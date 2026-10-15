@@ -39,3 +39,8 @@ target_compile_options(platinumwt_server PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(platinumwt-server src/main.cpp)
 target_link_libraries(platinumwt-server PRIVATE platinumwt_server)
 target_compile_options(platinumwt-server PRIVATE -Wall -Wextra -Wpedantic)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
