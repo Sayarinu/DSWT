@@ -1,0 +1,94 @@
+#include "platinumwt/server/config.h"
+
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstdlib>
+#include <optional>
+#include <stdexcept>
+#include <string>
+
+namespace platinumwt::server {
+namespace {
+
+class ConfigTest : public testing::Test {
+protected:
+  void SetUp() override {
+    for (std::size_t i = 0; i < names_.size(); ++i) {
+      if (const char *value = std::getenv(names_[i])) {
+        saved_[i] = value;
+      }
+    }
+    for (const char *name : names_) {
+      ASSERT_EQ(unsetenv(name), 0);
+    }
+  }
+
+  void TearDown() override {
+    for (std::size_t i = 0; i < names_.size(); ++i) {
+      if (saved_[i]) {
+        EXPECT_EQ(setenv(names_[i], saved_[i]->c_str(), 1), 0);
+      } else {
+        EXPECT_EQ(unsetenv(names_[i]), 0);
+      }
+    }
+  }
+
+  void Set(const char *name, const char *value) {
+    ASSERT_EQ(setenv(name, value, 1), 0);
+  }
+
+private:
+  const std::array<const char *, 4> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT",
+                                           "WT_GRPC_ADDRESS", "WT_GRPC_TARGET"};
+  std::array<std::optional<std::string>, 4> saved_;
+};
+
+TEST_F(ConfigTest, LoadsDefaults) {
+  const auto config = LoadServerConfig();
+  EXPECT_EQ(config.http_address, "0.0.0.0");
+  EXPECT_EQ(config.http_port, 8080);
+  EXPECT_EQ(config.grpc_address, "127.0.0.1:50051");
+  EXPECT_FALSE(config.grpc_target.has_value());
+}
+
+TEST_F(ConfigTest, LoadsEnvironmentOverrides) {
+  Set("WT_HTTP_ADDRESS", "127.0.0.1");
+  Set("WT_HTTP_PORT", "9090");
+  Set("WT_GRPC_ADDRESS", "127.0.0.1:50052");
+  Set("WT_GRPC_TARGET", "backend:50051");
+  const auto config = LoadServerConfig();
+  EXPECT_EQ(config.http_address, "127.0.0.1");
+  EXPECT_EQ(config.http_port, 9090);
+  EXPECT_EQ(config.grpc_address, "127.0.0.1:50052");
+  EXPECT_EQ(config.grpc_target, "backend:50051");
+}
+
+TEST_F(ConfigTest, AllowsEphemeralPort) {
+  Set("WT_HTTP_PORT", "0");
+  EXPECT_EQ(LoadServerConfig().http_port, 0);
+}
+
+TEST_F(ConfigTest, AllowsMaximumPort) {
+  Set("WT_HTTP_PORT", "65535");
+  EXPECT_EQ(LoadServerConfig().http_port, 65535);
+}
+
+TEST_F(ConfigTest, RejectsInvalidPorts) {
+  for (const char *port : {"", "invalid", "8080junk", "65536", "-1",
+                           "999999999999999999999999999999"}) {
+    SCOPED_TRACE(port);
+    Set("WT_HTTP_PORT", port);
+    EXPECT_THROW(LoadServerConfig(), std::logic_error);
+  }
+}
+
+TEST_F(ConfigTest, PreservesExplicitlyEmptyBackendTarget) {
+  Set("WT_GRPC_TARGET", "");
+  const auto config = LoadServerConfig();
+  ASSERT_TRUE(config.grpc_target.has_value());
+  EXPECT_TRUE(config.grpc_target->empty());
+}
+
+} // namespace
+} // namespace platinumwt::server
