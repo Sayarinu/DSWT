@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package platinumwt.v1;
+
+import "google/protobuf/empty.proto";
+
+service Connectivity {
+  rpc Ping(google.protobuf.Empty) returns (PingResponse);
+}
+
+message PingResponse {
+  string acknowledgement = 1;
+}
