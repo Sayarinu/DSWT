@@ -22,6 +22,7 @@
 #include "screen_fade.h"
 #include "system.h"
 #include "text.h"
+#include "touch_pad.h"
 
 #include "res/text/bank/wonder_trade.h"
 
@@ -81,6 +82,8 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
 
     SetVBlankCallback(NULL, NULL);
     DisableHBlank();
+    // Keep input polling from waiting on ARM7 while its Wi-Fi driver starts.
+    InitializeTouchPad(4);
     GXLayers_DisableEngineALayers();
     GXLayers_DisableEngineBLayers();
     GX_SetVisiblePlane(0);
@@ -115,6 +118,7 @@ static void WonderTrade_FreeGraphics(WonderTradeApp *app)
         return;
     }
     SetVBlankCallback(NULL, NULL);
+    DisableTouchPad();
     Window_Remove(&app->window);
     Bg_FreeTilemapBuffer(app->bgConfig, BG_LAYER_MAIN_0);
     GXLayers_DisableEngineALayers();
