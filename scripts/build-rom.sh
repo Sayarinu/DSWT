@@ -11,4 +11,4 @@ if [[ -n "${ROM_REVISION:-}" ]]; then
     docker_args+=(-e "ROM_REVISION=$ROM_REVISION")
 fi
 
-exec docker run "${docker_args[@]}" "$image" make "$@"
+exec docker run "${docker_args[@]}" "$image" make release

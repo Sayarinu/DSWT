@@ -26,6 +26,11 @@ Keep changes aligned with the game patch and the custom Wonder Trade service.
 Favor clear, maintainable C++ and gRPC interfaces for server code, and keep
 deployment and infrastructure changes reproducible through the stated tooling.
 
+## Branch Naming
+
+Name feature branches with only the associated Linear ticket identifier, such
+as `LUNE-#`. Do not append a descriptive slug.
+
 Treat the listed platform components as the intended stack; avoid introducing
 additional infrastructure or protocols without a project need.
 
