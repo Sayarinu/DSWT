@@ -44,7 +44,7 @@ diff --git a/meson.options b/meson.options
 diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 --- a/platinum.us/main.lsf.in
 +++ b/platinum.us/main.lsf.in
-@@ -179,0 +180,9 @@
+@@ -179,0 +180,10 @@
 +	Object src/wonder_trade/application.c
 +	Object src/wonder_trade/network.c
 +	Object src/wonder_trade/tls.c
@@ -52,6 +52,7 @@ diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 +	Object src/wonder_trade/wire.c
 +	Object src/wonder_trade/seed.c
 +	Object src/wonder_trade/journal.c
++	Object src/wonder_trade/engine.c
 +	Object src/wonder_trade/recovery.c
 +	Object src/wonder_trade/flash.c
 @@ -372,0 +382 @@
