@@ -1,8 +1,9 @@
 # Secure connection test
 
-This is a ping-only probe. Trading remains disabled. Physical DS and melonDS
-results are required before LUNE-300 is complete; host tests do not satisfy that
-gate. Never commit or upload ROMs, saves, test keys or provisioned seeds.
+This is a ping-only probe. Trading remains disabled. The current validation target
+is two independent melonDS saves; host tests do not satisfy that gate. Physical DS
+validation is deferred to LUNE-326. Never commit or upload ROMs, saves, test keys
+or provisioned seeds.
 
 The pinned Mbed TLS 4.1.1 / TF-PSA-Crypto 1.2.0 profile uses TLS 1.2,
 ECDHE/ECDSA P-256, ChaCha20-Poly1305 and SHA-256. Certificate verification is
