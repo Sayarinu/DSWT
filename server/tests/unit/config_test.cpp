@@ -39,9 +39,10 @@ protected:
   }
 
 private:
-  const std::array<const char *, 4> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT",
-                                           "WT_GRPC_ADDRESS", "WT_GRPC_TARGET"};
-  std::array<std::optional<std::string>, 4> saved_;
+  const std::array<const char *, 11> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
+      "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "PLATINUMWT_DATABASE_URL",
+      "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY"};
+  std::array<std::optional<std::string>, 11> saved_;
 };
 
 TEST_F(ConfigTest, LoadsDefaults) {
@@ -88,6 +89,35 @@ TEST_F(ConfigTest, PreservesExplicitlyEmptyBackendTarget) {
   const auto config = LoadServerConfig();
   ASSERT_TRUE(config.grpc_target.has_value());
   EXPECT_TRUE(config.grpc_target->empty());
+}
+
+TEST_F(ConfigTest, RequiresCompleteTlsConfigurationAndPrivateTradeTargets) {
+  Set("WT_TLS_CERTIFICATE", "/synthetic/certificate.pem");
+  EXPECT_THROW(LoadServerConfig(), std::invalid_argument);
+  Set("WT_TLS_PRIVATE_KEY", "/synthetic/private-key.pem");
+  Set("WT_TRADE_TARGET", "127.0.0.1:50053");
+  const auto config = LoadServerConfig();
+  ASSERT_TRUE(config.tls);
+  EXPECT_EQ(config.tls->certificate, "/synthetic/certificate.pem");
+  EXPECT_EQ(config.trade_target, "127.0.0.1:50053");
+  for (const char *target : {"0.0.0.0:50053", "example.invalid:50053", "127.0.0.1:0", "127.0.0.1:-1", "127.0.0.1:70000", ""}) {
+    Set("WT_TRADE_TARGET", target);
+    EXPECT_THROW(LoadServerConfig(), std::invalid_argument);
+  }
+}
+
+TEST_F(ConfigTest, KeepsBackendAndValidatorListenersPrivate) {
+  EXPECT_THROW(LoadBackendConfig(), std::invalid_argument);
+  Set("PLATINUMWT_DATABASE_URL", "dbname=synthetic");
+  Set("WT_LEGALITY_POLICY", "synthetic-policy");
+  EXPECT_EQ(LoadBackendConfig().address, "127.0.0.1:50053");
+  Set("WT_BACKEND_ADDRESS", "0.0.0.0:50053");
+  EXPECT_THROW(LoadBackendConfig(), std::invalid_argument);
+  Set("WT_BACKEND_ADDRESS", "127.0.0.1:0");
+  Set("WT_LEGALITY_TARGET", "public.invalid:50052");
+  EXPECT_THROW(LoadBackendConfig(), std::invalid_argument);
+  Set("WT_GRPC_ADDRESS", "0.0.0.0:50051");
+  EXPECT_THROW(LoadServerConfig(), std::invalid_argument);
 }
 
 } // namespace

@@ -10,7 +10,7 @@ find_package(gRPC CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(Threads REQUIRED)
 find_package(PostgreSQL 16 REQUIRED)
-find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
 
 set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
 foreach(schema IN ITEMS connectivity trade)
@@ -30,15 +30,23 @@ add_library(platinumwt_protocol STATIC
 target_include_directories(platinumwt_protocol PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(platinumwt_protocol PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 
+add_library(platinumwt_encoding STATIC src/trade_encoding.cpp)
+target_include_directories(platinumwt_encoding PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(platinumwt_encoding PRIVATE platinumwt_protocol OpenSSL::Crypto)
+target_compile_options(platinumwt_encoding PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(platinumwt_server STATIC
     src/config.cpp
     src/connectivity_service.cpp
     src/http_request_handler.cpp
+    src/http_services.cpp
+    src/trade_gateway.cpp
     src/http_session.cpp
     src/http_listener.cpp
     src/server.cpp)
 target_include_directories(platinumwt_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(platinumwt_server PUBLIC platinumwt_protocol Boost::system Threads::Threads)
+target_link_libraries(platinumwt_server PRIVATE platinumwt_encoding OpenSSL::SSL)
 target_compile_options(platinumwt_server PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(platinumwt-server src/main.cpp)
@@ -59,10 +67,14 @@ target_include_directories(platinumwt_legality PUBLIC "${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(platinumwt_legality PRIVATE platinumwt_protocol OpenSSL::Crypto)
 target_compile_options(platinumwt_legality PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(platinumwt_trading STATIC src/trade_service.cpp src/trade_encoding.cpp src/recovery_gate.cpp src/matcher_service.cpp)
+add_library(platinumwt_trading STATIC src/trade_service.cpp src/identity_service.cpp src/recovery_gate.cpp src/matcher_service.cpp)
 target_include_directories(platinumwt_trading PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(platinumwt_trading PUBLIC platinumwt_protocol PRIVATE platinumwt_ledger platinumwt_legality PostgreSQL::PostgreSQL OpenSSL::Crypto)
+target_link_libraries(platinumwt_trading PUBLIC platinumwt_protocol PRIVATE platinumwt_ledger platinumwt_legality platinumwt_encoding PostgreSQL::PostgreSQL OpenSSL::Crypto)
 target_compile_options(platinumwt_trading PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(platinumwt-backend src/backend_main.cpp)
+target_link_libraries(platinumwt-backend PRIVATE platinumwt_trading platinumwt_server)
+target_compile_options(platinumwt-backend PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
 if(BUILD_TESTING)

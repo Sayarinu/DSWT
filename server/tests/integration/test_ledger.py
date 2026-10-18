@@ -557,6 +557,11 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.tool("verify")
 
+    def test_https_trade_gateway(self):
+        from gateway_scenario import exercise
+        exercise(self)
+        self.tool("verify")
+
     def test_native_trade_contract(self):
         environment = dict(self.env, PGDATABASE=self.database)
         result = subprocess.run([str(self.trade_binary)], env=environment, capture_output=True, text=True, timeout=45)
@@ -618,12 +623,18 @@ def main():
     parser.add_argument("identity_binary", type=Path)
     parser.add_argument("trade_binary", type=Path)
     parser.add_argument("matcher_binary", type=Path)
+    parser.add_argument("server_binary", type=Path)
+    parser.add_argument("backend_binary", type=Path)
+    parser.add_argument("gateway_fixture", type=Path)
     args = parser.parse_args()
     LedgerTests.binary = args.binary.resolve()
     LedgerTests.migrations = args.migrations.resolve()
     LedgerTests.identity_binary = args.identity_binary.resolve()
     LedgerTests.trade_binary = args.trade_binary.resolve()
     LedgerTests.matcher_binary = args.matcher_binary.resolve()
+    LedgerTests.server_binary = args.server_binary.resolve()
+    LedgerTests.backend_binary = args.backend_binary.resolve()
+    LedgerTests.gateway_fixture = args.gateway_fixture.resolve()
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LedgerTests))
     return 0 if result.wasSuccessful() else 1
 

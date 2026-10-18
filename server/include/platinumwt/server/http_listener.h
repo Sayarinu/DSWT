@@ -7,18 +7,20 @@
 
 namespace platinumwt::server {
 
+class HttpServices;
+
 class HttpListener : public std::enable_shared_from_this<HttpListener> {
 public:
   HttpListener(boost::asio::io_context &io,
                boost::asio::ip::tcp::endpoint endpoint,
-               std::shared_ptr<grpc::Channel> channel);
+               std::shared_ptr<HttpServices> services);
   void Run();
 
 private:
   void Accept();
 
   boost::asio::ip::tcp::acceptor acceptor_;
-  std::shared_ptr<grpc::Channel> channel_;
+  std::shared_ptr<HttpServices> services_;
 };
 
 } // namespace platinumwt::server

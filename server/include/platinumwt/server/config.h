@@ -6,14 +6,29 @@
 
 namespace platinumwt::server {
 
+struct TlsFiles {
+  std::string certificate;
+  std::string private_key;
+};
+
 struct ServerConfig {
   std::string http_address;
   unsigned short http_port;
   std::string grpc_address;
   std::optional<std::string> grpc_target;
+  std::optional<std::string> trade_target;
+  std::optional<TlsFiles> tls;
+};
+
+struct BackendConfig {
+  std::string address;
+  std::string connection_info;
+  std::string legality_address;
+  std::string legality_policy;
 };
 
 ServerConfig LoadServerConfig();
+BackendConfig LoadBackendConfig();
 
 } // namespace platinumwt::server
 

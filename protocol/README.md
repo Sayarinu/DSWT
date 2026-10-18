@@ -52,12 +52,13 @@ cancellation or acknowledgement. A bounded response may precede the durability
 barrier, but a final success may not. The backup/recovery implementation must
 prove this barrier before launch; an incomplete restore keeps trading paused.
 
-The C++ lifecycle service is implemented but remains unregistered by the runtime.
-Its recovery provider must bind a recoverable WAL prefix to the current cluster
+The private C++ backend registers enrollment and lifecycle services. Its default
+recovery provider stays closed and must bind a recoverable WAL prefix to the current cluster
 and timeline; absence fails closed. A bounded in-memory cache ties conservative
 WAL requirements to committed per-identity event highwaters, so retry row locks
 cannot keep moving the target. Restart services after recovery. Real off-site
-attestation and public gateway registration remain separate integration gates.
+attestation remains a separate integration gate. The HTTPS gateway routes only
+the seven versioned DS operations, with no matcher RPC access or plaintext fallback.
 
 The unregistered worker-only matcher serializes each short pair transaction with
 a database advisory lock shared across replicas. It anchors the oldest unlocked

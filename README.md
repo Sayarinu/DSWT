@@ -33,7 +33,7 @@ ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches
 
 `docker build -t platinumwt-server server` builds the C++ server and runs its
 tests, including a disposable PostgreSQL 16 cluster with synthetic data.
-Trading endpoints remain disabled. The image also contains an operator tool:
+Final trading remains gated on off-site recovery. The image also contains an operator tool:
 
 ```sh
 platinumwt-ledger migrate /usr/local/share/platinumwt/migrations
@@ -48,6 +48,15 @@ it checks live state without repairing it. Audit evidence includes private
 verifiers and payloads and stays in the database/backups; the tool prints counts
 and SQLSTATE errors. Local WAL durability does not satisfy the separate off-site
 recovery barrier required before final trade responses are enabled.
+
+`platinumwt-backend` serves enrollment/trading on loopback with
+`PLATINUMWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
+defaults to `127.0.0.1:50052`. Its recovery provider currently stays closed.
+For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
+`WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
+`POST /wt/v1` is refused. Keep every internal service in the same private network
+namespace; only HTTPS may be exposed. The gateway bounds connections to 1,024,
+pending calls to 64 and request workers to eight; capacity still needs its soak test.
 
 ## Upstream source
 
