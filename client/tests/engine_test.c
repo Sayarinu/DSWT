@@ -9,6 +9,7 @@
 typedef struct Fixture {
     unsigned char banks[2][4096], pokemon[136], delivered[136];
     unsigned random, writes, failWrite, failStep, removed, received, restored, full;
+    unsigned reads, failRead;
     unsigned char id;
     int rotateSeed;
     WtEngine engine;
@@ -27,7 +28,9 @@ static void Put(unsigned char *bytes, uint64_t value, unsigned size)
 
 static int Read(void *arg, int bank, unsigned char record[4096])
 {
-    memcpy(record, ((Fixture *)arg)->banks[bank], 4096); return 0;
+    Fixture *fixture = arg;
+    if (++fixture->reads == fixture->failRead) return -1;
+    memcpy(record, fixture->banks[bank], 4096); return 0;
 }
 
 static int Write(void *arg, int bank, const unsigned char record[4096])
@@ -242,6 +245,7 @@ static void RejectionAndErrors(void)
     size = Header(&fixture, packet, WT_RESULT_NOT_FOUND, 2, 2, 0);
     assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && fixture.removed && !fixture.restored);
     assert(memcmp(before, fixture.banks, sizeof(before)) == 0);
+    fixture.engine.synchronized = 1;
     assert(WtEngine_Request(&fixture.engine, WT_OP_STATUS) == 0);
     size = Header(&fixture, packet, WT_RESULT_OK, 99, 3, 138);
     Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, fixture.pokemon);
@@ -303,9 +307,170 @@ static void DeliveryPersistence(void)
     }
 }
 
+static void RejectedCancel(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], incoming[136], digest[32];
+    unsigned char *event;
+    size_t size;
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    WtTest_Pokemon(incoming, 2); assert(Hash(incoming, 136, digest) == 0);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_CONFLICT, 3, 4, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && fixture.removed);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0 && fixture.engine.frame[5] == WT_OP_RECONCILE);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 4, 222);
+    packet[44] = 2; Put(packet + 46, 4, 8);
+    event = packet + 54; Put(event, 3, 8); event[8] = WT_EVENT_MATCHED;
+    memcpy(event + 9, fixture.engine.entry.trade, 16); memset(event + 41, 31, 16);
+    memcpy(event + 57, digest, 32); memset(event + 89, 41, 16); event[105] = WT_TRADE_MATCHED;
+    event += 106; Put(event, 4, 8); event[8] = WT_EVENT_REJECTED;
+    memcpy(event + 9, fixture.engine.entry.trade, 16); memcpy(event + 25, fixture.engine.entry.operation, 16);
+    event[105] = WT_TRADE_MATCHED;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 0);
+    assert(fixture.engine.entry.phase == WT_JOURNAL_QUEUED && !fixture.engine.entry.requestLength
+        && fixture.engine.entry.nextCounter == 3 && !fixture.restored);
+    assert(memcmp(fixture.engine.entry.incomingDigest, digest, 32) == 0);
+    Mirrored(&fixture, WT_JOURNAL_QUEUED);
+    /* Receipt and digest remain bound even across a process restart. */
+    WtEngine_Close(&fixture.engine); Open(&fixture); fixture.engine.synchronized = 1;
+    assert(WtEngine_Request(&fixture.engine, WT_OP_STATUS) == 0 && fixture.engine.frame[5] == WT_OP_STATUS);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 4, 138);
+    Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming);
+    packet[44 + 114] ^= 1;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.received);
+}
+
+static void LoadedStateAndMismatch(void)
+{
+    Fixture fixture;
+    WtJournalEntry entry;
+    WtJournalIO journal = { &fixture, Read, Write, Hash };
+    WtEngineIO io = { &fixture, Random, Inventory };
+    unsigned phase, code;
+    const unsigned phases[] = { WT_JOURNAL_ESCROW, WT_JOURNAL_SUBMIT_READY, WT_JOURNAL_APPLIED };
+    unsigned char packet[902]; size_t size;
+    for (phase = 0; phase < sizeof(phases) / sizeof(*phases); ++phase) {
+        Init(&fixture, 1, 25);
+        assert(WtTest_JournalEntry(phases[phase], Hash, &entry) == 0);
+        memset(entry.request, 0, sizeof(entry.request)); entry.requestLength = 0;
+        assert(WtJournal_Encode(&entry, Hash, fixture.banks[0]) == 0);
+        memcpy(fixture.banks[1], fixture.banks[0], 4096);
+        fixture.writes = 0;
+        assert(WtEngine_Open(&fixture.engine, journal, io) != 0);
+        assert(!fixture.writes && !fixture.removed && !fixture.received);
+    }
+    for (code = WT_RESULT_COUNTER_MISMATCH; code <= WT_RESULT_CURSOR_AHEAD; ++code) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+        size = Header(&fixture, packet, code, 1, 1, 0);
+        assert(WtEngine_Reply(&fixture.engine, packet, size) != 0);
+        assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && !fixture.removed);
+    }
+    Init(&fixture, 1, 25); Enroll(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+    size = Header(&fixture, packet, WT_RESULT_UNAVAILABLE, 0, 0, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && !fixture.engine.synchronized);
+    assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && !fixture.removed);
+}
+
+static void EnrollmentAndRetirementFaults(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], incoming[136];
+    unsigned stage, failure;
+    size_t size;
+    WtTest_Pokemon(incoming, 2);
+    for (stage = 0; stage < 4; ++stage) for (failure = 1; failure <= (stage == 2 ? 4U : 2U); ++failure) {
+        Init(&fixture, 1, 25);
+        if (stage == 0) {
+            fixture.failWrite = fixture.writes + failure;
+            assert(WtEngine_Enroll(&fixture.engine, 1) != 0);
+        } else if (stage == 1) {
+            assert(WtEngine_Enroll(&fixture.engine, 1) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+            size = Header(&fixture, packet, WT_RESULT_OK, 1, 1, 16); memset(packet + 44, 1, 16);
+            fixture.failWrite = fixture.writes + failure;
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0);
+        } else {
+            Enroll(&fixture);
+            if (stage == 2) {
+                assert(WtEngine_Deposit(&fixture.engine, 0) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+                size = Header(&fixture, packet, WT_RESULT_ILLEGAL_POKEMON, 2, 2, 0);
+                assert(WtEngine_Reply(&fixture.engine, packet, size) == 1);
+                assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+                size = Header(&fixture, packet, WT_RESULT_OK, 2, 2, 116);
+                packet[44] = 1; Put(packet + 46, 2, 8); Put(packet + 54, 2, 8); packet[62] = WT_EVENT_REJECTED;
+                memcpy(packet + 79, fixture.engine.entry.operation, 16); assert(Hash(fixture.pokemon, 136, packet + 111) == 0);
+            } else {
+                Submit(&fixture); assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
+                size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 274);
+                Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming); memcpy(packet + 182, incoming, 136);
+                assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+                size = Header(&fixture, packet, WT_RESULT_OK, 3, 4, 146); Put(packet + 44, 4, 8);
+                Snapshot(&fixture, packet + 52, WT_TRADE_ACKNOWLEDGED, WT_DELIVERY_MATCH, 4, incoming);
+            }
+            fixture.failWrite = fixture.writes + failure;
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0);
+        }
+        assert(fixture.engine.blocked && !fixture.engine.frameSize);
+        fixture.failWrite = 0; WtEngine_Close(&fixture.engine); Open(&fixture);
+        if (stage == 0) assert(fixture.engine.entry.phase == WT_JOURNAL_EMPTY || fixture.engine.entry.phase == WT_JOURNAL_ENROLLING);
+        if (stage == 1) assert(fixture.engine.entry.phase == WT_JOURNAL_ENROLLING || fixture.engine.entry.phase == WT_JOURNAL_IDLE);
+        if (stage == 2) {
+            assert(fixture.engine.entry.phase == WT_JOURNAL_SUBMIT_READY || fixture.engine.entry.phase == WT_JOURNAL_RESTORING || fixture.engine.entry.phase == WT_JOURNAL_IDLE);
+            if (fixture.engine.entry.phase == WT_JOURNAL_RESTORING) assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.restored);
+        }
+        if (stage == 3) assert(fixture.received == 1 && (fixture.engine.entry.phase == WT_JOURNAL_APPLIED || fixture.engine.entry.phase == WT_JOURNAL_IDLE));
+    }
+}
+
+static void ReadbackAndInventoryFaults(void)
+{
+    Fixture fixture;
+    unsigned failure;
+    unsigned char packet[902], incoming[136]; size_t size;
+    WtTest_Pokemon(incoming, 2);
+    for (failure = 1; failure <= 4; ++failure) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        fixture.failRead = fixture.reads + failure;
+        assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && fixture.engine.blocked && !fixture.removed);
+        fixture.failRead = 0; WtEngine_Close(&fixture.engine); Open(&fixture);
+        assert(fixture.engine.entry.phase == WT_JOURNAL_IDLE || fixture.engine.entry.phase == WT_JOURNAL_ESCROW);
+    }
+    for (failure = WT_INVENTORY_REMOVE; failure <= WT_INVENTORY_VERIFY_RECEIVED; ++failure) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        if (failure <= WT_INVENTORY_VERIFY_REMOVED) {
+            fixture.failStep = failure + 1;
+            assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && fixture.engine.blocked);
+        } else {
+            Submit(&fixture); assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
+            size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 274);
+            Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming); memcpy(packet + 182, incoming, 136);
+            fixture.failStep = failure + 1;
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked);
+        }
+        assert(!fixture.engine.frameSize);
+        fixture.failStep = 0; WtEngine_Close(&fixture.engine); Open(&fixture);
+        assert(WtEngine_Request(&fixture.engine, 0) == 0);
+    }
+    Init(&fixture, 1, 25); Enroll(&fixture);
+    assert(WtEngine_Deposit(&fixture.engine, 0) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+    size = Header(&fixture, packet, WT_RESULT_ILLEGAL_POKEMON, 2, 2, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 2, 2, 116);
+    packet[44] = 1; Put(packet + 46, 2, 8); Put(packet + 54, 2, 8); packet[62] = WT_EVENT_REJECTED;
+    memcpy(packet + 79, fixture.engine.entry.operation, 16); assert(Hash(fixture.pokemon, 136, packet + 111) == 0);
+    fixture.failStep = WT_INVENTORY_RESTORE + 1;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && !fixture.restored && fixture.removed);
+    Mirrored(&fixture, WT_JOURNAL_RESTORING);
+    fixture.failStep = 0; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.restored && !fixture.removed);
+}
+
 int main(void)
 {
     PairAndReturn(); RejectionAndErrors(); FailedPersistence(); DeliveryPersistence();
+    RejectedCancel(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     puts("Recoverable engine: paired delivery, return, rejection, retries, full storage, stale context and failed persistence passed");
     return 0;
 }

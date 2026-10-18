@@ -33,6 +33,20 @@ static int Refresh(WtEngine *engine)
     return 0;
 }
 
+static int StateKnown(const WtJournalEntry *entry)
+{
+    unsigned operation = entry->requestLength ? entry->request[5] : 0;
+    switch (entry->phase) {
+    case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_RECEIVED:
+    case WT_JOURNAL_APPLYING: case WT_JOURNAL_RESTORING: return operation == 0;
+    case WT_JOURNAL_ENROLLING: return operation == WT_OP_ENROLL;
+    case WT_JOURNAL_ESCROW: case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
+    case WT_JOURNAL_QUEUED: return operation == 0 || operation == WT_OP_CANCEL;
+    case WT_JOURNAL_APPLIED: return operation == WT_OP_ACKNOWLEDGE;
+    default: return 0;
+    }
+}
+
 static int Commit(WtEngine *engine, WtJournalEntry *next)
 {
     if (Refresh(engine) != 0) return -1;
@@ -129,6 +143,7 @@ static int Resume(WtEngine *engine)
         request.body.acknowledge.generation = engine->entry.generation + 1;
         if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
         Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
+        engine->lastResult = 0;
     }
     result = 0;
 done:
@@ -142,7 +157,7 @@ int WtEngine_Open(WtEngine *engine, WtJournalIO journal, WtEngineIO io)
     memset(engine, 0, sizeof(*engine)); engine->io = io;
     if (!io.random || !io.inventory || WtJournal_Open(&engine->journal, journal) != 0
         || WtJournal_Read(&engine->journal, &engine->entry) != 0
-        || engine->entry.generation == UINT64_MAX || engine->entry.phase == WT_JOURNAL_RECOVERY_REQUIRED
+        || engine->entry.generation == UINT64_MAX || !StateKnown(&engine->entry)
         || WtJournal_Repair(&engine->journal) != 0) return Block(engine);
     return 0;
 }
@@ -168,6 +183,7 @@ int WtEngine_Enroll(WtEngine *engine, uint32_t build)
     next.phase = WT_JOURNAL_ENROLLING; next.nextCounter = 1;
     if (Encode(engine, &request, &next) == 0) result = Commit(engine, &next);
     Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
+    engine->lastResult = 0;
 done:
     Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
     return result;
@@ -190,6 +206,7 @@ int WtEngine_Deposit(WtEngine *engine, unsigned slot)
     memcpy(request.body.submit.pokemon, next.outgoing, 136);
     if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
     engine->frameSize = 0; Clear(engine->frame, sizeof(engine->frame));
+    engine->lastResult = 0;
     result = Resume(engine);
 done:
     Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
@@ -200,14 +217,17 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
 {
     WtJournalEntry next;
     WtWireRequest request;
-    int result = -1;
+    int result = -1, rejectionLookup;
     if (Refresh(engine) != 0 || engine->frameSize) return -1;
     result = Resume(engine);
     if (result != 0) return result;
     next = engine->entry;
     result = -1;
-    if (next.requestLength && !(operation == WT_OP_RECONCILE
-            && next.phase == WT_JOURNAL_SUBMIT_READY && engine->lastResult != 0)) {
+    rejectionLookup = operation == WT_OP_RECONCILE && next.requestLength
+        && ((next.phase == WT_JOURNAL_SUBMIT_READY && engine->lastResult == WT_RESULT_ILLEGAL_POKEMON)
+            || (next.phase == WT_JOURNAL_QUEUED && next.request[5] == WT_OP_CANCEL
+                && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND)));
+    if (next.requestLength && !rejectionLookup) {
         if ((next.phase == WT_JOURNAL_SUBMIT_READY
                 && Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0)
             || (next.phase == WT_JOURNAL_APPLIED
@@ -216,7 +236,7 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
         result = 0; goto done;
     }
     if (next.phase != WT_JOURNAL_IDLE && next.phase != WT_JOURNAL_QUEUED
-        && !(next.phase == WT_JOURNAL_SUBMIT_READY && operation == WT_OP_RECONCILE && engine->lastResult)) goto done;
+        && !rejectionLookup) goto done;
     if (!engine->synchronized) operation = WT_OP_RECONCILE;
     else if (operation == 0) operation = next.phase == WT_JOURNAL_IDLE ? WT_OP_RECONCILE : WT_OP_STATUS;
     if (operation != WT_OP_RECONCILE && operation != WT_OP_STATUS && operation != WT_OP_COLLECT && operation != WT_OP_CANCEL) goto done;
@@ -231,6 +251,7 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     }
     if (Encode(engine, &request, operation == WT_OP_CANCEL ? &next : NULL) != 0) goto done;
     result = operation == WT_OP_CANCEL ? Commit(engine, &next) : 0;
+    if (operation == WT_OP_CANCEL) engine->lastResult = 0;
 done:
     Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
     return result;
@@ -259,18 +280,29 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
             && memcmp(event->operation, next->operation, 16) == 0
             && memcmp(event->digest, outgoingDigest, 32) == 0 && Zero(event->trade, 16)
             && event->state == WT_TRADE_NONE && !rejected) { rejected = 1; continue; }
+        if (next->phase == WT_JOURNAL_QUEUED && next->requestLength && next->request[5] == WT_OP_CANCEL
+            && event->kind == WT_EVENT_REJECTED && !rejected && Zero(event->digest, 32)
+            && memcmp(event->operation, next->operation, 16) == 0 && memcmp(event->trade, next->trade, 16) == 0
+            && (event->state == WT_TRADE_MATCHED || event->state == WT_TRADE_RETURN_READY)) { rejected = 2; continue; }
         if (next->phase != WT_JOURNAL_QUEUED || memcmp(event->trade, next->trade, 16) != 0) return -1;
         if (event->kind == WT_EVENT_SUBMITTED) {
             if (memcmp(event->operation, next->lastOperation, 16) != 0 || memcmp(event->digest, outgoingDigest, 32) != 0) return -1;
         } else if (event->kind == WT_EVENT_MATCHED || event->kind == WT_EVENT_CANCELLED) {
             if (!Zero(next->receipt, 16) && memcmp(next->receipt, event->receipt, 16) != 0) return -1;
+            if (event->kind == WT_EVENT_CANCELLED && (memcmp(event->operation, next->lastOperation, 16) != 0
+                || memcmp(event->digest, outgoingDigest, 32) != 0)) return -1;
+            if (!Zero(next->incomingDigest, 32) && memcmp(next->incomingDigest, event->digest, 32) != 0) return -1;
             memcpy(next->receipt, event->receipt, 16);
+            memcpy(next->incomingDigest, event->digest, 32);
         } else return -1;
     }
-    if (!ContextMatches(engine, reply, rejected)) return -1;
+    if (!ContextMatches(engine, reply, rejected != 0)
+        && !(reply->body.page.hasMore && next->requestLength && ContextMatches(engine, reply, 1))) return -1;
     if (rejected) {
         memcpy(next->lastOperation, next->operation, 16); next->lastOperationCounter = next->operationCounter;
-        next->nextCounter = reply->nextCounter; next->phase = WT_JOURNAL_RESTORING; ClearRequest(next);
+        next->nextCounter = reply->nextCounter;
+        if (rejected == 1) next->phase = WT_JOURNAL_RESTORING;
+        ClearRequest(next);
     }
     next->eventCursor = reply->body.page.end;
     if (Commit(engine, next) != 0) return -1;
@@ -294,6 +326,14 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
     if (reply.result != WT_RESULT_OK) {
         /* An error, including a validator verdict, is not restoration proof.
          * Reconcile the retained Submit's exact REJECTED event instead. */
+        int definitiveRejection = next.requestLength && next.operationCounter == next.nextCounter
+            && ((operation == WT_OP_SUBMIT && reply.result == WT_RESULT_ILLEGAL_POKEMON)
+                || (operation == WT_OP_CANCEL && (reply.result == WT_RESULT_CONFLICT || reply.result == WT_RESULT_NOT_FOUND)));
+        engine->synchronized = 0;
+        if (reply.result == WT_RESULT_COUNTER_MISMATCH || reply.result == WT_RESULT_CURSOR_AHEAD
+            || reply.result == WT_RESULT_UNAUTHENTICATED || reply.result == WT_RESULT_INVALID_REQUEST
+            || (reply.nextCounter && ((!ContextMatches(engine, &reply, 0)
+                    && !(definitiveRejection && ContextMatches(engine, &reply, 1)))))) goto blocked;
         result = 1;
         goto done;
     }
@@ -328,6 +368,8 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
             || engine->journal.io.hash(next.outgoing, 136, outgoingDigest) != 0
             || memcmp(snapshot->offeredDigest, outgoingDigest, 32) != 0
             || snapshot->state == WT_TRADE_NONE || snapshot->state == WT_TRADE_ACKNOWLEDGED) goto blocked;
+        if ((!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0)
+            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0)) goto blocked;
         if (operation == WT_OP_STATUS) { result = 0; goto done; }
         if (operation != WT_OP_COLLECT || (snapshot->state != WT_TRADE_MATCHED && snapshot->state != WT_TRADE_RETURN_READY)) goto blocked;
         if (!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0) goto blocked;
