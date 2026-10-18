@@ -83,6 +83,7 @@ await Test("legal generated wild encounter", () =>
 await Test("Gen IV names are not retroactively censored and data stays strict", () =>
 {
     const string name = "SHIT";
+    ParseSettings.Initialize(new LegalitySettings());
     Require(WordFilter.IsFiltered(name, EntityContext.Gen4, out _, out _), "fixture must trigger the default modern filter");
     var namedTrainer = new SimpleTrainerInfo(GameVersion.Pt) { OT = name, TID16 = 12345, SID16 = 54321, Language = 2, Gender = 0 };
     var pk = (PK4)starterEncounter.ConvertToPKM(namedTrainer);
