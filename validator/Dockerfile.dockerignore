@@ -4,6 +4,7 @@
 !server/
 !server/proto/
 !server/proto/trade.proto
+!LICENSE
 validator/.deps/
 validator/**/bin/
 validator/**/obj/

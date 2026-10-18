@@ -81,3 +81,5 @@ jobs:
             --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
             platinumwt-validator-tests
           docker build -f validator/Dockerfile -t platinumwt-validator .
+          docker run --rm --entrypoint sh platinumwt-validator -c \
+            'test -s /usr/share/platinumwt-validator/source/LICENSE && test -s /usr/share/platinumwt-validator/source/validator/LICENSE'

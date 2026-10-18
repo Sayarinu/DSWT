@@ -2,6 +2,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:0d99ebf1ccad15037b5c98c9fe89
 WORKDIR /source
 COPY validator validator
 COPY server/proto/trade.proto server/proto/trade.proto
+COPY LICENSE LICENSE
 RUN sh validator/fetch-core.sh
 RUN dotnet restore validator/tests/Validator.Tests.csproj --locked-mode
 RUN dotnet build validator/tests/Validator.Tests.csproj -c Release --no-restore \
