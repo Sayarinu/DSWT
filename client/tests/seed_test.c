@@ -87,6 +87,13 @@ int main(void)
     banks[1][1442] = 64;
     hash(banks[1]);
     assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
+    memcpy(banks[1], initial, 4096);
+    banks[1][1440] = 2;
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
+    memcpy(banks[1], initial, 4096);
+    banks[1][100] = 1;
+    memset(banks[1] + 4092, 0, 4);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memset(banks, 255, sizeof(banks));
     assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memcpy(banks[0], initial, 4096);

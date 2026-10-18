@@ -42,6 +42,21 @@ tool verifies both retail block types have a valid copy, requires both reserved
 updates an existing seed or transaction record. Region/layout validation is
 limited to the verified US targets.
 
+For melonDS on Linux, configure it to load that exact save path and launch through:
+
+```sh
+python3 scripts/run-emulator.py --save /path/to/test.sav --target us-rev1 -- /path/to/melonDS /path/to/test.nds
+```
+
+The launcher locks the managed save and fsyncs fresh host entropy into both EMPTY
+journals before each process starts. This prevents TLS random-state reuse after
+melonDS's buffered save writes are lost. It refuses enrolled/active/unknown journals;
+trade save durability and abrupt-process recovery must be implemented before
+transfers are enabled. CARD readback alone verifies emulated SRAM, not host-disk
+durability. Keep the original save separate and use this launcher for every run.
+Savestate/rewind restoration and loading a different save inside a running
+emulator are unsupported; exit and launch the intended save through this tool.
+
 Choose Wonder Trade and a party Pokémon to send a ping. No Pokémon or save
 credential is sent. After returning to the menu, Info reports connection time
 (including seed I/O), peak TLS bytes, worker stack use and maximum main-loop

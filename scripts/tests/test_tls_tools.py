@@ -1,11 +1,18 @@
 import binascii
+import fcntl
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import signal
 import struct
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +28,7 @@ def module(name):
 connection = module("configure-connection")
 provision = module("provision-save")
 prepare = module("prepare-tls")
+launcher = module("run-emulator")
 
 
 def synthetic_save():
@@ -112,6 +120,133 @@ class TlsToolTests(unittest.TestCase):
             (source / "escape").symlink_to(root / "client")
             with self.assertRaisesRegex(ValueError, "escapes"):
                 prepare.inventory(source)
+
+
+class EmulatorLauncherTests(unittest.TestCase):
+    def test_child_observes_fresh_mirrors_and_retail_bytes_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            save, observed = root / "test.sav", root / "observed"
+            original = provision.provision(synthetic_save(), "us-rev1")
+            provision.write_new(save, original)
+            code = ("import hashlib,struct,sys; from pathlib import Path; "
+                    "d=Path(sys.argv[1]).read_bytes(); "
+                    "assert struct.unpack_from('<Q',d,0x30010)[0]==2; "
+                    "assert d[0x30000:0x31000]==d[0x70000:0x71000]; "
+                    "Path(sys.argv[2]).write_text(hashlib.sha256(d).hexdigest())")
+            self.assertEqual(launcher.run(save, "us-rev1", [sys.executable, "-c", code, str(save), str(observed)]), 0)
+            data = save.read_bytes()
+            self.assertEqual(observed.read_text(), hashlib.sha256(data).hexdigest())
+            self.assertNotEqual(data[0x305a4:0x305c4], original[0x305a4:0x305c4])
+            for start, end in ((0, 0x30000), (0x31000, 0x70000), (0x71000, 0x80000)):
+                self.assertEqual(data[start:end], original[start:end])
+
+    def test_abrupt_child_rollback_still_gets_fresh_entropy_on_next_launch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            save, older = root / "test.sav", root / "older.sav"
+            original = provision.provision(synthetic_save(), "us-rev1")
+            provision.write_new(save, original)
+            provision.write_new(older, original)
+            code = ("import os,shutil,signal,sys; "
+                    "shutil.copyfile(sys.argv[1],sys.argv[2]); os.kill(os.getpid(),signal.SIGKILL)")
+            self.assertEqual(launcher.run(save, "us-rev1", [sys.executable, "-c", code, str(older), str(save)]), 137)
+            self.assertEqual(save.read_bytes(), original)
+            self.assertEqual(launcher.run(save, "us-rev1", [sys.executable, "-c", "pass"]), 0)
+            self.assertNotEqual(save.read_bytes()[0x305a4:0x305c4], original[0x305a4:0x305c4])
+
+    def test_unsupported_or_conflicting_journals_never_start_child(self):
+        original = provision.provision(synthetic_save(), "us-rev1")
+        variants = [synthetic_save()]
+        for offset in (0x30004, 0x30006, 0x305a0, 0x31000):
+            data = bytearray(original)
+            data[offset] ^= 2
+            variants.append(bytes(data))
+            if offset < 0x31000:
+                data[0x30fdc:0x30ffc] = hashlib.sha256(data[0x30000:0x30fdc]).digest()
+            variants.append(bytes(data))
+        data = bytearray(original)
+        data[0x70000:0x71000] = provision.seed_record(b"\x12" * 32, 1)
+        variants.append(bytes(data))
+        with tempfile.TemporaryDirectory() as temp:
+            for index, data in enumerate(variants):
+                save = Path(temp) / f"test{index}.sav"
+                provision.write_new(save, data)
+                with self.subTest(index=index), patch.object(launcher.subprocess, "run") as child:
+                    with self.assertRaises(ValueError):
+                        launcher.run(save, "us-rev1", ["unused"])
+                    child.assert_not_called()
+                    self.assertEqual(save.read_bytes(), data)
+
+    def test_failed_flush_preserves_selected_bank_and_blocks_child(self):
+        with tempfile.TemporaryDirectory() as temp:
+            save = Path(temp) / "test.sav"
+            data = bytearray(provision.provision(synthetic_save(), "us-rev1"))
+            # A torn bank's untrusted generation must not choose the overwrite order.
+            struct.pack_into("<Q", data, 0x30010, 2**64 - 1)
+            provision.write_new(save, data)
+            with patch.object(launcher.os, "fsync", side_effect=OSError("injected flush failure")), \
+                    patch.object(launcher.subprocess, "run") as child:
+                with self.assertRaises(OSError):
+                    launcher.run(save, "us-rev1", ["unused"])
+                child.assert_not_called()
+            self.assertEqual(save.read_bytes()[0x70000:0x71000], data[0x70000:0x71000])
+            self.assertEqual(launcher.run(save, "us-rev1", [sys.executable, "-c", "pass"]), 0)
+            recovered = save.read_bytes()
+            self.assertEqual(recovered[0x30000:0x31000], recovered[0x70000:0x71000])
+
+    def test_live_lock_symlinks_and_hardlinks_cannot_refresh_save(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            save = root / "test.sav"
+            original = provision.provision(synthetic_save(), "us-rev1")
+            provision.write_new(save, original)
+            with open(str(save) + ".platinumwt.lock", "w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(BlockingIOError):
+                    launcher.run(save, "us-rev1", ["unused"])
+            linked = root / "linked.sav"
+            linked.symlink_to(save)
+            with self.assertRaises(OSError):
+                launcher.run(linked, "us-rev1", ["unused"])
+            linked.unlink()
+            linked.hardlink_to(save)
+            with self.assertRaises(ValueError):
+                launcher.run(linked, "us-rev1", ["unused"])
+            self.assertEqual(save.read_bytes(), original)
+
+    def test_child_keeps_save_locked_if_launcher_is_killed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            save, ready = root / "test.sav", root / "ready"
+            provision.write_new(save, provision.provision(synthetic_save(), "us-rev1"))
+            code = ("import os,sys,time; from pathlib import Path; "
+                    "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(10)")
+            parent = subprocess.Popen([sys.executable, str(ROOT / "scripts/run-emulator.py"),
+                                       "--save", str(save), "--target", "us-rev1", "--",
+                                       sys.executable, "-c", code, str(ready)])
+            child_pid = None
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists())
+                child_pid = int(ready.read_text())
+                parent.kill()
+                parent.wait(timeout=5)
+                with self.assertRaises(BlockingIOError):
+                    launcher.run(save, "us-rev1", ["unused"])
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                parent.wait(timeout=5)
+                if child_pid is None and ready.exists():
+                    child_pid = int(ready.read_text())
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
 
 if __name__ == "__main__":

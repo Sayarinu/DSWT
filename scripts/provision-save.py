@@ -15,6 +15,18 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def seed_record(seed, generation):
+    if len(seed) != 32 or not any(seed) or not 0 <= generation < 2**64:
+        raise ValueError("Invalid seed or journal generation")
+    record = bytearray(4096)
+    struct.pack_into("<4sHHIIQ", record, 0, b"PWTJ", 1, 0, 4096, 0, generation)
+    struct.pack_into("<HH", record, 1440, 1, 32)
+    record[1444:1476] = seed
+    record[4060:4092] = hashlib.sha256(record[:4060]).digest()
+    record[4092:] = b"CMIT"
+    return bytes(record)
+
+
 def provision(data, target):
     layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
     if target not in layout["verified_targets"] or len(data) != layout["flash_size"]:
@@ -35,12 +47,7 @@ def provision(data, target):
         area = data[bank:bank + layout["bank_reserved_size"]]
         if area not in (b"\0" * len(area), b"\xff" * len(area)):
             raise ValueError("Reserved bank is not blank; refusing to replace seeds, identities or recovery evidence")
-    record = bytearray(layout["record_size"])
-    struct.pack_into("<4sHHIIQ", record, 0, b"PWTJ", 1, 0, 4096, 0, 1)
-    struct.pack_into("<HH", record, 1440, 1, 32)
-    record[1444:1476] = secrets.token_bytes(32)
-    record[4060:4092] = hashlib.sha256(record[:4060]).digest()
-    record[4092:] = b"CMIT"
+    record = seed_record(secrets.token_bytes(32), 1)
     result = bytearray(data)
     for bank in layout["journal_banks"]:
         result[bank:bank + len(record)] = record
@@ -57,6 +64,11 @@ def write_new(path, data):
             os.fsync(output.fileno())
         if path.read_bytes() != data:
             raise OSError("Provisioned copy did not verify")
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except BaseException:
         path.unlink()
         raise

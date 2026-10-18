@@ -40,16 +40,31 @@ static int WtSeed_HashSelfTest(void)
         && size == sizeof(digest) && memcmp(digest, expected, sizeof(digest)) == 0;
 }
 
-static int WtSeed_Check(unsigned char *record)
+static int WtSeed_CheckLayout(const unsigned char *record)
 {
-    unsigned char digest[32];
     size_t i;
-    unsigned char nonzero = 0;
     if (memcmp(record, "PWTJ\1\0\0\0\0\20\0\0\0\0\0\0", 16) != 0) {
         return WT_SEED_ERROR_HEADER;
     }
     if (memcmp(record + 1440, "\1\0\40\0", 4) != 0) {
         return WT_SEED_ERROR_FORMAT;
+    }
+    for (i = 24; i < WT_HASH_OFFSET; i++) {
+        if ((i < 1440 || i >= WT_SEED_OFFSET + WT_SEED_SIZE) && record[i] != 0) {
+            return WT_SEED_ERROR_RESERVED;
+        }
+    }
+    return 0;
+}
+
+static int WtSeed_Check(unsigned char *record)
+{
+    unsigned char digest[32];
+    size_t i;
+    unsigned char nonzero = 0;
+    int layout = WtSeed_CheckLayout(record);
+    if (layout != 0) {
+        return layout;
     }
     if (memcmp(record + 4092, "CMIT", 4) != 0) {
         return WT_SEED_ERROR_COMMIT;
@@ -60,12 +75,8 @@ static int WtSeed_Check(unsigned char *record)
     if (memcmp(record + WT_HASH_OFFSET, digest, 32) != 0) {
         return WT_SEED_ERROR_DIGEST;
     }
-    for (i = 24; i < WT_HASH_OFFSET; i++) {
-        if (i >= WT_SEED_OFFSET && i < WT_SEED_OFFSET + WT_SEED_SIZE) {
-            nonzero |= record[i];
-        } else if ((i < 1440 || i >= 1444) && record[i] != 0) {
-            return WT_SEED_ERROR_RESERVED;
-        }
+    for (i = WT_SEED_OFFSET; i < WT_SEED_OFFSET + WT_SEED_SIZE; i++) {
+        nonzero |= record[i];
     }
     return nonzero != 0 ? 0 : WT_SEED_ERROR_EMPTY;
 }
@@ -75,7 +86,7 @@ static int WtSeed_Unknown(const unsigned char *record, int valid)
     unsigned char digest[32];
     size_t i;
     if (memcmp(record, "PWTJ", 4) == 0) {
-        if (record[4] != 1 || record[5] != 0 || record[6] != 0 || record[7] != 0) {
+        if (WtSeed_CheckLayout(record) != 0) {
             return 1;
         }
         /* A committed, intact record with unrecognized fields is not a torn write. */
