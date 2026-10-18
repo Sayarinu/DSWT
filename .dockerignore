@@ -1,0 +1,15 @@
+.git
+game
+.aws
+.codex
+.agents
+.vscode
+.env
+.env.*
+**/*.nds
+**/*.sav
+**/*.dsv
+**/*.platinumwt
+**/*.platinumwt.lock
+**/.platinumwt-pending-*
+**/__pycache__

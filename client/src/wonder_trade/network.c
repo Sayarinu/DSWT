@@ -14,6 +14,7 @@
 #include "unk_02033200.h"
 #include "wifi_overlays.h"
 #include "wonder_trade/http.h"
+#include "wonder_trade/persistence.h"
 #include "wonder_trade/seed.h"
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
@@ -33,6 +34,7 @@ enum WonderTradeSeedError {
     WT_SEED_UNSUPPORTED_FLASH = -21,
     WT_SEED_READ_FAILED = -22,
     WT_SEED_FOREIGN_SECTOR = -23,
+    WT_SEED_UNSAFE_STORAGE = -24,
 };
 
 typedef struct WonderTradeTransport {
@@ -101,6 +103,11 @@ static int WonderTradeNetwork_ReadBank(void *arg, int bank, unsigned char record
     CARD_LockBackup(lockID);
     if (CARD_GetCurrentBackupType() != CARD_BACKUP_TYPE_FLASH_4MBITS) {
         transport->result = WT_SEED_UNSUPPORTED_FLASH;
+        goto done;
+    }
+    if (!CARD_ReadFlash(WT_PERSISTENCE_ADDRESS, page, WT_PERSISTENCE_SIZE)
+        || memcmp(page, WT_PERSISTENCE_DESCRIPTOR, WT_PERSISTENCE_SIZE) != 0) {
+        transport->result = WT_SEED_UNSAFE_STORAGE;
         goto done;
     }
     if (!CARD_ReadFlash(address, record, WT_JOURNAL_SIZE)) {

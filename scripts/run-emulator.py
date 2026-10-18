@@ -75,13 +75,26 @@ def owned_file(descriptor):
         raise ValueError("Use an owned regular save copy without hardlinks")
 
 
-def run(save, target, command):
+def run(save, target, command, store_tool=None):
     if not command:
         raise ValueError("Supply the emulator command after --")
+    save = save.absolute()
     lock = os.open(str(save) + ".platinumwt.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         owned_file(lock)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        environment = dict(os.environ, PLATINUMWT_SAVE_LOCK_FD=str(lock))
+        if store_tool:
+            if not Path(str(save) + '.platinumwt').exists():
+                # No recovery store may be created from an original/unseeded save.
+                descriptor = os.open(save, os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    owned_file(descriptor)
+                    refreshed_record(os.pread(descriptor, 524289, 0), target)
+                finally:
+                    os.close(descriptor)
+            subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
+                           pass_fds=(lock,), check=True, capture_output=True, timeout=15)
         descriptor = os.open(save, os.O_RDWR | os.O_NOFOLLOW)
         try:
             owned_file(descriptor)
@@ -90,20 +103,32 @@ def run(save, target, command):
             data = os.pread(descriptor, 524288, 0)
             layout, record, selected_bank = refreshed_record(data, target)
             os.fchmod(descriptor, 0o600)
-            # Retain the selected old bank until its replacement is durable.
-            banks = [bank for bank in layout["journal_banks"] if bank != selected_bank] + [selected_bank]
-            for bank in banks:
-                write_all(descriptor, bytes(4), bank + 4092)
-                os.fsync(descriptor)
-                write_all(descriptor, record[:4092], bank)
-                os.fsync(descriptor)
-                write_all(descriptor, record[4092:], bank + 4092)
-                os.fsync(descriptor)
-                if os.pread(descriptor, 4096, bank) != record:
-                    raise OSError("Refreshed seed did not verify")
+            if store_tool:
+                refreshed = bytearray(data)
+                for bank in layout['journal_banks']:
+                    refreshed[bank:bank + 4096] = record
+                subprocess.run([str(store_tool), 'refresh', str(save)], input=refreshed, env=environment,
+                               pass_fds=(lock,), check=True, capture_output=True, timeout=15)
+                environment['PLATINUMWT_DURABLE_SAVE'] = str(save)
+            else:
+                # Retain the selected old bank until its replacement is durable.
+                banks = [bank for bank in layout["journal_banks"] if bank != selected_bank] + [selected_bank]
+                for bank in banks:
+                    write_all(descriptor, bytes(4), bank + 4092)
+                    os.fsync(descriptor)
+                    write_all(descriptor, record[:4092], bank)
+                    os.fsync(descriptor)
+                    write_all(descriptor, record[4092:], bank + 4092)
+                    os.fsync(descriptor)
+                    if os.pread(descriptor, 4096, bank) != record:
+                        raise OSError("Refreshed seed did not verify")
             # The child retains the lock if its launcher is interrupted.
-            result = subprocess.run(command, pass_fds=(lock,), check=False).returncode
-            os.fsync(descriptor)
+            result = subprocess.run(command, pass_fds=(lock,), env=environment, check=False).returncode
+            if store_tool:
+                subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
+                               pass_fds=(lock,), check=True, capture_output=True, timeout=15)
+            else:
+                os.fsync(descriptor)
             return result if result >= 0 else 128 - result
         finally:
             os.close(descriptor)
@@ -115,10 +140,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", type=Path, required=True)
     parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
+    parser.add_argument("--store-tool", type=Path, help="Use the built platinumwt-save-store and durable emulator mode")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     try:
-        raise SystemExit(run(args.save, args.target, command))
-    except (OSError, ValueError) as error:
+        raise SystemExit(run(args.save, args.target, command, args.store_tool))
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Cannot start emulator: {error}\n")

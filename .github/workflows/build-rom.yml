@@ -83,3 +83,15 @@ jobs:
           docker build -f validator/Dockerfile -t platinumwt-validator .
           docker run --rm --entrypoint sh platinumwt-validator -c \
             'test -s /usr/share/platinumwt-validator/source/LICENSE && test -s /usr/share/platinumwt-validator/source/validator/LICENSE'
+
+  emulator-persistence:
+    name: Test durable emulator persistence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test host persistence faults and build pinned emulator integration
+        run: docker build -f emulator/Dockerfile -t platinumwt-emulator-builder .

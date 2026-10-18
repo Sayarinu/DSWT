@@ -1,0 +1,216 @@
+--- a/src/NDSCart.cpp
++++ b/src/NDSCart.cpp
+@@ -20,6 +20,7 @@
+ #include "NDS.h"
+ #include "DSi.h"
+ #include "NDSCart.h"
++#include "PlatinumWTPersistence.h"
+ #include "CRC32.h"
+ #include "Platform.h"
+ #include "ROMList.h"
+@@ -708,6 +709,15 @@
+ 
+ u8 CartRetail::SRAMWrite_FLASH(u8 val, u32 pos, bool last)
+ {
++    // Read-only virtual capability; no descriptor is placed in SRAM or a save.
++    if (((SRAMCmd == 0x03 && pos > 3) || (SRAMCmd == 0x0B && pos > 4)) &&
++        SRAMAddr >= WT_PERSISTENCE_ADDRESS && SRAMAddr < WT_PERSISTENCE_ADDRESS + WT_PERSISTENCE_SIZE &&
++        Platform::HasDurableNDSSave(UserData))
++    {
++        static const u8 descriptor[] = WT_PERSISTENCE_DESCRIPTOR;
++        static_assert(sizeof(descriptor) == WT_PERSISTENCE_SIZE + 1);
++        return descriptor[SRAMAddr++ - WT_PERSISTENCE_ADDRESS];
++    }
+     switch (SRAMCmd)
+     {
+     case 0x05: // read status register
+--- a/src/Platform.h
++++ b/src/Platform.h
+@@ -281,6 +281,7 @@
+ // savedata and savelen are always the entire save memory buffer and its full length
+ // writeoffset and writelen indicate which part of the memory was altered
+ void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata);
++bool HasDurableNDSSave(void* userdata);
+ void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata);
+ 
+ /// Called when the firmware needs to be written back to storage,
+--- a/src/frontend/qt_sdl/CMakeLists.txt
++++ b/src/frontend/qt_sdl/CMakeLists.txt
+@@ -91,7 +91,9 @@
+ 
+ add_compile_definitions(ARCHIVE_SUPPORT_ENABLED)
+ 
+-add_executable(melonDS ${SOURCES_QT_SDL})
++add_executable(melonDS ${SOURCES_QT_SDL} platinumwt/durable_save.cpp)
++find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
++target_link_libraries(melonDS PRIVATE OpenSSL::Crypto)
+ 
+ add_subdirectory("../../net"
+     ${CMAKE_BINARY_DIR}/net)
+--- a/src/frontend/qt_sdl/EmuInstance.cpp
++++ b/src/frontend/qt_sdl/EmuInstance.cpp
+@@ -708,6 +708,7 @@
+ 
+ bool EmuInstance::loadState(const std::string& filename)
+ {
++    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return false;
+     Platform::FileHandle* file = Platform::OpenFile(filename, Platform::FileMode::Read);
+     if (file == nullptr)
+     { // If we couldn't open the state file...
+@@ -775,6 +776,7 @@
+ 
+ bool EmuInstance::saveState(const std::string& filename)
+ {
++    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return false;
+     Platform::FileHandle* file = Platform::OpenFile(filename, Platform::FileMode::Write);
+ 
+     if (file == nullptr)
+@@ -824,6 +826,7 @@
+ 
+ void EmuInstance::undoStateLoad()
+ {
++    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return;
+     if (!savestateLoaded || !backupState) return;
+ 
+     // Rewind the backup state and put it in load mode
+@@ -1971,7 +1974,18 @@
+     }
+ 
+     cartType = 0;
+-    ndsSave = std::make_unique<SaveManager>(savname);
++    const char* managed = std::getenv("PLATINUMWT_DURABLE_SAVE");
++    if (managed && savname != managed)
++    {
++        errorstr = "This emulator session requires its managed save.";
++        return false;
++    }
++    try { ndsSave = std::make_unique<SaveManager>(savname, managed != nullptr); }
++    catch (const std::exception&)
++    {
++        errorstr = "Managed save unavailable; preserve the save and recovery directory.";
++        return false;
++    }
+ 
+     return true; // success
+ }
+--- a/src/frontend/qt_sdl/EmuThread.cpp
++++ b/src/frontend/qt_sdl/EmuThread.cpp
+@@ -640,6 +640,7 @@
+         case msg_ImportSavefile:
+             {
+                 msgResult = 0;
++                if (std::getenv("PLATINUMWT_DURABLE_SAVE")) break;
+                 auto f = Platform::OpenFile(msg.param.value<QString>().toStdString(), Platform::FileMode::Read);
+                 if (!f) break;
+ 
+--- a/src/frontend/qt_sdl/Platform.cpp
++++ b/src/frontend/qt_sdl/Platform.cpp
+@@ -420,6 +420,12 @@
+         inst->ndsSave->RequestFlush(savedata, savelen, writeoffset, writelen);
+ }
+ 
++bool HasDurableNDSSave(void* userdata)
++{
++    EmuInstance* inst = (EmuInstance*)userdata;
++    return inst->ndsSave && inst->ndsSave->IsDurable();
++}
++
+ void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
+ {
+     EmuInstance* inst = (EmuInstance*)userdata;
+--- a/src/frontend/qt_sdl/SaveManager.cpp
++++ b/src/frontend/qt_sdl/SaveManager.cpp
+@@ -17,6 +17,9 @@
+ */
+ 
+ #include <stdio.h>
++#include <cstdlib>
++#include <exception>
++#include <stdexcept>
+ #include <string.h>
+ 
+ #include "SaveManager.h"
+@@ -25,8 +28,14 @@
+ using namespace melonDS;
+ using namespace melonDS::Platform;
+ 
+-SaveManager::SaveManager(const std::string& path) : QThread()
+-{
++SaveManager::SaveManager(const std::string& path, bool durable) : QThread()
++{
++    if (durable)
++    {
++        Durable = std::make_unique<platinumwt::DurableSave>(path);
++        if (!Durable->SupportsHostDurability()) throw std::runtime_error("Unsupported save filesystem");
++    }
++
+     SecondaryBuffer = nullptr;
+     SecondaryBufferLength = 0;
+     SecondaryBufferLock = new QMutex();
+@@ -43,7 +52,7 @@
+     PreviousFlushVersion = 0;
+     TimeAtLastFlushRequest = 0;
+ 
+-    if (!path.empty())
++    if (!path.empty() && !Durable)
+     {
+         Running = true;
+         start();
+@@ -73,6 +82,12 @@
+ 
+ void SaveManager::SetPath(const std::string& path, bool reload)
+ {
++    if (Durable)
++    {
++        if (path == Path && !reload) return;
++        std::fputs("Managed save path change refused; emulator stopped\n", stderr);
++        std::_Exit(74);
++    }
+     Path = path;
+ 
+     if (reload)
+@@ -96,6 +111,16 @@
+ 
+ void SaveManager::RequestFlush(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen)
+ {
++    if (Durable)
++    {
++        try { Durable->Commit(savedata, savelen); }
++        catch (const std::exception&)
++        {
++            std::fputs("Managed save failed; emulator stopped before continuing\n", stderr);
++            std::_Exit(74);
++        }
++        return;
++    }
+     if (Length != savelen)
+     {
+         Length = savelen;
+--- a/src/frontend/qt_sdl/SaveManager.h
++++ b/src/frontend/qt_sdl/SaveManager.h
+@@ -30,6 +30,7 @@
+ #include <QMutex>
+ 
+ #include "types.h"
++#include "platinumwt/durable_save.h"
+ 
+ class SaveManager : public QThread
+ {
+@@ -37,7 +38,8 @@
+     void run() override;
+ 
+ public:
+-    SaveManager(const std::string& path);
++    SaveManager(const std::string& path, bool durable = false);
++    bool IsDurable() const { return Durable != nullptr; }
+     ~SaveManager();
+ 
+     std::string GetPath();
+@@ -51,6 +53,7 @@
+ 
+ private:
+     std::string Path;
++    std::unique_ptr<platinumwt::DurableSave> Durable;
+ 
+     std::atomic_bool Running;
+ 
