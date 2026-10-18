@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -17,6 +18,20 @@ bool Hit(int fd, bool directory = false) {
     if (!std::getenv("PWT_FAULT_ARMED")) return false;
     struct stat info{};
     if (::fstat(fd, &info) != 0 || (!S_ISREG(info.st_mode) && !(directory && S_ISDIR(info.st_mode)))) return false;
+    // The real Qt process also writes configuration/firmware. Restrict optional
+    // GUI fault injection to this save's atomic-publication files/directories.
+    if (const auto *save = std::getenv("PWT_FAULT_SAVE")) {
+        char target[4096];
+        const auto descriptor = "/proc/self/fd/" + std::to_string(fd);
+        const auto length = ::readlink(descriptor.c_str(), target, sizeof(target));
+        if (length < 0 || static_cast<std::size_t>(length) == sizeof(target)) return false;
+        const std::string path(target, static_cast<std::size_t>(length)), raw(save);
+        const auto parent = raw.substr(0, raw.find_last_of('/')), store = raw + ".platinumwt";
+        if (S_ISDIR(info.st_mode)) {
+            if (path != parent && path != store) return false;
+        } else if (path.rfind(parent + "/.platinumwt-pending-", 0) != 0 &&
+                   path.rfind(store + "/.platinumwt-pending-", 0) != 0) return false;
+    }
     const auto *selected = std::getenv("PWT_FAULT_AT");
     return selected && ++serial == std::strtoul(selected, nullptr, 10);
 }

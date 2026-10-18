@@ -173,15 +173,16 @@ Bytes Snapshot(const Head &head, const Bytes &data) {
     Seal(bytes);
     return bytes;
 }
-std::optional<Bytes> LoadSnapshot(int directory, const char *name, const Head &head) {
+std::optional<Bytes> LoadSnapshot(int directory, const char *name, const Head &head, Bytes &partial) {
     Bytes bytes;
     try { bytes = Read(directory, name, kSaveSize + 96); }
     catch (const std::system_error &error) { if (error.code().value() == ENOENT) return {}; throw; }
     // A future format is evidence, not permission for an older build to repair it.
-    Require(bytes.size() < 8 || Magic(bytes, "PWTHS001"));
-    if (bytes.size() != kSaveSize + 96 || !Sealed(bytes)) return {};
+    Require(std::equal(bytes.begin(), bytes.begin() + std::min<std::size_t>(bytes.size(), 8), "PWTHS001"));
+    if (bytes.size() != kSaveSize + 96) { partial = std::move(bytes); return {}; }
+    Require(Sealed(bytes));
     Require(Field<16>(bytes, 16) == head.lineage);
-    if (Field<32>(bytes, 32) != Hash(bytes.data() + 64, kSaveSize)) return {};
+    Require(Field<32>(bytes, 32) == Hash(bytes.data() + 64, kSaveSize));
     return bytes;
 }
 
@@ -218,6 +219,7 @@ struct DurableSave::Impl {
             const auto passed = Info(fd, false), own = Info(lock.Get(), false);
             Require(passed.st_dev == own.st_dev && passed.st_ino == own.st_ino);
             if (::flock(fd, LOCK_EX | LOCK_NB) != 0) Fail();
+            if (::fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) Fail();
         } else if (::flock(lock.Get(), LOCK_EX | LOCK_NB) != 0) Fail();
         struct stat found{};
         if (::fstatat(parent.Get(), store_name.c_str(), &found, AT_SYMLINK_NOFOLLOW) != 0) {
@@ -245,9 +247,15 @@ struct DurableSave::Impl {
 
     void Recover(Mode mode) {
         head = DecodeHead(Read(store->Get(), "HEAD", 128));
-        const auto first = LoadSnapshot(store->Get(), "A", head), second = LoadSnapshot(store->Get(), "B", head);
+        Bytes partial_first, partial_second;
+        const auto first = LoadSnapshot(store->Get(), "A", head, partial_first);
+        const auto second = LoadSnapshot(store->Get(), "B", head, partial_second);
         Require(first || second);
         const auto &selected = !first ? *second : !second || Generation(*first) >= Generation(*second) ? *first : *second;
+        // Repair truncation only when the surviving checked image proves every
+        // remaining byte. Unknown/foreign evidence is never overwritten.
+        Require(std::equal(partial_first.begin(), partial_first.end(), selected.begin()) &&
+            std::equal(partial_second.begin(), partial_second.end(), selected.begin()));
         const auto generation = Generation(selected);
         Require(generation >= head.generation && generation - head.generation <= 1);
         if (first && second) {
@@ -260,6 +268,11 @@ struct DurableSave::Impl {
         if (raw.size() == kSaveSize) {
             const auto hash = Hash(raw);
             Require(hash == head.digest || hash == head.previous || hash == digest);
+        } else {
+            const auto prefix = [&](const std::optional<Bytes> &snapshot) {
+                return snapshot && std::equal(raw.begin(), raw.end(), snapshot->begin() + 64);
+            };
+            Require(prefix(first) || prefix(second));
         }
         if (mode == Mode::Existing) {
             Require(first && second && *first == *second && generation == head.generation && raw.size() == kSaveSize && Hash(raw) == digest);

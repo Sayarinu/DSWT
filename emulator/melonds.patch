@@ -73,26 +73,68 @@
      if (!savestateLoaded || !backupState) return;
  
      // Rewind the backup state and put it in load mode
-@@ -1971,7 +1974,18 @@
+@@ -1866,6 +1869,12 @@
+ 
+ bool EmuInstance::loadROM(QStringList filepath, bool reset, QString& errorstr)
+ {
++    const char* managed = std::getenv("PLATINUMWT_DURABLE_SAVE");
++    if (managed && (ndsSave || !reset))
++    {
++        errorstr = "Restart the launcher to change a managed cartridge.";
++        return false;
++    }
+     unique_ptr<u8[]> filedata = nullptr;
+     u32 filelen;
+     std::string basepath;
+@@ -1889,6 +1898,22 @@
+     std::string savname = getAssetPath(false, localCfg.GetString("SaveFilePath"), ".sav");
+     std::string origsav = savname;
+     savname += instanceFileSuffix();
++
++    std::unique_ptr<SaveManager> managedSave;
++    if (managed)
++    {
++        if (savname != managed)
++        {
++            errorstr = "This emulator session requires its managed save.";
++            return false;
++        }
++        try { managedSave = std::make_unique<SaveManager>(savname, true); }
++        catch (const std::exception&)
++        {
++            errorstr = "Managed save unavailable; preserve the save and recovery directory.";
++            return false;
++        }
++    }
+ 
+     FileHandle* sav = Platform::OpenFile(savname, FileMode::Read);
+     if (!sav)
+@@ -1934,6 +1959,9 @@
+         return false;
+     }
+ 
++    // Install the checked manager before a cartridge can execute a save callback.
++    if (managed) ndsSave = std::move(managedSave);
++
+     if (reset)
+     {
+         nextCart = std::move(cart);
+@@ -1971,13 +1999,14 @@
      }
  
      cartType = 0;
 -    ndsSave = std::make_unique<SaveManager>(savname);
-+    const char* managed = std::getenv("PLATINUMWT_DURABLE_SAVE");
-+    if (managed && savname != managed)
-+    {
-+        errorstr = "This emulator session requires its managed save.";
-+        return false;
-+    }
-+    try { ndsSave = std::make_unique<SaveManager>(savname, managed != nullptr); }
-+    catch (const std::exception&)
-+    {
-+        errorstr = "Managed save unavailable; preserve the save and recovery directory.";
-+        return false;
-+    }
++    if (!managed) ndsSave = std::make_unique<SaveManager>(savname);
  
      return true; // success
  }
+ 
+ void EmuInstance::ejectCart()
+ {
++    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return;
+     ndsSave = nullptr;
+ 
+     if (emuIsActive())
 --- a/src/frontend/qt_sdl/EmuThread.cpp
 +++ b/src/frontend/qt_sdl/EmuThread.cpp
 @@ -640,6 +640,7 @@

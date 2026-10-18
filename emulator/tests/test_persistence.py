@@ -60,7 +60,8 @@ class PersistenceTests(unittest.TestCase):
             for stage in range(1, 21):
                 with self.subTest(mode=mode, stage=stage):
                     self.reset()
-                    env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_AT=str(stage), PWT_FAULT_MODE=mode)
+                    env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_AT=str(stage),
+                               PWT_FAULT_MODE=mode, PWT_FAULT_SAVE=str(self.save))
                     process = subprocess.Popen([str(self.probe), str(self.save), str(self.input)], env=env,
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     try:
@@ -116,6 +117,33 @@ class PersistenceTests(unittest.TestCase):
         self.save.write_bytes(second.read_bytes())
         self.tool('prepare', ok=False)
         self.assertEqual(self.save.read_bytes(), second.read_bytes())
+
+    def test_unknown_and_foreign_truncated_evidence_is_preserved(self):
+        store = Path(str(self.save) + '.platinumwt')
+        for unknown in (b'unknown', image(b'owner-b', 0)[:0x30200]):
+            with self.subTest(raw_size=len(unknown)):
+                self.reset()
+                self.save.write_bytes(unknown)
+                snapshots = {name: (store / name).read_bytes() for name in ('A', 'B', 'HEAD')}
+                self.tool('prepare', ok=False)
+                self.assertEqual(self.save.read_bytes(), unknown)
+                self.assertEqual({name: (store / name).read_bytes() for name in snapshots}, snapshots)
+        for unknown in (b'NEW', b'PWTHS002', b'PWTHS001' + bytes(8) + b'foreign-lineage!'):
+            with self.subTest(snapshot=unknown):
+                self.reset()
+                (store / 'A').write_bytes(unknown)
+                self.tool('prepare', ok=False)
+                self.assertEqual((store / 'A').read_bytes(), unknown)
+                self.assertEqual(self.save.read_bytes(), self.before)
+
+    def test_damaged_complete_snapshot_is_preserved_for_investigation(self):
+        snapshot = Path(str(self.save) + '.platinumwt') / 'A'
+        unknown = bytearray(snapshot.read_bytes())
+        unknown[64 + 0x30000] ^= 1
+        snapshot.write_bytes(unknown)
+        self.tool('prepare', ok=False)
+        self.assertEqual(snapshot.read_bytes(), unknown)
+        self.assertEqual(self.save.read_bytes(), self.before)
 
     def test_stale_snapshot_pair_cannot_move_behind_the_durable_head(self):
         result = subprocess.run([str(self.probe), str(self.save), str(self.input)], capture_output=True, timeout=5)
