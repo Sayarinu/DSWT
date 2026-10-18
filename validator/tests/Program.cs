@@ -80,6 +80,21 @@ await Test("legal generated wild encounter", () =>
     return Task.CompletedTask;
 });
 
+await Test("Gen IV names are not retroactively censored and data stays strict", () =>
+{
+    const string name = "SHIT";
+    ParseSettings.Initialize(new LegalitySettings());
+    Require(WordFilter.IsFiltered(name, EntityContext.Gen4, out _, out _), "fixture must trigger the default modern filter");
+    var namedTrainer = new SimpleTrainerInfo(GameVersion.Pt) { OT = name, TID16 = 12345, SID16 = 54321, Language = 2, Gender = 0 };
+    var pk = (PK4)starterEncounter.ConvertToPKM(namedTrainer);
+    pk.Nickname = name; pk.IsNicknamed = true; pk.MetDate = new DateOnly(2020, 1, 1);
+    var data = Canonical(pk); var before = data.ToArray();
+    Require(Policy.Analyze(data).Legal && data.SequenceEqual(before), "historical names rejected or repaired");
+    var invalid = Mutate(data, value => value.IV32 ^= 0x3FFFFFFF);
+    Require(!Policy.Analyze(invalid).Legal, "name exception bypassed RNG checks");
+    return Task.CompletedTask;
+});
+
 await Test("event rules accept generated gift and reject altered encounter", () =>
 {
     var gift = EncounterEvent.MGDB_G4.First(g => g.Species == 491 && !g.IsEgg && g.IsEntity);

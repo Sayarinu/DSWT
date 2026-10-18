@@ -11,7 +11,7 @@
 
 namespace platinumwt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-pwt1";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-pwt2";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
