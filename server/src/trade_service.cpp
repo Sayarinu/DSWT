@@ -109,6 +109,7 @@ public:
       Result(reply, v1::RESULT_PROCESSING);
       return;
     }
+    if (code != v1::RESULT_OK) reply.Clear();
     auto *context = reply.mutable_context();
     context->set_result(code);
     context->set_next_counter(Unsigned(PQgetvalue(row.get(), 0, 0)));
@@ -415,6 +416,12 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
         "FROM platinumwt.trade_events AS events WHERE save_id=$1::uuid AND sequence>$2::numeric "
         "ORDER BY events.sequence LIMIT $3::integer",
         {HexBytes(session.auth.save_id()), std::to_string(request->after_event()), std::to_string(request->limit() + 1)});
+    const auto expected = std::min<std::uint64_t>(request->limit() + 1, session.highwater - request->after_event());
+    if (PQntuples(rows.get()) != static_cast<int>(expected)) throw std::runtime_error("event history incomplete");
+    for (int row = 0; row < PQntuples(rows.get()); ++row) {
+      if (Unsigned(PQgetvalue(rows.get(), row, 0)) != request->after_event() + row + 1)
+        throw std::runtime_error("event history gap");
+    }
     reply->set_page_end(request->after_event());
     reply->set_has_more(PQntuples(rows.get()) > static_cast<int>(request->limit()));
     for (int row = 0; row < std::min(PQntuples(rows.get()), static_cast<int>(request->limit())); ++row) {
@@ -427,7 +434,6 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
       event->set_payload_sha256(UnhexBytes(PQgetvalue(rows.get(), row, 5)));
       event->set_receipt_id(UnhexBytes(PQgetvalue(rows.get(), row, 6)));
       event->set_state(static_cast<v1::TradeState>(std::stoi(PQgetvalue(rows.get(), row, 7))));
-      if (event->sequence() != reply->page_end() + 1) throw std::runtime_error("event history gap");
       reply->set_page_end(event->sequence());
     }
     session.Publish(*reply, v1::RESULT_OK);

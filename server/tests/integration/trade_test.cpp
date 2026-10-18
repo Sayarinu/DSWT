@@ -194,7 +194,12 @@ TEST_F(TradeTest, AuthorizationAndForeignTradesNeverDiscloseOwnership) {
   EXPECT_EQ(Status({}, wrong).context().result(), v1::RESULT_UNAUTHENTICATED);
   EXPECT_FALSE(Status({}, wrong).has_trade());
   auto other = Enroll();
-  EXPECT_EQ(Status(submitted.outcome().trade_id(), other).context().result(), v1::RESULT_NOT_FOUND);
+  const auto foreign = Status(submitted.outcome().trade_id(), other);
+  EXPECT_EQ(foreign.context().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_FALSE(foreign.has_trade());
+  const auto missing = Status(Identifier());
+  EXPECT_EQ(missing.context().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_FALSE(missing.has_trade());
   EXPECT_EQ(Collect(submitted.outcome().trade_id(), other).context().result(), v1::RESULT_NOT_FOUND);
   auto cancel = Cancellation(submitted.outcome(), 1);
   *cancel.mutable_context()->mutable_auth() = other;
@@ -379,6 +384,42 @@ TEST_F(TradeTest, ReconciliationIsContiguousBoundedAndRetained) {
   EXPECT_EQ(Reconcile(12).context().result(), v1::RESULT_CURSOR_AHEAD);
   EXPECT_EQ(Reconcile(0, 0).context().result(), v1::RESULT_INVALID_REQUEST);
   EXPECT_EQ(Reconcile(0, 9).context().result(), v1::RESULT_INVALID_REQUEST);
+}
+
+TEST_F(TradeTest, ReconciliationRejectsTruncatedOrContradictoryHistory) {
+  verdict = LegalityVerdict::Illegal;
+  ASSERT_EQ(Submit(Submission(auth, 1)).context().result(), v1::RESULT_ILLEGAL_POKEMON);
+  ASSERT_EQ(Submit(Submission(auth, 2)).context().result(), v1::RESULT_ILLEGAL_POKEMON);
+  auto corrupt = [&](const char *sql, const std::string &value) {
+    detail::Transaction transaction(database);
+    database.Execute("SET LOCAL session_replication_role=replica");
+    database.Parameters(sql, {detail::HexBytes(auth.save_id()), value});
+    transaction.Commit();
+  };
+  auto rejected = [&](std::uint64_t after) {
+    v1::ReconcileRequest request;
+    *request.mutable_auth() = auth;
+    request.set_after_event(after);
+    request.set_limit(8);
+    v1::ReconcileReply reply;
+    reply.add_events();
+    const auto status = service.Reconcile(nullptr, &request, &reply);
+    EXPECT_EQ(status.error_code(), grpc::StatusCode::UNAVAILABLE);
+    EXPECT_EQ(reply.ByteSizeLong(), 0U);
+  };
+  const char *watermark = "UPDATE platinumwt.save_identities SET event_highwater=$2::numeric WHERE save_id=$1::uuid";
+  // Privileged corruption bypasses normal guards; restore the original rows so
+  // the independent audit replay still verifies the rest of the fixture.
+  corrupt(watermark, "5");
+  rejected(0); // Missing tail after a partial page.
+  rejected(3); // Missing tail with no returned rows.
+  corrupt(watermark, "1");
+  rejected(0); // Retained events extend beyond this snapshot's highwater.
+  corrupt(watermark, "3");
+  corrupt("UPDATE platinumwt.trade_events SET sequence=$2::numeric WHERE save_id=$1::uuid AND sequence=2", "4");
+  rejected(0); // Same row count, but an interior gap and an event beyond highwater.
+  corrupt("UPDATE platinumwt.trade_events SET sequence=2 WHERE save_id=$1::uuid AND sequence=$2::numeric", "4");
+  EXPECT_EQ(Reconcile().events_size(), 3);
 }
 
 TEST_F(TradeTest, CopiedSaveConcurrentSubmissionsHaveOneAuthoritativeWinner) {
