@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Carry proposed updates onto a ticket branch before merging.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories:
+      - /server
+      - /tools/rom-builder
+    schedule:
+      interval: weekly

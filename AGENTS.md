@@ -12,6 +12,8 @@ Preserve upstream notices and record its revision when refreshing the workspace.
 
 - The server implementation will be written in C++.
 - Server protocols will use gRPC.
+- The legality validator is an isolated pinned PKHeX.Core gRPC service in .NET,
+  with its GPL source and notice obligations.
 - Docker will package services, and Kubernetes (k3s) will orchestrate them.
 - The deployment target will be a VPS with AWS resources managed through
   Terraform.
@@ -40,7 +42,8 @@ Nintendo DS networking constraints and use gRPC for server-side services.
 - Format new commits as `{TicketID-#} - Message`, such as
   `ABC-123 - Fix trade recovery`. Preserve historical messages during migration.
 - Keep PRs focused and self-contained: problem, changes, validation, material
-  risks, and ticket identifier. Omit links to private trackers.
+  risks, and ticket identifier. Omit links to private trackers; use the PR
+  template's automation opt-out to suppress private tracker comments.
 - Start each implementation branch from the latest `main`. Review and merge
   one PR at a time after automated review, resolved findings, and passing
   PR checks. Honor explicitly requested approval checkpoints.
