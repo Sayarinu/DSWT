@@ -2,33 +2,15 @@
 
 #include "identity_auth.h"
 #include "postgres.h"
+#include "recovery_gate.h"
 #include "trade_encoding.h"
 
 #include <algorithm>
 #include <limits>
-#include <mutex>
 #include <stdexcept>
-#include <unordered_map>
 #include <utility>
 
 namespace platinumwt::server {
-
-// Model state advances only with a new identity event. Remember one conservative
-// WAL requirement per identity so retries do not chase unrelated/new row-lock
-// WAL forever while the off-site prefix advances. Eviction only delays a reply.
-struct VisibilityCache {
-  std::mutex mutex;
-  std::unordered_map<std::string, std::pair<std::uint64_t, std::uint64_t>> entries;
-
-  std::uint64_t Remember(const std::string &id, std::uint64_t event, std::uint64_t position) {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto existing = entries.find(id);
-    if (existing != entries.end() && existing->second.first >= event) return existing->second.second;
-    if (existing == entries.end() && entries.size() >= 4096) entries.erase(entries.begin());
-    entries[id] = {event, position};
-    return position;
-  }
-};
 
 namespace {
 using detail::Database;
@@ -68,15 +50,14 @@ public:
   Database database;
   detail::Transaction transaction;
   const v1::Credentials &auth;
-  const RecoveryBarrier &recovery;
-  VisibilityCache &visibility;
+  detail::RecoveryGate &recovery;
   bool authenticated = false;
   std::uint64_t next = 0, highwater = 0;
 
   Session(const std::string &info, const v1::Credentials &credentials,
-          const RecoveryBarrier &barrier, VisibilityCache &cache, bool write)
+          detail::RecoveryGate &barrier, bool write)
       : database(info), transaction(database, write ? "BEGIN" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"),
-        auth(credentials), recovery(barrier), visibility(cache) {
+        auth(credentials), recovery(barrier) {
     auto row = database.Parameters(write ?
         "SELECT encode(credential_verifier,'hex'),next_counter::text,event_highwater::text "
         "FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
@@ -93,9 +74,7 @@ public:
   }
 
   bool Covered(std::uint64_t event) {
-    if (!recovery) return false;
-    auto row = database.Execute("SELECT (pg_current_wal_flush_lsn() - '0/0'::pg_lsn)::text");
-    return recovery(visibility.Remember(auth.save_id(), event, Unsigned(PQgetvalue(row.get(), 0, 0))));
+    return recovery.Covers(database, auth.save_id(), event);
   }
 
   template <typename Reply>
@@ -234,8 +213,8 @@ void Allocate(Work work) {
 } // namespace
 
 TradeService::TradeService(std::string connection_info, SubmissionValidator validator, RecoveryBarrier recovery)
-    : connection_info_(std::move(connection_info)), validator_(std::move(validator)), recovery_(std::move(recovery)),
-      visibility_(std::make_shared<VisibilityCache>()) {}
+    : connection_info_(std::move(connection_info)), validator_(std::move(validator)),
+      recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
 
 grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::SubmitRequest *request,
                                   v1::MutationReply *reply) {
@@ -253,7 +232,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     body += request->pokemon().sha256();
     const auto hash = detail::MutationHash(2, request->context(), body);
     {
-      Session session(connection_info_, request->context().auth(), recovery_, *visibility_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       session.transaction.Commit();
@@ -263,7 +242,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     std::copy(request->pokemon().pk4().begin(), request->pokemon().pk4().end(), data.begin());
     const auto legality = validator_ ? validator_(data) : LegalityDecision{};
     Allocate([&] {
-      Session session(connection_info_, request->context().auth(), recovery_, *visibility_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       if (legality.verdict == LegalityVerdict::Unavailable) { session.Publish(*reply, v1::RESULT_UNAVAILABLE); return; }
@@ -296,7 +275,7 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
     if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), 16)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
-    Session session(connection_info_, request->auth(), recovery_, *visibility_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     *reply->mutable_trade() = session.Snapshot(request->trade_id());
     session.Publish(*reply, !request->trade_id().empty() && reply->trade().state() == v1::TRADE_NONE ?
@@ -314,7 +293,7 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
     }
     const auto hash = detail::MutationHash(4, request->context(), request->trade_id());
     Allocate([&] {
-      Session session(connection_info_, request->context().auth(), recovery_, *visibility_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true);
       if (!session.Begin(request->context(), hash, *reply)) return;
       auto snapshot = session.Snapshot(request->trade_id());
       if (snapshot.state() != v1::TRADE_QUEUED) {
@@ -346,7 +325,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
   return Guard(context, *reply, [&] {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!detail::NonzeroBytes(request->trade_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
-    Session session(connection_info_, request->auth(), recovery_, *visibility_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     const auto snapshot = session.Snapshot(request->trade_id());
     if (snapshot.state() == v1::TRADE_NONE || snapshot.state() == v1::TRADE_QUEUED) {
@@ -375,7 +354,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
     std::string body = request->trade_id() + request->receipt_id() + request->delivered_sha256() + request->applied_sha256();
     detail::AppendUnsigned(body, request->applied_generation(), 8);
     const auto hash = detail::MutationHash(6, request->context(), body);
-    Session session(connection_info_, request->context().auth(), recovery_, *visibility_, true);
+    Session session(connection_info_, request->context().auth(), *recovery_, true);
     if (!session.Begin(request->context(), hash, *reply)) return;
     auto snapshot = session.Snapshot(request->trade_id());
     if ((snapshot.state() != v1::TRADE_MATCHED && snapshot.state() != v1::TRADE_RETURN_READY) ||
@@ -407,7 +386,7 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
   return Guard(context, *reply, [&] {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
-    Session session(connection_info_, request->auth(), recovery_, *visibility_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     if (request->after_event() > session.highwater) { session.Publish(*reply, v1::RESULT_CURSOR_AHEAD); return; }
     auto rows = session.database.Parameters("SELECT sequence::text,kind,coalesce(replace(trade_id::text,'-',''),''),"

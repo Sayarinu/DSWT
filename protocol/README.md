@@ -59,6 +59,14 @@ WAL requirements to committed per-identity event highwaters, so retry row locks
 cannot keep moving the target. Restart services after recovery. Real off-site
 attestation and public gateway registration remain separate integration gates.
 
+The unregistered worker-only matcher serializes each short pair transaction with
+a database advisory lock shared across replicas. It anchors the oldest unlocked
+eligible offer by its immutable admission event and randomly chooses a distinct
+unlocked owner. Busy workers return `PROCESSING`; reuse that operation ID. A
+final `NOT_FOUND` records no eligible pair, so later polling needs a new ID.
+Pairs and no-pair outcomes survive retry/restart and require recovery coverage.
+The one-hour capacity gate must measure contention before production promotion.
+
 Retain final operation outcomes, payloads, receipts and contiguous ownership
 events for supported replay, including after acknowledgement. Reconciliation
 pages at most eight events after a per-identity cursor; reject a cursor beyond

@@ -59,7 +59,7 @@ target_include_directories(platinumwt_legality PUBLIC "${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(platinumwt_legality PRIVATE platinumwt_protocol OpenSSL::Crypto)
 target_compile_options(platinumwt_legality PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(platinumwt_trading STATIC src/trade_service.cpp src/trade_encoding.cpp)
+add_library(platinumwt_trading STATIC src/trade_service.cpp src/trade_encoding.cpp src/recovery_gate.cpp src/matcher_service.cpp)
 target_include_directories(platinumwt_trading PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(platinumwt_trading PUBLIC platinumwt_protocol PRIVATE platinumwt_ledger platinumwt_legality PostgreSQL::PostgreSQL OpenSSL::Crypto)
 target_compile_options(platinumwt_trading PRIVATE -Wall -Wextra -Wpedantic)
