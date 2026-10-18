@@ -218,6 +218,8 @@ static void ReceiptImagesAndPacketBinding(void)
     assert(WtJournal_Encode(&entry, Hash, record) != 0);
     Escrow(&entry); entry.generation = 1;
     assert(WtJournal_Encode(&entry, Hash, record) != 0);
+    Escrow(&entry); entry.operationCounter = UINT64_MAX; memset(entry.request + 72, 255, 8);
+    assert(WtJournal_Encode(&entry, Hash, record) != 0);
 }
 
 static int BrokenHash(const unsigned char *bytes, size_t size, unsigned char digest[32])
@@ -251,6 +253,19 @@ static void IdentityBootstrapAndExhaustion(void)
     assert(WtJournal_Open(&store, IO()) == 0);
     assert(WtJournal_Commit(&store, &entry) == 0 && memcmp(banks[0], banks[1], 4096) == 0);
     assert(WtJournal_Read(&store, &bound) == 0 && memcmp(bound.credential, entry.credential, 32) == 0);
+    {
+        const int offsets[] = { 104, 160, 416, 2000 };
+        size_t i;
+        unsigned char saved[4096];
+        for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+            memcpy(banks[1], banks[0], 4096); banks[1][6] = WT_JOURNAL_IDLE;
+            banks[1][offsets[i]] ^= 64; memset(banks[1] + 4092, 0, 4);
+            memcpy(saved, banks[1], 4096); writes = 0;
+            assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+            assert(memcmp(saved, banks[1], 4096) == 0);
+        }
+        memcpy(banks[1], banks[0], 4096);
+    }
     writes = 0;
     assert(WtJournal_OpenEmpty(&store, IO()) == WT_JOURNAL_ERROR_UNKNOWN && writes == 0);
     memset(banks[1] + 4092, 0, 4);
@@ -258,6 +273,33 @@ static void IdentityBootstrapAndExhaustion(void)
     assert(WtJournal_Open(&store, IO()) == 0 && WtJournal_Repair(&store) == 0);
     bound.phase = WT_JOURNAL_IDLE; bound.generation++; memset(bound.saveID, 1, 16);
     bound.requestLength = 0; memset(bound.request, 0, 256);
+    {
+        const int offsets[] = { 104, 160, 416 };
+        unsigned char saved[4096];
+        size_t i;
+        int phase;
+        Reset(); assert(WtJournal_Encode(&bound, Hash, banks[0]) == 0);
+        for (phase = WT_JOURNAL_ENROLLING; phase <= WT_JOURNAL_IDLE; phase++) {
+            for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                assert(WtJournal_Encode(&entry, Hash, banks[1]) == 0);
+                memcpy(banks[1] + 32, bound.saveID, 16); banks[1][6] = (unsigned char)phase;
+                banks[1][offsets[i]] ^= 64; memset(banks[1] + 4092, 0, 4);
+                memcpy(saved, banks[1], 4096); writes = 0;
+                assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+                assert(memcmp(saved, banks[1], 4096) == 0);
+            }
+        }
+        assert(WtJournal_Encode(&empty, Hash, banks[0]) == 0);
+        assert(WtJournal_Encode(&entry, Hash, banks[1]) == 0);
+        banks[1][1952] = 0; banks[1][1953] = 1; banks[1][1965] = 2;
+        memset(banks[1] + 4092, 0, 4); memcpy(saved, banks[1], 4096);
+        assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+        assert(memcmp(saved, banks[1], 4096) == 0);
+    }
+    CutTransition(&entry, &bound);
+    entry.requestLength = 149; entry.request[6] = 69; entry.request[84] = 64;
+    memset(entry.request + 85, 19, 64);
+    CutTransition(&empty, &entry);
     CutTransition(&entry, &bound);
     Reset(); assert(WtJournal_Encode(&entry, Hash, banks[0]) == 0); memcpy(banks[1], banks[0], 4096);
     assert(WtJournal_Open(&store, IO()) == 0);
