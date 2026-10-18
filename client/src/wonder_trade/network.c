@@ -22,6 +22,12 @@
 #define WT_NETWORK_HEAP_SIZE 0x20000
 #define WT_STACK_SIZE 0x8000
 
+enum WonderTradeTransportPhase {
+    WT_TRANSPORT_CONNECTING,
+    WT_TRANSPORT_REQUEST,
+    WT_TRANSPORT_DRAINING,
+};
+
 typedef struct WonderTradeTransport {
     OSThread thread;
     WtTls tls;
@@ -32,11 +38,11 @@ typedef struct WonderTradeTransport {
     unsigned char body[WT_HTTP_BODY_MAX];
     unsigned char stack[WT_STACK_SIZE + 8];
     volatile BOOL cancel;
+    volatile int phase;
     int socket;
-    int result;
+    volatile int result;
     u32 handshakeMs;
     u32 peakBytes;
-    u32 stackBytes;
     OSTick deadline;
     OSTick lastProgress;
 } WonderTradeTransport;
@@ -211,7 +217,6 @@ static void WonderTradeNetwork_Worker(void *arg)
     size_t sent = 0;
     size_t blocks;
     size_t peak;
-    u32 unused;
     int result = -1;
     BOOL tlsStarted = FALSE;
     OSTick start = OS_GetTick();
@@ -260,6 +265,7 @@ static void WonderTradeNetwork_Worker(void *arg)
     transport->handshakeMs = OS_TicksToMilliSeconds(OS_GetTick() - start);
     transport->deadline = OS_GetTick() + OS_SecondsToTicks(15);
     transport->lastProgress = OS_GetTick();
+    transport->phase = WT_TRANSPORT_REQUEST;
     while (sent < sizeof(request) - 1) {
         result = WtTls_Write(&transport->tls, request + sent, sizeof(request) - 1 - sent);
         if (result > 0) {
@@ -288,6 +294,8 @@ done:
     if (tlsStarted) {
         WtTls_Close(&transport->tls);
     }
+    transport->result = result;
+    transport->phase = WT_TRANSPORT_DRAINING;
     if (transport->socket > 0) {
         SOCL_Close(transport->socket);
         while (!SOCL_IsClosed(transport->socket)) {
@@ -300,13 +308,6 @@ done:
     mbedtls_memory_buffer_alloc_free();
     mbedtls_platform_zeroize(&transport->seed, sizeof(transport->seed));
     mbedtls_platform_zeroize(transport->arena, sizeof(transport->arena));
-    for (unused = 0; unused < WT_STACK_SIZE && transport->stack[unused] == 0xa5; unused++) {
-        (void)0;
-    }
-    transport->stackBytes = WT_STACK_SIZE - unused;
-    if (unused < 256) {
-        result = -16;
-    }
     transport->result = transport->cancel ? -15 : result;
     sTransport = NULL;
 }
@@ -314,6 +315,9 @@ done:
 static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
 {
     WonderTradeTransport *transport = network->transport;
+    const unsigned char *stack;
+    u32 size;
+    u32 unused;
     if (transport == NULL) {
         return TRUE;
     }
@@ -322,13 +326,35 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     }
     OS_JoinThread(&transport->thread);
     network->error = transport->result;
+    if (network->timedOut) {
+        network->error = -6;
+    }
     network->handshakeMs = transport->handshakeMs;
     network->tlsPeakBytes = transport->peakBytes;
-    network->stackBytes = transport->stackBytes;
+    stack = (const unsigned char *)(transport->thread.stackTop + sizeof(u32));
+    size = transport->thread.stackBottom - transport->thread.stackTop - 2 * sizeof(u32);
+    for (unused = 0; unused < size && stack[unused] == 0xa5; unused++) {
+        (void)0;
+    }
+    network->stackBytes = size - unused;
+    if (unused < 256 || OS_GetStackStatus(&transport->thread) != OS_STACK_NO_ERROR) {
+        network->error = -16;
+    }
     mbedtls_platform_zeroize(transport, sizeof(*transport));
     Heap_Free(transport);
     network->transport = NULL;
     return TRUE;
+}
+
+static void WonderTradeNetwork_Disconnect(WonderTradeNetwork *network)
+{
+    if (network->accessPointStarted && WCM_GetPhase() == WCM_PHASE_DCF) {
+        int result = WCM_DisconnectAsync();
+        /* REJECT leaves DCF intact: retry on the next frame, without blocking. */
+        if (result == WCM_RESULT_FAILURE || result == WCM_RESULT_FATAL_ERROR) {
+            network->error = -17;
+        }
+    }
 }
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID)
@@ -355,14 +381,19 @@ void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
     }
     transport = Heap_Alloc(network->heapID, sizeof(*transport));
     memset(transport, 0, sizeof(*transport));
-    memset(transport->stack, 0xa5, sizeof(transport->stack));
     network->transport = transport;
     network->lastUpdate = OS_GetTick();
+    network->deadline = network->lastUpdate + OS_SecondsToTicks(30);
+    network->requestStarted = FALSE;
+    network->timedOut = FALSE;
     network->maxFrameMs = 0;
     network->state = WT_NET_PINGING;
     stackTop = (void *)(((u32)transport->stack + WT_STACK_SIZE) & ~7);
     OS_CreateThread(&transport->thread, WonderTradeNetwork_Worker, transport,
         stackTop, WT_STACK_SIZE - 8, OS_GetThreadPriority(OS_GetCurrentThread()) + 1);
+    /* Creation clears the interior and writes SDK guards; preserve those guards. */
+    memset((void *)(transport->thread.stackTop + sizeof(u32)), 0xa5,
+        transport->thread.stackBottom - transport->thread.stackTop - 2 * sizeof(u32));
     OS_WakeupThreadDirect(&transport->thread);
 }
 
@@ -381,6 +412,8 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
         return;
     }
     if (network->state == WT_NET_CLOSING) {
+        /* Dropping our AP aborts long SDK ARP/TCP retries; retain all owned memory. */
+        WonderTradeNetwork_Disconnect(network);
         if (!WonderTradeNetwork_FinishWorker(network)) {
             return;
         }
@@ -438,12 +471,24 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
         }
     }
     if (network->state == WT_NET_PINGING) {
+        WonderTradeTransport *transport = network->transport;
         OSTick now = OS_GetTick();
         u32 elapsed = OS_TicksToMilliSeconds(now - network->lastUpdate);
         if (elapsed > network->maxFrameMs) {
             network->maxFrameMs = elapsed;
         }
         network->lastUpdate = now;
+        if (transport->phase == WT_TRANSPORT_REQUEST && !network->requestStarted) {
+            network->requestStarted = TRUE;
+            network->deadline = now + OS_SecondsToTicks(15);
+        }
+        if (now >= network->deadline) {
+            network->timedOut = TRUE;
+            transport->cancel = TRUE;
+        }
+        if (transport->cancel || (transport->phase == WT_TRANSPORT_DRAINING && transport->result != 0)) {
+            WonderTradeNetwork_Disconnect(network);
+        }
         if (WonderTradeNetwork_FinishWorker(network)) {
             network->state = network->error == 0 ? WT_NET_ACKNOWLEDGED : WT_NET_ERROR;
         }

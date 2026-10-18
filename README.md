@@ -14,10 +14,11 @@ The build script prepares pinned source automatically; see
 [`client/UPSTREAM.md`](client/UPSTREAM.md) for provenance and local-edit handling.
 
 The simplest build uses Docker and does not install the cross-compiler on your
-host:
+host. First create a local public endpoint/pins profile using the
+[secure connection test guide](client/tests/README.md), then pass its path:
 
 ```sh
-./scripts/build-rom.sh
+WONDER_TRADE_PROFILE=game/device-test/connection.json ./scripts/build-rom.sh
 ```
 
 The output is `game/pokeplatinum/build/pokeplatinum.us.nds`. To select North

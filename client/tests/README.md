@@ -47,6 +47,11 @@ credential is sent. After returning to the menu, Info reports connection time
 frame gap. Errors report a connection code. The TLS arena is capped at 65,536
 bytes; the worker stack is 32 KiB, and the application heap is 320 KiB.
 
+Cancellation, expired deadlines and failed exchanges asynchronously disconnect
+the owned access point to interrupt the SDK's long TCP/ARP retries. The port
+retains heap/overlay ownership until the worker, socket pipes, access point and
+driver have drained. Actual cancellation/teardown latency remains a device gate.
+
 Record device/model, TWiLight/melonDS version, ROM target, AP setup, build commit,
 each Info value, total failure/cancellation time and whether normal gameplay and
 ordinary saves still work. Test both keys (`serve --key next`), reject an unknown

@@ -31,6 +31,8 @@ typedef struct WonderTradeNetwork {
     NNSFndHeapHandle heap;
     BOOL accessPointStarted;
     BOOL driverStopping;
+    BOOL requestStarted;
+    BOOL timedOut;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);

@@ -17,7 +17,7 @@ static uint64_t WtSeed_Generation(const unsigned char *record)
     return value;
 }
 
-static int WtSeed_Hash(unsigned char *record, unsigned char digest[32])
+static int WtSeed_Hash(const unsigned char *record, unsigned char digest[32])
 {
     size_t size;
     return psa_hash_compute(PSA_ALG_SHA_256, record, WT_HASH_OFFSET,
@@ -45,11 +45,17 @@ static int WtSeed_Valid(unsigned char *record)
     return nonzero != 0;
 }
 
-static int WtSeed_Unknown(const unsigned char *record)
+static int WtSeed_Unknown(const unsigned char *record, int valid)
 {
+    unsigned char digest[32];
     size_t i;
     if (memcmp(record, "PWTJ", 4) == 0) {
-        return record[4] != 1 || record[5] != 0 || record[6] != 0 || record[7] != 0;
+        if (record[4] != 1 || record[5] != 0 || record[6] != 0 || record[7] != 0) {
+            return 1;
+        }
+        /* A committed, intact record with unrecognized fields is not a torn write. */
+        return !valid && memcmp(record + 4092, "CMIT", 4) == 0
+            && WtSeed_Hash(record, digest) && memcmp(record + WT_HASH_OFFSET, digest, 32) == 0;
     }
     if (record[0] != 0 && record[0] != 255) {
         return 1;
@@ -78,7 +84,7 @@ int WtSeed_Open(WtSeed *store, void *arg, WtSeedReadBank read, WtSeedWriteBank w
     firstValid = WtSeed_Valid(store->record);
     secondValid = WtSeed_Valid(other);
     /* An older connectivity build must never overwrite a newer trade journal. */
-    if (WtSeed_Unknown(store->record) || WtSeed_Unknown(other)) {
+    if (WtSeed_Unknown(store->record, firstValid) || WtSeed_Unknown(other, secondValid)) {
         goto done;
     }
     if (!firstValid && !secondValid) {
