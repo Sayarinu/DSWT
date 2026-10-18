@@ -190,17 +190,48 @@ class LedgerTests(unittest.TestCase):
         self.enroll()
         copied = self.root / self.database
         shutil.copytree(self.migrations, copied)
-        upgrade = copied / "0002_upgrade.sql"
+        installed_count = len(list(self.migrations.glob("*.sql")))
+        upgrade = copied / f"{installed_count + 1:04d}_upgrade.sql"
         upgrade.write_text("CREATE TABLE platinumwt_meta.upgrade_test(id integer); SELECT missing_function();")
         self.tool("migrate", str(copied), ok=False)
         self.assertEqual(self.sql("SELECT to_regclass('platinumwt_meta.upgrade_test') IS NULL"), "t")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt_meta.schema_migrations"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt_meta.schema_migrations"), str(installed_count))
         upgrade.write_text("CREATE TABLE platinumwt_meta.upgrade_test(id integer);")
         self.tool("migrate", str(copied))
         self.tool("verify")
         upgrade.write_text(upgrade.read_text() + "\n-- changed")
         self.assertIn("changed", self.tool("migrate", str(copied), ok=False))
         self.tool("migrate", str(self.migrations), ok=False)
+
+    def test_matcher_upgrade_retains_existing_matches_and_replay(self):
+        previous = self.root / "v1_migrations"
+        previous.mkdir()
+        shutil.copy(self.migrations / "0001_ledger.sql", previous)
+        self.database = f"upgrade_{self.serial}"
+        self.sql(f"CREATE DATABASE {self.database}", database="postgres")
+        self.tool("migrate", str(previous))
+        for owner in (1, 2):
+            self.enroll(owner)
+            self.submit(owner)
+        self.sql("BEGIN;" + self.match_sql() + "COMMIT;")
+        self.tool("verify")
+        self.tool("migrate", str(self.migrations))
+        self.assertEqual(self.sql("SELECT operation_id::text||'|'||match_id::text FROM platinumwt.matcher_attempts"),
+                         f"{identifier(8001)}|{identifier(7001)}")
+        self.tool("verify")
+
+    def test_matcher_attempts_are_immutable_and_replayed(self):
+        operation = identifier(9001)
+        self.sql(f"INSERT INTO platinumwt.matcher_attempts VALUES ('{operation}',NULL)")
+        self.tool("verify")
+        for statement in (f"DELETE FROM platinumwt.matcher_attempts WHERE operation_id='{operation}'",
+                          "TRUNCATE platinumwt.matcher_attempts",
+                          f"UPDATE platinumwt.matcher_attempts SET match_id=NULL WHERE operation_id='{operation}'",
+                          f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(9002)}','{identifier(7001)}')"):
+            self.sql(statement, ok=False)
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 f"DELETE FROM platinumwt.matcher_attempts WHERE operation_id='{operation}'; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_failed_transition_rolls_back_payload_counter_and_journal(self):
         self.enroll()
@@ -453,7 +484,8 @@ class LedgerTests(unittest.TestCase):
     def test_cli_errors_do_not_expose_server_diagnostics(self):
         copied = self.root / self.database
         shutil.copytree(self.migrations, copied)
-        (copied / "0002_secret.sql").write_text("DO $$ BEGIN RAISE EXCEPTION 'PRIVATE_SENTINEL'; END $$;")
+        version = len(list(self.migrations.glob("*.sql"))) + 1
+        (copied / f"{version:04d}_secret.sql").write_text("DO $$ BEGIN RAISE EXCEPTION 'PRIVATE_SENTINEL'; END $$;")
         output = self.tool("migrate", str(copied), ok=False)
         self.assertIn("P0001", output)
         self.assertNotIn("PRIVATE_SENTINEL", output)
@@ -480,6 +512,19 @@ class LedgerTests(unittest.TestCase):
             expected = {hashlib.sha256(b'PlatinumWT save credential v1\x00' + bytes.fromhex(save_id) +
                                        bytes([value]) * 32).hexdigest() for value in (0x51, 0x52)}
             self.assertTrue(verifier in expected, "Stored verifier differs from the protocol formula")
+        self.tool("verify")
+
+    def test_native_matcher_contract(self):
+        environment = dict(self.env, PGDATABASE=self.database)
+        result = subprocess.run([str(self.matcher_binary)], env=environment,
+                                capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.tool("verify")
+        self.stop()
+        self.start()
+        result = subprocess.run([str(self.matcher_binary), "--verify-restart"], env=environment,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.tool("verify")
 
     def test_native_trade_contract(self):
@@ -542,11 +587,13 @@ def main():
     parser.add_argument("migrations", type=Path)
     parser.add_argument("identity_binary", type=Path)
     parser.add_argument("trade_binary", type=Path)
+    parser.add_argument("matcher_binary", type=Path)
     args = parser.parse_args()
     LedgerTests.binary = args.binary.resolve()
     LedgerTests.migrations = args.migrations.resolve()
     LedgerTests.identity_binary = args.identity_binary.resolve()
     LedgerTests.trade_binary = args.trade_binary.resolve()
+    LedgerTests.matcher_binary = args.matcher_binary.resolve()
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LedgerTests))
     return 0 if result.wasSuccessful() else 1
 

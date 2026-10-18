@@ -31,10 +31,16 @@ add_test(NAME integration.ledger
     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_ledger.py"
         $<TARGET_FILE:platinumwt-ledger> "${CMAKE_CURRENT_SOURCE_DIR}/../migrations"
         $<TARGET_FILE:platinumwt-identity-tests>
-        $<TARGET_FILE:platinumwt-trade-tests>)
+        $<TARGET_FILE:platinumwt-trade-tests>
+        $<TARGET_FILE:platinumwt-matcher-tests>)
 set_tests_properties(integration.ledger PROPERTIES TIMEOUT 180 LABELS "integration")
 
 add_executable(platinumwt-trade-tests integration/trade_test.cpp)
 target_include_directories(platinumwt-trade-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 target_link_libraries(platinumwt-trade-tests PRIVATE platinumwt_trading platinumwt_ledger PostgreSQL::PostgreSQL GTest::gtest)
 target_compile_options(platinumwt-trade-tests PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(platinumwt-matcher-tests integration/matcher_test.cpp)
+target_include_directories(platinumwt-matcher-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_link_libraries(platinumwt-matcher-tests PRIVATE platinumwt_trading platinumwt_ledger PostgreSQL::PostgreSQL GTest::gtest)
+target_compile_options(platinumwt-matcher-tests PRIVATE -Wall -Wextra -Wpedantic)
