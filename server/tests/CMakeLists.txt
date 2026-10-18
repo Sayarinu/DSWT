@@ -32,7 +32,10 @@ add_test(NAME integration.ledger
         $<TARGET_FILE:platinumwt-ledger> "${CMAKE_CURRENT_SOURCE_DIR}/../migrations"
         $<TARGET_FILE:platinumwt-identity-tests>
         $<TARGET_FILE:platinumwt-trade-tests>
-        $<TARGET_FILE:platinumwt-matcher-tests>)
+        $<TARGET_FILE:platinumwt-matcher-tests>
+        $<TARGET_FILE:platinumwt-server>
+        $<TARGET_FILE:platinumwt-backend>
+        $<TARGET_FILE:platinumwt-gateway-fixture>)
 set_tests_properties(integration.ledger PROPERTIES TIMEOUT 180 LABELS "integration")
 
 add_executable(platinumwt-trade-tests integration/trade_test.cpp)
@@ -44,3 +47,7 @@ add_executable(platinumwt-matcher-tests integration/matcher_test.cpp)
 target_include_directories(platinumwt-matcher-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 target_link_libraries(platinumwt-matcher-tests PRIVATE platinumwt_trading platinumwt_ledger PostgreSQL::PostgreSQL GTest::gtest)
 target_compile_options(platinumwt-matcher-tests PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(platinumwt-gateway-fixture integration/gateway_fixture.cpp)
+target_link_libraries(platinumwt-gateway-fixture PRIVATE platinumwt_trading Boost::system Threads::Threads)
+target_compile_options(platinumwt-gateway-fixture PRIVATE -Wall -Wextra -Wpedantic)

@@ -1,12 +1,12 @@
 FROM ubuntu:24.04 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build g++ pkg-config libgrpc++-dev protobuf-compiler-grpc \
-    libprotobuf-dev libboost-system-dev libgtest-dev python3 libpq-dev postgresql-16 libssl-dev \
+    libprotobuf-dev libboost-system-dev libgtest-dev python3 libpq-dev postgresql-16 libssl-dev openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /build \
+    && cmake --build /build --parallel 2 \
     && ctest --test-dir /build --output-on-failure
 
 FROM ubuntu:24.04
@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgrpc++1.51t64 libprotobuf32t64 libboost-system1.83.0 libpq5 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build/platinumwt-server /usr/local/bin/platinumwt-server
+COPY --from=build /build/platinumwt-backend /usr/local/bin/platinumwt-backend
 COPY --from=build /build/platinumwt-ledger /usr/local/bin/platinumwt-ledger
 COPY migrations /usr/local/share/platinumwt/migrations
 USER 65532:65532

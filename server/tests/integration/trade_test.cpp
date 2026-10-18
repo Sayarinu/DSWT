@@ -1,5 +1,6 @@
 #include "platinumwt/server/trade_service.h"
 #include "platinumwt/server/identity_store.h"
+#include "platinumwt/server/identity_service.h"
 
 #include "postgres.h"
 #include "trade_encoding.h"
@@ -135,6 +136,34 @@ protected:
     return PQgetvalue(row.get(), 0, 0);
   }
 };
+
+TEST_F(TradeTest, EnrollmentEndpointPublishesOnlyCoveredIdentityAndLiveProgress) {
+  v1::EnrollRequest request;
+  request.set_enrollment_id(Identifier());
+  request.set_credential(std::string(32, '\x51'));
+  v1::EnrollReply reply;
+  IdentityService closed("");
+  ASSERT_TRUE(closed.Enroll(nullptr, &request, &reply).ok());
+  EXPECT_EQ(reply.context().result(), v1::RESULT_PROCESSING);
+  EXPECT_TRUE(reply.save_id().empty());
+  EXPECT_EQ(reply.context().event_highwater(), 0U);
+  IdentityService endpoint("", [](auto) { return true; });
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  ASSERT_EQ(reply.context().result(), v1::RESULT_OK);
+  const auto id = reply.save_id();
+  auto owner = auth;
+  owner.set_save_id(id);
+  ASSERT_EQ(Submit(Submission(owner)).context().result(), v1::RESULT_OK);
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  EXPECT_EQ(reply.save_id(), id);
+  EXPECT_EQ(reply.context().next_counter(), 2U);
+  EXPECT_EQ(reply.context().event_highwater(), 2U);
+  request.set_credential(std::string(32, '\x52'));
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  EXPECT_EQ(reply.context().result(), v1::RESULT_CONFLICT);
+  EXPECT_TRUE(reply.save_id().empty());
+  EXPECT_EQ(reply.context().event_highwater(), 0U);
+}
 
 TEST_F(TradeTest, SubmissionStatusRetryAndImmutableOutcome) {
   const auto request = Submission(auth);
