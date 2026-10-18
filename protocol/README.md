@@ -3,7 +3,7 @@
 This defines the exchange before it is enabled. `server/proto/trade.proto` is
 the internal gRPC contract; `wire.py` is a small envelope conformance oracle for
 test clients. It checks envelope shape; endpoints must also enforce the body,
-authorization and state rules here. Neither registers a trading endpoint. The
+authorization and state rules here. The server exposes these endpoints; the
 current game still only pings. Transport, database, legality and save fault tests
 must pass first.
 
