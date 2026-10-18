@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh a provisioned ping-only save's entropy durably before starting its emulator."""
+"""Refresh a checked journal's entropy durably before starting its emulator."""
 
 import argparse
 import fcntl
@@ -87,14 +87,17 @@ def run(save, target, command, store_tool=None):
         if store_tool:
             if not Path(str(save) + '.platinumwt').exists():
                 # No recovery store may be created from an original/unseeded save.
-                descriptor = os.open(save, os.O_RDONLY | os.O_NOFOLLOW)
-                try:
-                    owned_file(descriptor)
-                    refreshed_record(os.pread(descriptor, 524289, 0), target)
-                finally:
-                    os.close(descriptor)
+                subprocess.run([str(store_tool), 'inspect', str(save), target], env=environment,
+                               pass_fds=(lock,), check=True, capture_output=True, timeout=15)
             subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
                            pass_fds=(lock,), check=True, capture_output=True, timeout=15)
+            subprocess.run([str(store_tool), 'seed', str(save), target], env=environment,
+                           pass_fds=(lock,), check=True, capture_output=True, timeout=15)
+            environment['PLATINUMWT_DURABLE_SAVE'] = str(save)
+            result = subprocess.run(command, pass_fds=(lock,), env=environment, check=False).returncode
+            subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
+                           pass_fds=(lock,), check=True, capture_output=True, timeout=15)
+            return result if result >= 0 else 128 - result
         descriptor = os.open(save, os.O_RDWR | os.O_NOFOLLOW)
         try:
             owned_file(descriptor)
@@ -103,32 +106,20 @@ def run(save, target, command, store_tool=None):
             data = os.pread(descriptor, 524288, 0)
             layout, record, selected_bank = refreshed_record(data, target)
             os.fchmod(descriptor, 0o600)
-            if store_tool:
-                refreshed = bytearray(data)
-                for bank in layout['journal_banks']:
-                    refreshed[bank:bank + 4096] = record
-                subprocess.run([str(store_tool), 'refresh', str(save)], input=refreshed, env=environment,
-                               pass_fds=(lock,), check=True, capture_output=True, timeout=15)
-                environment['PLATINUMWT_DURABLE_SAVE'] = str(save)
-            else:
-                # Retain the selected old bank until its replacement is durable.
-                banks = [bank for bank in layout["journal_banks"] if bank != selected_bank] + [selected_bank]
-                for bank in banks:
-                    write_all(descriptor, bytes(4), bank + 4092)
-                    os.fsync(descriptor)
-                    write_all(descriptor, record[:4092], bank)
-                    os.fsync(descriptor)
-                    write_all(descriptor, record[4092:], bank + 4092)
-                    os.fsync(descriptor)
-                    if os.pread(descriptor, 4096, bank) != record:
-                        raise OSError("Refreshed seed did not verify")
+            # Retain the selected old bank until its replacement is durable.
+            banks = [bank for bank in layout["journal_banks"] if bank != selected_bank] + [selected_bank]
+            for bank in banks:
+                write_all(descriptor, bytes(4), bank + 4092)
+                os.fsync(descriptor)
+                write_all(descriptor, record[:4092], bank)
+                os.fsync(descriptor)
+                write_all(descriptor, record[4092:], bank + 4092)
+                os.fsync(descriptor)
+                if os.pread(descriptor, 4096, bank) != record:
+                    raise OSError("Refreshed seed did not verify")
             # The child retains the lock if its launcher is interrupted.
             result = subprocess.run(command, pass_fds=(lock,), env=environment, check=False).returncode
-            if store_tool:
-                subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
-                               pass_fds=(lock,), check=True, capture_output=True, timeout=15)
-            else:
-                os.fsync(descriptor)
+            os.fsync(descriptor)
             return result if result >= 0 else 128 - result
         finally:
             os.close(descriptor)

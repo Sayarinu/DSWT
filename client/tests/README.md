@@ -52,8 +52,9 @@ python3 scripts/run-emulator.py --save /path/to/test.sav --target us-rev1 --stor
 The launcher locks the save, repairs checked host snapshots and commits fresh
 entropy before starting the emulator. Its synchronous host store makes subsequent
 flash writes durable before the DS continues. The game refuses transport without
-that emulator capability. The launch guard still refuses enrolled/active/unknown
-journals until game recovery integration is implemented. Keep the original save
+that emulator capability. Native launch refresh preserves checked active journals;
+unknown evidence blocks launch and game boot still blocks active phases until
+recovery integration is implemented. Keep the original save
 separate and use this launcher for every run.
 Savestate/rewind restoration and loading a different save inside a running
 emulator are unsupported; exit and launch the intended save through this tool.
@@ -82,7 +83,10 @@ evidence locally. Do not use this fixture for production.
 
 The transport section at offset 1440 has format u16=1, length u16=32 and a
 32-byte host CSPRNG seed, with remaining bytes zero. It currently accepts only
-EMPTY journals. Mbed TLS's nonvolatile seed mechanism updates the seed before
+EMPTY journals for ping. Trade requests use the checked recovery seed path and
+must match the journal's identity and phase; enrollment and mutation packets
+must match the recorded bytes.
+Mbed TLS's nonvolatile seed mechanism updates the seed before
 external RNG use. Each update commits a new journal generation to both isolated
 flash sectors using the SDK flash API: invalidate the old `CMIT`, verify the
 replacement body, then write and verify `CMIT` last. A write

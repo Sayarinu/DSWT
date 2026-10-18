@@ -9,7 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends qt6-base-privat
 WORKDIR /src
 COPY LICENSE LICENSE
 COPY scripts/prepare-emulator.py scripts/prepare-tls.py scripts/
+COPY scripts/run-emulator.py scripts/provision-save.py scripts/
 COPY client/include/wonder_trade/persistence.h client/include/wonder_trade/persistence.h
+COPY client/include/wonder_trade/journal.h client/include/wonder_trade/journal.h
+COPY client/src/wonder_trade/journal.c client/src/wonder_trade/journal.c
+COPY client/include/wonder_trade/wire.h client/include/wonder_trade/wire.h
+COPY client/src/wonder_trade/wire.c client/src/wonder_trade/wire.c
+COPY client/tests/journal_fixture.h client/tests/journal_fixture.h
 COPY emulator/ emulator/
 RUN cmake -S emulator -B /checks -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /checks --parallel 2 \

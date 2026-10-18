@@ -178,10 +178,15 @@ static void WonderTradeNetwork_Worker(void *arg)
         goto done;
     }
     transport->flash.requireDurability = TRUE;
-    result = WtSeed_Open(&transport->seed, &transport->flash,
-        WtFlash_ReadBank, WtFlash_WriteBank);
+    result = transport->requestSize
+        ? WtSeed_OpenRecovery(&transport->seed, &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank)
+        : WtSeed_Open(&transport->seed, &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank);
     if (transport->cancel || result != 0) {
         result = transport->flash.error != 0 ? transport->flash.error : result;
+        goto done;
+    }
+    if (transport->requestSize && !WtSeed_RequestMatches(&transport->seed, transport->request, transport->requestSize)) {
+        result = -18;
         goto done;
     }
     transport->socket = SOCL_TcpSocket();

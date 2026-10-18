@@ -29,6 +29,11 @@ typedef WtJournal WtSeed;
 
 /* This connectivity port accepts only an EMPTY journal with a provisioned seed. */
 int WtSeed_Open(WtSeed *store, void *arg, WtSeedReadBank read, WtSeedWriteBank write);
+/* Explicit checked recovery path; ordinary ping keeps its EMPTY-only policy. */
+int WtSeed_OpenRecovery(WtSeed *store, void *arg, WtSeedReadBank read, WtSeedWriteBank write);
+/* Local identity, pending-packet and phase binding. The game still must prove
+ * inventory/server transitions; this check cannot authorize a transfer. */
+int WtSeed_RequestMatches(WtSeed *store, const unsigned char *frame, size_t size);
 int WtSeed_Read(WtSeed *store, unsigned char *seed, size_t size);
 int WtSeed_Write(WtSeed *store, const unsigned char *seed, size_t size);
 
