@@ -84,12 +84,13 @@ The transport section at offset 1440 has format u16=1, length u16=32 and a
 32-byte host CSPRNG seed, with remaining bytes zero. It currently accepts only
 EMPTY journals. Mbed TLS's nonvolatile seed mechanism updates the seed before
 external RNG use. Each update commits a new journal generation to both isolated
-flash sectors using the retail save API: invalidate the old `CMIT`, verify the
+flash sectors using the SDK flash API: invalidate the old `CMIT`, verify the
 replacement body, then write and verify `CMIT` last. A write
 failure prevents ClientHello; equal conflicting generations, unknown formats or
 missing seeds block the connection. Torn unknown headers require inspection;
-this probe never initializes or overwrites them. The trade journal and boot
-recovery implementation remain separately ticketed.
+this probe never initializes or overwrites them. Read-only boot inspection also
+blocks active or unknown journals before gameplay; full inventory/server recovery
+remains separately ticketed.
 
 ```sh
 tls_source="$(python3 scripts/prepare-tls.py)"
@@ -101,6 +102,13 @@ python3 -m unittest discover -s scripts/tests
 ```
 
 On a debugger/ptrace host, run ctest with `ASAN_OPTIONS=detect_leaks=0`; address
-and undefined-behavior instrumentation still apply to the HTTP parser. The TLS
-probe separately checks that all arena allocations are freed. Host conformance
+and undefined-behavior instrumentation still apply to the HTTP, journal and boot
+policy tests. The TLS probe separately checks that all arena allocations are
+freed. Host conformance
 does not emulate flash redirection, ARM7 scheduling or physical Wi-Fi timing.
+
+With the same local `WONDER_TRADE_PROFILE`, run
+`python3 scripts/build-recovery-probe.py` to build a separate ignored ROM that
+exercises the actual blocked retail save/erase/clear and asynchronous entrypoints.
+It restores and verifies the normal ROM afterward; run the probe only on a
+disposable save copy.

@@ -14,7 +14,7 @@
 #include "unk_02033200.h"
 #include "wifi_overlays.h"
 #include "wonder_trade/http.h"
-#include "wonder_trade/persistence.h"
+#include "wonder_trade/flash.h"
 #include "wonder_trade/seed.h"
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
@@ -29,18 +29,11 @@ enum WonderTradeTransportPhase {
     WT_TRANSPORT_DRAINING,
 };
 
-enum WonderTradeSeedError {
-    WT_SEED_LOCK_FAILED = -20,
-    WT_SEED_UNSUPPORTED_FLASH = -21,
-    WT_SEED_READ_FAILED = -22,
-    WT_SEED_FOREIGN_SECTOR = -23,
-    WT_SEED_UNSAFE_STORAGE = -24,
-};
-
 typedef struct WonderTradeTransport {
     OSThread thread;
     WtTls tls;
     WtSeed seed;
+    WtFlashAccess flash;
     WtHttpResponse response;
     unsigned char arena[WT_TLS_HEAP_SIZE];
     unsigned char input[512];
@@ -84,91 +77,6 @@ static void *WonderTradeNetwork_AccessPointAlloc(u32 type, s32 size)
 static void WonderTradeNetwork_AccessPointFree(u32 type, void *pointer, s32 size)
 {
     DWC_Free((DWCAllocType)type, pointer, size);
-}
-
-static int WonderTradeNetwork_ReadBank(void *arg, int bank, unsigned char record[4096])
-{
-    WonderTradeTransport *transport = arg;
-    unsigned char page[256];
-    u32 address = bank == 0 ? 0x30000 : 0x70000;
-    u32 offset;
-    int blank = -1;
-    int result = -1;
-    s32 lockID = OS_GetLockID();
-
-    if (lockID == OS_LOCK_ID_ERROR) {
-        transport->result = WT_SEED_LOCK_FAILED;
-        return -1;
-    }
-    CARD_LockBackup(lockID);
-    if (CARD_GetCurrentBackupType() != CARD_BACKUP_TYPE_FLASH_4MBITS) {
-        transport->result = WT_SEED_UNSUPPORTED_FLASH;
-        goto done;
-    }
-    if (!CARD_ReadFlash(WT_PERSISTENCE_ADDRESS, page, WT_PERSISTENCE_SIZE)
-        || memcmp(page, WT_PERSISTENCE_DESCRIPTOR, WT_PERSISTENCE_SIZE) != 0) {
-        transport->result = WT_SEED_UNSAFE_STORAGE;
-        goto done;
-    }
-    if (!CARD_ReadFlash(address, record, WT_JOURNAL_SIZE)) {
-        transport->result = WT_SEED_READ_FAILED;
-        goto done;
-    }
-    for (offset = WT_JOURNAL_SIZE; offset < 0x10000; offset += sizeof(page)) {
-        u32 i;
-        if (!CARD_ReadFlash(address + offset, page, sizeof(page))) {
-            transport->result = WT_SEED_READ_FAILED;
-            goto done;
-        }
-        for (i = 0; i < sizeof(page); i++) {
-            if (blank == -1) {
-                blank = page[i];
-            }
-            if ((blank != 0 && blank != 255) || page[i] != blank) {
-                transport->result = WT_SEED_FOREIGN_SECTOR;
-                goto done;
-            }
-        }
-    }
-    result = 0;
-done:
-    CARD_UnlockBackup(lockID);
-    OS_ReleaseLockID(lockID);
-    return result;
-}
-
-static int WonderTradeNetwork_WriteBank(void *arg, int bank, const unsigned char record[4096])
-{
-    static const unsigned char uncommitted[4] = { 0, 0, 0, 0 };
-    unsigned char page[256];
-    u32 address = bank == 0 ? 0x30000 : 0x70000;
-    u32 offset;
-    int result = -1;
-    s32 lockID = OS_GetLockID();
-
-    if (lockID == OS_LOCK_ID_ERROR) {
-        return -1;
-    }
-    SleepLock(SLEEP_TYPE_SAVE_DATA);
-    CARD_LockBackup(lockID);
-    if (CARD_GetCurrentBackupType() != CARD_BACKUP_TYPE_FLASH_4MBITS
-        || !CARD_WriteAndVerifyFlash(address + 4092, uncommitted, sizeof(uncommitted))
-        || !CARD_WriteAndVerifyFlash(address, record, 4092)
-        || !CARD_WriteAndVerifyFlash(address + 4092, record + 4092, 4)) {
-        goto done;
-    }
-    for (offset = 0; offset < WT_JOURNAL_SIZE; offset += sizeof(page)) {
-        if (!CARD_ReadFlash(address + offset, page, sizeof(page))
-            || memcmp(page, record + offset, sizeof(page)) != 0) {
-            goto done;
-        }
-    }
-    result = 0;
-done:
-    CARD_UnlockBackup(lockID);
-    OS_ReleaseLockID(lockID);
-    SleepUnlock(SLEEP_TYPE_SAVE_DATA);
-    return result;
 }
 
 static int WonderTradeNetwork_ReadSeed(unsigned char *seed, size_t size)
@@ -250,10 +158,11 @@ static void WonderTradeNetwork_Worker(void *arg)
     transport->lastProgress = start;
     mbedtls_memory_buffer_alloc_init(transport->arena, sizeof(transport->arena));
     mbedtls_platform_set_nv_seed(WonderTradeNetwork_ReadSeed, WonderTradeNetwork_WriteSeed);
-    result = WtSeed_Open(&transport->seed, transport,
-        WonderTradeNetwork_ReadBank, WonderTradeNetwork_WriteBank);
+    transport->flash.requireDurability = TRUE;
+    result = WtSeed_Open(&transport->seed, &transport->flash,
+        WtFlash_ReadBank, WtFlash_WriteBank);
     if (transport->cancel || result != 0) {
-        result = transport->result != 0 ? transport->result : result;
+        result = transport->flash.error != 0 ? transport->flash.error : result;
         goto done;
     }
     transport->socket = SOCL_TcpSocket();
