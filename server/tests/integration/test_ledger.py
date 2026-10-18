@@ -146,10 +146,12 @@ class LedgerTests(unittest.TestCase):
                 '{asset}',{blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',4);
             COMMIT;""")
 
-    def match_sql(self, sequences=None):
+    def match_sql(self, sequences=None, *, record_attempt=True):
         match = identifier(7001)
         text = f"INSERT INTO platinumwt.matches VALUES ('{match}','{identifier(8001)}'," \
                f"'{identifier(1001)}','{identifier(1002)}');"
+        if record_attempt:
+            text += f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(8001)}','{match}');"
         for owner in (1, 2):
             sequence = (sequences or {}).get(owner, 3)
             peer = 3 - owner
@@ -213,7 +215,7 @@ class LedgerTests(unittest.TestCase):
         for owner in (1, 2):
             self.enroll(owner)
             self.submit(owner)
-        self.sql("BEGIN;" + self.match_sql() + "COMMIT;")
+        self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;")
         self.tool("verify")
         self.tool("migrate", str(self.migrations))
         self.assertEqual(self.sql("SELECT operation_id::text||'|'||match_id::text FROM platinumwt.matcher_attempts"),
@@ -231,6 +233,34 @@ class LedgerTests(unittest.TestCase):
             self.sql(statement, ok=False)
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
                  f"DELETE FROM platinumwt.matcher_attempts WHERE operation_id='{operation}'; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
+
+    def test_pair_requires_a_matching_attempt_in_writes_and_replay(self):
+        for owner in (1, 2):
+            self.enroll(owner)
+            self.submit(owner)
+        self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;", ok=False)
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.matches"), "0")
+        self.sql(f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(8001)}',NULL)")
+        self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;", ok=False)
+        self.tool("verify")
+        # Start from a valid pair, then corrupt both projection and audit so
+        # replay's graph checks, rather than only image comparison, must reject it.
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 "DELETE FROM platinumwt.matcher_attempts; "
+                 "DELETE FROM platinumwt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
+        self.sql("BEGIN;" + self.match_sql() + "COMMIT;")
+        self.tool("verify")
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 "DELETE FROM platinumwt.matcher_attempts; "
+                 "DELETE FROM platinumwt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
+        self.sql("INSERT INTO platinumwt.matcher_attempts SELECT operation_id,match_id FROM platinumwt.matches")
+        self.tool("verify")
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 "UPDATE platinumwt.matcher_attempts SET match_id=NULL; "
+                 "UPDATE platinumwt.audit_journal SET after_image=jsonb_set(after_image,'{match_id}','null'::jsonb) "
+                 "WHERE table_name='matcher_attempts'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_failed_transition_rolls_back_payload_counter_and_journal(self):

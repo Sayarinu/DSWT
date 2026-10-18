@@ -312,6 +312,7 @@ TEST_F(TradeTest, MatchedTradeCannotCancelAndDeliversOnlyItsAssignedPeerAsset) {
   };
   pair_sql("INSERT INTO platinumwt.matches VALUES ($9::uuid,$10::uuid,"
       "least($2::uuid,$5::uuid),greatest($2::uuid,$5::uuid))");
+  pair_sql("INSERT INTO platinumwt.matcher_attempts VALUES ($10::uuid,$9::uuid)");
   pair_sql("INSERT INTO platinumwt.receipts VALUES "
       "($7::uuid,$2::uuid,$1::uuid,$6::uuid,1,$9::uuid),"
       "($8::uuid,$5::uuid,$4::uuid,$3::uuid,1,$9::uuid)");

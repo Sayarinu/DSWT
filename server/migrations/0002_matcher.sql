@@ -4,6 +4,7 @@ ALTER TABLE platinumwt.matches ADD UNIQUE (match_id, operation_id);
 CREATE TABLE platinumwt.matcher_attempts (
     operation_id platinumwt.id PRIMARY KEY,
     match_id platinumwt.id UNIQUE,
+    UNIQUE (operation_id, match_id),
     FOREIGN KEY (match_id, operation_id) REFERENCES platinumwt.matches(match_id, operation_id)
 );
 CREATE TRIGGER immutable_row BEFORE UPDATE OR DELETE ON platinumwt.matcher_attempts
@@ -13,6 +14,8 @@ CREATE TRIGGER retain_table BEFORE TRUNCATE ON platinumwt.matcher_attempts
 CREATE TRIGGER audit_rows AFTER INSERT ON platinumwt.matcher_attempts
     FOR EACH ROW EXECUTE FUNCTION platinumwt.audit_row('operation_id');
 INSERT INTO platinumwt.matcher_attempts SELECT operation_id, match_id FROM platinumwt.matches;
+ALTER TABLE platinumwt.matches ADD FOREIGN KEY (operation_id, match_id)
+    REFERENCES platinumwt.matcher_attempts(operation_id, match_id) DEFERRABLE INITIALLY DEFERRED;
 REVOKE ALL ON platinumwt.matcher_attempts FROM PUBLIC;
 
 CREATE INDEX queued_offer_candidates ON platinumwt.offers(trade_id)
