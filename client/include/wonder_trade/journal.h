@@ -51,6 +51,8 @@ typedef struct WtJournalEntry {
     unsigned char deliveryKind;
     uint32_t globalCounter, generalCounter, boxCounter;
     unsigned char inventoryBefore[32], inventoryAfter[32];
+    /* Hash original/source.length, canonical incoming/136 and stored
+     * destinationAfter/destination.length respectively; exclude box padding. */
     unsigned char originalDigest[32], incomingDigest[32], appliedDigest[32];
     unsigned char original[236], destinationBefore[236], destinationAfter[236];
     unsigned char outgoing[136], incoming[136], seed[32];

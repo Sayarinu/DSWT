@@ -102,6 +102,12 @@ static int RequestValid(const WtJournalEntry *entry, WtJournalHash hash)
         && Get(frame + 176, 8) != 0 && Get(frame + 176, 8) <= entry->generation;
 }
 
+static int DigestMatches(const unsigned char *bytes, size_t length, const unsigned char *expected, WtJournalHash hash)
+{
+    unsigned char digest[32];
+    return hash(bytes, length, digest) == 0 && memcmp(digest, expected, 32) == 0;
+}
+
 static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
 {
     if (entry->phase > WT_JOURNAL_RECOVERY_REQUIRED || Zero(entry->seed, 32)
@@ -130,6 +136,11 @@ static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
     if ((entry->source.kind == 2 && !Zero(entry->original + 136, 100))
         || (entry->destination.kind == 2 && (!Zero(entry->destinationBefore + 136, 100)
             || !Zero(entry->destinationAfter + 136, 100)))) return 0;
+    if ((!Zero(entry->originalDigest, 32) && (entry->source.kind == 0
+            || !DigestMatches(entry->original, entry->source.length, entry->originalDigest, hash)))
+        || (!Zero(entry->incomingDigest, 32) && !DigestMatches(entry->incoming, 136, entry->incomingDigest, hash))
+        || (!Zero(entry->appliedDigest, 32) && (entry->destination.kind == 0
+            || !DigestMatches(entry->destinationAfter, entry->destination.length, entry->appliedDigest, hash)))) return 0;
     return 1;
 }
 
@@ -230,10 +241,18 @@ static int PrefixAndZeros(const unsigned char *bytes, const unsigned char *compl
     return 0;
 }
 
+static int InitialEnrollment(const unsigned char *record)
+{
+    return Get(record + 6, 2) == WT_JOURNAL_ENROLLING && Zero(record + 32, 16)
+        && Get(record + 96, 8) <= 1 && Zero(record + 104, 56) && Zero(record + 160, 1280);
+}
+
 static int TornIdentityKnown(const unsigned char *partial, const unsigned char *complete)
 {
     uint16_t partialPhase = (uint16_t)Get(partial + 6, 2), completePhase = (uint16_t)Get(complete + 6, 2);
-    if (Blank(partial) || partialPhase == WT_JOURNAL_EMPTY || completePhase == WT_JOURNAL_EMPTY) return 1;
+    if (Blank(partial)) return 1;
+    if (partialPhase == WT_JOURNAL_EMPTY) return completePhase == WT_JOURNAL_EMPTY || InitialEnrollment(complete);
+    if (completePhase == WT_JOURNAL_EMPTY) return InitialEnrollment(partial);
     /* Identity bytes never change after enrollment. A cut during the first
      * provisioning mirror can contain only a known prefix followed by zeros. */
     if (memcmp(partial + 48, complete + 48, 48) != 0
@@ -251,7 +270,12 @@ static int Follows(const unsigned char *before, const unsigned char *after)
     if (Get(after + 96, 8) < Get(before + 96, 8) || Get(after + 104, 8) < Get(before + 104, 8)
         || Get(after + 144, 8) < Get(before + 144, 8)) return 0;
     if (Get(after + 144, 8) == Get(before + 144, 8) && memcmp(after + 128, before + 128, 16) != 0) return 0;
-    if (!Zero(before + 112, 16) && Zero(after + 112, 16)) return 0;
+    if (memcmp(before + 112, after + 112, 16) != 0
+        && (Get(before + 6, 2) != WT_JOURNAL_APPLYING || Get(after + 6, 2) != WT_JOURNAL_APPLIED
+            || memcmp(before + 200, after + 200, 16) != 0 || memcmp(after + 112, after + 200, 16) != 0)) return 0;
+    if (Get(before + 1952, 2) != 0 && Get(after + 1952, 2) != 0
+        && memcmp(before + 1968, after + 1968, 16) == 0
+        && memcmp(before + 1952, after + 1952, 264) != 0) return 0;
     if (Get(before + 6, 2) != WT_JOURNAL_EMPTY && (Get(after + 6, 2) == WT_JOURNAL_EMPTY
         || memcmp(before + 48, after + 48, 48) != 0
         || (!Zero(before + 32, 16) && memcmp(before + 32, after + 32, 16) != 0))) return 0;

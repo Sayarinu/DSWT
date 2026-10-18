@@ -62,7 +62,7 @@ static void Escrow(WtJournalEntry *entry)
     memset(entry->operation, 5, 16); entry->operationCounter = 1;
     memset(entry->original, 6, 236); memset(entry->outgoing, 7, 136);
     memset(entry->inventoryBefore, 8, 32); memset(entry->inventoryAfter, 9, 32);
-    memset(entry->originalDigest, 10, 32);
+    assert(Hash(entry->original, entry->source.length, entry->originalDigest) == 0);
     entry->requestLength = 256;
     memcpy(entry->request, "WTDS\1\2\260\0", 8);
     memcpy(entry->request + 8, entry->operation, 16); memcpy(entry->request + 24, entry->saveID, 16);
@@ -188,7 +188,9 @@ static void ReceiptImagesAndPacketBinding(void)
     memset(entry.trade, 11, 16); memset(entry.receipt, 12, 16); entry.deliveryKind = 1;
     entry.destination.kind = 2; entry.destination.box = 17; entry.destination.slot = 29; entry.destination.length = 136;
     memset(entry.destinationBefore, 13, 136); memset(entry.destinationAfter, 14, 136);
-    memset(entry.incoming, 15, 136); memset(entry.incomingDigest, 16, 32); memset(entry.appliedDigest, 17, 32);
+    memset(entry.incoming, 15, 136);
+    assert(Hash(entry.incoming, 136, entry.incomingDigest) == 0);
+    assert(Hash(entry.destinationAfter, entry.destination.length, entry.appliedDigest) == 0);
     entry.globalCounter = 0x12345678; entry.generalCounter = 0xffffffff; entry.boxCounter = 0x87654321;
     assert(WtJournal_Encode(&entry, Hash, record) == 0);
     assert(record[225] == 0x78 && record[228] == 0x12 && record[233] == 0x21 && record[236] == 0x87);
@@ -197,6 +199,17 @@ static void ReceiptImagesAndPacketBinding(void)
     assert(memcmp(decoded.destinationBefore, entry.destinationBefore, 236) == 0);
     assert(memcmp(decoded.destinationAfter, entry.destinationAfter, 236) == 0);
     assert(memcmp(decoded.receipt, entry.receipt, 16) == 0 && decoded.generalCounter == 0xffffffff);
+    {
+        const int offsets[] = { 416, 1260, 888, 301, 333, 365 };
+        size_t i;
+        WtJournal store;
+        for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+            Reset(); memcpy(banks[1], record, 4096);
+            banks[1][offsets[i]] ^= 1; Rehash(banks[1]);
+            assert(WtJournal_Decode(banks[1], Hash, &decoded) != 0);
+            assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+        }
+    }
     entry.destinationAfter[200] = 1;
     assert(WtJournal_Encode(&entry, Hash, record) != 0);
     Escrow(&entry); entry.request[100] ^= 1;
@@ -297,6 +310,8 @@ static void ProgressCannotMoveBackwards(void)
     after = before; after.generation++;
     memset(after.lastReceipt, 0, 16);
     assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
+    after = before; after.generation++; after.lastReceipt[0] ^= 1;
+    assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
     after = before; after.generation++; after.lastOperation[0] ^= 1;
     assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
     after = before; after.generation++; after.nextCounter = 2; after.eventCursor = 3;
@@ -312,6 +327,39 @@ static void ProgressCannotMoveBackwards(void)
     assert(WtJournal_Read(&store, &ignored) != 0);
 }
 
+static void EmptyCannotDiscardActiveEvidence(void)
+{
+    WtJournal store;
+    WtJournalEntry empty, active;
+    unsigned char saved[2][4096];
+    memset(&empty, 0, sizeof(empty)); empty.generation = 1; memset(empty.seed, 4, 32);
+    Escrow(&active);
+    Reset(); assert(WtJournal_Encode(&empty, Hash, banks[0]) == 0);
+    assert(WtJournal_Encode(&active, Hash, banks[1]) == 0);
+    memset(banks[1] + 4092, 0, 4);
+    memcpy(saved, banks, sizeof(saved));
+    assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+    assert(WtJournal_Repair(&store) != 0 && memcmp(saved, banks, sizeof(saved)) == 0);
+    assert(WtJournal_Encode(&active, Hash, banks[1]) == 0);
+    memset(banks[0] + 4092, 0, 4);
+    memcpy(saved, banks, sizeof(saved));
+    assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+    assert(memcmp(saved, banks, sizeof(saved)) == 0);
+}
+
+static void PendingPacketsAreImmutable(void)
+{
+    WtJournal store;
+    WtJournalEntry before, after;
+    Escrow(&before); after = before; after.generation++; after.request[80]++;
+    Reset(); assert(WtJournal_Encode(&before, Hash, banks[0]) == 0);
+    memcpy(banks[1], banks[0], 4096);
+    assert(WtJournal_Open(&store, IO()) == 0);
+    assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
+    assert(WtJournal_Encode(&after, Hash, banks[1]) == 0);
+    assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+}
+
 int main(void)
 {
     WtJournalEntry entry;
@@ -321,6 +369,8 @@ int main(void)
     IdentityBootstrapAndExhaustion();
     DeliveryByteCuts();
     ProgressCannotMoveBackwards();
+    EmptyCannotDiscardActiveEvidence();
+    PendingPacketsAreImmutable();
     puts("Journal byte-cut, identity, replay, evidence, readback and image-binding checks passed");
     return 0;
 }
