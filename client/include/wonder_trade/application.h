@@ -4,5 +4,6 @@
 #include "overlay_manager.h"
 
 extern const ApplicationManagerTemplate gWonderTradeAppTemplate;
+extern const ApplicationManagerTemplate gWonderTradeBootAppTemplate;
 
 #endif

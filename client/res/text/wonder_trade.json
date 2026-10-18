@@ -84,6 +84,14 @@
     {
       "id": "WonderTrade_Text_FrameMs",
       "en_US": "Frame gap ms"
+    },
+    {
+      "id": "WonderTrade_Text_CheckingSave",
+      "en_US": "Checking saved game...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_RecoveryRequired",
+      "en_US": "Save recovery required.\nKeep this save and its\nrecovery files.\n\nDo not delete or replace them."
     }
   ]
 }

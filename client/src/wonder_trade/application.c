@@ -2,11 +2,14 @@
 
 #include <nitro.h>
 #include <string.h>
+#include <mbedtls/platform_util.h>
 
 #include "applications/party_menu/defs.h"
 #include "applications/party_menu/main.h"
 #include "field/field_system.h"
 #include "wonder_trade/network.h"
+#include "wonder_trade/flash.h"
+#include "wonder_trade/recovery.h"
 
 #include "bag.h"
 #include "bg_window.h"
@@ -27,6 +30,8 @@
 #include "res/text/bank/wonder_trade.h"
 
 enum WonderTradeAppState {
+    WT_APP_BOOT,
+    WT_APP_RECOVERY,
     WT_APP_CONNECTING,
     WT_APP_MENU,
     WT_APP_PICKER_FADE,
@@ -37,6 +42,14 @@ enum WonderTradeAppState {
     WT_APP_RESTART,
     WT_APP_CLOSING,
 };
+
+#define WT_BOOT_STACK_SIZE 0x8000
+typedef struct WonderTradeBootWorker {
+    OSThread thread;
+    WtFlashAccess flash;
+    int result;
+    unsigned char stack[WT_BOOT_STACK_SIZE + 8];
+} WonderTradeBootWorker;
 
 typedef struct WonderTradeApp {
     FieldSystem *fieldSystem;
@@ -52,6 +65,7 @@ typedef struct WonderTradeApp {
     int cursor;
     int selectedSlot;
     BOOL graphicsReady;
+    WonderTradeBootWorker *boot;
 } WonderTradeApp;
 
 static void WonderTrade_Draw(WonderTradeApp *app);
@@ -168,7 +182,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         }
         WonderTrade_Print(app, WonderTrade_Text_Back, 24, 160);
         Window_DrawMenuCursor(&app->window, 8, 160);
-    } else {
+    } else if (app->state != WT_APP_BOOT && app->state != WT_APP_RECOVERY) {
         WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
     }
     Window_CopyToVRAM(&app->window);
@@ -231,25 +245,76 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
     WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
 }
 
-static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
+static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSystem *fieldSystem, int state, int message)
 {
     Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x50000);
     WonderTradeApp *app = ApplicationManager_NewData(appMan, sizeof(WonderTradeApp), HEAP_ID_WONDER_TRADE);
     memset(app, 0, sizeof(*app));
-    app->fieldSystem = ApplicationManager_Args(appMan);
+    app->fieldSystem = fieldSystem;
     app->selectedSlot = -1;
     app->messages = MessageLoader_Init(MSG_LOADER_PRELOAD_ENTIRE_BANK, NARC_INDEX_MSGDATA__PL_MSG, TEXT_BANK_WONDER_TRADE, HEAP_ID_WONDER_TRADE);
     app->bgConfig = BgConfig_New(HEAP_ID_WONDER_TRADE);
-    app->state = WT_APP_CONNECTING;
-    app->statusMessage = WonderTrade_Text_Connecting;
+    app->state = state;
+    app->statusMessage = message;
     WonderTrade_InitGraphics(app);
+    return app;
+}
+
+static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
+{
+    WonderTradeApp *app = WonderTrade_Create(appMan, ApplicationManager_Args(appMan), WT_APP_CONNECTING, WonderTrade_Text_Connecting);
     WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
     return TRUE;
+}
+
+static void WonderTrade_BootWorker(void *arg)
+{
+    WonderTradeBootWorker *worker = arg;
+    WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
+    worker->result = WtRecovery_Check(io);
+}
+
+static BOOL WonderTrade_BootInit(ApplicationManager *appMan, int *state)
+{
+    WonderTradeApp *app;
+    WonderTradeBootWorker *worker;
+    void *stackTop;
+    WtRecovery_Begin();
+    app = WonderTrade_Create(appMan, NULL, WT_APP_BOOT, WonderTrade_Text_CheckingSave);
+    worker = Heap_Alloc(HEAP_ID_WONDER_TRADE, sizeof(*worker));
+    memset(worker, 0, sizeof(*worker)); app->boot = worker;
+    stackTop = (void *)(((u32)worker->stack + WT_BOOT_STACK_SIZE) & ~7);
+    OS_CreateThread(&worker->thread, WonderTrade_BootWorker, worker, stackTop,
+        WT_BOOT_STACK_SIZE - 8, OS_GetThreadPriority(OS_GetCurrentThread()) + 1);
+    memset((void *)(worker->thread.stackTop + sizeof(u32)), 0xa5,
+        worker->thread.stackBottom - worker->thread.stackTop - 2 * sizeof(u32));
+    OS_WakeupThreadDirect(&worker->thread);
+    return TRUE;
+}
+
+static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
+{
+    WonderTradeBootWorker *worker = app->boot;
+    const unsigned char *stack;
+    u32 size, unused;
+    if (!OS_IsThreadTerminated(&worker->thread)) return FALSE;
+    OS_JoinThread(&worker->thread);
+    stack = (const unsigned char *)(worker->thread.stackTop + sizeof(u32));
+    size = worker->thread.stackBottom - worker->thread.stackTop - 2 * sizeof(u32);
+    for (unused = 0; unused < size && stack[unused] == 0xa5; unused++) { (void)0; }
+    if (unused < 256 || OS_GetStackStatus(&worker->thread) != OS_STACK_NO_ERROR || worker->result != 0) WtRecovery_Block();
+    mbedtls_platform_zeroize(worker, sizeof(*worker));
+    Heap_Free(worker); app->boot = NULL;
+    if (WtRecovery_CanWrite()) return TRUE;
+    WonderTrade_Show(app, WT_APP_RECOVERY, WonderTrade_Text_RecoveryRequired);
+    return FALSE;
 }
 
 static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = ApplicationManager_Data(appMan);
+    if (app->state == WT_APP_BOOT) return WonderTrade_BootPoll(app);
+    if (app->state == WT_APP_RECOVERY) return FALSE;
     WonderTradeNetwork_Update(&app->network);
 
     if (app->state == WT_APP_PICKER_FADE) {
@@ -352,4 +417,8 @@ static BOOL WonderTrade_Exit(ApplicationManager *appMan, int *state)
 
 const ApplicationManagerTemplate gWonderTradeAppTemplate = {
     WonderTrade_Init, WonderTrade_Main, WonderTrade_Exit, FS_OVERLAY_ID_NONE
+};
+
+const ApplicationManagerTemplate gWonderTradeBootAppTemplate = {
+    WonderTrade_BootInit, WonderTrade_Main, WonderTrade_Exit, FS_OVERLAY_ID_NONE
 };

@@ -8,6 +8,11 @@ diff --git a/include/constants/heap.h b/include/constants/heap.h
 +++ b/include/constants/heap.h
 @@ -127,0 +128 @@
 +    HEAP_ID_WONDER_TRADE,
+diff --git a/include/savedata.h b/include/savedata.h
+--- a/include/savedata.h
++++ b/include/savedata.h
+@@ -46,0 +47 @@
++    BOOL wonderTradeBlocked;
 diff --git a/include/start_menu.h b/include/start_menu.h
 --- a/include/start_menu.h
 +++ b/include/start_menu.h
@@ -39,14 +44,16 @@ diff --git a/meson.options b/meson.options
 diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 --- a/platinum.us/main.lsf.in
 +++ b/platinum.us/main.lsf.in
-@@ -179,0 +180,6 @@
+@@ -179,0 +180,8 @@
 +	Object src/wonder_trade/application.c
 +	Object src/wonder_trade/network.c
 +	Object src/wonder_trade/tls.c
 +	Object src/wonder_trade/http.c
 +	Object src/wonder_trade/seed.c
 +	Object src/wonder_trade/journal.c
-@@ -373,0 +379 @@
++	Object src/wonder_trade/recovery.c
++	Object src/wonder_trade/flash.c
+@@ -372,0 +381 @@
 +	Library libwonder_trade_tls.a
 diff --git a/res/text/start_menu.json b/res/text/start_menu.json
 --- a/res/text/start_menu.json
@@ -56,6 +63,67 @@ diff --git a/res/text/start_menu.json b/res/text/start_menu.json
 +    {
 +      "id": "StartMenu_Text_WonderTrade",
 +      "en_US": "WONDER TRADE"
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,0 +2,2 @@
++#include "wonder_trade/application.h"
++#include "wonder_trade/recovery.h"
+@@ -179,8 +181,13 @@
+-        if (sApplication.nextOverlayID != FS_OVERLAY_ID_NONE) {
+-            Overlay_LoadByID(sApplication.nextOverlayID, OVERLAY_LOAD_NORMAL);
+-        }
+-
+-        sApplication.currOverlayID = sApplication.nextOverlayID;
+-        sApplication.currApplication = ApplicationManager_New(sApplication.nextApplication, &sApplication.args, HEAP_ID_SYSTEM);
+-        sApplication.nextOverlayID = FS_OVERLAY_ID_NONE;
+-        sApplication.nextApplication = NULL;
++        if (!WtRecovery_Started()) {
++            sApplication.currOverlayID = FS_OVERLAY_ID_NONE;
++            sApplication.currApplication = ApplicationManager_New(&gWonderTradeBootAppTemplate, &sApplication.args, HEAP_ID_SYSTEM);
++        } else {
++            if (sApplication.nextOverlayID != FS_OVERLAY_ID_NONE) {
++                Overlay_LoadByID(sApplication.nextOverlayID, OVERLAY_LOAD_NORMAL);
++            }
++
++            sApplication.currOverlayID = sApplication.nextOverlayID;
++            sApplication.currApplication = ApplicationManager_New(sApplication.nextApplication, &sApplication.args, HEAP_ID_SYSTEM);
++            sApplication.nextOverlayID = FS_OVERLAY_ID_NONE;
++            sApplication.nextApplication = NULL;
++        }
+diff --git a/src/savedata.c b/src/savedata.c
+--- a/src/savedata.c
++++ b/src/savedata.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -119,0 +121,2 @@
++    if (!WtRecovery_CanWrite()) return FALSE;
++
+@@ -166,0 +170,2 @@
++    if (!WtRecovery_CanWrite()) return SAVE_RESULT_CORRUPT;
++
+@@ -193,0 +199,2 @@
++    if (!WtRecovery_CanWrite()) return SAVE_RESULT_CORRUPT;
++
+@@ -209,0 +217,2 @@
++    if (!WtRecovery_CanClear()) return;
++
+@@ -635,0 +645,3 @@
++    state->wonderTradeBlocked = !WtRecovery_CanWrite();
++    if (state->wonderTradeBlocked) return;
++
+@@ -669,0 +682,2 @@
++    if (state->wonderTradeBlocked) return SAVE_RESULT_CORRUPT;
++
+@@ -738,0 +753,2 @@
++    if (state->wonderTradeBlocked) return;
++
+@@ -763,0 +780,2 @@
++    if (state->wonderTradeBlocked) return;
++
+@@ -1231,0 +1250,2 @@
++    if (!WtRecovery_CanWrite()) return FALSE;
++
 diff --git a/src/start_menu.c b/src/start_menu.c
 --- a/src/start_menu.c
 +++ b/src/start_menu.c
