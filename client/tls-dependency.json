@@ -1,0 +1,7 @@
+{
+  "version": "4.1.1",
+  "crypto_version": "1.2.0",
+  "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.1/mbedtls-4.1.1.tar.bz2",
+  "sha256": "3359a349e23db3d5536fcee032ae7b2ecbfc08972fab643089b5cbf2a375c98c",
+  "license": "Apache-2.0"
+}

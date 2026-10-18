@@ -18,13 +18,18 @@ enum WonderTradeNetworkState {
 
 typedef struct WonderTradeNetwork {
     int state;
-    int request;
     int error;
     OSTick deadline;
+    OSTick lastUpdate;
+    u32 handshakeMs;
+    u32 tlsPeakBytes;
+    u32 stackBytes;
+    u32 maxFrameMs;
+    enum HeapID heapID;
+    void *transport;
     void *heapBuffer;
     NNSFndHeapHandle heap;
     BOOL accessPointStarted;
-    BOOL httpStarted;
     BOOL driverStopping;
 } WonderTradeNetwork;
 

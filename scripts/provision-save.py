@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Create a separate save copy with a host CSPRNG seed in verified unused banks."""
+
+import argparse
+import binascii
+import hashlib
+import json
+import os
+from pathlib import Path
+import secrets
+import struct
+import sys
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def provision(data, target):
+    layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
+    if target not in layout["verified_targets"] or len(data) != layout["flash_size"]:
+        raise ValueError("Only a full 512 KiB save for a verified US target is supported")
+    # Both retail blocks need at least one valid fallback. Do not rewrite either.
+    for block_id, region in enumerate(layout["retail_regions_per_half"][:2]):
+        valid = False
+        for half in (0, layout["half_size"]):
+            offset, size = half + region["offset"], region["size"]
+            body = data[offset:offset + size - 20]
+            footer = data[offset + size - 20:offset + size]
+            _, _, length, signature, stored_id, crc = struct.unpack("<IIIIBxH", footer)
+            valid |= (length == size and signature == 0x20060623 and stored_id == block_id
+                      and binascii.crc_hqx(body, 0xffff) == crc)
+        if not valid:
+            raise ValueError("Retail save block has no valid copy; preserve it for recovery")
+    for bank in layout["journal_banks"]:
+        area = data[bank:bank + layout["bank_reserved_size"]]
+        if area not in (b"\0" * len(area), b"\xff" * len(area)):
+            raise ValueError("Reserved bank is not blank; refusing to replace seeds, identities or recovery evidence")
+    record = bytearray(layout["record_size"])
+    struct.pack_into("<4sHHIIQ", record, 0, b"PWTJ", 1, 0, 4096, 0, 1)
+    struct.pack_into("<HH", record, 1440, 1, 32)
+    record[1444:1476] = secrets.token_bytes(32)
+    record[4060:4092] = hashlib.sha256(record[:4060]).digest()
+    record[4092:] = b"CMIT"
+    result = bytearray(data)
+    for bank in layout["journal_banks"]:
+        result[bank:bank + len(record)] = record
+    return bytes(result)
+
+
+def write_new(path, data):
+    # O_EXCL also rejects symlinks, aliases and an existing source/destination.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        if path.read_bytes() != data:
+            raise OSError("Provisioned copy did not verify")
+    except BaseException:
+        path.unlink()
+        raise
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path)
+    parser.add_argument("destination", type=Path)
+    parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True,
+                        help="verified ROM target reported by identify-rom.py")
+    args = parser.parse_args()
+    try:
+        write_new(args.destination, provision(args.source.read_bytes(), args.target))
+        print(f"Provisioned a separate save copy: {args.destination}")
+    except (OSError, ValueError) as error:
+        parser.exit(1, f"Cannot provision save: {error}\n")

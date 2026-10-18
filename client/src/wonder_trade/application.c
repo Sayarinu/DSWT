@@ -149,9 +149,25 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         WonderTrade_Print(app, WonderTrade_Text_Retry, 24, 96);
         WonderTrade_Print(app, WonderTrade_Text_Exit, 24, 120);
         Window_DrawMenuCursor(&app->window, 8, 96 + app->cursor * 24);
+        WonderTrade_Print(app, WonderTrade_Text_ErrorCode, 8, 152);
+        String *number = String_Init(12, HEAP_ID_WONDER_TRADE);
+        String_FormatInt(number, app->network.error, 10, PADDING_MODE_NONE, CHARSET_MODE_EN);
+        Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, number, 152, 152, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
+        String_Free(number);
     } else if (app->state == WT_APP_MESSAGE) {
-        WonderTrade_Print(app, WonderTrade_Text_Back, 24, 144);
-        Window_DrawMenuCursor(&app->window, 8, 144);
+        if (app->statusMessage == WonderTrade_Text_Explanation) {
+            const int labels[] = { WonderTrade_Text_ConnectMs, WonderTrade_Text_TlsBytes, WonderTrade_Text_StackBytes, WonderTrade_Text_FrameMs };
+            const u32 values[] = { app->network.handshakeMs, app->network.tlsPeakBytes, app->network.stackBytes, app->network.maxFrameMs };
+            String *number = String_Init(12, HEAP_ID_WONDER_TRADE);
+            for (int i = 0; i < 4; i++) {
+                WonderTrade_Print(app, labels[i], 8, 88 + i * 16);
+                String_FormatInt(number, values[i], 10, PADDING_MODE_NONE, CHARSET_MODE_EN);
+                Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, number, 152, 88 + i * 16, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
+            }
+            String_Free(number);
+        }
+        WonderTrade_Print(app, WonderTrade_Text_Back, 24, 160);
+        Window_DrawMenuCursor(&app->window, 8, 160);
     } else {
         WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
     }
@@ -217,7 +233,7 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
 
 static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
 {
-    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x40000);
+    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x50000);
     WonderTradeApp *app = ApplicationManager_NewData(appMan, sizeof(WonderTradeApp), HEAP_ID_WONDER_TRADE);
     memset(app, 0, sizeof(*app));
     app->fieldSystem = ApplicationManager_Args(appMan);

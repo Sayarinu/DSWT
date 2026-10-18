@@ -51,7 +51,7 @@
     },
     {
       "id": "WonderTrade_Text_PingError",
-      "en_US": "Server did not acknowledge.\nCheck the server and connection,\nthen retry."
+      "en_US": "Could not verify the server\nor saved connection state.\nCheck the connection code."
     },
     {
       "id": "WonderTrade_Text_Ineligible",
@@ -63,7 +63,27 @@
     },
     {
       "id": "WonderTrade_Text_Explanation",
-      "en_US": "Select a Pokémon to test\nthe Wonder Trade connection.\nTrading is not available yet."
+      "en_US": "Secure connection test.\nTrading is not available yet."
+    },
+    {
+      "id": "WonderTrade_Text_ErrorCode",
+      "en_US": "Connection code"
+    },
+    {
+      "id": "WonderTrade_Text_ConnectMs",
+      "en_US": "Connect ms"
+    },
+    {
+      "id": "WonderTrade_Text_TlsBytes",
+      "en_US": "TLS bytes"
+    },
+    {
+      "id": "WonderTrade_Text_StackBytes",
+      "en_US": "Stack bytes"
+    },
+    {
+      "id": "WonderTrade_Text_FrameMs",
+      "en_US": "Frame gap ms"
     }
   ]
 }

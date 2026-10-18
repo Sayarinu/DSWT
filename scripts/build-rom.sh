@@ -17,16 +17,21 @@ if [[ ! "$revision" =~ ^[01]$ ]]; then
     exit 2
 fi
 image="platinumwt-rom-builder"
-trade_url="${WONDER_TRADE_BASE_URL:-http://10.64.0.1:8080}"
-if [[ "$build_mode" == modified && ! "$trade_url" =~ ^http://[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]; then
-    echo "WONDER_TRADE_BASE_URL must be http://host[:port] without a trailing slash" >&2
-    exit 1
+if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
+    echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see client/tests/README.md)" >&2
+    exit 2
 fi
 
 workspace="$(python3 "$repo_root/scripts/prepare-game.py" "${prepare_args[@]}")"
+tls_args=()
+if [[ "$build_mode" == modified ]]; then
+    tls_workspace="$(python3 "$repo_root/scripts/prepare-tls.py")"
+    python3 "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/platinumwt-connection.h"
+    tls_args=(-v "$tls_workspace:/tls:ro")
+fi
 docker build -f "$repo_root/tools/rom-builder/Dockerfile" -t "$image" "$repo_root/tools/rom-builder"
 
-docker_args=(--rm --user "$(id -u):$(id -g)" -e "WONDER_TRADE_BASE_URL=$trade_url" -e "ROM_REVISION=$revision" -e "PLATINUMWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
+docker_args=(--rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "PLATINUMWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" "${tls_args[@]}" -w /workspace)
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
@@ -37,7 +42,8 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
     else
         python3 subprojects/meson-1.12.0/meson.py configure build \
             -Drevision="$ROM_REVISION" \
-            -Dwonder_trade_base_url="$WONDER_TRADE_BASE_URL"
+            -Dwonder_trade_tls_dir=/tls \
+            -Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h
         make release
     fi
 '
