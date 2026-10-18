@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -481,6 +482,57 @@ class LedgerTests(unittest.TestCase):
             self.assertTrue(verifier in expected, "Stored verifier differs from the protocol formula")
         self.tool("verify")
 
+    def test_native_trade_contract(self):
+        environment = dict(self.env, PGDATABASE=self.database)
+        result = subprocess.run([str(self.trade_binary)], env=environment, capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Independent v1 wire oracle: credentials are excluded from request
+        # identity, and saved outcomes use the documented snapshot field order.
+        rows = self.sql("""SELECT replace(op.save_id::text,'-',''),replace(op.operation_id::text,'-',''),
+            op.counter,op.opcode,encode(op.request_sha256,'hex'),op.event_sequence,encode(op.outcome,'hex'),
+            replace(e.trade_id::text,'-',''),replace(o.offered_asset_id::text,'-',''),encode(p.sha256,'hex'),
+            coalesce(replace(r.asset_id::text,'-',''),''),coalesce(encode(q.sha256,'hex'),''),
+            coalesce(replace(r.receipt_id::text,'-',''),''),coalesce(r.delivery_kind,0),e.state,
+            coalesce(encode(a.applied_sha256,'hex'),''),coalesce(a.applied_generation,0),
+            encode(CASE WHEN op.opcode=2 THEN p.pk4 ELSE q.pk4 END,'hex')
+            FROM platinumwt.operations op JOIN platinumwt.trade_events e
+                ON (op.save_id,op.event_sequence)=(e.save_id,e.sequence)
+            JOIN platinumwt.offers o ON o.trade_id=e.trade_id
+            JOIN platinumwt.payloads p ON p.asset_id=o.offered_asset_id
+            LEFT JOIN platinumwt.receipts r ON r.receipt_id=e.receipt_id
+            LEFT JOIN platinumwt.payloads q ON q.asset_id=r.asset_id
+            LEFT JOIN platinumwt.acknowledgements a ON a.save_id=op.save_id AND a.operation_id=op.operation_id
+            WHERE op.result=1""").splitlines()
+        self.assertGreater(len(rows), 0)
+        for row in rows:
+            (save, operation, counter, opcode, request_hash, sequence, outcome, trade, asset, digest,
+             received, received_digest, receipt, kind, state, applied, generation, pk4) = row.split('|')
+            opcode, sequence = int(opcode), int(sequence)
+            raw = lambda value, size: bytes.fromhex(value) if value else bytes(size)
+            # A historical submission has no receipt even if its live offer
+            # later matched or returned. Its event joins the immutable payload.
+            if opcode == 2:
+                body = struct.pack('<Q', 1) + bytes.fromhex(pk4) + bytes.fromhex(digest)
+            elif opcode == 4:
+                body = bytes.fromhex(trade)
+            else:
+                body = (bytes.fromhex(trade + receipt + received_digest + applied) +
+                        struct.pack('<Q', int(generation)))
+            frame = struct.pack('<4sBBH16s16s32sQ', b'WTDS', 1, opcode, len(body),
+                                bytes.fromhex(operation), bytes.fromhex(save), bytes([0x51]) * 32, int(counter)) + body
+            self.assertEqual(hashlib.sha256(frame[:40] + frame[72:]).hexdigest(), request_hash)
+            expected = struct.pack('<Q16sBB16s32s16s32s16sQ', sequence, bytes.fromhex(trade), int(state), int(kind),
+                                   bytes.fromhex(asset), bytes.fromhex(digest), raw(received, 16),
+                                   raw(received_digest, 32), raw(receipt, 16), sequence)
+            self.assertEqual(bytes.fromhex(outcome), expected)
+        self.tool("verify")
+        self.stop()
+        self.start()
+        result = subprocess.run([str(self.trade_binary), "--verify-restart"], env=environment,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.tool("verify")
+
 
 def main():
     if os.geteuid() == 0:
@@ -489,10 +541,12 @@ def main():
     parser.add_argument("binary", type=Path)
     parser.add_argument("migrations", type=Path)
     parser.add_argument("identity_binary", type=Path)
+    parser.add_argument("trade_binary", type=Path)
     args = parser.parse_args()
     LedgerTests.binary = args.binary.resolve()
     LedgerTests.migrations = args.migrations.resolve()
     LedgerTests.identity_binary = args.identity_binary.resolve()
+    LedgerTests.trade_binary = args.trade_binary.resolve()
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LedgerTests))
     return 0 if result.wasSuccessful() else 1
 
