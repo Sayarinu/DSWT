@@ -315,6 +315,13 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     return 0;
 }
 
+static int DeliveryMatches(const WtJournalEntry *entry, const WtWireSnapshot *snapshot)
+{
+    return (Zero(entry->receipt, 16) || memcmp(entry->receipt, snapshot->receipt, 16) == 0)
+        && (Zero(entry->incomingDigest, 32) || memcmp(entry->incomingDigest, snapshot->receivedDigest, 32) == 0)
+        && (!entry->deliveryKind || entry->deliveryKind == snapshot->deliveryKind);
+}
+
 int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
 {
     WtWireReply reply;
@@ -359,10 +366,7 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         if ((operation == WT_OP_SUBMIT && next.phase != WT_JOURNAL_SUBMIT_READY)
             || (operation == WT_OP_CANCEL && next.phase != WT_JOURNAL_QUEUED)
             || (operation == WT_OP_ACKNOWLEDGE && next.phase != WT_JOURNAL_APPLIED)) goto blocked;
-        if (operation == WT_OP_ACKNOWLEDGE && next.deliveryKind != snapshot->deliveryKind) goto blocked;
-        if (operation == WT_OP_CANCEL && ((next.deliveryKind && next.deliveryKind != snapshot->deliveryKind)
-            || (!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0)
-            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0))) goto blocked;
+        if ((operation == WT_OP_ACKNOWLEDGE || operation == WT_OP_CANCEL) && !DeliveryMatches(&next, snapshot)) goto blocked;
         memcpy(next.lastOperation, next.operation, 16); next.lastOperationCounter = next.operationCounter;
         next.nextCounter = reply.nextCounter; next.eventCursor = reply.body.mutation.event;
         ClearRequest(&next);
@@ -383,12 +387,9 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
             || engine->journal.io.hash(next.outgoing, 136, outgoingDigest) != 0
             || memcmp(snapshot->offeredDigest, outgoingDigest, 32) != 0
             || snapshot->state == WT_TRADE_NONE || snapshot->state == WT_TRADE_ACKNOWLEDGED) goto blocked;
-        if ((!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0)
-            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0)
-            || (next.deliveryKind && next.deliveryKind != snapshot->deliveryKind)) goto blocked;
+        if (!DeliveryMatches(&next, snapshot)) goto blocked;
         if (operation == WT_OP_STATUS) { result = 0; goto done; }
         if (operation != WT_OP_COLLECT || (snapshot->state != WT_TRADE_MATCHED && snapshot->state != WT_TRADE_RETURN_READY)) goto blocked;
-        if (!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0) goto blocked;
         memcpy(next.receipt, snapshot->receipt, 16); next.deliveryKind = snapshot->deliveryKind;
         memcpy(next.incoming, reply.body.collection.pokemon, 136); memcpy(next.incomingDigest, snapshot->receivedDigest, 32);
         next.phase = WT_JOURNAL_RECEIVED;
