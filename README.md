@@ -56,7 +56,23 @@ For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
 `WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
 `POST /wt/v1` is refused. Keep every internal service in the same private network
 namespace; only HTTPS may be exposed. The gateway bounds connections to 1,024,
-pending calls to 64 and request workers to eight; capacity still needs its soak test.
+with separate four-worker submission and recovery pools. Admission budgets are:
+
+| Resource | Total concurrent/queued | Per key concurrent | Burst / refill per second |
+| --- | ---: | ---: | ---: |
+| Gateway connections | 1,024 | 64 | 128 / 64 |
+| Gateway enrollment/submission jobs | 8 | 8 | 64 / 32 |
+| Gateway status/cancel/collect/ack/reconcile jobs | 16 | 8 | 256 / 128 |
+| Backend enrollment/submission calls | 4 | 2 | 16 / 4 |
+| Backend recovery calls | 8 | 2 | 64 / 16 |
+
+Gateway keys use the direct IPv4 peer or IPv6 /64; forwarded headers do not
+override them. Backend identity budgets admit only verified credentials, with a
+separate global concurrency lease held throughout each request. Each budget
+holds at most 4,096 keys, evicts inactive keys older than 60 seconds under pressure
+and rejects new keys when full. Limits are per process; account
+for all replicas in database/validator/node capacity and complete the soak gate
+before production. These limits are resource bounds, not throughput guarantees.
 
 ## Upstream source
 

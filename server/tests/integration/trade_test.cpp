@@ -297,6 +297,57 @@ TEST_F(TradeTest, ValidatorOutageDoesNotBlockAcceptedReturnCollectAndAck) {
   EXPECT_EQ(validations.load(), 2);
 }
 
+TEST_F(TradeTest, ForgedCredentialsNeverAcquireOrWaitForAnOwnersWriteLock) {
+  auto forged = Submission(auth);
+  forged.mutable_context()->mutable_auth()->set_credential(std::string(32, '\x52'));
+  detail::Transaction held(database);
+  database.Parameters("SELECT save_id FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
+      {detail::HexBytes(auth.save_id())});
+  const auto before = std::chrono::steady_clock::now();
+  const auto reply = Submit(forged);
+  EXPECT_LT(std::chrono::steady_clock::now() - before, std::chrono::seconds(1));
+  EXPECT_EQ(reply.context().result(), v1::RESULT_UNAUTHENTICATED);
+  EXPECT_EQ(reply.context().next_counter(), 0U);
+  EXPECT_EQ(validations.load(), 0);
+}
+
+TEST_F(TradeTest, ForgedCredentialChurnCannotEvictARealOwnersFirstRecoveryRequest) {
+  const auto request = Submission(auth);
+  const auto submitted = Submit(request);
+  ASSERT_EQ(submitted.context().result(), v1::RESULT_OK);
+  // Prepare a delivery using an independent service; the target service has
+  // never admitted a recovery key for this accepted deposit.
+  TradeService preparation("", {}, [](auto) { return true; });
+  auto cancel = Cancellation(submitted.outcome());
+  v1::MutationReply returned;
+  ASSERT_TRUE(preparation.Cancel(nullptr, &cancel, &returned).ok());
+  ASSERT_EQ(returned.context().result(), v1::RESULT_OK);
+  std::atomic<unsigned> serial{0}, failures{0};
+  std::vector<std::future<void>> attackers;
+  for (unsigned worker = 0; worker < 8; ++worker) attackers.push_back(std::async(std::launch::async, [&] {
+    for (unsigned index; (index = serial++) < 4097;) {
+      v1::StatusRequest forged;
+      *forged.mutable_auth() = auth;
+      std::string secret(32, '\x52');
+      for (unsigned byte = 0; byte < 4; ++byte) secret[byte] = static_cast<char>(index >> (8 * byte));
+      forged.mutable_auth()->set_credential(secret);
+      v1::StatusReply reply;
+      const auto status = service.Status(nullptr, &forged, &reply);
+      if (!status.ok() || reply.context().result() != v1::RESULT_UNAUTHENTICATED ||
+          reply.context().next_counter() != 0 || reply.context().event_highwater() != 0) ++failures;
+    }
+  }));
+  for (auto &attacker : attackers) attacker.get();
+  ASSERT_EQ(failures, 0U);
+  const auto incoming = Collect(returned.outcome().trade_id());
+  ASSERT_EQ(incoming.context().result(), v1::RESULT_OK);
+  EXPECT_EQ(incoming.pokemon().pk4(), request.pokemon().pk4());
+  const auto applied = Ack(Acknowledgement(incoming.trade()));
+  ASSERT_EQ(applied.context().result(), v1::RESULT_OK);
+  EXPECT_EQ(applied.outcome().state(), v1::TRADE_ACKNOWLEDGED);
+  EXPECT_EQ(validations.load(), 1);
+}
+
 TEST_F(TradeTest, ReceiptProofAndTerminalCancellationFailuresAreRetained) {
   const auto submitted = Submit(Submission(auth));
   const auto returned = Cancel(Cancellation(submitted.outcome()));

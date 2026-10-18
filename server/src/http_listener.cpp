@@ -29,7 +29,8 @@ void HttpListener::Accept() {
                              boost::system::error_code error,
                              tcp::socket socket) {
     if (!error) {
-      auto connection = self->services_->Connect();
+      const auto peer = socket.remote_endpoint(error);
+      auto connection = error ? nullptr : self->services_->Connect(peer.address());
       if (connection) std::make_shared<HttpSession>(std::move(socket), self->services_, std::move(connection))->Run();
     }
     if (self->acceptor_.is_open()) {

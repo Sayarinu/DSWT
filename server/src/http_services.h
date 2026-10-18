@@ -1,39 +1,39 @@
 #pragma once
 
 #include "platinumwt/server/http_request_handler.h"
+#include "admission.h"
 
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/thread_pool.hpp>
 
-#include <atomic>
 #include <functional>
 
 namespace platinumwt::server {
 
-class HttpServices;
 struct HttpConnection {
-  explicit HttpConnection(std::shared_ptr<HttpServices> owner);
-  ~HttpConnection();
-  std::shared_ptr<HttpServices> owner;
+  std::string network;
+  std::unique_ptr<detail::Quota::Permit> permit;
 };
 
 class HttpServices : public std::enable_shared_from_this<HttpServices> {
 public:
   using Request = boost::beast::http::request<boost::beast::http::string_body>;
   using Response = boost::beast::http::response<boost::beast::http::string_body>;
-  HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &workers,
+  HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
+                boost::asio::thread_pool &recovery,
                 std::shared_ptr<boost::asio::ssl::context> tls);
-  std::unique_ptr<HttpConnection> Connect();
-  bool Dispatch(Request request, std::shared_ptr<grpc::ClientContext> context, bool secure,
+  std::unique_ptr<HttpConnection> Connect(const boost::asio::ip::address &peer);
+  bool Dispatch(Request request, std::shared_ptr<grpc::ClientContext> context, bool secure, std::string_view network,
                 std::function<void(Response)> complete);
   const std::shared_ptr<boost::asio::ssl::context> &Tls() const { return tls_; }
 
 private:
-  friend struct HttpConnection;
   std::shared_ptr<HttpRequestHandler> handler_;
-  boost::asio::thread_pool &workers_;
+  boost::asio::thread_pool &submissions_, &recovery_;
   std::shared_ptr<boost::asio::ssl::context> tls_;
-  std::atomic<unsigned> connections_{0}, jobs_{0};
+  detail::Quota connections_{{1024, 64, 128, 64}};
+  detail::Quota submission_jobs_{{8, 8, 64, 32}};
+  detail::Quota recovery_jobs_{{16, 8, 256, 128}};
 };
 
 } // namespace platinumwt::server

@@ -2,10 +2,12 @@ find_package(GTest REQUIRED)
 include(GoogleTest)
 
 add_executable(platinumwt-unit-tests
+    unit/admission_test.cpp
     unit/config_test.cpp
     unit/connectivity_service_test.cpp
     unit/http_request_handler_test.cpp)
-target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server GTest::gtest_main)
+target_include_directories(platinumwt-unit-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server platinumwt_admission GTest::gtest_main)
 target_compile_options(platinumwt-unit-tests PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(platinumwt-unit-tests TEST_PREFIX "unit." PROPERTIES LABELS "unit")
 
@@ -49,5 +51,6 @@ target_link_libraries(platinumwt-matcher-tests PRIVATE platinumwt_trading platin
 target_compile_options(platinumwt-matcher-tests PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(platinumwt-gateway-fixture integration/gateway_fixture.cpp)
+target_include_directories(platinumwt-gateway-fixture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 target_link_libraries(platinumwt-gateway-fixture PRIVATE platinumwt_trading Boost::system Threads::Threads)
 target_compile_options(platinumwt-gateway-fixture PRIVATE -Wall -Wextra -Wpedantic)

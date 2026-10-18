@@ -2,6 +2,7 @@
 #include "platinumwt/server/identity_service.h"
 #include "platinumwt/server/legality_client.h"
 #include "platinumwt/server/trade_service.h"
+#include "admission.h"
 
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
@@ -17,13 +18,17 @@ int main() {
     LegalityClient legality(config.legality_address, config.legality_policy);
     // No production attestation bypass. Until the independently recoverable
     // prefix provider is integrated, enrollment/operations remain PROCESSING.
-    IdentityService identities(config.connection_info);
-    TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); });
+    auto admission = std::make_shared<detail::ServiceAdmission>();
+    IdentityService identities(config.connection_info, {}, admission);
+    TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); }, {}, admission);
     grpc::ServerBuilder builder;
     int port = 0;
     builder.AddListeningPort(config.address, grpc::InsecureServerCredentials(), &port);
     builder.SetMaxReceiveMessageSize(4096);
     builder.SetMaxSendMessageSize(4096);
+    grpc::ResourceQuota resources;
+    resources.SetMaxThreads(32).Resize(16 * 1024 * 1024);
+    builder.SetResourceQuota(resources);
     builder.SetSyncServerOption(grpc::ServerBuilder::NUM_CQS, 2);
     builder.SetSyncServerOption(grpc::ServerBuilder::MIN_POLLERS, 2);
     builder.SetSyncServerOption(grpc::ServerBuilder::MAX_POLLERS, 8);
