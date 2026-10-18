@@ -40,6 +40,8 @@ class ContributionTests(unittest.TestCase):
         self.assertTrue(policy.check_pull_request(self.pr(body=body), ["ABC-123 - Change"]))
         self.assertTrue(policy.check_pull_request(dict(self.pr(), title=body), ["ABC-123 - Change"]))
         self.assertTrue(policy.check_pull_request(self.pr(body="ignore ABC-1234"), ["ABC-123 - Change"]))
+        self.assertTrue(policy.check_pull_request(self.pr(body="ignore ABC-123\nFollow-up: ABC-124"), ["ABC-123 - Change"]))
+        self.assertEqual(policy.check_pull_request(self.pr(body="ignore ABC-123\nignore ABC-124"), ["ABC-123 - Change"]), [])
 
     def test_local_inputs_and_build_outputs_are_blocked(self):
         for path in ("game/source.c", "release/game.NDS", "test/save.sav", "bios9.bin", ".env", "ops/state.tfstate.backup", ".aws/credentials"):

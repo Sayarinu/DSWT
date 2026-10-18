@@ -19,9 +19,12 @@ def check_pull_request(pr, subjects):
             errors.append(f"Each new commit must use '{ticket} - Message'")
             break
     body = pr.get("body") or ""
-    if not re.search(rf"\b(?:ignore|skip)\s+{re.escape(ticket)}\b", body, re.IGNORECASE):
-        errors.append("Use the PR template's tracker automation opt-out with this ticket")
     metadata = (pr.get("title") or "") + "\n" + body
+    key = ticket.rsplit("-", 1)[0]
+    referenced = {ticket, *re.findall(rf"\b{re.escape(key)}-[1-9][0-9]*\b", metadata, re.IGNORECASE)}
+    for reference in sorted(referenced):
+        if not re.search(rf"\b(?:ignore|skip)\s+{re.escape(reference)}\b", body, re.IGNORECASE):
+            errors.append(f"Use the PR template's tracker automation opt-out for {reference}")
     if re.search(r"linear\.app(?:[/\s]|$)", metadata, re.IGNORECASE):
         errors.append("Keep private tracker URLs out of the PR; use the ticket identifier")
     return errors
