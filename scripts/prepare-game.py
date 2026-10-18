@@ -74,6 +74,12 @@ def configure(root, workspace, pin, pristine):
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
 
     base, desired = ({}, {}) if pristine else overlay_files(root, workspace)
+    marker = workspace / ".git/platinumwt-overlays.json"
+    if marker.is_symlink():
+        raise RuntimeError("Overlay ownership record must not be a symlink")
+    previous = json.loads(marker.read_text()) if marker.exists() else []
+    if not isinstance(previous, list) or not all(isinstance(name, str) for name in previous):
+        raise RuntimeError("Invalid overlay ownership record")
     changed = set(filter(None, git(workspace, "diff", "--name-only", "--no-renames", "-z", "HEAD").decode().split("\0")))
     if changed - base.keys():
         raise RuntimeError("Unmanaged upstream changes found; keep this workspace aside before rebuilding")
@@ -84,7 +90,7 @@ def configure(root, workspace, pin, pristine):
         dest = workspace / name
         if any(path.is_symlink() for path in (dest, *dest.parents)):
             raise RuntimeError(f"Refusing a symlink in the game workspace: {name}")
-        if name in base and not dest.exists():
+        if (name in base or name in previous) and not dest.exists():
             raise RuntimeError(f"Local deletion of {name}; keep this workspace aside before rebuilding")
         if dest.exists() and dest.read_bytes() not in (base.get(name), content):
             raise RuntimeError(f"Local changes in {name}; keep this workspace aside before rebuilding")
@@ -93,6 +99,7 @@ def configure(root, workspace, pin, pristine):
         if not dest.exists() or dest.read_bytes() != content:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
+    marker.write_text(json.dumps(sorted(desired)) + "\n")
 
 
 def prepare(root, pristine=False):
@@ -122,6 +129,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine))
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Cannot prepare game workspace: {error}", file=sys.stderr)
         sys.exit(1)

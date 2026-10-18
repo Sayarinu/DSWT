@@ -74,11 +74,15 @@ class PrepareGameTests(unittest.TestCase):
 
     def test_local_deletion_is_preserved(self):
         workspace = prepare_game.prepare(self.root)
-        path = workspace / "src/start_menu.c"
-        path.unlink()
-        with self.assertRaisesRegex(RuntimeError, "Local deletion"):
-            prepare_game.prepare(self.root)
-        self.assertFalse(path.exists())
+        for name in ("src/start_menu.c", "src/wonder_trade/application.c"):
+            with self.subTest(name=name):
+                path = workspace / name
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(RuntimeError, "Local deletion"):
+                    prepare_game.prepare(self.root)
+                self.assertFalse(path.exists())
+                path.write_bytes(original)
 
     def test_unmanaged_files_are_preserved(self):
         workspace = prepare_game.prepare(self.root)
