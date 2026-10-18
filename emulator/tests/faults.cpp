@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/random.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -53,6 +54,19 @@ void After(bool hit) {
     }
 }
 } // namespace
+
+extern "C" ssize_t getrandom(void *bytes, size_t size, unsigned flags) {
+    static auto real = reinterpret_cast<decltype(&getrandom)>(::dlsym(RTLD_NEXT, "getrandom"));
+    const auto *mode = std::getenv("PWT_SEED_RANDOM_MODE");
+    if (size == 32 && mode) {
+        if (std::strcmp(mode, "error") == 0) { errno = EIO; return -1; }
+        if (std::strcmp(mode, "zero") == 0 || std::strcmp(mode, "same") == 0) {
+            std::memset(bytes, std::strcmp(mode, "same") == 0 ? 4 : 0, size);
+            return static_cast<ssize_t>(size);
+        }
+    }
+    return real(bytes, size, flags);
+}
 
 extern "C" ssize_t write(int fd, const void *bytes, size_t size) {
     static auto real = reinterpret_cast<decltype(&write)>(::dlsym(RTLD_NEXT, "write"));
