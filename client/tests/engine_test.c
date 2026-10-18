@@ -360,6 +360,13 @@ static void LoadedStateAndMismatch(void)
         assert(WtEngine_Open(&fixture.engine, journal, io) != 0);
         assert(!fixture.writes && !fixture.removed && !fixture.received);
     }
+    Init(&fixture, 1, 25);
+    assert(WtTest_JournalEntry(WT_JOURNAL_ESCROW, Hash, &entry) == 0);
+    entry.outgoing[4] = 1; memcpy(entry.request + 88, entry.outgoing, 136);
+    assert(Hash(entry.outgoing, 136, entry.request + 224) == 0);
+    assert(WtJournal_Encode(&entry, Hash, fixture.banks[0]) == 0);
+    memcpy(fixture.banks[1], fixture.banks[0], 4096); fixture.writes = 0;
+    assert(WtEngine_Open(&fixture.engine, journal, io) != 0 && !fixture.writes && !fixture.removed);
     for (code = WT_RESULT_COUNTER_MISMATCH; code <= WT_RESULT_CURSOR_AHEAD; ++code) {
         Init(&fixture, 1, 25); Enroll(&fixture);
         assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
@@ -372,6 +379,31 @@ static void LoadedStateAndMismatch(void)
     size = Header(&fixture, packet, WT_RESULT_UNAVAILABLE, 0, 0, 0);
     assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && !fixture.engine.synchronized);
     assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && !fixture.removed);
+}
+
+static void DeliveryKindBinding(void)
+{
+    Fixture fixture;
+    unsigned char packet[902]; size_t size;
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 274);
+    Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, fixture.pokemon);
+    memcpy(packet + 182, fixture.pokemon, 136);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 4, 146); Put(packet + 44, 4, 8);
+    Snapshot(&fixture, packet + 52, WT_TRADE_ACKNOWLEDGED, WT_DELIVERY_RETURN, 4, fixture.pokemon);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && fixture.received == 1);
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 3, 146); Put(packet + 44, 3, 8);
+    Snapshot(&fixture, packet + 52, WT_TRADE_RETURN_READY, WT_DELIVERY_RETURN, 3, fixture.pokemon);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.engine.entry.deliveryKind == WT_DELIVERY_RETURN);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 3, 274);
+    Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, fixture.pokemon);
+    memcpy(packet + 182, fixture.pokemon, 136);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.received);
 }
 
 static void EnrollmentAndRetirementFaults(void)
@@ -471,6 +503,7 @@ int main(void)
 {
     PairAndReturn(); RejectionAndErrors(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
+    DeliveryKindBinding();
     puts("Recoverable engine: paired delivery, return, rejection, retries, full storage, stale context and failed persistence passed");
     return 0;
 }

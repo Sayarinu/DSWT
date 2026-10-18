@@ -33,9 +33,10 @@ static int Refresh(WtEngine *engine)
     return 0;
 }
 
-static int StateKnown(const WtJournalEntry *entry)
+static int StateKnown(const WtJournalEntry *entry, WtWireHash hash)
 {
     unsigned operation = entry->requestLength ? entry->request[5] : 0;
+    if (entry->requestLength && WtWire_CheckRequest(entry->request, entry->requestLength, hash) != 0) return 0;
     switch (entry->phase) {
     case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_RECEIVED:
     case WT_JOURNAL_APPLYING: case WT_JOURNAL_RESTORING: return operation == 0;
@@ -157,7 +158,7 @@ int WtEngine_Open(WtEngine *engine, WtJournalIO journal, WtEngineIO io)
     memset(engine, 0, sizeof(*engine)); engine->io = io;
     if (!io.random || !io.inventory || WtJournal_Open(&engine->journal, journal) != 0
         || WtJournal_Read(&engine->journal, &engine->entry) != 0
-        || engine->entry.generation == UINT64_MAX || !StateKnown(&engine->entry)
+        || engine->entry.generation == UINT64_MAX || !StateKnown(&engine->entry, journal.hash)
         || WtJournal_Repair(&engine->journal) != 0) return Block(engine);
     return 0;
 }
@@ -270,7 +271,7 @@ static int ContextMatches(WtEngine *engine, const WtWireReply *reply, int finali
 static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
 {
     unsigned i;
-    int rejected = 0;
+    enum { NO_REJECTION, REJECTED_SUBMIT, REJECTED_CANCEL } rejected = NO_REJECTION;
     unsigned char outgoingDigest[32];
     if (engine->journal.io.hash(next->outgoing, 136, outgoingDigest) != 0) return -1;
     for (i = 0; i < reply->body.page.count; ++i) {
@@ -279,21 +280,24 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
         if (next->phase == WT_JOURNAL_SUBMIT_READY && event->kind == WT_EVENT_REJECTED
             && memcmp(event->operation, next->operation, 16) == 0
             && memcmp(event->digest, outgoingDigest, 32) == 0 && Zero(event->trade, 16)
-            && event->state == WT_TRADE_NONE && !rejected) { rejected = 1; continue; }
+            && event->state == WT_TRADE_NONE && !rejected) { rejected = REJECTED_SUBMIT; continue; }
         if (next->phase == WT_JOURNAL_QUEUED && next->requestLength && next->request[5] == WT_OP_CANCEL
             && event->kind == WT_EVENT_REJECTED && !rejected && Zero(event->digest, 32)
             && memcmp(event->operation, next->operation, 16) == 0 && memcmp(event->trade, next->trade, 16) == 0
-            && (event->state == WT_TRADE_MATCHED || event->state == WT_TRADE_RETURN_READY)) { rejected = 2; continue; }
+            && (event->state == WT_TRADE_MATCHED || event->state == WT_TRADE_RETURN_READY)) { rejected = REJECTED_CANCEL; continue; }
         if (next->phase != WT_JOURNAL_QUEUED || memcmp(event->trade, next->trade, 16) != 0) return -1;
         if (event->kind == WT_EVENT_SUBMITTED) {
             if (memcmp(event->operation, next->lastOperation, 16) != 0 || memcmp(event->digest, outgoingDigest, 32) != 0) return -1;
         } else if (event->kind == WT_EVENT_MATCHED || event->kind == WT_EVENT_CANCELLED) {
+            unsigned kind = event->kind == WT_EVENT_MATCHED ? WT_DELIVERY_MATCH : WT_DELIVERY_RETURN;
+            if (next->deliveryKind && next->deliveryKind != kind) return -1;
             if (!Zero(next->receipt, 16) && memcmp(next->receipt, event->receipt, 16) != 0) return -1;
             if (event->kind == WT_EVENT_CANCELLED && (memcmp(event->operation, next->lastOperation, 16) != 0
                 || memcmp(event->digest, outgoingDigest, 32) != 0)) return -1;
             if (!Zero(next->incomingDigest, 32) && memcmp(next->incomingDigest, event->digest, 32) != 0) return -1;
             memcpy(next->receipt, event->receipt, 16);
             memcpy(next->incomingDigest, event->digest, 32);
+            next->deliveryKind = (unsigned char)kind;
         } else return -1;
     }
     if (!ContextMatches(engine, reply, rejected != 0)
@@ -301,7 +305,7 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     if (rejected) {
         memcpy(next->lastOperation, next->operation, 16); next->lastOperationCounter = next->operationCounter;
         next->nextCounter = reply->nextCounter;
-        if (rejected == 1) next->phase = WT_JOURNAL_RESTORING;
+        if (rejected == REJECTED_SUBMIT) next->phase = WT_JOURNAL_RESTORING;
         ClearRequest(next);
     }
     next->eventCursor = reply->body.page.end;
@@ -354,11 +358,18 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         if ((operation == WT_OP_SUBMIT && next.phase != WT_JOURNAL_SUBMIT_READY)
             || (operation == WT_OP_CANCEL && next.phase != WT_JOURNAL_QUEUED)
             || (operation == WT_OP_ACKNOWLEDGE && next.phase != WT_JOURNAL_APPLIED)) goto blocked;
+        if (operation == WT_OP_ACKNOWLEDGE && next.deliveryKind != snapshot->deliveryKind) goto blocked;
         memcpy(next.lastOperation, next.operation, 16); next.lastOperationCounter = next.operationCounter;
         next.nextCounter = reply.nextCounter; next.eventCursor = reply.body.mutation.event;
         ClearRequest(&next);
         if (operation == WT_OP_ACKNOWLEDGE) Idle(&next);
-        else { next.phase = WT_JOURNAL_QUEUED; memcpy(next.trade, snapshot->trade, 16); }
+        else {
+            next.phase = WT_JOURNAL_QUEUED; memcpy(next.trade, snapshot->trade, 16);
+            if (operation == WT_OP_CANCEL) {
+                memcpy(next.receipt, snapshot->receipt, 16); memcpy(next.incomingDigest, snapshot->receivedDigest, 32);
+                next.deliveryKind = snapshot->deliveryKind;
+            }
+        }
         result = Commit(engine, &next); goto done;
     }
     if (!ContextMatches(engine, &reply, 0) || next.phase != WT_JOURNAL_QUEUED) goto blocked;
@@ -369,7 +380,8 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
             || memcmp(snapshot->offeredDigest, outgoingDigest, 32) != 0
             || snapshot->state == WT_TRADE_NONE || snapshot->state == WT_TRADE_ACKNOWLEDGED) goto blocked;
         if ((!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0)
-            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0)) goto blocked;
+            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0)
+            || (next.deliveryKind && next.deliveryKind != snapshot->deliveryKind)) goto blocked;
         if (operation == WT_OP_STATUS) { result = 0; goto done; }
         if (operation != WT_OP_COLLECT || (snapshot->state != WT_TRADE_MATCHED && snapshot->state != WT_TRADE_RETURN_READY)) goto blocked;
         if (!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0) goto blocked;
