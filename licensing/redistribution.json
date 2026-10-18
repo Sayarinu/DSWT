@@ -214,13 +214,15 @@
       "requirements": "Before GHCR publication inventory exact packages/transitive licenses, retain package copyright files and satisfy applicable source/relinking obligations. Do not copy the game workspace into a public image."
     },
     {
-      "name": "Mbed TLS 4.1 LTS (planned)",
-      "license": "Apache-2.0 OR GPL-2.0-or-later; select Apache-2.0",
+      "name": "Mbed TLS 4.1.1 with TF-PSA-Crypto 1.2.0",
+      "license": "Apache-2.0 (selected from dual Apache-2.0 OR GPL-2.0-or-later)",
       "evidence": [
-        "https://github.com/Mbed-TLS/mbedtls/blob/mbedtls-4.1/LICENSE"
+        "client/tls-dependency.json",
+        "licensing/mbedtls.txt",
+        "https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-4.1.1"
       ],
-      "decision": "not_yet_integrated",
-      "requirements": "Pin the actual version, include Apache and applicable component notices, and review distributed linked client output independently of the source license."
+      "decision": "pinned_external_client_dependency",
+      "requirements": "Preserve upstream source notices and the selected Apache license. Only the bounded profile is linked; no TLS source is vendored. Inventory exact linked objects and transitive notices in the final patch audit before distribution."
     },
     {
       "name": "PostgreSQL/libpq (planned)",

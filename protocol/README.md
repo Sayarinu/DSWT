@@ -183,7 +183,8 @@ canonical outgoing/incoming (136 each), then 44 zero bytes. Locators use kind
 slots 0..29. Images preserve the original encrypted stored game encoding;
 box images zero-pad their 136 bytes to 236. The transport-private section has a u16 format and u16
 length (at most 508) followed by private bytes and zero padding; its seeded format
-is a LUNE-300 prerequisite, not an entropy source. The pending-request section is
+uses format 1 / length 32 for the separately provisioned nonvolatile CSPRNG seed
+(see `client/tests/README.md`). The pending-request section is
 a u16 frame length, six zero bytes, then up to 256 exact request bytes with zero
 padding. Persist enrollment/mutation packets before their first send, and keep
 them unchanged until their final outcome is proven. Escrow/applied generation

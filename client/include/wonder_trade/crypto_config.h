@@ -1,0 +1,40 @@
+#ifndef WONDER_TRADE_CRYPTO_CONFIG_H
+#define WONDER_TRADE_CRYPTO_CONFIG_H
+
+#define PSA_WANT_ALG_ECDH 1
+#define PSA_WANT_ALG_ECDSA 1
+#define PSA_WANT_ALG_CHACHA20_POLY1305 1
+#define PSA_WANT_ALG_SHA_256 1
+#define PSA_WANT_ALG_TLS12_PRF 1
+#define PSA_WANT_ECC_SECP_R1_256 1
+#define PSA_WANT_KEY_TYPE_CHACHA20 1
+#define PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_BASIC 1
+#define PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT 1
+#define PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE 1
+#define MBEDTLS_PSA_CRYPTO_C
+#define MBEDTLS_ASN1_PARSE_C
+#define MBEDTLS_PK_C
+#define MBEDTLS_PK_PARSE_C
+#define MBEDTLS_MD_C
+#define MBEDTLS_HMAC_DRBG_C
+#define MBEDTLS_ENTROPY_NV_SEED
+#define MBEDTLS_ENTROPY_NO_SOURCES_OK
+#define MBEDTLS_PLATFORM_C
+#define MBEDTLS_PLATFORM_MEMORY
+#define MBEDTLS_PLATFORM_NV_SEED_ALT
+#define MBEDTLS_MEMORY_BUFFER_ALLOC_C
+#define MBEDTLS_MEMORY_DEBUG
+/* Collect allocator counters without a DS stdio sink or diagnostic memory dumps. */
+static inline int WtTls_DiscardDiagnostic(const char *format, ...)
+{
+    (void)format;
+    return 0;
+}
+#define MBEDTLS_PLATFORM_FPRINTF_MACRO(stream, ...) WtTls_DiscardDiagnostic(__VA_ARGS__)
+#define MBEDTLS_PSA_KEY_SLOT_COUNT 8
+#define MBEDTLS_MPI_MAX_SIZE 32
+#define MBEDTLS_ECP_WINDOW_SIZE 2
+#define MBEDTLS_ECP_FIXED_POINT_OPTIM 0
+#define MBEDTLS_ECP_NIST_OPTIM
+
+#endif

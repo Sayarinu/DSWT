@@ -1,48 +1,53 @@
 diff --git a/generated/text_banks.txt b/generated/text_banks.txt
-index 0bd549ad..129ac5b9 100644
 --- a/generated/text_banks.txt
 +++ b/generated/text_banks.txt
-@@ -724,0 +725 @@ TEXT_BANK_SPECIES_CATEGORY_JP
+@@ -724,0 +725 @@
 +TEXT_BANK_WONDER_TRADE
 diff --git a/include/constants/heap.h b/include/constants/heap.h
-index 5892d483..f924ccf9 100644
 --- a/include/constants/heap.h
 +++ b/include/constants/heap.h
-@@ -127,0 +128 @@ enum HeapID {
+@@ -127,0 +128 @@
 +    HEAP_ID_WONDER_TRADE,
 diff --git a/include/start_menu.h b/include/start_menu.h
-index f7d9fba4..819e2828 100644
 --- a/include/start_menu.h
 +++ b/include/start_menu.h
 @@ -14 +14 @@
 -#define MAX_START_MENU_OPTIONS 7
 +#define MAX_START_MENU_OPTIONS 8
-@@ -28,0 +29 @@ typedef struct StartMenu {
+@@ -28,0 +29 @@
 +    u8 rowSpacing;
 diff --git a/meson.build b/meson.build
-index 37b6e562..b93ad72c 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -17,0 +18,4 @@ toplevel_includes = include_directories('.')
-+wonder_trade_config = configuration_data()
-+wonder_trade_config.set_quoted('WONDER_TRADE_BASE_URL', get_option('wonder_trade_base_url'))
-+configure_file(output: 'wonder_trade_config.h', configuration: wonder_trade_config)
+@@ -16,0 +17,2 @@
 +
++configure_file(input: get_option('wonder_trade_profile_header'), output: 'wonder_trade_config.h', copy: true)
+@@ -161,0 +164 @@
++subdir('src/wonder_trade')
+@@ -204,0 +208 @@
++        wt_tls_args,
+@@ -209,0 +214 @@
++        wt_tls_includes,
+@@ -223,0 +229 @@
++        wt_tls,
 diff --git a/meson.options b/meson.options
-index 768b89da..4d489073 100644
 --- a/meson.options
 +++ b/meson.options
-@@ -3,0 +4 @@ option('logging_enabled', type: 'boolean', value: false)
-+option('wonder_trade_base_url', type: 'string', value: 'http://10.64.0.1:8080')
+@@ -3,0 +4,2 @@
++option('wonder_trade_tls_dir', type: 'string', value: '')
++option('wonder_trade_profile_header', type: 'string', value: '')
 diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
-index 3d2b3b43..fbe4825d 100644
 --- a/platinum.us/main.lsf.in
 +++ b/platinum.us/main.lsf.in
-@@ -179,0 +180,2 @@ Static main
+@@ -179,0 +180,5 @@
 +	Object src/wonder_trade/application.c
 +	Object src/wonder_trade/network.c
++	Object src/wonder_trade/tls.c
++	Object src/wonder_trade/http.c
++	Object src/wonder_trade/seed.c
+@@ -373,0 +379 @@
++	Library libwonder_trade_tls.a
 diff --git a/res/text/start_menu.json b/res/text/start_menu.json
-index 3e7cdbe1..455891f3 100644
 --- a/res/text/start_menu.json
 +++ b/res/text/start_menu.json
 @@ -50,0 +51,4 @@
@@ -51,92 +56,92 @@ index 3e7cdbe1..455891f3 100644
 +      "id": "StartMenu_Text_WonderTrade",
 +      "en_US": "WONDER TRADE"
 diff --git a/src/start_menu.c b/src/start_menu.c
-index f2d0b06a..e16e7bf3 100644
 --- a/src/start_menu.c
 +++ b/src/start_menu.c
 @@ -26,0 +27 @@
 +#include "wonder_trade/application.h"
-@@ -103,0 +105 @@ enum StartMenuOption {
+@@ -103,0 +105 @@
 +    START_MENU_OPTION_WONDER_TRADE,
-@@ -141 +143 @@ static void StartMenu_AnimateSprites(StartMenu *menu);
+@@ -141 +143 @@
 -static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos);
 +static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos, u8 spacing);
-@@ -180,0 +183,3 @@ static BOOL StartMenu_SelectRetire(FieldTask *fieldTask);
+@@ -180,0 +183,3 @@
 +static BOOL StartMenu_SelectWonderTrade(FieldTask *fieldTask);
 +static BOOL StartMenu_OpenWonderTrade(FieldTask *fieldTask);
 +static BOOL StartMenu_ExitWonderTrade(FieldTask *fieldTask);
-@@ -199,0 +205 @@ static const StartMenuAction sStartMenuActions[] = {
+@@ -199,0 +205 @@
 +    [START_MENU_OPTION_WONDER_TRADE] = { .bankEntry = StartMenu_Text_WonderTrade,    .callback = StartMenu_SelectWonderTrade },
-@@ -206 +212 @@ static const SpriteTemplate sSpriteTemplates[] = {
+@@ -206 +212 @@
 -        .x = 204,
 +        .x = 188,
-@@ -218 +224 @@ static const SpriteTemplate sSpriteTemplates[] = {
+@@ -218 +224 @@
 -        .x = 174,
 +        .x = 142,
-@@ -274,0 +281 @@ BOOL FieldSystem_IsInValidLocation(FieldSystem *fieldSystem)
+@@ -274,0 +281 @@
 +#define HIDE_OPTION_WONDER_TRADE (1 << 9)
-@@ -372 +379 @@ static u32 StartMenu_GetNormalHiddenOptions(FieldSystem *fieldSystem)
+@@ -372 +379 @@
 -        hideFlags |= HIDE_OPTION_POKEMON;
 +        hideFlags |= HIDE_OPTION_POKEMON | HIDE_OPTION_WONDER_TRADE;
-@@ -380 +387 @@ static u32 StartMenu_GetNormalHiddenOptions(FieldSystem *fieldSystem)
+@@ -380 +387 @@
 -        hideFlags |= HIDE_OPTION_POKEMON;
 +        hideFlags |= HIDE_OPTION_POKEMON | HIDE_OPTION_WONDER_TRADE;
-@@ -383,0 +391,5 @@ static u32 StartMenu_GetNormalHiddenOptions(FieldSystem *fieldSystem)
+@@ -381,0 +389,5 @@
++    }
++
 +    if (Party_GetCurrentCount(SaveData_GetParty(fieldSystem->saveData)) == 0
 +        || CommServerClient_IsInitialized() || !FieldSystem_IsInValidLocation(fieldSystem)) {
 +        hideFlags |= HIDE_OPTION_WONDER_TRADE;
-+    }
-+
-@@ -392 +404 @@ static u32 StartMenu_GetSafariHiddenOptions(FieldSystem *fieldSystem)
+@@ -392 +404 @@
 -    return HIDE_OPTION_SAVE | HIDE_OPTION_CHAT;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_SAVE | HIDE_OPTION_CHAT;
-@@ -397 +409 @@ static u32 StartMenu_GetPalParkHiddenOptions(FieldSystem *fieldSystem)
+@@ -397 +409 @@
 -    return HIDE_OPTION_SAVE | HIDE_OPTION_CHAT | HIDE_OPTION_BAG;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_SAVE | HIDE_OPTION_CHAT | HIDE_OPTION_BAG;
-@@ -402 +414 @@ static u32 StartMenu_GetBattleTowerSalonHiddenOptions(FieldSystem *fieldSystem)
+@@ -402 +414 @@
 -    return HIDE_OPTION_POKEDEX | HIDE_OPTION_BAG | HIDE_OPTION_SAVE | HIDE_OPTION_CHAT | HIDE_OPTION_RETIRE;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_POKEDEX | HIDE_OPTION_BAG | HIDE_OPTION_SAVE | HIDE_OPTION_CHAT | HIDE_OPTION_RETIRE;
-@@ -407 +419 @@ static u32 StartMenu_GetUnionRoomHiddenOptions(FieldSystem *fieldSystem)
+@@ -407 +419 @@
 -    return HIDE_OPTION_SAVE | HIDE_OPTION_RETIRE;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_SAVE | HIDE_OPTION_RETIRE;
-@@ -412 +424 @@ static u32 StartMenu_GetColosseumHiddenOptions(FieldSystem *fieldSystem)
+@@ -412 +424 @@
 -    return HIDE_OPTION_SAVE | HIDE_OPTION_POKEDEX | HIDE_OPTION_CHAT | HIDE_OPTION_RETIRE;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_SAVE | HIDE_OPTION_POKEDEX | HIDE_OPTION_CHAT | HIDE_OPTION_RETIRE;
-@@ -527 +539,4 @@ static void StartMenu_InitMenu(FieldTask *fieldTask)
+@@ -527 +539,4 @@
 -    Window_Add(fieldSystem->bgConfig, &menu->primaryWindow, BG_LAYER_MAIN_3, 20, 1, 11, optionCount * 3, 12, BASE_TILE_MESSAGE_WINDOW - 11 * 22);
 +    menu->rowSpacing = optionCount > 7 ? 20 : 24;
 +    u8 width = 15;
 +    u8 height = (optionCount * menu->rowSpacing + 7) / 8;
 +    Window_Add(fieldSystem->bgConfig, &menu->primaryWindow, BG_LAYER_MAIN_3, 16, 1, width, height, 12, BASE_TILE_MESSAGE_WINDOW - width * height);
-@@ -567 +582 @@ static void StartMenu_InitMenu(FieldTask *fieldTask)
+@@ -567 +582 @@
 -    template.lineSpacing = 8;
 +    template.lineSpacing = menu->rowSpacing - 16;
-@@ -596,0 +612 @@ static u32 StartMenu_MakeOptionList(StartMenu *menu, u8 *listOut)
+@@ -596,0 +612 @@
 +    ADD_OPTION_IF_NOT_HIDDEN(START_MENU_OPTION_WONDER_TRADE, HIDE_OPTION_WONDER_TRADE);
-@@ -694 +710 @@ static BOOL StartMenu_Select(FieldTask *fieldTask)
+@@ -694 +710 @@
 -        StartMenu_SetCursorPos(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, menu->cursorPos);
 +        StartMenu_SetCursorPos(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, menu->cursorPos, menu->rowSpacing);
-@@ -755 +771,4 @@ static void StartMenu_InitSprites(StartMenu *menu, u8 *options, u32 optionCount,
+@@ -755 +771,4 @@
 -    StartMenu_SetCursorPos(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, menu->cursorPos);
 +    VecFx32 cursorScale = { FX32_ONE * 4 / 3, FX32_ONE * menu->rowSpacing / 24, FX32_ONE };
 +    Sprite_SetAffineScaleEx(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, &cursorScale, AFFINE_OVERWRITE_MODE_DOUBLE);
 +
 +    StartMenu_SetCursorPos(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, menu->cursorPos, menu->rowSpacing);
-@@ -765 +784 @@ static void StartMenu_InitSprites(StartMenu *menu, u8 *options, u32 optionCount,
+@@ -765,3 +784,5 @@
 -        template.y += 24 * i;
-+        template.y += menu->rowSpacing * i;
-@@ -767 +786,3 @@ static void StartMenu_InitSprites(StartMenu *menu, u8 *options, u32 optionCount,
+-
 -        if (options[i] == START_MENU_OPTION_BAG && gender == GENDER_FEMALE) {
++        template.y += menu->rowSpacing * i;
++
 +        if (options[i] == START_MENU_OPTION_WONDER_TRADE) {
 +            template.animIdx = START_MENU_OPTION_POKEMON * ICON_ANIM_COUNT;
 +        } else if (options[i] == START_MENU_OPTION_BAG && gender == GENDER_FEMALE) {
-@@ -802 +823 @@ static void StartMenu_AnimateSprites(StartMenu *menu)
+@@ -802 +823 @@
 -static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos)
 +static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos, u8 spacing)
-@@ -805 +826 @@ static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos)
+@@ -805 +826 @@
 -    position.y = (20 + 24 * pos) * FX32_ONE;
 +    position.y = (20 + spacing * pos) * FX32_ONE;
-@@ -1777,0 +1799,26 @@ static void StartMenu_Evolve(FieldTask *fieldTask)
+@@ -1777,0 +1799,26 @@
 +
 +static BOOL StartMenu_SelectWonderTrade(FieldTask *fieldTask)
 +{

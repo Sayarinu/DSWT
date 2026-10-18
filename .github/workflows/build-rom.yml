@@ -47,3 +47,20 @@ jobs:
           persist-credentials: false
       - name: Build server and run integration tests
         run: docker build -t platinumwt-server server
+
+  tls-transport:
+    name: Test bounded TLS transport
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build pinned TLS profile and run conformance tests
+        run: |
+          tls_source="$(python3 scripts/prepare-tls.py)"
+          cmake -S client/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
+          cmake --build game/tls-tests --parallel 2
+          ctest --test-dir game/tls-tests --output-on-failure
+          python3 client/tests/test_tls.py game/tls-tests/tls_probe
