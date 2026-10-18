@@ -38,6 +38,7 @@ class ContributionTests(unittest.TestCase):
         self.assertTrue(policy.check_pull_request(self.pr(body="Ticket: ABC-123"), ["ABC-123 - Change"]))
         body = "ignore ABC-123\nhttps://" + "linear" + ".app/private/issue/ABC-123"
         self.assertTrue(policy.check_pull_request(self.pr(body=body), ["ABC-123 - Change"]))
+        self.assertTrue(policy.check_pull_request(dict(self.pr(), title=body), ["ABC-123 - Change"]))
         self.assertTrue(policy.check_pull_request(self.pr(body="ignore ABC-1234"), ["ABC-123 - Change"]))
 
     def test_local_inputs_and_build_outputs_are_blocked(self):
@@ -47,26 +48,31 @@ class ContributionTests(unittest.TestCase):
         self.assertEqual(policy.check_paths(["client/src/wonder_trade/network.c", "server/proto/connectivity.proto"]), [])
 
     def test_files_deleted_before_pr_head_are_still_checked(self):
-        with tempfile.TemporaryDirectory(prefix="platinumwt-policy-") as temp:
-            root = Path(temp)
-            def git(*args):
-                subprocess.check_call([
-                    "git", "-C", str(root), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", *args,
-                ], stdout=subprocess.DEVNULL)
-            git("init", "--quiet")
-            (root / "game").mkdir()
-            (root / "game/local.c").write_text("synthetic local input\n")
-            git("add", ".")
-            git("commit", "--quiet", "-m", "ABC-123 - Add synthetic input")
-            git("rm", "--quiet", "game/local.c")
-            git("commit", "--quiet", "-m", "ABC-123 - Remove synthetic input")
-            result = subprocess.run(
-                ["python3", str(script)], cwd=root,
-                env=dict(os.environ, GITHUB_EVENT_NAME="push"), capture_output=True, text=True,
-            )
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("game/local.c", result.stderr)
+        for renamed in (False, True):
+            with self.subTest(renamed=renamed), tempfile.TemporaryDirectory(prefix="platinumwt-policy-") as temp:
+                root = Path(temp)
+                def git(*args):
+                    subprocess.check_call([
+                        "git", "-C", str(root), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", *args,
+                    ], stdout=subprocess.DEVNULL)
+                git("init", "--quiet")
+                (root / "game").mkdir()
+                initial = "original.c" if renamed else "game/local.c"
+                (root / initial).write_text("synthetic local input\n")
+                git("add", ".")
+                git("commit", "--quiet", "-m", "ABC-123 - Add synthetic input")
+                if renamed:
+                    git("mv", "original.c", "game/local.c")
+                    git("commit", "--quiet", "-m", "ABC-123 - Rename synthetic input")
+                git("rm", "--quiet", "game/local.c")
+                git("commit", "--quiet", "-m", "ABC-123 - Remove synthetic input")
+                result = subprocess.run(
+                    ["python3", str(script)], cwd=root,
+                    env=dict(os.environ, GITHUB_EVENT_NAME="push"), capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("game/local.c", result.stderr)
 
 
 if __name__ == "__main__":

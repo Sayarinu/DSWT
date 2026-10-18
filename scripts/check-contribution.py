@@ -21,7 +21,8 @@ def check_pull_request(pr, subjects):
     body = pr.get("body") or ""
     if not re.search(rf"\b(?:ignore|skip)\s+{re.escape(ticket)}\b", body, re.IGNORECASE):
         errors.append("Use the PR template's tracker automation opt-out with this ticket")
-    if re.search(r"linear\.app(?:[/\s]|$)", body, re.IGNORECASE):
+    metadata = (pr.get("title") or "") + "\n" + body
+    if re.search(r"linear\.app(?:[/\s]|$)", metadata, re.IGNORECASE):
         errors.append("Keep private tracker URLs out of the PR; use the ticket identifier")
     return errors
 
@@ -46,7 +47,7 @@ def check_paths(paths):
 def main():
     paths = subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0")
     historical = subprocess.check_output(
-        ["git", "log", "--all", "--root", "-m", "--format=", "--name-only", "--diff-filter=A", "-z"], text=True
+        ["git", "log", "--all", "--root", "-m", "--no-renames", "--format=", "--name-only", "--diff-filter=A", "-z"], text=True
     ).split("\0")
     errors = check_paths(sorted(set(filter(None, paths + historical))))
     if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
