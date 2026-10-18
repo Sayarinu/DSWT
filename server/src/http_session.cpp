@@ -47,6 +47,7 @@ void HttpSession::Read() {
   Lowest().expires_after(std::chrono::seconds(5));
   std::visit([self = shared_from_this()](auto &stream) {
     http::async_read_some(stream, self->buffer_, self->parser_, [self](beast::error_code error, std::size_t) {
+      if (self->phase_ != Phase::Reading) return;
       if (error) self->Close();
       else if (!self->parser_.is_done()) self->Read();
       else if (self->buffer_.size() != 0) self->Close();
@@ -102,6 +103,7 @@ void HttpSession::Write() {
 }
 
 void HttpSession::Shutdown() {
+  if (phase_ == Phase::Closed) return;
   if (!services_->Tls()) { Close(); return; }
   phase_ = Phase::Closing;
   Lowest().expires_after(std::chrono::seconds(2));
