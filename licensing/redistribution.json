@@ -1,0 +1,277 @@
+{
+  "audited_commit": "65431d39c0e707eef879e2ad929aa6ce2c4eeb75",
+  "audited_date": "2026-10-18",
+  "upstream": {
+    "repository": "https://github.com/pret/pokeplatinum",
+    "revision": "1dc13dcea40c04ab53f1f607de46023dc409ef20",
+    "import_commit": "f4138a0e",
+    "evidence": "game/pokeplatinum/UPSTREAM.md",
+    "top_level_license": "NOASSERTION"
+  },
+  "scope": "MIT covers original project contributions only. Paths describe the original audited snapshot; licensing/migration.json records relocation and filtering. This source-migration inventory does not clear compiled ROMs, patches, dependencies or images.",
+  "project_files": [
+    ".github/workflows/build-rom.yml",
+    "AGENTS.md",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "licensing/redistribution.json",
+    "scripts/build-rom.sh",
+    "server/.dockerignore",
+    "server/.gitignore",
+    "server/CMakeLists.txt",
+    "server/Dockerfile",
+    "server/include/platinumwt/server/config.h",
+    "server/include/platinumwt/server/connectivity_service.h",
+    "server/include/platinumwt/server/http_listener.h",
+    "server/include/platinumwt/server/http_request_handler.h",
+    "server/include/platinumwt/server/http_session.h",
+    "server/include/platinumwt/server/server.h",
+    "server/proto/connectivity.proto",
+    "server/src/config.cpp",
+    "server/src/connectivity_service.cpp",
+    "server/src/http_listener.cpp",
+    "server/src/http_request_handler.cpp",
+    "server/src/http_session.cpp",
+    "server/src/main.cpp",
+    "server/src/server.cpp",
+    "server/tests/CMakeLists.txt",
+    "server/tests/integration/run_tests.py",
+    "server/tests/integration/server_fixture.py",
+    "server/tests/integration/test_backend.py",
+    "server/tests/integration/test_http_gateway.py",
+    "server/tests/integration/test_malformed_requests.py",
+    "server/tests/unit/config_test.cpp",
+    "server/tests/unit/connectivity_service_test.cpp",
+    "server/tests/unit/http_request_handler_test.cpp",
+    "tools/rom-builder/Dockerfile"
+  ],
+  "game_additions": [
+    "game/pokeplatinum/UPSTREAM.md",
+    "game/pokeplatinum/include/wonder_trade/application.h",
+    "game/pokeplatinum/include/wonder_trade/network.h",
+    "game/pokeplatinum/res/text/wonder_trade.json",
+    "game/pokeplatinum/src/wonder_trade/application.c",
+    "game/pokeplatinum/src/wonder_trade/network.c"
+  ],
+  "shared_game_edits": [
+    "game/pokeplatinum/generated/text_banks.txt",
+    "game/pokeplatinum/include/constants/heap.h",
+    "game/pokeplatinum/include/start_menu.h",
+    "game/pokeplatinum/meson.build",
+    "game/pokeplatinum/meson.options",
+    "game/pokeplatinum/platinum.us/main.lsf.in",
+    "game/pokeplatinum/res/field/events/events_global_terminal_1f.json",
+    "game/pokeplatinum/res/field/maps/data/map_data_278.bin",
+    "game/pokeplatinum/res/field/scripts/scripts_global_terminal_1f.s",
+    "game/pokeplatinum/res/text/global_terminal_1f.json",
+    "game/pokeplatinum/res/text/start_menu.json",
+    "game/pokeplatinum/src/start_menu.c"
+  ],
+  "migration_policy": [
+    "Include only the exact project_files and game_additions paths; exclude every unlisted path in every historical tree.",
+    "Relocate original game additions outside the ignored upstream workspace. Recreate shared-file edits with reviewed project changes; do not export complete modified upstream files or binary assets.",
+    "Preserve authors, dates and messages with an original-to-migrated commit map. Keep the complete original repository and PR history private.",
+    "Review newly added paths and copied content before extending the allowlist; a directory name or file extension does not prove ownership.",
+    "Check all reachable public history, tags, source archives, artifact layers and secret exposure before publication."
+  ],
+  "components": [
+    {
+      "name": "Original project server, tests, tooling and guidance",
+      "license": "MIT",
+      "evidence": [
+        "git history for project_files",
+        "LICENSE"
+      ],
+      "decision": "source_allowlist",
+      "requirements": "Keep the MIT notice. Current server tests use synthetic HTTP/configuration data, not game saves or Pokemon payload fixtures."
+    },
+    {
+      "name": "Original Wonder Trade application, networking and text additions",
+      "license": "MIT for original contributions only",
+      "evidence": [
+        "6576a083",
+        "d52b3446",
+        "game/pokeplatinum/UPSTREAM.md"
+      ],
+      "decision": "listed_game_additions_only",
+      "requirements": "Preserve attribution; shared upstream files and compiled game/SDK material are not covered."
+    },
+    {
+      "name": "Imported Platinum source, graphics, maps, text, audio and game data",
+      "license": "NOASSERTION",
+      "evidence": [
+        "game/pokeplatinum/UPSTREAM.md",
+        "https://github.com/pret/pokeplatinum/tree/1dc13dcea40c04ab53f1f607de46023dc409ef20"
+      ],
+      "decision": "exclude",
+      "requirements": "Keep local/private. The snapshot includes thousands of graphics and data files, binary maps, MIDI and WAV assets; a project MIT license does not clear them."
+    },
+    {
+      "name": "Nintendo support libraries fetched by upstream",
+      "license": "NOASSERTION",
+      "evidence": [
+        "game/pokeplatinum/subprojects/NitroSDK.wrap",
+        "game/pokeplatinum/subprojects/NitroWiFi.wrap",
+        "game/pokeplatinum/subprojects/NitroDWC.wrap",
+        "game/pokeplatinum/subprojects/NitroSystem.wrap",
+        "game/pokeplatinum/subprojects/libvct.wrap"
+      ],
+      "decision": "exclude",
+      "requirements": "These wrappers identify pinned external inputs, not redistribution grants. Do not vendor SDK/library source or generated binaries into public source, caches or images."
+    },
+    {
+      "name": "Metroskrew 0.1.3 and relinked compiler binaries",
+      "license": "NOASSERTION",
+      "evidence": [
+        "game/pokeplatinum/Makefile",
+        "game/pokeplatinum/tools/devtools/get_metroskrew.sh",
+        "https://github.com/mid-kid/metroskrew"
+      ],
+      "decision": "exclude",
+      "requirements": "The upstream project identifies a relinked proprietary Metrowerks compiler. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish its binaries."
+    },
+    {
+      "name": "Fetched game build dependencies: RapidJSON 1.1.0, yyjson 0.12.0, metang v0.2.0-python and Meson 1.12.0",
+      "license": "RapidJSON: MIT plus BSD/JSON components; yyjson: MIT; metang and Meson: Apache-2.0",
+      "evidence": [
+        "game/pokeplatinum/subprojects/rapidjson.wrap",
+        "game/pokeplatinum/subprojects/yyjson.wrap",
+        "game/pokeplatinum/subprojects/metang.wrap",
+        "game/pokeplatinum/Makefile",
+        "https://github.com/Tencent/rapidjson/blob/v1.1.0/license.txt",
+        "https://github.com/ibireme/yyjson/blob/0.12.0/LICENSE",
+        "https://github.com/lhearachel/metang/blob/v0.2.0-python/LICENSE",
+        "https://github.com/mesonbuild/meson/blob/1.12.0/COPYING"
+      ],
+      "decision": "external_build_dependencies; exclude_from_migration",
+      "requirements": "Keep these external to project source. Before distributing tools or build images, retain their notices and review included components and Meson wrap patches. RapidJSON's bin/jsonchecker uses the JSON license; exclude it from distributions unless separately reviewed."
+    },
+    {
+      "name": "Bundled upstream tools and embedded libraries",
+      "license": "per-component; not covered by project MIT",
+      "evidence": [
+        "game/pokeplatinum/tools/nitrogfx/LICENSE",
+        "game/pokeplatinum/tools/nitrosfx/LICENSE",
+        "game/pokeplatinum/tools/nitrosfx/cJSON.c",
+        "game/pokeplatinum/tools/nitrobtx/LICENSE",
+        "game/pokeplatinum/tools/nitrobtx/include/color.h",
+        "game/pokeplatinum/tools/nitrobtx/include/external/optparse/UNLICENSE",
+        "game/pokeplatinum/tools/msgenc/LICENSE.pugixml.md"
+      ],
+      "decision": "exclude_from_migration",
+      "requirements": "Retain local notices: nitrogfx and pugixml/cJSON MIT, nitrosfx LGPL 2.1 license document, nitrobtx GPL-3.0-only headers, optparse Unlicense. Do a per-file source/binary obligations review before separately redistributing any tool."
+    },
+    {
+      "name": "gRPC C++ and its transitive components",
+      "license": "Apache-2.0 plus applicable component notices",
+      "evidence": [
+        "server/CMakeLists.txt",
+        "server/Dockerfile",
+        "https://github.com/grpc/grpc/blob/master/LICENSE"
+      ],
+      "decision": "external_dependency",
+      "requirements": "Inventory the exact installed version and transitive components and retain their licenses/notices in released binaries/images; the project MIT license does not replace them."
+    },
+    {
+      "name": "Protocol Buffers",
+      "license": "BSD-3-Clause",
+      "evidence": [
+        "server/CMakeLists.txt",
+        "https://github.com/protocolbuffers/protobuf/blob/v3.21.12/LICENSE"
+      ],
+      "decision": "external_dependency",
+      "requirements": "Retain the runtime license in binary distributions. Generated code ownership follows the input schema; runtime dependencies retain their own terms."
+    },
+    {
+      "name": "Boost",
+      "license": "BSL-1.0",
+      "evidence": [
+        "server/CMakeLists.txt",
+        "https://www.boost.org/LICENSE_1_0.txt"
+      ],
+      "decision": "external_dependency",
+      "requirements": "Retain applicable notices in source redistribution and review the exact packaged binary dependencies."
+    },
+    {
+      "name": "GoogleTest",
+      "license": "BSD-3-Clause",
+      "evidence": [
+        "server/tests/CMakeLists.txt",
+        "https://github.com/google/googletest/blob/main/LICENSE"
+      ],
+      "decision": "build_dependency",
+      "requirements": "Keep notices if redistributed; do not package test/build inputs into the runtime image unnecessarily."
+    },
+    {
+      "name": "Ubuntu base images and build/runtime packages",
+      "license": "per-package",
+      "evidence": [
+        "server/Dockerfile",
+        "tools/rom-builder/Dockerfile"
+      ],
+      "decision": "artifact_review_required",
+      "requirements": "Before GHCR publication inventory exact packages/transitive licenses, retain package copyright files and satisfy applicable source/relinking obligations. Do not copy the game workspace into a public image."
+    },
+    {
+      "name": "Mbed TLS 4.1 LTS (planned)",
+      "license": "Apache-2.0 OR GPL-2.0-or-later; select Apache-2.0",
+      "evidence": [
+        "https://github.com/Mbed-TLS/mbedtls/blob/mbedtls-4.1/LICENSE"
+      ],
+      "decision": "not_yet_integrated",
+      "requirements": "Pin the actual version, include Apache and applicable component notices, and review distributed linked client output independently of the source license."
+    },
+    {
+      "name": "PostgreSQL/libpq (planned)",
+      "license": "PostgreSQL",
+      "evidence": [
+        "https://www.postgresql.org/about/licence/"
+      ],
+      "decision": "not_yet_integrated",
+      "requirements": "Keep upstream notices when adding/distributing the dependency."
+    },
+    {
+      "name": "PKHeX.Core legality service (planned)",
+      "license": "GPL-3.0-or-later",
+      "evidence": [
+        "https://github.com/kwsch/PKHeX/blob/master/PKHeX.Core/PKHeX.Core.csproj",
+        "https://github.com/kwsch/PKHeX/blob/master/LICENSE"
+      ],
+      "decision": "separate_component_review_required",
+      "requirements": "Pin the actual version and review core resources. License the adapter/component appropriately and distribute complete corresponding source, license and notices with its container/binary. Do not relabel or copy PKHeX code into the MIT C++ service; separate processes alone are not a license clearance."
+    }
+  ],
+  "release_allowlist": [
+    "Reviewed checksum-specific BPS patches without ROMs or unrelated original game content",
+    "Supported input/output checksum and compatibility manifests",
+    "Installation, supported-device and recovery instructions",
+    "Project/dependency licenses, required notices and corresponding source"
+  ],
+  "publication_blockers": [
+    {
+      "ticket": "LUNE-297",
+      "requirement": "Only allowlisted project source/history may enter the replacement repository; remove inherited game/SDK/assets and audit every reachable tree."
+    },
+    {
+      "ticket": "LUNE-298",
+      "requirement": "Reconstruct the game locally from pinned upstream input and reviewed changes without publishing imported source, SDKs, proprietary toolchain binaries or private user files; establish permitted toolchain use."
+    },
+    {
+      "ticket": "LUNE-304",
+      "requirement": "Complete PKHeX core/resource and GPL source/notice review when the validator is integrated."
+    },
+    {
+      "ticket": "LUNE-315",
+      "requirement": "Audit exact dependency/base-image versions, transitive licenses, notices and layers before publishing service containers."
+    },
+    {
+      "ticket": "LUNE-291",
+      "requirement": "Inspect the actual compiled patch and literal/embedded content; patch format and input checksums alone do not establish distribution rights."
+    },
+    {
+      "ticket": "LUNE-323",
+      "requirement": "Audit final reachable Git history, archives, containers and release artifacts for rights, secrets, copied/private material and preserved notices before publication."
+    }
+  ]
+}

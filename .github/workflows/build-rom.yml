@@ -1,0 +1,44 @@
+name: Validate source inputs
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-rom:
+    name: Validate source inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Check patch formatting
+        if: github.event_name == 'pull_request'
+        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Validate changed data and build script
+        run: |
+          python3 -m json.tool client/res/text/wonder_trade.json >/dev/null
+          python3 -m json.tool licensing/redistribution.json >/dev/null
+          python3 -m json.tool licensing/migration.json >/dev/null
+          bash -n scripts/build-rom.sh
+
+  connectivity-server:
+    name: Build and test connectivity server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build server and run integration tests
+        run: docker build -t platinumwt-server server

@@ -1,0 +1,11 @@
+/game/
+/.vscode/
+.env
+.env.*
+*.nds
+*.sav
+*.dsv
+*.nef
+bios7.bin
+bios9.bin
+firmware.bin

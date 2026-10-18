@@ -1,0 +1,18 @@
+find_package(GTest REQUIRED)
+include(GoogleTest)
+
+add_executable(platinumwt-unit-tests
+    unit/config_test.cpp
+    unit/connectivity_service_test.cpp
+    unit/http_request_handler_test.cpp)
+target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server GTest::gtest_main)
+target_compile_options(platinumwt-unit-tests PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(platinumwt-unit-tests TEST_PREFIX "unit." PROPERTIES LABELS "unit")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+foreach(module IN ITEMS test_http_gateway test_backend test_malformed_requests)
+    add_test(NAME integration.${module}
+        COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_tests.py"
+            $<TARGET_FILE:platinumwt-server> ${module})
+    set_tests_properties(integration.${module} PROPERTIES TIMEOUT 30 LABELS "integration")
+endforeach()

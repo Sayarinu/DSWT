@@ -1,0 +1,69 @@
+{
+  "key": 54176,
+  "messages": [
+    {
+      "id": "WonderTrade_Text_Title",
+      "en_US": "WONDER TRADE"
+    },
+    {
+      "id": "WonderTrade_Text_Trade",
+      "en_US": "Wonder Trade"
+    },
+    {
+      "id": "WonderTrade_Text_Info",
+      "en_US": "Info"
+    },
+    {
+      "id": "WonderTrade_Text_Exit",
+      "en_US": "Exit"
+    },
+    {
+      "id": "WonderTrade_Text_Retry",
+      "en_US": "Retry"
+    },
+    {
+      "id": "WonderTrade_Text_Back",
+      "en_US": "A / B: Back"
+    },
+    {
+      "id": "WonderTrade_Text_Cancel",
+      "en_US": "B / X: Cancel"
+    },
+    {
+      "id": "WonderTrade_Text_Connecting",
+      "en_US": "Connecting to Wi-Fi...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_Disconnecting",
+      "en_US": "Disconnecting...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_Choose",
+      "en_US": "Choose a party Pokémon\nto test server connectivity."
+    },
+    {
+      "id": "WonderTrade_Text_Pinging",
+      "en_US": "Contacting the Wonder Trade\nserver... Please wait."
+    },
+    {
+      "id": "WonderTrade_Text_ConnectionError",
+      "en_US": "Could not connect to Wi-Fi.\nCheck your WFC settings,\nthen retry."
+    },
+    {
+      "id": "WonderTrade_Text_PingError",
+      "en_US": "Server did not acknowledge.\nCheck the server and connection,\nthen retry."
+    },
+    {
+      "id": "WonderTrade_Text_Ineligible",
+      "en_US": "Eggs and invalid Pokémon\ncannot be selected."
+    },
+    {
+      "id": "WonderTrade_Text_Acknowledged",
+      "en_US": "Server acknowledged!\nYour Pokémon was not traded."
+    },
+    {
+      "id": "WonderTrade_Text_Explanation",
+      "en_US": "Select a Pokémon to test\nthe Wonder Trade connection.\nTrading is not available yet."
+    }
+  ]
+}
