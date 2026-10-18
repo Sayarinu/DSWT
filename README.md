@@ -3,6 +3,9 @@
 This project aims to patch Pokémon Platinum with Wonder Trade support and run a
 custom Wonder Trade server.
 
+The [ROM compatibility and patch contract](patches/README.md) records verified
+inputs and pending targets. No Wonder Trade patch has been released yet.
+
 ## Build the game ROM
 
 Project additions and the integration patch are in [`client`](client). The
