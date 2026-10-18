@@ -2,6 +2,7 @@
 #include "wonder_trade/http.h"
 #include "wonder_trade/seed.h"
 #include "wonder_trade/tls.h"
+#include "wonder_trade/wire.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -14,12 +15,23 @@
 #include <unistd.h>
 #include <mbedtls/memory_buffer_alloc.h>
 #include <mbedtls/platform.h>
+#include <mbedtls/platform_util.h>
+#include <psa/crypto.h>
 
 static WtSeed seedStore;
 static unsigned char arena[WT_TLS_HEAP_SIZE];
 static int seedFd;
 static int writes;
 static int failWrite;
+static WtHttpExchange exchange;
+
+typedef struct HttpContext { WtTls *tls; time_t deadline; } HttpContext;
+
+static int hash(const unsigned char *bytes, size_t size, unsigned char digest[32])
+{
+    size_t length = 0;
+    return psa_hash_compute(PSA_ALG_SHA_256, bytes, size, digest, 32, &length) == PSA_SUCCESS && length == 32 ? 0 : -1;
+}
 
 static int readBank(void *arg, int bank, unsigned char record[4096])
 {
@@ -83,22 +95,45 @@ static int waitAgain(int result, time_t deadline)
     return 1;
 }
 
+static int writeHttp(void *arg, const unsigned char *bytes, size_t size)
+{
+    return WtTls_Write(((HttpContext *)arg)->tls, bytes, size);
+}
+
+static int readHttp(void *arg, unsigned char *bytes, size_t size)
+{
+    return WtTls_Read(((HttpContext *)arg)->tls, bytes, size);
+}
+
+static int waitHttp(void *arg, int result)
+{
+    return waitAgain(result, ((HttpContext *)arg)->deadline);
+}
+
 int main(int argc, char **argv)
 {
     WtTls tls;
-    WtHttpResponse response;
+    WtWireReply reply;
+    HttpContext context = { &tls, 0 };
+    WtHttpIO io = { &context, writeHttp, readHttp, waitHttp };
     struct sockaddr_in address;
     unsigned char pins[2][32];
-    unsigned char input[512];
-    unsigned char body[WT_HTTP_BODY_MAX];
-    const unsigned char request[] = "GET /v1/ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-    size_t sent = 0, peak = 0, blocks = 0;
+    unsigned char request[WT_WIRE_REQUEST_MAX + 1];
+    size_t requestSize = 0, peak = 0, blocks = 0;
     size_t used = 0, live = 0;
     time_t deadline = time(NULL) + 5;
     int socketFd, result, i, p;
 
-    if (argc != 7) {
+    if (argc != 7 && argc != 8) {
         return 2;
+    }
+    if (argc == 8) {
+        FILE *input = fopen(argv[7], "rb");
+        int invalid;
+        if (!input) return 2;
+        requestSize = fread(request, 1, sizeof(request), input);
+        invalid = ferror(input) || requestSize == 0 || requestSize > WT_WIRE_REQUEST_MAX;
+        if (fclose(input) != 0 || invalid || WtWire_CheckRequest(request, requestSize, hash) != 0) return 2;
     }
     for (p = 0; p < 2; p++) {
         if (strlen(argv[3 + p]) != 64) {
@@ -137,29 +172,19 @@ int main(int argc, char **argv)
         } while (waitAgain(result, deadline));
     }
     if (result == 0) {
-        while (sent < sizeof(request) - 1) {
-            result = WtTls_Write(&tls, request + sent, sizeof(request) - 1 - sent);
-            if (result > 0) {
-                sent += (size_t)result;
-            } else if (!waitAgain(result, deadline)) {
-                break;
-            }
+        context.deadline = time(NULL) + 5;
+        result = WtHttp_Exchange(&exchange, io, "localhost", requestSize ? request : NULL, requestSize);
+        if (result == 0 && requestSize) {
+            result = WtWire_Decode(request, requestSize, exchange.body, exchange.bodySize, hash, &reply);
+            if (result == 0) printf("wire_result=%u\n", (unsigned)reply.result);
+        } else if (result == 0) {
+            result = exchange.bodySize == sizeof("PLATINUMWT_ACK_V1\n") - 1
+                && memcmp(exchange.body, "PLATINUMWT_ACK_V1\n", sizeof("PLATINUMWT_ACK_V1\n") - 1) == 0 ? 0 : -1;
         }
-        WtHttp_Init(&response);
-        while (sent == sizeof(request) - 1 && !response.complete) {
-            result = WtTls_Read(&tls, input, sizeof(input));
-            if (result > 0) {
-                result = WtHttp_Feed(&response, input, (size_t)result, body, sizeof(body));
-                if (result < 0) {
-                    break;
-                }
-            } else if (!waitAgain(result, deadline)) {
-                break;
-            }
-        }
-        result = response.complete && response.bodySize == sizeof("PLATINUMWT_ACK_V1\n") - 1
-            && memcmp(body, "PLATINUMWT_ACK_V1\n", sizeof("PLATINUMWT_ACK_V1\n") - 1) == 0 ? 0 : -1;
     }
+    mbedtls_platform_zeroize(request, sizeof(request));
+    mbedtls_platform_zeroize(&exchange, sizeof(exchange));
+    mbedtls_platform_zeroize(&reply, sizeof(reply));
     WtTls_Close(&tls);
     close(socketFd);
     close(seedFd);

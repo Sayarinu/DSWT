@@ -34,10 +34,11 @@ typedef struct WonderTradeTransport {
     WtTls tls;
     WtSeed seed;
     WtFlashAccess flash;
-    WtHttpResponse response;
+    WtHttpExchange http;
+    WtWireReply reply;
+    unsigned char request[WT_WIRE_REQUEST_MAX];
+    size_t requestSize;
     unsigned char arena[WT_TLS_HEAP_SIZE];
-    unsigned char input[512];
-    unsigned char body[WT_HTTP_BODY_MAX];
     unsigned char stack[WT_STACK_SIZE + 8];
     volatile BOOL cancel;
     volatile int phase;
@@ -140,12 +141,26 @@ static BOOL WonderTradeNetwork_Wait(WonderTradeTransport *transport, int result)
     return TRUE;
 }
 
+static int WonderTradeNetwork_WriteHttp(void *arg, const unsigned char *bytes, size_t size)
+{
+    return WtTls_Write(&((WonderTradeTransport *)arg)->tls, bytes, size);
+}
+
+static int WonderTradeNetwork_ReadHttp(void *arg, unsigned char *bytes, size_t size)
+{
+    return WtTls_Read(&((WonderTradeTransport *)arg)->tls, bytes, size);
+}
+
+static int WonderTradeNetwork_WaitHttp(void *arg, int result)
+{
+    return WonderTradeNetwork_Wait(arg, result);
+}
+
 static void WonderTradeNetwork_Worker(void *arg)
 {
     WonderTradeTransport *transport = arg;
     static const unsigned char pins[2][32] = WONDER_TRADE_PINS;
-    static const unsigned char request[] = "GET /v1/ping HTTP/1.1\r\nHost: " WONDER_TRADE_AUTHORITY "\r\nConnection: close\r\n\r\n";
-    size_t sent = 0;
+    WtHttpIO io = { transport, WonderTradeNetwork_WriteHttp, WonderTradeNetwork_ReadHttp, WonderTradeNetwork_WaitHttp };
     size_t blocks;
     size_t peak;
     int result = -1;
@@ -158,6 +173,10 @@ static void WonderTradeNetwork_Worker(void *arg)
     transport->lastProgress = start;
     mbedtls_memory_buffer_alloc_init(transport->arena, sizeof(transport->arena));
     mbedtls_platform_set_nv_seed(WonderTradeNetwork_ReadSeed, WonderTradeNetwork_WriteSeed);
+    if (transport->requestSize && WtWire_CheckRequest(transport->request, transport->requestSize, WtFlash_Hash) != 0) {
+        result = -18;
+        goto done;
+    }
     transport->flash.requireDurability = TRUE;
     result = WtSeed_Open(&transport->seed, &transport->flash,
         WtFlash_ReadBank, WtFlash_WriteBank);
@@ -199,31 +218,21 @@ static void WonderTradeNetwork_Worker(void *arg)
     transport->deadline = OS_GetTick() + OS_SecondsToTicks(15);
     transport->lastProgress = OS_GetTick();
     transport->phase = WT_TRANSPORT_REQUEST;
-    while (sent < sizeof(request) - 1) {
-        result = WtTls_Write(&transport->tls, request + sent, sizeof(request) - 1 - sent);
-        if (result > 0) {
-            sent += result;
-        } else if (!WonderTradeNetwork_Wait(transport, result)) {
-            goto done;
-        }
+    if (WtHttp_Exchange(&transport->http, io, WONDER_TRADE_AUTHORITY,
+            transport->requestSize ? transport->request : NULL, transport->requestSize) != 0) {
+        result = -12;
+        goto done;
     }
-    WtHttp_Init(&transport->response);
-    while (!transport->response.complete) {
-        result = WtTls_Read(&transport->tls, transport->input, sizeof(transport->input));
-        if (result > 0) {
-            if (WtHttp_Feed(&transport->response, transport->input, result,
-                    transport->body, sizeof(transport->body)) < 0) {
-                result = -12;
-                goto done;
-            }
-        } else if (!WonderTradeNetwork_Wait(transport, result)) {
-            result = -13;
-            goto done;
-        }
+    if (transport->requestSize) {
+        result = WtWire_Decode(transport->request, transport->requestSize,
+            transport->http.body, transport->http.bodySize, WtFlash_Hash, &transport->reply) == 0 ? 0 : -18;
+    } else {
+        result = transport->http.bodySize == sizeof(WT_ACK) - 1
+            && memcmp(transport->http.body, WT_ACK, sizeof(WT_ACK) - 1) == 0 ? 0 : -14;
     }
-    result = transport->response.bodySize == sizeof(WT_ACK) - 1
-        && memcmp(transport->body, WT_ACK, sizeof(WT_ACK) - 1) == 0 ? 0 : -14;
 done:
+    mbedtls_platform_zeroize(transport->request, sizeof(transport->request));
+    mbedtls_platform_zeroize(&transport->http, sizeof(transport->http));
     if (tlsStarted) {
         WtTls_Close(&transport->tls);
     }
@@ -261,6 +270,8 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     network->error = transport->result;
     if (network->timedOut) {
         network->error = -6;
+    } else if (transport->cancel) {
+        network->error = -15;
     }
     network->handshakeMs = transport->handshakeMs;
     network->tlsPeakBytes = transport->peakBytes;
@@ -273,6 +284,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     if (unused < 256 || OS_GetStackStatus(&transport->thread) != OS_STACK_NO_ERROR) {
         network->error = -16;
     }
+    if (network->error == 0 && transport->requestSize) network->reply = transport->reply;
     mbedtls_platform_zeroize(transport, sizeof(*transport));
     Heap_Free(transport);
     network->transport = NULL;
@@ -303,24 +315,36 @@ void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID)
     network->deadline = OS_GetTick() + OS_SecondsToTicks(30);
 }
 
-void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
+static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const unsigned char *frame, size_t size)
 {
     WonderTradeTransport *transport;
     void *stackTop;
-    if (network->transport != NULL || !network->accessPointStarted || WCM_GetPhase() != WCM_PHASE_DCF) {
+    mbedtls_platform_zeroize(&network->reply, sizeof(network->reply));
+    /* A rejected call must not orphan or replace an already running worker. */
+    if (network->transport != NULL || network->state == WT_NET_CLOSING || network->state == WT_NET_CLOSED) return FALSE;
+    if (!network->accessPointStarted || WCM_GetPhase() != WCM_PHASE_DCF
+        || ((frame == NULL) != (size == 0)) || size > WT_WIRE_REQUEST_MAX) {
         network->error = -2;
         network->state = WT_NET_ERROR;
-        return;
+        return FALSE;
     }
     transport = Heap_Alloc(network->heapID, sizeof(*transport));
+    if (transport == NULL) {
+        network->error = -1;
+        network->state = WT_NET_ERROR;
+        return FALSE;
+    }
     memset(transport, 0, sizeof(*transport));
+    transport->requestSize = size;
+    if (size) memcpy(transport->request, frame, size);
     network->transport = transport;
+    network->error = 0;
     network->lastUpdate = OS_GetTick();
     network->deadline = network->lastUpdate + OS_SecondsToTicks(30);
     network->requestStarted = FALSE;
     network->timedOut = FALSE;
     network->maxFrameMs = 0;
-    network->state = WT_NET_PINGING;
+    network->state = size ? WT_NET_EXCHANGING : WT_NET_PINGING;
     stackTop = (void *)(((u32)transport->stack + WT_STACK_SIZE) & ~7);
     OS_CreateThread(&transport->thread, WonderTradeNetwork_Worker, transport,
         stackTop, WT_STACK_SIZE - 8, OS_GetThreadPriority(OS_GetCurrentThread()) + 1);
@@ -328,11 +352,27 @@ void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
     memset((void *)(transport->thread.stackTop + sizeof(u32)), 0xa5,
         transport->thread.stackBottom - transport->thread.stackTop - 2 * sizeof(u32));
     OS_WakeupThreadDirect(&transport->thread);
+    return TRUE;
+}
+
+void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
+{
+    WonderTradeNetwork_BeginRequest(network, NULL, 0);
+}
+
+BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size)
+{
+    if (!frame || size == 0) {
+        mbedtls_platform_zeroize(&network->reply, sizeof(network->reply));
+        return FALSE;
+    }
+    return WonderTradeNetwork_BeginRequest(network, frame, size);
 }
 
 void WonderTradeNetwork_Close(WonderTradeNetwork *network)
 {
     WonderTradeTransport *transport = network->transport;
+    mbedtls_platform_zeroize(&network->reply, sizeof(network->reply));
     if (transport != NULL) {
         transport->cancel = TRUE;
     }
@@ -403,8 +443,9 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
             network->state = WT_NET_ERROR;
         }
     }
-    if (network->state == WT_NET_PINGING) {
+    if (network->state == WT_NET_PINGING || network->state == WT_NET_EXCHANGING) {
         WonderTradeTransport *transport = network->transport;
+        BOOL exchanging = transport->requestSize != 0;
         OSTick now = OS_GetTick();
         u32 elapsed = OS_TicksToMilliSeconds(now - network->lastUpdate);
         if (elapsed > network->maxFrameMs) {
@@ -423,7 +464,7 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
             WonderTradeNetwork_Disconnect(network);
         }
         if (WonderTradeNetwork_FinishWorker(network)) {
-            network->state = network->error == 0 ? WT_NET_ACKNOWLEDGED : WT_NET_ERROR;
+            network->state = network->error == 0 ? (exchanging ? WT_NET_RESPONSE : WT_NET_ACKNOWLEDGED) : WT_NET_ERROR;
         }
     }
     if ((network->state == WT_NET_STARTING || network->state == WT_NET_CONNECTING)

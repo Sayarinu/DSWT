@@ -44,7 +44,7 @@ def event(sequence, kind):
                        0 if empty or rejected else kind - 1)
 
 
-def run(binary):
+def messages():
     incoming_digest = hashlib.sha256(pokemon(2)).digest()
     bodies = {
         1: struct.pack("<IB", 0x01020304, 0),
@@ -56,14 +56,6 @@ def run(binary):
     requests = {op: wire.encode_request(wire.Request(
         wire.Operation(op), b"\x11" * 16, ZERO if op == 1 else b"\x22" * 16,
         b"\x33" * 32, 1 if op in (2, 4, 6) else 0, body)) for op, body in bodies.items()}
-    encoded = subprocess.check_output([binary, "requests"], timeout=10)
-    for operation in range(1, 8):
-        size, = struct.unpack_from("<H", encoded)
-        actual, encoded = encoded[2:2 + size], encoded[2 + size:]
-        assert actual == requests[operation], f"Independent request bytes differ for operation {operation}"
-        assert wire.decode_request(actual).operation == operation
-    assert not encoded
-
     page = struct.pack("<BBQ", 8, 0, 8) + b"".join(event(i + 1, kind) for i, kind in enumerate((1, 2, 3, 5, 2, 4, 5, 6)))
     replies = {
         1: (1, 1, b"\x22" * 16),
@@ -74,6 +66,18 @@ def run(binary):
         6: (2, 4, struct.pack("<Q", 4) + snapshot(4, 1, 4)),
         7: (2, 8, page),
     }
+    return requests, replies
+
+
+def run(binary):
+    requests, replies = messages()
+    encoded = subprocess.check_output([binary, "requests"], timeout=10)
+    for operation in range(1, 8):
+        size, = struct.unpack_from("<H", encoded)
+        actual, encoded = encoded[2:2 + size], encoded[2 + size:]
+        assert actual == requests[operation], f"Independent request bytes differ for operation {operation}"
+        assert wire.decode_request(actual).operation == operation
+    assert not encoded
     cases = []
 
     def add(request, reply, expected):
