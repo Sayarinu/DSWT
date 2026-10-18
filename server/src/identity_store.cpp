@@ -1,6 +1,7 @@
 #include "platinumwt/server/identity_store.h"
 
 #include "postgres.h"
+#include "identity_auth.h"
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -86,6 +87,20 @@ bool Matches(const IdentityId &id, const SaveCredential &credential,
 }
 
 } // namespace
+
+bool detail::CredentialMatches(std::string_view save_id,
+                               std::string_view credential,
+                               std::string_view stored_hex) {
+  if (save_id.size() != 16 || credential.size() != 32)
+    return false;
+  IdentityId id{};
+  SaveCredential secret{};
+  std::copy(save_id.begin(), save_id.end(), id.begin());
+  std::copy(credential.begin(), credential.end(), secret.begin());
+  const bool result = Matches(id, secret, stored_hex);
+  OPENSSL_cleanse(secret.data(), secret.size());
+  return result;
+}
 
 struct IdentityStore::Impl {
   detail::Database database;

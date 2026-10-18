@@ -52,6 +52,13 @@ cancellation or acknowledgement. A bounded response may precede the durability
 barrier, but a final success may not. The backup/recovery implementation must
 prove this barrier before launch; an incomplete restore keeps trading paused.
 
+The C++ lifecycle service is implemented but remains unregistered by the runtime.
+Its recovery provider must bind a recoverable WAL prefix to the current cluster
+and timeline; absence fails closed. A bounded in-memory cache ties conservative
+WAL requirements to committed per-identity event highwaters, so retry row locks
+cannot keep moving the target. Restart services after recovery. Real off-site
+attestation and public gateway registration remain separate integration gates.
+
 Retain final operation outcomes, payloads, receipts and contiguous ownership
 events for supported replay, including after acknowledgement. Reconciliation
 pages at most eight events after a per-identity cursor; reject a cursor beyond
