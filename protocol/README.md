@@ -109,6 +109,9 @@ The response header is `WTDS`, version, opcode, body length, request ID (first
 24 bytes), then result u16, reserved-zero u16, current next-counter u64 and durable
 event-highwater u64: 44 bytes total. Result numbers are those in `ResultCode`.
 Only `OK` carries a body. Unauthenticated replies expose zero counters/highwater.
+An HTTP 503 is retryable: keep all escrow/evidence and reuse the exact recorded
+operation ID, counter and bytes after backoff of at least one second with jitter.
+It does not authorize restoring or discarding a Pokémon.
 Errors require HTTP failure handling or this bounded envelope, never HTML parsing
 as a successful exchange. Error codes alone do not prove counter consumption:
 `ILLEGAL_POKEMON` is a recorded rejection; `CONFLICT` may instead be an unrecorded

@@ -1,6 +1,7 @@
 #include "platinumwt/server/identity_service.h"
 
 #include "platinumwt/server/identity_store.h"
+#include "admission.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
@@ -18,8 +19,10 @@ struct CredentialBuffer {
 };
 } // namespace
 
-IdentityService::IdentityService(std::string connection_info, RecoveryBarrier recovery)
-    : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
+IdentityService::IdentityService(std::string connection_info, RecoveryBarrier recovery,
+                                 std::shared_ptr<detail::ServiceAdmission> admission)
+    : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))),
+      admission_(admission ? std::move(admission) : std::make_shared<detail::ServiceAdmission>()) {}
 
 grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::EnrollRequest *request, v1::EnrollReply *reply) {
   reply->Clear();
@@ -29,12 +32,16 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
     return grpc::Status::OK;
   }
   try {
+    auto permit = admission_->Acquire(detail::RequestKind::Enrollment, request->enrollment_id(), request->credential());
+    if (!permit) return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
     IdentityId nonce{};
     CredentialBuffer credential;
     std::copy(request->enrollment_id().begin(), request->enrollment_id().end(), nonce.begin());
     std::copy(request->credential().begin(), request->credential().end(), credential.bytes.begin());
-    IdentityStore store(connection_info_);
-    const auto identity = store.Enroll(nonce, credential.bytes);
+    const auto identity = [&] {
+      IdentityStore store(connection_info_);
+      return store.Enroll(nonce, credential.bytes);
+    }();
     if (!identity) {
       reply->mutable_context()->set_result(v1::RESULT_CONFLICT);
       return grpc::Status::OK;

@@ -1,6 +1,7 @@
 #include "platinumwt/server/trade_service.h"
 
 #include "identity_auth.h"
+#include "admission.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
@@ -20,11 +21,16 @@ using detail::Unsigned;
 constexpr auto kMaximum = std::numeric_limits<std::uint64_t>::max();
 
 template <typename Reply, typename Work>
-grpc::Status Guard(grpc::ServerContext *context, Reply &reply, Work work) {
+grpc::Status Guard(grpc::ServerContext *context, Reply &reply, detail::ServiceAdmission &admission,
+                   detail::RequestKind kind, const v1::Credentials &auth, Work work) {
   reply.Clear();
   if (context && context->IsCancelled())
     return {grpc::StatusCode::CANCELLED, "request cancelled"};
   try {
+    auto permit = auth.save_id().size() == 16 && auth.credential().size() == 32 ?
+        admission.Acquire(kind, auth.save_id(), auth.credential()) : nullptr;
+    if (auth.save_id().size() == 16 && auth.credential().size() == 32 && !permit)
+      return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
     work();
     return grpc::Status::OK;
   } catch (const std::exception &) {
@@ -58,18 +64,22 @@ public:
           detail::RecoveryGate &barrier, bool write)
       : database(info), transaction(database, write ? "BEGIN" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"),
         auth(credentials), recovery(barrier) {
-    auto row = database.Parameters(write ?
-        "SELECT encode(credential_verifier,'hex'),next_counter::text,event_highwater::text "
-        "FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
-        "SELECT encode(credential_verifier,'hex'),next_counter::text,event_highwater::text "
+    // Authenticate before acquiring a write lock: knowing a SaveID alone must
+    // not let a forged credential queue behind or contend with its owner.
+    auto row = database.Parameters("SELECT encode(credential_verifier,'hex') "
         "FROM platinumwt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
     const bool found = PQntuples(row.get()) == 1;
     const bool matches = detail::CredentialMatches(auth.save_id(), auth.credential(),
         found ? PQgetvalue(row.get(), 0, 0) : "");
     authenticated = found && matches;
     if (authenticated) {
-      next = Unsigned(PQgetvalue(row.get(), 0, 1));
-      highwater = Unsigned(PQgetvalue(row.get(), 0, 2));
+      auto progress = database.Parameters(write ?
+          "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
+          "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",
+          {HexBytes(auth.save_id())});
+      if (PQntuples(progress.get()) != 1) throw std::runtime_error("identity disappeared");
+      next = Unsigned(PQgetvalue(progress.get(), 0, 0));
+      highwater = Unsigned(PQgetvalue(progress.get(), 0, 1));
     }
   }
 
@@ -212,13 +222,15 @@ void Allocate(Work work) {
 
 } // namespace
 
-TradeService::TradeService(std::string connection_info, SubmissionValidator validator, RecoveryBarrier recovery)
+TradeService::TradeService(std::string connection_info, SubmissionValidator validator, RecoveryBarrier recovery,
+                           std::shared_ptr<detail::ServiceAdmission> admission)
     : connection_info_(std::move(connection_info)), validator_(std::move(validator)),
-      recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
+      recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))),
+      admission_(admission ? std::move(admission) : std::make_shared<detail::ServiceAdmission>()) {}
 
 grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::SubmitRequest *request,
                                   v1::MutationReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Submission, request->context().auth(), [&] {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context())) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     if (request->escrow_generation() == 0 || !detail::CanonicalShape(request->pokemon().pk4()) ||
@@ -270,7 +282,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
 
 grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::StatusRequest *request,
                                   v1::StatusReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), 16)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
@@ -286,7 +298,7 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
 
 grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::CancelRequest *request,
                                   v1::MutationReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->context().auth(), [&] {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
@@ -322,7 +334,7 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
 
 grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::CollectRequest *request,
                                    v1::CollectReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!detail::NonzeroBytes(request->trade_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     Session session(connection_info_, request->auth(), *recovery_, false);
@@ -344,7 +356,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
 
 grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::AcknowledgeRequest *request,
                                        v1::MutationReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->context().auth(), [&] {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16) ||
         !detail::NonzeroBytes(request->receipt_id(), 16) || request->delivered_sha256().size() != 32 ||
@@ -383,7 +395,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
 
 grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::ReconcileRequest *request,
                                      v1::ReconcileReply *reply) {
-  return Guard(context, *reply, [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     Session session(connection_info_, request->auth(), *recovery_, false);

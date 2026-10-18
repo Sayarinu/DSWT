@@ -2,29 +2,38 @@
 
 #include <boost/asio/post.hpp>
 
+#include <stdexcept>
+
 namespace platinumwt::server {
 
-HttpConnection::HttpConnection(std::shared_ptr<HttpServices> service) : owner(std::move(service)) {}
-HttpConnection::~HttpConnection() { --owner->connections_; }
-
-HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &workers,
+HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
+                           boost::asio::thread_pool &recovery,
                            std::shared_ptr<boost::asio::ssl::context> tls)
-    : handler_(std::move(handler)), workers_(workers), tls_(std::move(tls)) {}
+    : handler_(std::move(handler)), submissions_(submissions), recovery_(recovery), tls_(std::move(tls)) {}
 
-std::unique_ptr<HttpConnection> HttpServices::Connect() {
-  if (connections_.fetch_add(1) >= 1024) { --connections_; return {}; }
-  try { return std::make_unique<HttpConnection>(shared_from_this()); }
-  catch (...) { --connections_; throw; }
+std::unique_ptr<HttpConnection> HttpServices::Connect(const boost::asio::ip::address &peer) {
+  auto network = detail::NetworkKey(peer);
+  auto permit = connections_.Acquire(network);
+  if (!permit) return {};
+  return std::make_unique<HttpConnection>(HttpConnection{std::move(network), std::move(permit)});
 }
 
 bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext> context, bool secure,
-                            std::function<void(Response)> complete) {
-  if (jobs_.fetch_add(1) >= 64) { --jobs_; return false; }
-  try {
-    boost::asio::post(workers_, [self = shared_from_this(), request = std::move(request), context = std::move(context), secure,
-                               complete = std::move(complete)]() mutable {
+                            std::string_view network, std::function<void(Response)> complete) {
+  const auto &body = request.body();
+  // Classification reserves workers, never grants authentication or ownership.
+  const bool recovering = secure && request.target() == "/wt/v1" && body.size() >= 80 &&
+      body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] >= 3 && body[5] <= 7;
+  auto permit = (recovering ? recovery_jobs_ : submission_jobs_).Acquire(network);
+  if (!permit) return false;
+  boost::asio::post(recovering ? recovery_ : submissions_,
+      [self = shared_from_this(), request = std::move(request), context = std::move(context), secure,
+       permit = std::move(permit), complete = std::move(complete)]() mutable {
       Response response;
-      try { response = self->handler_->Handle(request, *context, secure); }
+      try {
+        if (std::chrono::system_clock::now() >= context->deadline()) throw std::runtime_error("request expired in queue");
+        response = self->handler_->Handle(request, *context, secure);
+      }
       catch (const std::exception &) {
         response.version(request.version());
         response.result(boost::beast::http::status::service_unavailable);
@@ -32,10 +41,9 @@ bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext
         response.set(boost::beast::http::field::cache_control, "no-store");
         response.prepare_payload();
       }
-      --self->jobs_;
+      permit.reset();
       complete(std::move(response));
     });
-  } catch (...) { --jobs_; throw; }
   return true;
 }
 

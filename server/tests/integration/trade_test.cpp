@@ -297,6 +297,20 @@ TEST_F(TradeTest, ValidatorOutageDoesNotBlockAcceptedReturnCollectAndAck) {
   EXPECT_EQ(validations.load(), 2);
 }
 
+TEST_F(TradeTest, ForgedCredentialsNeverAcquireOrWaitForAnOwnersWriteLock) {
+  auto forged = Submission(auth);
+  forged.mutable_context()->mutable_auth()->set_credential(std::string(32, '\x52'));
+  detail::Transaction held(database);
+  database.Parameters("SELECT save_id FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
+      {detail::HexBytes(auth.save_id())});
+  const auto before = std::chrono::steady_clock::now();
+  const auto reply = Submit(forged);
+  EXPECT_LT(std::chrono::steady_clock::now() - before, std::chrono::seconds(1));
+  EXPECT_EQ(reply.context().result(), v1::RESULT_UNAUTHENTICATED);
+  EXPECT_EQ(reply.context().next_counter(), 0U);
+  EXPECT_EQ(validations.load(), 0);
+}
+
 TEST_F(TradeTest, ReceiptProofAndTerminalCancellationFailuresAreRetained) {
   const auto submitted = Submit(Submission(auth));
   const auto returned = Cancel(Cancellation(submitted.outcome()));

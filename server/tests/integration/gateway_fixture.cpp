@@ -2,26 +2,45 @@
 // This target is not copied into runtime images and grants no production bypass.
 #include "platinumwt/server/identity_service.h"
 #include "platinumwt/server/trade_service.h"
+#include "admission.h"
 
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
 
 #include <csignal>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 namespace platinumwt::server {
 namespace {
+void Mark(const char *message) {
+  static std::mutex output;
+  std::lock_guard<std::mutex> lock(output);
+  std::cout << message << std::endl;
+}
 
 class TestTrades final : public v1::WonderTrade::Service {
 public:
-  TradeService trades{"", [](const auto &data) {
-    if (data[8] == 2) {
-      std::cout << "TEST_VALIDATION_STARTED" << std::endl;
-      std::this_thread::sleep_for(std::chrono::milliseconds(350));
-    }
-    return LegalityDecision{data[8] == 3 ? LegalityVerdict::Illegal : LegalityVerdict::Legal, {}};
-  }, [](auto) { return true; }};
+  explicit TestTrades(std::shared_ptr<detail::ServiceAdmission> admission, std::string release)
+      : trades("", [release = std::move(release)](const auto &data) {
+          if (data[8] == 2) {
+            Mark("TEST_VALIDATION_STARTED");
+            std::this_thread::sleep_for(std::chrono::milliseconds(350));
+          }
+          if (data[8] == 4 && !release.empty()) {
+            Mark("TEST_VALIDATION_HELD");
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!std::filesystem::exists(release) && std::chrono::steady_clock::now() < deadline)
+              std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          }
+          if (!release.empty() && std::filesystem::exists(release + ".outage"))
+            return LegalityDecision{LegalityVerdict::Unavailable, {}};
+          return LegalityDecision{data[8] == 3 ? LegalityVerdict::Illegal : LegalityVerdict::Legal, {}};
+        }, [](auto) { return true; }, std::move(admission)) {}
+  TradeService trades;
 
   grpc::Status Submit(grpc::ServerContext *context, const v1::SubmitRequest *request, v1::MutationReply *reply) override {
     return trades.Submit(context, request, reply);
@@ -45,9 +64,9 @@ public:
       return trades.Status(context, &changed, reply);
     }
     if (request->trade_id() == std::string(16, '\xF0')) {
-      std::cout << "TEST_WAIT_STARTED" << std::endl;
+      Mark("TEST_WAIT_STARTED");
       while (!context->IsCancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
-      std::cout << "TEST_WAIT_CANCELLED" << std::endl;
+      Mark("TEST_WAIT_CANCELLED");
       return {grpc::StatusCode::CANCELLED, "synthetic cancellation"};
     }
     if (request->trade_id() == std::string(16, '\xF1') || request->trade_id() == std::string(16, '\xF2') ||
@@ -69,13 +88,18 @@ public:
 };
 
 int Run() {
-  IdentityService identities("", [](auto) { return true; });
-  TestTrades trades;
+  auto admission = std::make_shared<detail::ServiceAdmission>();
+  const auto *release = std::getenv("PLATINUMWT_GATEWAY_FIXTURE_RELEASE");
+  IdentityService identities("", [](auto) { return true; }, admission);
+  TestTrades trades(admission, release ? release : "");
   grpc::ServerBuilder builder;
   int port = 0;
   builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(), &port);
   builder.SetMaxReceiveMessageSize(4096);
   builder.SetMaxSendMessageSize(8192); // Deliberately permit the oversized negative fixture.
+  grpc::ResourceQuota resources;
+  resources.SetMaxThreads(32).Resize(16 * 1024 * 1024);
+  builder.SetResourceQuota(resources);
   builder.RegisterService(&identities);
   builder.RegisterService(&trades);
   auto server = builder.BuildAndStart();

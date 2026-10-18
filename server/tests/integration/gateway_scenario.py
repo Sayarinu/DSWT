@@ -50,7 +50,8 @@ class GatewayScenario:
         self.context.maximum_version = ssl.TLSVersion.TLSv1_2
         self.context.set_ciphers('ECDHE-ECDSA-CHACHA20-POLY1305')
         self.credentials = []
-        self.backend = self.start(test.gateway_fixture)
+        self.release = self.directory / 'release-validation'
+        self.backend = self.start(test.gateway_fixture, PLATINUMWT_GATEWAY_FIXTURE_RELEASE=str(self.release))
         backend_port = int(self.mark(self.backend, b'TEST_BACKEND ').split()[-1])
         self.gateway, self.port = self.start_gateway(backend_port)
 
@@ -143,8 +144,8 @@ class GatewayScenario:
         packet = self.frame(2, struct.pack('<Q', 1) + data + hashlib.sha256(data).digest(), client, counter=counter)
         return packet, self.post(packet)
 
-    def raw(self):
-        transport = socket.create_connection(('127.0.0.1', self.port), timeout=7)
+    def raw(self, *, source='127.0.0.1'):
+        transport = socket.create_connection(('127.0.0.1', self.port), timeout=7, source_address=(source, 0))
         return self.context.wrap_socket(transport, server_hostname='localhost')
 
     @staticmethod
@@ -337,6 +338,104 @@ class GatewayScenario:
         finally:
             connection.close()
 
+    def overload_and_recovery(self):
+        # Fill both running and queued submission slots while recovering a
+        # different accepted deposit on workers that submissions cannot use.
+        owners = [self.enroll(os.urandom(32)) for _ in range(9)]
+        packets = [self.frame(2, struct.pack('<Q', 1) + self.pokemon(4) + hashlib.sha256(self.pokemon(4)).digest(),
+                              owner, counter=1) for owner in owners]
+        returning = self.enroll(os.urandom(32))
+        _, offered = self.submit(returning)
+        trade = SNAPSHOT.unpack(offered[3][8:])[0]
+        cancelled = self.post(self.frame(4, trade, returning, counter=2))
+        snapshot = SNAPSHOT.unpack(cancelled[3][8:])
+        original = self.pokemon()
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            active = [executor.submit(self.post, packet) for packet in packets[:4]]
+            queued = []
+            try:
+                for _ in range(4):
+                    self.mark(self.backend, b'TEST_VALIDATION_HELD')
+                for packet in packets[4:8]:
+                    connection = self.raw()
+                    queued.append(connection)
+                    connection.sendall(self.http(packet))
+                before = time.monotonic()
+                collected = self.post(self.frame(5, trade, returning))
+                self.test.assertEqual(collected[3][138:], original)
+                proof = trade + snapshot[7] + hashlib.sha256(original).digest() + hashlib.sha256(b'applied recovery').digest()
+                acknowledgement = self.frame(6, proof + struct.pack('<Q', 9), returning, counter=3)
+                acknowledged = self.post(acknowledgement)
+                self.test.assertEqual(acknowledged[:3], (1, 4, 4))
+                self.test.assertEqual(self.post(self.frame(7, struct.pack('<QB', 0, 8), returning))[0], 1)
+                self.test.assertEqual(self.post(acknowledgement), acknowledged)
+                self.test.assertLess(time.monotonic() - before, 1.5)
+                self.post(packets[8], status=503)
+                self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE operation_id='" +
+                                                   str(uuid.UUID(bytes=packets[8][8:24])) + "'"), '0')
+            finally:
+                self.release.touch()
+                for connection in queued:
+                    connection.close() # Ambiguous responses must be recovered by the same operation.
+            for future in active:
+                self.test.assertEqual(future.result(timeout=5)[0], 1)
+        # Queued calls may have committed or been cancelled. Exact retries yield
+        # one owned offer either way, with no duplicate payload or operation.
+        for packet in packets[4:]:
+            self.test.assertEqual(self.post(packet)[0], 1)
+        for packet, owner in zip(packets, owners):
+            self.test.assertEqual(self.post(packet)[0], 1)
+            self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE save_id='" +
+                                               str(uuid.UUID(bytes=owner.save)) + "'"), '1')
+
+        # A validator outage leaves the mutation unconsumed and accepted assets
+        # collectable; the exact pending packet succeeds after validation returns.
+        outage = self.directory / 'release-validation.outage'
+        outage.touch()
+        try:
+            packet, unavailable = self.submit(owners[8], counter=2) # Existing pending deposit wins capacity before validation.
+            self.test.assertEqual(unavailable[0], 7)
+            waiting = self.enroll(os.urandom(32))
+            packet, unavailable = self.submit(waiting)
+            self.test.assertEqual(unavailable[:3], (11, 1, 1))
+            self.test.assertEqual(self.post(self.frame(5, trade, returning))[3][138:], original)
+            self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE save_id='" +
+                                               str(uuid.UUID(bytes=waiting.save)) + "'"), '0')
+        finally:
+            outage.unlink()
+        self.test.assertEqual(self.post(packet)[0], 1)
+
+        # Database loss produces only a retryable empty HTTP failure. Retained
+        # outcomes and delivered bytes survive an immediate stop/restart.
+        self.test.stop()
+        try:
+            self.post(acknowledgement, status=503)
+            self.post(self.frame(5, trade, returning), status=503)
+        finally:
+            self.test.start()
+        self.test.assertEqual(self.post(acknowledgement), acknowledged)
+        self.test.assertEqual(self.post(self.frame(5, trade, returning))[3][138:], original)
+
+    def connection_exhaustion(self):
+        # No TLS handshake is required to reach the per-network connection cap.
+        # Another direct peer retains capacity under the same global cap.
+        stalled = []
+        try:
+            for _ in range(64):
+                stalled.append(socket.create_connection(('127.0.0.1', self.port), timeout=2))
+            with socket.create_connection(('127.0.0.1', self.port), timeout=2) as extra:
+                self.test.assertEqual(extra.recv(1), b'')
+            with self.raw(source='127.0.0.2') as connection:
+                packet = self.frame(3, ZERO_ID, self.first)
+                connection.sendall(self.http(packet))
+                response = http.client.HTTPResponse(connection)
+                response.begin()
+                self.test.assertEqual(response.status, 200)
+                self.test.assertEqual(RESPONSE.unpack_from(response.read())[5], 1)
+        finally:
+            for connection in stalled:
+                connection.close()
+
 
 def exercise(test):
     scenario = GatewayScenario(test)
@@ -344,3 +443,5 @@ def exercise(test):
     scenario.malformed_and_backend_failures()
     scenario.cancellation_and_timeouts()
     scenario.closed_runtime_and_plaintext()
+    scenario.overload_and_recovery()
+    scenario.connection_exhaustion()

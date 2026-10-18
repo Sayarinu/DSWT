@@ -14,12 +14,12 @@ namespace platinumwt::server {
 
 using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, 136> &)>;
 
-namespace detail { class RecoveryGate; }
+namespace detail { class RecoveryGate; class ServiceAdmission; }
 
 class TradeService final : public v1::WonderTrade::Service {
 public:
   TradeService(std::string connection_info, SubmissionValidator validator,
-                RecoveryBarrier recovery = {});
+                RecoveryBarrier recovery = {}, std::shared_ptr<detail::ServiceAdmission> admission = {});
 
   grpc::Status Submit(grpc::ServerContext *, const v1::SubmitRequest *, v1::MutationReply *) override;
   grpc::Status Status(grpc::ServerContext *, const v1::StatusRequest *, v1::StatusReply *) override;
@@ -32,6 +32,7 @@ private:
   std::string connection_info_;
   SubmissionValidator validator_;
   std::shared_ptr<detail::RecoveryGate> recovery_;
+  std::shared_ptr<detail::ServiceAdmission> admission_;
 };
 
 } // namespace platinumwt::server
