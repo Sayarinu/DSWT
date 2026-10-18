@@ -24,10 +24,19 @@ static int readBank(void *arg, int bank, unsigned char *record)
 
 static int writeBank(void *arg, int bank, const unsigned char *record)
 {
+    int count;
+    int step;
     (void)arg;
     writes++;
-    memset(banks[bank], 255, 4096);
-    memcpy(banks[bank], record, writes == failAt ? (size_t)cutAt : 4096);
+    count = writes == failAt ? cutAt : 4100;
+    /* Power cuts while invalidating the old tag, replacing body, then committing. */
+    for (step = 0; step < count; step++) {
+        if (step < 4) {
+            banks[bank][4092 + step] = 0;
+        } else {
+            banks[bank][step - 4] = record[step - 4];
+        }
+    }
     return writes == failAt ? -1 : 0;
 }
 
@@ -44,9 +53,9 @@ int main(void)
     memcpy(initial + 4092, "CMIT", 4);
     hash(initial);
     memset(seed, 2, 32);
-    /* Cut every byte of either mirror write, including the final commit tag. */
+    /* Cut every byte of either mirror overwrite, including both commit tags. */
     for (failure = 1; failure <= 2; failure++) {
-        for (cut = 0; cut <= 4096; cut++) {
+        for (cut = 0; cut <= 4100; cut++) {
             memcpy(banks[0], initial, 4096);
             memcpy(banks[1], initial, 4096);
             failAt = failure;
@@ -55,14 +64,9 @@ int main(void)
             assert(WtSeed_Open(&store, NULL, readBank, writeBank) == 0);
             assert(WtSeed_Write(&store, seed, 32) == -1);
             assert(WtSeed_Read(&store, output, 32) == -1);
-            if (WtSeed_Open(&recovered, NULL, readBank, writeBank) != 0) {
-                /* A torn unknown header needs inspection; never erase its evidence. */
-                assert(cut > 0 && cut < 8);
-                assert(memcmp(banks[failure == 1 ? 0 : 1] + 4092, "CMIT", 4) == 0);
-                continue;
-            }
+            assert(WtSeed_Open(&recovered, NULL, readBank, writeBank) == 0);
             assert(WtSeed_Read(&recovered, output, 32) == 32);
-            assert(output[0] == (failure == 2 || cut == 4096 ? 2 : 1));
+            assert(output[0] == (failure == 2 || cut == 4100 ? 2 : 1));
             failAt = 0;
             memset(seed, 3, 32);
             assert(WtSeed_Write(&recovered, seed, 32) == 32);
@@ -74,22 +78,22 @@ int main(void)
     memcpy(banks[1], initial, 4096);
     banks[1][1444] = 4;
     hash(banks[1]);
-    assert(WtSeed_Open(&store, NULL, readBank, writeBank) == -1);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memcpy(banks[1], initial, 4096);
     banks[1][1440] = 2;
     hash(banks[1]);
-    assert(WtSeed_Open(&store, NULL, readBank, writeBank) == -1);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memcpy(banks[1], initial, 4096);
     banks[1][1442] = 64;
     hash(banks[1]);
-    assert(WtSeed_Open(&store, NULL, readBank, writeBank) == -1);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memset(banks, 255, sizeof(banks));
-    assert(WtSeed_Open(&store, NULL, readBank, writeBank) == -1);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memcpy(banks[0], initial, 4096);
     memcpy(banks[1], initial, 4096);
     banks[1][6] = 3;
     hash(banks[1]);
-    assert(WtSeed_Open(&store, NULL, readBank, writeBank) == -1);
+    assert(WtSeed_Open(&store, NULL, readBank, writeBank) != 0);
     memcpy(banks[1], initial, 4096);
     memset(banks[0] + 16, 255, 8);
     hash(banks[0]);

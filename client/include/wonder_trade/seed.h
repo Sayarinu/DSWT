@@ -7,7 +7,21 @@
 #define WT_JOURNAL_SIZE 4096
 #define WT_SEED_SIZE 32
 
-/* Backend writes must verify the body, program CMIT last, then read back. */
+enum WtSeedError {
+    WT_SEED_ERROR_HEADER = -30,
+    WT_SEED_ERROR_FORMAT = -31,
+    WT_SEED_ERROR_COMMIT = -32,
+    WT_SEED_ERROR_HASH = -33,
+    WT_SEED_ERROR_DIGEST = -34,
+    WT_SEED_ERROR_RESERVED = -35,
+    WT_SEED_ERROR_EMPTY = -36,
+    WT_SEED_ERROR_UNKNOWN = -37,
+    WT_SEED_ERROR_CONFLICT = -38,
+    WT_SEED_ERROR_READ = -39,
+    WT_SEED_ERROR_SELF_TEST = -40,
+};
+
+/* Backend writes invalidate CMIT, verify the body, write CMIT last, then read back. */
 typedef int (*WtSeedReadBank)(void *arg, int bank, unsigned char record[4096]);
 typedef int (*WtSeedWriteBank)(void *arg, int bank, const unsigned char record[4096]);
 typedef struct WtSeed {

@@ -26,4 +26,5 @@ foreach path : ['library', 'tf-psa-crypto/core', 'tf-psa-crypto/extras',
     endforeach
 endforeach
 wt_tls = static_library('wonder_trade_tls', tls_sources,
-    include_directories: wt_tls_includes, c_args: wt_tls_args + ['-thumb'], native: false)
+    include_directories: wt_tls_includes, c_args: wt_tls_args + ['-thumb'],
+    native: false, pic: false)

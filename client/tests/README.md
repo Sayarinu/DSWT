@@ -67,7 +67,8 @@ The transport section at offset 1440 has format u16=1, length u16=32 and a
 32-byte host CSPRNG seed, with remaining bytes zero. It currently accepts only
 EMPTY journals. Mbed TLS's nonvolatile seed mechanism updates the seed before
 external RNG use. Each update commits a new journal generation to both isolated
-flash sectors, with the hash/body verified and `CMIT` programmed last. A write
+flash sectors using the retail save API: invalidate the old `CMIT`, verify the
+replacement body, then write and verify `CMIT` last. A write
 failure prevents ClientHello; equal conflicting generations, unknown formats or
 missing seeds block the connection. Torn unknown headers require inspection;
 this probe never initializes or overwrites them. The trade journal and boot
