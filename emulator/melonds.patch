@@ -145,6 +145,14 @@
                  auto f = Platform::OpenFile(msg.param.value<QString>().toStdString(), Platform::FileMode::Read);
                  if (!f) break;
  
+@@ -851,6 +852,7 @@
+ 
+ int EmuThread::importSavefile(const QString& filename)
+ {
++    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return 0;
+     sendMessage(msg_EmuReset);
+     sendMessage({.type = msg_ImportSavefile, .param = filename});
+     waitMessage(2);
 --- a/src/frontend/qt_sdl/Platform.cpp
 +++ b/src/frontend/qt_sdl/Platform.cpp
 @@ -420,6 +420,12 @@
