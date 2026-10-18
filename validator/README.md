@@ -1,6 +1,6 @@
 The isolated validator accepts only canonical 136-byte PK4 data and its SHA-256
 through `PokemonLegality.Validate`. It returns a boolean, the exact payload hash,
-policy `pkhex-26.08.26-74b88906-pwt1` and up to eight stable reason codes. It never
+policy `pkhex-26.08.26-74b88906-pwt2` and up to eight stable reason codes. It never
 returns a Pokémon or repairs data. No ROM, save, UI, sprite or package icon is
 included in the build context or runtime.
 
@@ -21,8 +21,9 @@ The whole-container memory/PID limits also cover native memory and runtime
 threads; a managed-heap setting alone is insufficient.
 
 The policy uses the pinned core's Gen IV legality analysis, physical Gen III
-transfer rules and invalid verdicts for missing Gen III/IV RNG frames. Eggs,
-mail, invalid structures/species and forms incompatible with Platinum are
+transfer rules and invalid verdicts for missing Gen III/IV RNG frames. Gen IV
+names use historical-format checks rather than later consoles' word lists.
+Eggs, mail, invalid structures/species and forms incompatible with Platinum are
 rejected. The game must reject attached capsules and protect its last usable
 party Pokémon before escrow: those facts are absent from canonical PK4.
 
