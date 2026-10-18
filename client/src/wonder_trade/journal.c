@@ -273,9 +273,14 @@ static int Follows(const unsigned char *before, const unsigned char *after)
     if (memcmp(before + 112, after + 112, 16) != 0
         && (Get(before + 6, 2) != WT_JOURNAL_APPLYING || Get(after + 6, 2) != WT_JOURNAL_APPLIED
             || memcmp(before + 200, after + 200, 16) != 0 || memcmp(after + 112, after + 200, 16) != 0)) return 0;
-    if (Get(before + 1952, 2) != 0 && Get(after + 1952, 2) != 0
-        && memcmp(before + 1968, after + 1968, 16) == 0
-        && memcmp(before + 1952, after + 1952, 264) != 0) return 0;
+    if (Get(before + 1952, 2) != 0 && memcmp(before + 1952, after + 1952, 264) != 0) {
+        if (Get(after + 1952, 2) != 0 && memcmp(before + 1968, after + 1968, 16) == 0) return 0;
+        if (before[1965] == 1) {
+            if (Get(after + 6, 2) != WT_JOURNAL_IDLE || Zero(after + 32, 16) || Get(after + 1952, 2) != 0) return 0;
+        } else if (Get(after + 144, 8) != Get(before + 2032, 8)
+            || Get(after + 96, 8) <= Get(before + 2032, 8)
+            || memcmp(after + 128, before + 1968, 16) != 0) return 0;
+    }
     if (Get(before + 6, 2) != WT_JOURNAL_EMPTY && (Get(after + 6, 2) == WT_JOURNAL_EMPTY
         || memcmp(before + 48, after + 48, 48) != 0
         || (!Zero(before + 32, 16) && memcmp(before + 32, after + 32, 16) != 0))) return 0;

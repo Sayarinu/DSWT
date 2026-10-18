@@ -358,6 +358,15 @@ static void PendingPacketsAreImmutable(void)
     assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
     assert(WtJournal_Encode(&after, Hash, banks[1]) == 0);
     assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+    memcpy(banks[1], banks[0], 4096); assert(WtJournal_Open(&store, IO()) == 0);
+    after = before; after.generation++; after.operation[0] ^= 1; after.request[8] ^= 1;
+    assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
+    after = before; after.generation++; after.requestLength = 0; memset(after.request, 0, 256);
+    assert(WtJournal_Commit(&store, &after) != 0 && writes == 0);
+    after.phase = WT_JOURNAL_QUEUED; memset(after.trade, 11, 16);
+    after.nextCounter = 2; after.lastOperationCounter = before.operationCounter;
+    memcpy(after.lastOperation, before.operation, 16);
+    assert(WtJournal_Commit(&store, &after) == 0);
 }
 
 int main(void)
