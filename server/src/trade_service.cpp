@@ -121,7 +121,7 @@ public:
       Result(reply, v1::RESULT_UNAUTHENTICATED);
       return false;
     }
-    auto prior = database.Parameters("SELECT encode(request_sha256,'hex'),result," 
+    auto prior = database.Parameters("SELECT encode(request_sha256,'hex'),result,"
         "encode(outcome,'hex') FROM platinumwt.operations WHERE save_id=$1::uuid "
         "AND operation_id=$2::uuid", {HexBytes(auth.save_id()), HexBytes(context.operation_id())});
     if (PQntuples(prior.get()) == 1) {
