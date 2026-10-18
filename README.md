@@ -29,6 +29,26 @@ modified ROM. To reproduce and check the unmodified US baseline, run
 `game/pokeplatinum-pristine/` and runs all upstream pristine checksum checks.
 ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
 
+## Server ledger
+
+`docker build -t platinumwt-server server` builds the C++ server and runs its
+tests, including a disposable PostgreSQL 16 cluster with synthetic data.
+Trading endpoints remain disabled. The image also contains an operator tool:
+
+```sh
+platinumwt-ledger migrate /usr/local/share/platinumwt/migrations
+platinumwt-ledger verify
+```
+
+Configure its database with libpq's `PGSERVICE`/`PGPASSFILE` settings or the
+`PLATINUMWT_DATABASE_URL` environment variable; keep credentials outside Git.
+Run migrations as the database owner. They are transactional, ordered and
+checksum-verified. Replay uses a consistent snapshot and temporary row images;
+it checks live state without repairing it. Audit evidence includes private
+verifiers and payloads and stays in the database/backups; the tool prints counts
+and SQLSTATE errors. Local WAL durability does not satisfy the separate off-site
+recovery barrier required before final trade responses are enabled.
+
 ## Upstream source
 
 The pinned upstream revision is recorded in [`client/UPSTREAM.md`](client/UPSTREAM.md).

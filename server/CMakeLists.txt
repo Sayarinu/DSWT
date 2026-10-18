@@ -9,6 +9,7 @@ find_package(Protobuf REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(Threads REQUIRED)
+find_package(PostgreSQL 16 REQUIRED)
 
 set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
 foreach(schema IN ITEMS connectivity trade)
@@ -42,6 +43,15 @@ target_compile_options(platinumwt_server PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(platinumwt-server src/main.cpp)
 target_link_libraries(platinumwt-server PRIVATE platinumwt_server)
 target_compile_options(platinumwt-server PRIVATE -Wall -Wextra -Wpedantic)
+
+add_library(platinumwt_ledger STATIC src/ledger_store.cpp)
+target_include_directories(platinumwt_ledger PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(platinumwt_ledger PRIVATE PostgreSQL::PostgreSQL)
+target_compile_options(platinumwt_ledger PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(platinumwt-ledger src/ledger_main.cpp)
+target_link_libraries(platinumwt-ledger PRIVATE platinumwt_ledger)
+target_compile_options(platinumwt-ledger PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
 if(BUILD_TESTING)

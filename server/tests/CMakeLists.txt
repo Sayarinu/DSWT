@@ -16,3 +16,8 @@ foreach(module IN ITEMS test_http_gateway test_backend test_malformed_requests)
             $<TARGET_FILE:platinumwt-server> ${module})
     set_tests_properties(integration.${module} PROPERTIES TIMEOUT 30 LABELS "integration")
 endforeach()
+
+add_test(NAME integration.ledger
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_ledger.py"
+        $<TARGET_FILE:platinumwt-ledger> "${CMAKE_CURRENT_SOURCE_DIR}/../migrations")
+set_tests_properties(integration.ledger PROPERTIES TIMEOUT 180 LABELS "integration")

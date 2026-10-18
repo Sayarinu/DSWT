@@ -225,13 +225,15 @@
       "requirements": "Preserve upstream source notices and the selected Apache license. Only the bounded profile is linked; no TLS source is vendored. Inventory exact linked objects and transitive notices in the final patch audit before distribution."
     },
     {
-      "name": "PostgreSQL/libpq (planned)",
+      "name": "PostgreSQL 16 / libpq",
       "license": "PostgreSQL",
       "evidence": [
+        "server/CMakeLists.txt",
+        "server/Dockerfile",
         "https://www.postgresql.org/about/licence/"
       ],
-      "decision": "not_yet_integrated",
-      "requirements": "Keep upstream notices when adding/distributing the dependency."
+      "decision": "external_dependency",
+      "requirements": "Runtime packages retain their PostgreSQL license/copyright files, including /usr/share/doc/libpq5/copyright. Inventory exact package versions and transitive notices before publishing images; no PostgreSQL source is vendored."
     },
     {
       "name": "PKHeX.Core legality service (planned)",
