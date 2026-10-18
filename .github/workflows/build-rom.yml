@@ -64,3 +64,22 @@ jobs:
           cmake --build game/tls-tests --parallel 2
           ctest --test-dir game/tls-tests --output-on-failure
           python3 client/tests/test_tls.py game/tls-tests/tls_probe
+
+  legality-validator:
+    name: Build and test isolated legality validator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build pinned core and run worker and gRPC conformance tests
+        run: |
+          docker build -f validator/Dockerfile --target validator-tests -t platinumwt-validator-tests .
+          docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \
+            --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            platinumwt-validator-tests
+          docker build -f validator/Dockerfile -t platinumwt-validator .
+          docker run --rm --entrypoint sh platinumwt-validator -c \
+            'test -s /usr/share/platinumwt-validator/source/LICENSE && test -s /usr/share/platinumwt-validator/source/validator/LICENSE'

@@ -1,4 +1,5 @@
-The root MIT license covers this project's original contributions. The audited
+The root MIT license covers original contributions outside validator/, whose
+GPL-3.0-or-later license and notices apply separately. The audited
 file inventory and publication allowlist are in licensing/redistribution.json.
 It does not license the imported game, assets, SDKs, compiler binaries, or
 third-party components; their existing rights and notices remain applicable.

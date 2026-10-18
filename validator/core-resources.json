@@ -1,0 +1,43 @@
+{
+  "revision": "74b88906e935e4a52d6d9243b8e373056409c738",
+  "license_declared_by_upstream": "GPL-3.0-or-later",
+  "selected_source": [
+    "PKHeX.Core/",
+    "Directory.Build.props",
+    "LICENSE"
+  ],
+  "excluded": [
+    "UI and drawing projects",
+    "icon.png",
+    "upstream test fixtures",
+    "all other upstream paths"
+  ],
+  "resource_inventory_algorithm": "SHA256 of sorted UTF-8 relative/path + NUL + lowercase file SHA256 + LF for every resource within each category",
+  "resource_categories": [
+    {
+      "directory": "byte",
+      "files": 79,
+      "bytes": 2060952,
+      "inventory_sha256": "ee358f392896a06c5a6c75f785720893b162b1a59618046c4d56b566643a6a76"
+    },
+    {
+      "directory": "legality",
+      "files": 200,
+      "bytes": 4631439,
+      "inventory_sha256": "aa169db7a0fd83edce950236d1c00ecc3d4b4a005c676481f27d0079d1850a1c"
+    },
+    {
+      "directory": "localize",
+      "files": 60,
+      "bytes": 348306,
+      "inventory_sha256": "dae76ab10012bccbb7643d32fba4bd5f7c093a7a640523051ff7ee15ba3841d7"
+    },
+    {
+      "directory": "text",
+      "files": 1392,
+      "bytes": 5143000,
+      "inventory_sha256": "2a5b39700762d963d7432f67c8cc621eb01800b653820204c2968f6440f4b86b"
+    }
+  ],
+  "publication": "Blocked pending final artifact review of embedded game-derived resources and corresponding-source delivery. Upstream license declaration alone is not independent resource-provenance evidence."
+}

@@ -9,6 +9,11 @@ target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server GTest::gte
 target_compile_options(platinumwt-unit-tests PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(platinumwt-unit-tests TEST_PREFIX "unit." PROPERTIES LABELS "unit")
 
+add_executable(platinumwt-legality-tests unit/legality_client_test.cpp)
+target_link_libraries(platinumwt-legality-tests PRIVATE platinumwt_legality platinumwt_protocol GTest::gtest_main)
+target_compile_options(platinumwt-legality-tests PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(platinumwt-legality-tests TEST_PREFIX "unit." PROPERTIES LABELS "unit" TIMEOUT 10)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 foreach(module IN ITEMS test_http_gateway test_backend test_malformed_requests)
     add_test(NAME integration.${module}

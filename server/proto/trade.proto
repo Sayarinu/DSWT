@@ -200,5 +200,6 @@ message ValidateReply {
   bool legal = 1;
   string policy_version = 2; // At most 64 UTF-8 bytes, pins rules/core/resources.
   repeated string reason_codes = 3; // At most 8 codes, each at most 32 ASCII bytes.
+  bytes sha256 = 4; // 32 bytes identifying the exact submitted canonical payload.
   // No repaired or substituted payload: validation cannot mutate an asset.
 }

@@ -236,14 +236,17 @@
       "requirements": "Runtime packages retain their PostgreSQL license/copyright files, including /usr/share/doc/libpq5/copyright. Inventory exact package versions and transitive notices before publishing images; no PostgreSQL source is vendored."
     },
     {
-      "name": "PKHeX.Core legality service (planned)",
-      "license": "GPL-3.0-or-later",
+      "name": "PKHeX.Core 26.08.26 isolated legality service",
+      "license": "GPL-3.0-or-later (adapter and upstream core declaration)",
       "evidence": [
-        "https://github.com/kwsch/PKHeX/blob/master/PKHeX.Core/PKHeX.Core.csproj",
-        "https://github.com/kwsch/PKHeX/blob/master/LICENSE"
+        "validator/upstream.env",
+        "validator/core-resources.json",
+        "validator/LICENSE",
+        "validator/NOTICE",
+        "https://github.com/kwsch/PKHeX/tree/74b88906e935e4a52d6d9243b8e373056409c738"
       ],
-      "decision": "separate_component_review_required",
-      "requirements": "Pin the actual version and review core resources. License the adapter/component appropriately and distribute complete corresponding source, license and notices with its container/binary. Do not relabel or copy PKHeX code into the MIT C++ service; separate processes alone are not a license clearance."
+      "decision": "pinned_source_build; image_publication_still_gated",
+      "requirements": "Build from the hash-verified immutable source archive, selecting only Core plus its build properties and license. Preserve the complete matching core/resources and adapter/build source in every runtime image and supply it with distributions. No UI/artwork/package icon or upstream binary fixtures are selected. Review all 1,731 embedded core tables, text and event resources in the final image rights audit; the upstream GPL declaration alone does not independently prove provenance for game-derived content. Retain gRPC/Protobuf/base-image notices and exact dependency hashes."
     },
     {
       "name": "OpenSSL 3 libcrypto for server identity verification",
@@ -274,7 +277,7 @@
     },
     {
       "ticket": "LUNE-304",
-      "requirement": "Complete PKHeX core/resource and GPL source/notice review when the validator is integrated."
+      "requirement": "Pinned source integration and GPL source/notice handling are implemented by the validator. Final embedded-resource provenance, exact image contents and corresponding-source distribution remain publication gates under LUNE-315 and LUNE-323."
     },
     {
       "ticket": "LUNE-315",
