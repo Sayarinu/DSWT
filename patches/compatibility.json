@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-10-18",
+  "input_format": "Full-size decrypted Nintendo DS ROM",
+  "inventory_source": "https://datomatic.no-intro.org/index.php?page=search&s=28",
+  "variants": [
+    {
+      "id": "us-rev0",
+      "name": "USA Rev 0",
+      "size": 134217728,
+      "sha256": "ede62292aa7f7014ff27d42097e769753380531739889c29b968b67b80f80678",
+      "sha1": "ce81046eda7d232513069519cb2085349896dec7",
+      "crc32": "9253921d",
+      "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3541",
+      "build_revision": 0,
+      "pristine_verified": true,
+      "planned_patch": "platinum-wonder-trade-us-rev0.bps"
+    },
+    {
+      "id": "us-rev1",
+      "name": "USA Rev 1",
+      "size": 134217728,
+      "sha256": "fbce4c4def0c7797f8dd238a3d7a5e48b4a7e3abd86890ac65f6321cef781bdb",
+      "sha1": "0862ec35b24de5c7e2dcb88c9eea0873110d755c",
+      "crc32": "69d628e8",
+      "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=4997",
+      "build_revision": 1,
+      "pristine_verified": true,
+      "planned_patch": "platinum-wonder-trade-us-rev1.bps"
+    },
+    {
+      "id": "europe",
+      "name": "Europe (English)",
+      "size": 134217728,
+      "sha256": "7f703c7911864a6a99e63339c6bb7f7a32aabd5fb7d56a902a949a2d8bfccba4",
+      "sha1": "8d15cd443d4e83e20493c79d3f9dc408c4f51ae0",
+      "crc32": "71aca63a",
+      "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3797",
+      "build_revision": null,
+      "pristine_verified": false,
+      "planned_patch": "platinum-wonder-trade-europe.bps"
+    }
+  ]
+}
