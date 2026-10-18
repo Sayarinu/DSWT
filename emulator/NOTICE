@@ -1,0 +1,10 @@
+melonDS 1.1, revision b86390e4428bf38ce4c1ce0e9ca446d6d25955e8,
+is Copyright 2016-2025 the melonDS team, GPL-3.0-or-later.
+emulator/melonds.patch includes GPL upstream context; GPL-3.0-or-later.txt applies.
+Original persistence/tooling additions retain the project's MIT notice.
+
+The combined emulator is GPL software. Supply the complete matching upstream,
+integration changes, added source and build scripts/licenses with any binary
+distribution, and retain dependency notices/source or relinking obligations.
+prepare-emulator.py preserves upstream notices and includes the MIT license.
+No ROM, BIOS, firmware, save, private seed or key is included in this source.

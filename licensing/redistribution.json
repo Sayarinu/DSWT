@@ -258,6 +258,18 @@
       ],
       "decision": "external_dependency",
       "requirements": "Use the Ubuntu security-maintained libssl package and retain /usr/share/doc/libssl3t64/copyright in runtime images. Review exact versions and transitive notices before publication. No OpenSSL source is vendored."
+    },
+    {
+      "name": "melonDS 1.1 durable Linux emulator integration",
+      "license": "GPL-3.0-or-later for upstream/combined emulator; MIT for original persistence/tool additions",
+      "evidence": [
+        "emulator/upstream.json",
+        "emulator/NOTICE",
+        "emulator/GPL-3.0-or-later.txt",
+        "https://github.com/melonDS-emu/melonDS/tree/b86390e4428bf38ce4c1ce0e9ca446d6d25955e8"
+      ],
+      "decision": "pinned_local_source_build; matching_source_required_for_binary_distribution",
+      "requirements": "Preserve the upstream GPL context/license and all component notices. Supply the complete exact upstream, integration patch, added MIT persistence/capability source, build scripts and project license with any binary distribution; review Qt/SDL/ENet/SLIRP/OpenSSL and packaged dependencies for notices/source or relinking obligations before publication. No ROM, BIOS, firmware, save or private state belongs in source, CI artifacts or container layers."
     }
   ],
   "release_allowlist": [

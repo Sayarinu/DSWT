@@ -42,18 +42,19 @@ tool verifies both retail block types have a valid copy, requires both reserved
 updates an existing seed or transaction record. Region/layout validation is
 limited to the verified US targets.
 
-For melonDS on Linux, configure it to load that exact save path and launch through:
+For melonDS on Linux, build the [durable emulator](../../emulator/README.md),
+configure it to load that exact save path and launch through:
 
 ```sh
-python3 scripts/run-emulator.py --save /path/to/test.sav --target us-rev1 -- /path/to/melonDS /path/to/test.nds
+python3 scripts/run-emulator.py --save /path/to/test.sav --target us-rev1 --store-tool game/save-store-build/platinumwt-save-store -- /path/to/built/melonDS /path/to/test.nds
 ```
 
-The launcher locks the managed save and fsyncs fresh host entropy into both EMPTY
-journals before each process starts. This prevents TLS random-state reuse after
-melonDS's buffered save writes are lost. It refuses enrolled/active/unknown journals;
-trade save durability and abrupt-process recovery must be implemented before
-transfers are enabled. CARD readback alone verifies emulated SRAM, not host-disk
-durability. Keep the original save separate and use this launcher for every run.
+The launcher locks the save, repairs checked host snapshots and commits fresh
+entropy before starting the emulator. Its synchronous host store makes subsequent
+flash writes durable before the DS continues. The game refuses transport without
+that emulator capability. The launch guard still refuses enrolled/active/unknown
+journals until game recovery integration is implemented. Keep the original save
+separate and use this launcher for every run.
 Savestate/rewind restoration and loading a different save inside a running
 emulator are unsupported; exit and launch the intended save through this tool.
 

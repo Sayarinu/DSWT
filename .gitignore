@@ -5,6 +5,9 @@
 *.nds
 *.sav
 *.dsv
+*.platinumwt/
+*.platinumwt.lock
+.platinumwt-pending-*
 *.nef
 bios7.bin
 bios9.bin
