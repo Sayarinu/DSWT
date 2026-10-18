@@ -7,7 +7,8 @@ custom Wonder Trade server.
 
 Project additions and the integration patch are in [`client`](client). The
 upstream game source and build inputs stay in an ignored local workspace.
-Prepare that workspace using [`client/UPSTREAM.md`](client/UPSTREAM.md).
+The build script prepares pinned source automatically; see
+[`client/UPSTREAM.md`](client/UPSTREAM.md) for provenance and local-edit handling.
 
 The simplest build uses Docker and does not install the cross-compiler on your
 host:
@@ -19,9 +20,10 @@ host:
 The output is `game/pokeplatinum/build/pokeplatinum.us.nds`. To select North
 American revision 0, run `ROM_REVISION=0 ./scripts/build-rom.sh`. The image
 definition is in `tools/rom-builder/Dockerfile`. This project script builds the
-ROM without running the upstream pristine-ROM and filesystem checksum checks;
-those checks are available through the upstream `make check` target. The
-upstream build guide also documents native Linux and other platform setups.
+modified ROM. To reproduce and check the unmodified US baseline, run
+`./scripts/build-rom.sh --pristine` (also accepts `ROM_REVISION=0`). This uses
+`game/pokeplatinum-pristine/` and runs all upstream pristine checksum checks.
+ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
 
 ## Upstream source
 
