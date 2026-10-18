@@ -97,6 +97,7 @@ CREATE TABLE platinumwt.trade_events (
     receipt_id platinumwt.id,
     state smallint NOT NULL CHECK (state BETWEEN 0 AND 4),
     PRIMARY KEY (save_id, sequence),
+    UNIQUE (save_id, operation_id),
     UNIQUE (save_id, sequence, operation_id),
     UNIQUE (save_id, sequence, trade_id, state),
     FOREIGN KEY (trade_id, save_id) REFERENCES platinumwt.offers(trade_id, save_id),
@@ -111,6 +112,7 @@ CREATE TABLE platinumwt.trade_events (
     CHECK (kind NOT IN (2, 3, 4, 5) OR asset_id IS NOT NULL),
     CHECK ((kind IN (3, 4, 5)) = (receipt_id IS NOT NULL)),
     CHECK (kind <> 1 OR (sequence = 1 AND asset_id IS NULL AND payload_sha256 IS NULL)),
+    CHECK ((sequence = 1) = (kind = 1)),
     CHECK (kind = 6 OR ((kind = 1) = (trade_id IS NULL))),
     CHECK ((kind = 1 AND state = 0) OR (kind = 2 AND state = 1)
         OR (kind = 3 AND state = 2) OR (kind = 4 AND state = 3)
@@ -157,11 +159,51 @@ LANGUAGE sql IMMUTABLE AS $$
         ELSE image END
 $$;
 
-CREATE FUNCTION platinumwt.guard_columns() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION platinumwt.valid_initial(table_name name, image jsonb) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE table_name
+        WHEN 'save_identities' THEN (image ->> 'next_counter')::numeric = 1
+            AND (image ->> 'event_highwater')::numeric = 0
+        WHEN 'offers' THEN (image ->> 'state')::integer = 1 AND image ->> 'receipt_id' IS NULL
+        WHEN 'ownership' THEN (image ->> 'location')::integer = 1
+        ELSE true END
+$$;
+
+CREATE FUNCTION platinumwt.valid_transition(table_name name, before_image jsonb, after_image jsonb)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+    SELECT platinumwt.fixed_columns(table_name, before_image) = platinumwt.fixed_columns(table_name, after_image)
+        AND CASE table_name
+        WHEN 'save_identities' THEN before_image = after_image OR (
+            (after_image ->> 'next_counter')::numeric = (before_image ->> 'next_counter')::numeric + 1
+                AND after_image ->> 'event_highwater' = before_image ->> 'event_highwater') OR (
+            after_image ->> 'next_counter' = before_image ->> 'next_counter'
+                AND (after_image ->> 'event_highwater')::numeric = (before_image ->> 'event_highwater')::numeric + 1)
+        WHEN 'offers' THEN before_image = after_image OR (
+            ((before_image ->> 'state')::integer = 1 AND (after_image ->> 'state')::integer IN (2, 3)
+                OR (before_image ->> 'state')::integer IN (2, 3) AND (after_image ->> 'state')::integer = 4)
+            AND (after_image ->> 'last_event')::numeric > (before_image ->> 'last_event')::numeric
+            AND (before_image ->> 'receipt_id' IS NULL OR after_image ->> 'receipt_id' = before_image ->> 'receipt_id'))
+        WHEN 'ownership' THEN before_image = after_image OR (
+            ((before_image ->> 'location')::integer = 1 AND (after_image ->> 'location')::integer = 2
+                OR (before_image ->> 'location')::integer = 2 AND (after_image ->> 'location')::integer = 3
+                    AND after_image ->> 'save_id' = before_image ->> 'save_id'
+                    AND after_image ->> 'trade_id' = before_image ->> 'trade_id')
+            AND (after_image ->> 'last_event')::numeric > (before_image ->> 'last_event')::numeric)
+        ELSE false END
+$$;
+
+CREATE FUNCTION platinumwt.guard_initial() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF platinumwt.fixed_columns(TG_TABLE_NAME, to_jsonb(OLD))
-        IS DISTINCT FROM platinumwt.fixed_columns(TG_TABLE_NAME, to_jsonb(NEW)) THEN
-        RAISE EXCEPTION 'immutable columns cannot be changed' USING ERRCODE = '23514';
+    IF platinumwt.valid_initial(TG_TABLE_NAME, to_jsonb(NEW)) IS NOT TRUE THEN
+        RAISE EXCEPTION 'invalid initial state' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE FUNCTION platinumwt.guard_transition() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF platinumwt.valid_transition(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) IS NOT TRUE THEN
+        RAISE EXCEPTION 'invalid state transition' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END $$;
@@ -216,7 +258,7 @@ BEGIN
     IF NEW.operation_id IS NOT NULL THEN
         SELECT * INTO operation FROM platinumwt.operations
             WHERE save_id = NEW.save_id AND operation_id = NEW.operation_id;
-        IF NOT FOUND OR ((NEW.kind = 6) <> (operation.result <> 1))
+        IF NOT FOUND OR operation.event_sequence <> NEW.sequence OR ((NEW.kind = 6) <> (operation.result <> 1))
             OR (NEW.kind <> 6 AND operation.opcode <> CASE NEW.kind WHEN 2 THEN 2 WHEN 4 THEN 4 ELSE 6 END) THEN
             RAISE EXCEPTION 'event operation is inconsistent' USING ERRCODE = '23514';
         END IF;
@@ -351,11 +393,17 @@ CREATE CONSTRAINT TRIGGER applied_receipt AFTER INSERT ON platinumwt.acknowledge
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION platinumwt.check_acknowledgement();
 
 CREATE TRIGGER identity_columns BEFORE UPDATE ON platinumwt.save_identities
-    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_columns();
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_transition();
+CREATE TRIGGER identity_initial BEFORE INSERT ON platinumwt.save_identities
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_initial();
+CREATE TRIGGER offer_initial BEFORE INSERT ON platinumwt.offers
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_initial();
+CREATE TRIGGER ownership_initial BEFORE INSERT ON platinumwt.ownership
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_initial();
 CREATE TRIGGER offer_columns BEFORE UPDATE ON platinumwt.offers
-    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_columns();
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_transition();
 CREATE TRIGGER ownership_columns BEFORE UPDATE ON platinumwt.ownership
-    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_columns();
+    FOR EACH ROW EXECUTE FUNCTION platinumwt.guard_transition();
 
 -- Audit every row change in the same transaction; forbid deletion and truncation.
 DO $$
@@ -407,10 +455,10 @@ BEGIN
         IF previous IS DISTINCT FROM item.before_image THEN
             RAISE EXCEPTION 'replay preimage mismatch' USING ERRCODE = '23514';
         END IF;
-        IF item.before_image IS NOT NULL AND (item.table_name NOT IN ('save_identities', 'offers', 'ownership')
-            OR platinumwt.fixed_columns(item.table_name, item.before_image)
-                IS DISTINCT FROM platinumwt.fixed_columns(item.table_name, item.after_image)) THEN
-            RAISE EXCEPTION 'replay changed immutable evidence' USING ERRCODE = '23514';
+        IF (item.before_image IS NULL AND platinumwt.valid_initial(item.table_name, item.after_image) IS NOT TRUE)
+            OR (item.before_image IS NOT NULL AND platinumwt.valid_transition(
+                item.table_name, item.before_image, item.after_image) IS NOT TRUE) THEN
+            RAISE EXCEPTION 'invalid replay transition' USING ERRCODE = '23514';
         END IF;
         INSERT INTO pg_temp.wt_replay_rows VALUES (item.table_name, item.row_key, item.after_image)
             ON CONFLICT (table_name, row_key) DO UPDATE SET row_data = EXCLUDED.row_data;
@@ -423,6 +471,13 @@ BEGIN
             RAISE EXCEPTION 'replay projection mismatch' USING ERRCODE = '23514';
         END IF;
     END LOOP;
+    IF EXISTS (SELECT 1 FROM platinumwt.save_identities i
+        LEFT JOIN (SELECT save_id, count(*) AS events FROM platinumwt.trade_events GROUP BY save_id) e USING (save_id)
+        LEFT JOIN (SELECT save_id, count(*) AS operations FROM platinumwt.operations GROUP BY save_id) o USING (save_id)
+        WHERE i.event_highwater <> coalesce(e.events, 0) OR i.next_counter <> coalesce(o.operations, 0) + 1) THEN
+        RAISE EXCEPTION 'replay checkpoint history is incomplete' USING ERRCODE = '23514';
+    END IF;
+    PERFORM platinumwt.validate_offer(trade_id) FROM platinumwt.offers;
     DROP TABLE pg_temp.wt_replay_rows;
     RETURN row_count;
 END $$;

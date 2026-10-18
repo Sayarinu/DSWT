@@ -162,6 +162,15 @@ class LedgerTests(unittest.TestCase):
             """
         return text
 
+    def rejection_sql(self, owner=1, sequence=2):
+        return f"""
+            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{identifier(owner + 3000)}',1,2,
+                {blob(bytes([3]) * 32)},8,{sequence},{blob(b'')});
+            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,operation_id,payload_sha256,state)
+                VALUES ('{identifier(owner)}',{sequence},6,'{identifier(owner + 3000)}',
+                    {blob(hashlib.sha256(bytes(136)).digest())},0);
+        """
+
     def test_empty_and_existing_migrations_and_replay(self):
         self.assertIn("events: 0", self.tool("verify"))
         self.enroll()
@@ -291,17 +300,54 @@ class LedgerTests(unittest.TestCase):
 
     def test_rejected_submission_retains_digest_without_creating_asset(self):
         self.enroll()
-        self.sql(f"""BEGIN;
-            INSERT INTO platinumwt.operations VALUES ('{identifier(1)}','{identifier(3001)}',1,2,
-                {blob(bytes([3]) * 32)},8,2,{blob(b'')});
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,operation_id,payload_sha256,state)
-                VALUES ('{identifier(1)}',2,6,'{identifier(3001)}',
-                    {blob(hashlib.sha256(bytes(136)).digest())},0);
-            COMMIT;""")
+        self.sql("BEGIN;" + self.rejection_sql() + "COMMIT;")
         self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "0")
         self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM platinumwt.save_identities"), "2:2")
         self.assertEqual(self.sql("SELECT result FROM platinumwt.operations"), "8")
         self.tool("verify")
+
+    def test_operation_has_exactly_one_outcome_event(self):
+        self.enroll()
+        self.submit()
+        before = self.tool("verify")
+        self.sql("INSERT INTO platinumwt.trade_events SELECT save_id,3,version,kind,trade_id,operation_id,"
+                 "asset_id,payload_sha256,receipt_id,state FROM platinumwt.trade_events WHERE sequence=2", ok=False)
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.trade_events WHERE operation_id IS NOT NULL"), "1")
+        self.assertEqual(self.tool("verify"), before)
+
+    def test_checkpoint_gaps_fail_on_write_and_replay(self):
+        self.sql(f"INSERT INTO platinumwt.save_identities VALUES ('{identifier(1)}','{identifier(101)}',"
+                 f"{blob(bytes(32))},1,5)", ok=False)
+        self.enroll()
+        self.sql("BEGIN; UPDATE platinumwt.save_identities SET event_highwater=5;" +
+                 self.rejection_sql(sequence=6) + "COMMIT;", ok=False)
+        self.tool("verify")
+        # Bypass only the initial guard to prove the replay fold checks bootstrap state independently.
+        self.sql("ALTER TABLE platinumwt.save_identities DISABLE TRIGGER identity_initial")
+        try:
+            self.sql(f"BEGIN; INSERT INTO platinumwt.save_identities VALUES ('{identifier(2)}',"
+                     f"'{identifier(102)}',{blob(bytes(32))},1,5);" + self.rejection_sql(2, 6) + "COMMIT;")
+        finally:
+            self.sql("ALTER TABLE platinumwt.save_identities ENABLE TRIGGER identity_initial")
+        self.assertIn("23514", self.tool("verify", ok=False))
+
+    def test_acknowledged_trade_cannot_regress_on_write_or_replay(self):
+        self.enroll()
+        self.submit()
+        self.cancel()
+        self.acknowledge()
+        before = self.tool("verify")
+        regression = "UPDATE platinumwt.offers SET state=3,last_event=3; " \
+                     "UPDATE platinumwt.ownership SET location=2,last_event=3;"
+        self.sql("BEGIN;" + regression + "COMMIT;", ok=False)
+        self.assertEqual(self.tool("verify"), before)
+        # Retain the audit images while simulating a privileged bypass of write guards.
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 "ALTER TABLE platinumwt.offers ENABLE ALWAYS TRIGGER audit_rows; "
+                 "ALTER TABLE platinumwt.ownership ENABLE ALWAYS TRIGGER audit_rows; " + regression +
+                 "ALTER TABLE platinumwt.offers ENABLE TRIGGER audit_rows; "
+                 "ALTER TABLE platinumwt.ownership ENABLE TRIGGER audit_rows; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_immutable_payload_operations_and_retained_journal(self):
         self.enroll()
