@@ -244,6 +244,17 @@
       ],
       "decision": "separate_component_review_required",
       "requirements": "Pin the actual version and review core resources. License the adapter/component appropriately and distribute complete corresponding source, license and notices with its container/binary. Do not relabel or copy PKHeX code into the MIT C++ service; separate processes alone are not a license clearance."
+    },
+    {
+      "name": "OpenSSL 3 libcrypto for server identity verification",
+      "license": "Apache-2.0",
+      "evidence": [
+        "server/CMakeLists.txt",
+        "server/src/identity_store.cpp",
+        "https://github.com/openssl/openssl/blob/openssl-3.0/LICENSE.txt"
+      ],
+      "decision": "external_dependency",
+      "requirements": "Use the Ubuntu security-maintained libssl package and retain /usr/share/doc/libssl3t64/copyright in runtime images. Review exact versions and transitive notices before publication. No OpenSSL source is vendored."
     }
   ],
   "release_allowlist": [

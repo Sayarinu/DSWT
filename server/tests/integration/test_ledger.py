@@ -468,6 +468,19 @@ class LedgerTests(unittest.TestCase):
             self.start()
             self.assertEqual(self.sql("SHOW fsync"), "on")
 
+    def test_native_identity_contract(self):
+        result = subprocess.run([str(self.identity_binary)], env=dict(self.env, PGDATABASE=self.database),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = self.sql("SELECT replace(save_id::text,'-','')||'|'||encode(credential_verifier,'hex') "
+                        "FROM platinumwt.save_identities").splitlines()
+        for row in rows:
+            save_id, verifier = row.split('|')
+            expected = {hashlib.sha256(b'PlatinumWT save credential v1\x00' + bytes.fromhex(save_id) +
+                                       bytes([value]) * 32).hexdigest() for value in (0x51, 0x52)}
+            self.assertTrue(verifier in expected, "Stored verifier differs from the protocol formula")
+        self.tool("verify")
+
 
 def main():
     if os.geteuid() == 0:
@@ -475,9 +488,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("migrations", type=Path)
+    parser.add_argument("identity_binary", type=Path)
     args = parser.parse_args()
     LedgerTests.binary = args.binary.resolve()
     LedgerTests.migrations = args.migrations.resolve()
+    LedgerTests.identity_binary = args.identity_binary.resolve()
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LedgerTests))
     return 0 if result.wasSuccessful() else 1
 
