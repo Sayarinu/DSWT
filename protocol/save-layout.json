@@ -24,7 +24,8 @@
     {"name": "transaction", "offset": 160, "size": 256},
     {"name": "pokemon_images", "offset": 416, "size": 1024},
     {"name": "transport_private_state", "offset": 1440, "size": 512},
-    {"name": "reserved_zero", "offset": 1952, "size": 2108},
+    {"name": "pending_request", "offset": 1952, "size": 264},
+    {"name": "reserved_zero", "offset": 2216, "size": 1844},
     {"name": "sha256", "offset": 4060, "size": 32},
     {"name": "commit_tag", "offset": 4092, "size": 4}
   ]

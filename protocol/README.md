@@ -7,6 +7,14 @@ authorization and state rules here. Neither registers a trading endpoint. The
 current game still only pings. Transport, database, legality and save fault tests
 must pass first.
 
+The existing X-menu path is DWC access-point setup → GHTTP `/v1/ping` → C++
+gateway → `Connectivity.Ping`. Retail GTS instead uses `network_handler.c`'s
+Post/PostFinish and Get/Return/Delete flows, stores the offered image in
+`GlobalTrade`, and interleaves the network finish step with
+`SAVE_RESULT_PROCEED_FINAL`/`SAVE_RESULT_OK`. Wonder Trade uses the independent
+ownership/journal sequence below; its implementation must leave those GTS paths
+and data intact.
+
 ## Identity and commitment
 
 The client first persists a random 16-byte enrollment ID and independent
@@ -22,7 +30,8 @@ Every mutation has a nonzero 16-byte operation ID and a 64-bit counter, persiste
 before sending. Counters start at 1. Under an identity lock, look up the operation
 before checking the counter. An identical retry returns its recorded outcome;
 changed opcode/counter/body under the same ID conflicts. Hash the canonical
-request including identity/opcode/counter/body, excluding the credential. A
+request as SHA-256 of frame bytes 0..39 followed by bytes 72..end, excluding only
+the credential. A
 recorded acceptance or definitive rejection consumes one counter. Authentication,
 format/rate/capacity failures do not. Reject gaps/stale counters and exhaustion;
 never wrap. One in-flight mutation and one pending trade per identity serialize
@@ -40,8 +49,10 @@ prove this barrier before launch; an incomplete restore keeps trading paused.
 Retain final operation outcomes, payloads, receipts and contiguous ownership
 events for supported replay, including after acknowledgement. Reconciliation
 pages at most eight events after a per-identity cursor; reject a cursor beyond
-the durable highwater. Persist each page before advancing its cursor. A missing
-event, contradictory receipt or unknown state stops trading for reconciliation;
+the durable highwater. Validate a page in RAM, then atomically persist its folded
+state changes and final cursor in one mirrored journal record before discarding
+it; raw pages need not remain in the save. Unrepresentable effects cannot advance
+the cursor. A missing event, contradictory receipt or unknown state stops trading for reconciliation;
 it never authorizes deleting escrow, restoring an offered Pokémon or reenrolling.
 
 ## DS messages
@@ -77,21 +88,30 @@ The response header is `WTDS`, version, opcode, body length, request ID (first
 event-highwater u64: 44 bytes total. Result numbers are those in `ResultCode`.
 Only `OK` carries a body. Unauthenticated replies expose zero counters/highwater.
 Errors require HTTP failure handling or this bounded envelope, never HTML parsing
-as a successful exchange. Transient failure is not a definitive rejection.
+as a successful exchange. Error codes alone do not prove counter consumption:
+`ILLEGAL_POKEMON` is a recorded rejection; `CONFLICT` may instead be an unrecorded
+operation-ID/body conflict. Before retiring a rejected operation or restoring
+escrow, reconcile its durable `REJECTED` event by operation ID and offered digest
+(zero digest for operations without a Pokémon body). Counter-mismatch and other
+transient/protocol errors leave escrow intact. Headers describe live counter and
+highwater values; a retried mutation's outcome/event remain its original result.
 
 | Op | Request body in order | Successful response body |
 | --- | --- | --- |
 | 1 Enroll | Build u32, hint length u8, 0..64 hint bytes | Save ID (16) |
-| 2 Submit | Escrow generation u64, canonical PK4 (136), digest (32) | Outcome event u64, snapshot (137) |
-| 3 Status | Trade ID (16); zero selects current pending trade | Snapshot (137); all zero when none |
-| 4 Cancel | Nonzero trade ID (16) | Outcome event u64, snapshot (137) |
-| 5 Collect | Nonzero trade ID (16) | Snapshot (137), canonical incoming PK4 (136) |
-| 6 Acknowledge | Trade ID, receipt ID, delivered digest, applied digest, journal generation u64 | Outcome event u64, snapshot (137) |
+| 2 Submit | Escrow generation u64, canonical PK4 (136), digest (32) | Outcome event u64, snapshot (138) |
+| 3 Status | Trade ID (16); zero selects current pending trade | Snapshot (138); all zero when none |
+| 4 Cancel | Nonzero trade ID (16) | Outcome event u64, snapshot (138) |
+| 5 Collect | Nonzero trade ID (16) | Snapshot (138), canonical incoming PK4 (136) |
+| 6 Acknowledge | Trade ID, receipt ID, delivered digest, applied digest, journal generation u64 | Outcome event u64, snapshot (138) |
 | 7 Reconcile | After-event u64, limit u8 (1..8) | Count u8, has-more u8 (0/1), page-end u64, events |
 
-A snapshot is trade ID (16), state u8, offered asset ID (16), offered digest (32),
+A snapshot is trade ID (16), state u8, delivery kind u8, offered asset ID (16), offered digest (32),
 received asset ID (16), received digest (32), receipt ID (16), last event u64.
-Absent received fields are zero. An event is sequence u64, kind u8, trade ID,
+Delivery kind is NONE=0 before a receipt, MATCH=1 or RETURN=2 thereafter. It is
+immutable with the receipt and survives live state ACKNOWLEDGED. A return's
+received asset/digest equal its offered asset/digest; never infer delivery kind
+from equal payloads. Absent received fields are zero. An event is sequence u64, kind u8, trade ID,
 operation ID, asset ID, payload digest, receipt ID, state u8: 106 bytes. Fields
 without an applicable object are zero. Sequences are contiguous, increasing and
 at most the highwater; page-end equals the last sequence or the request cursor
@@ -155,15 +175,21 @@ identity holds save ID/credential/enrollment ID (16/32/16); progress holds next
 counter u64, event cursor u64, last applied receipt (16), last finalized operation
 (16), its counter u64 and zero padding (8). Transaction holds operation ID (16),
 counter u64, trade/receipt IDs (16 each), source/destination locators (4 each:
-kind/box/slot/image-length), global/general/box counters (u32 each), inventory
-before/after digests and original/incoming/applied digests (32 each), then 20
+kind/box/slot/image-length), immutable delivery kind u8, global/general/box counters (u32 each), inventory
+before/after digests and original/incoming/applied digests (32 each), then 19
 zero bytes. Images are original/destination-before/destination-after (236 each),
 canonical outgoing/incoming (136 each), then 44 zero bytes. Locators use kind
 0=absent, 1=party, 2=box; zero-based party slots are 0..5, boxes 0..17 and box
 slots 0..29. Images preserve the original encrypted stored game encoding;
 box images zero-pad their 136 bytes to 236. The transport-private section has a u16 format and u16
 length (at most 508) followed by private bytes and zero padding; its seeded format
-is a LUNE-300 prerequisite, not an entropy source. Reserved sections are zero.
+is a LUNE-300 prerequisite, not an entropy source. The pending-request section is
+a u16 frame length, six zero bytes, then up to 256 exact request bytes with zero
+padding. Persist enrollment/mutation packets before their first send, and keep
+them unchanged until their final outcome is proven. Escrow/applied generation
+values inside those packets are independent of later journal generations, seed
+updates and reconciliation. Clear the section only when retiring that operation.
+Reserved sections are zero.
 SHA-256 covers bytes 0..4059; the final four bytes are ASCII `CMIT`, written last.
 
 Phases are EMPTY=0, ENROLLING=1, IDLE=2, ESCROW=3, SUBMIT_READY=4, QUEUED=5,

@@ -49,6 +49,12 @@ enum TradeState {
   TRADE_ACKNOWLEDGED = 4;
 }
 
+enum DeliveryKind {
+  DELIVERY_NONE = 0;
+  DELIVERY_MATCH = 1;
+  DELIVERY_RETURN = 2;
+}
+
 enum EventKind {
   EVENT_UNSPECIFIED = 0;
   EVENT_ENROLLED = 1;
@@ -102,6 +108,7 @@ message TradeSnapshot {
   bytes received_sha256 = 6;
   bytes receipt_id = 7;
   uint64 last_event = 8;
+  DeliveryKind delivery_kind = 9; // Immutable with receipt, including after ACK.
 }
 
 message MutationReply {

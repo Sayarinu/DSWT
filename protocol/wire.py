@@ -35,16 +35,16 @@ class Result(IntEnum):
 REQUEST = struct.Struct("<4sBBH16s16s32sQ")
 RESPONSE = struct.Struct("<4sBBH16sHHQQ")
 MAX_PACKET = 4096
-SNAPSHOT_SIZE = 137
+SNAPSHOT_SIZE = struct.calcsize("<16sBB16s32s16s32s16sQ")
 EVENT_SIZE = 106
 REQUEST_SIZES = {
     Operation.SUBMIT: 176, Operation.STATUS: 16, Operation.CANCEL: 16,
     Operation.COLLECT: 16, Operation.ACKNOWLEDGE: 104, Operation.RECONCILE: 9,
 }
 RESPONSE_SIZES = {
-    Operation.ENROLL: 16, Operation.SUBMIT: 145, Operation.STATUS: SNAPSHOT_SIZE,
-    Operation.CANCEL: 145, Operation.COLLECT: SNAPSHOT_SIZE + 136,
-    Operation.ACKNOWLEDGE: 145,
+    Operation.ENROLL: 16, Operation.SUBMIT: 8 + SNAPSHOT_SIZE, Operation.STATUS: SNAPSHOT_SIZE,
+    Operation.CANCEL: 8 + SNAPSHOT_SIZE, Operation.COLLECT: SNAPSHOT_SIZE + 136,
+    Operation.ACKNOWLEDGE: 8 + SNAPSHOT_SIZE,
 }
 
 

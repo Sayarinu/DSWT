@@ -103,7 +103,7 @@ class WireTests(unittest.TestCase):
             self.assertEqual(wire.decode_response(wire.encode_response(response)), response)
             with self.assertRaises(ValueError):
                 wire.encode_response(wire.Response(wire.Operation.SUBMIT, b"x" * 16, result, 0, 0, b"unexpected"))
-        response = bytearray(wire.encode_response(wire.Response(wire.Operation.STATUS, b"x" * 16, wire.Result.OK, 1, 0, bytes(137))))
+        response = bytearray(wire.encode_response(wire.Response(wire.Operation.STATUS, b"x" * 16, wire.Result.OK, 1, 0, bytes(wire.SNAPSHOT_SIZE))))
         for offset, value in ((24, 0), (24, 255), (26, 1)):
             changed = bytearray(response)
             changed[offset] = value
@@ -145,6 +145,7 @@ class SaveLayoutTests(unittest.TestCase):
         sizes = {section["name"]: section["size"] for section in sections}
         self.assertGreaterEqual(sizes["pokemon_images"], 3 * 236 + 2 * 136)
         self.assertGreaterEqual(sizes["identity"], 16 + 32 + 16)
+        self.assertGreaterEqual(sizes["pending_request"], 8 + wire.REQUEST.size + max(wire.REQUEST_SIZES.values()))
 
 
 if __name__ == "__main__":
