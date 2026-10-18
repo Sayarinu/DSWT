@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "upstream_revision": "1dc13dcea40c04ab53f1f607de46023dc409ef20",
+  "verified_targets": ["us-rev0", "us-rev1"],
+  "flash_size": 524288,
+  "half_size": 262144,
+  "retail_regions_per_half": [
+    {"name": "general", "offset": 0, "size": 53036},
+    {"name": "boxes", "offset": 53036, "size": 74212},
+    {"name": "hall_of_fame", "offset": 131072, "size": 10944},
+    {"name": "battle_hall", "offset": 143360, "size": 2992},
+    {"name": "my_recording", "offset": 147456, "size": 7520},
+    {"name": "download_recording_0", "offset": 155648, "size": 7520},
+    {"name": "download_recording_1", "offset": 163840, "size": 7520},
+    {"name": "download_recording_2", "offset": 172032, "size": 7520}
+  ],
+  "journal_banks": [196608, 458752],
+  "bank_reserved_size": 65536,
+  "record_size": 4096,
+  "record_sections": [
+    {"name": "header", "offset": 0, "size": 32},
+    {"name": "identity", "offset": 32, "size": 64},
+    {"name": "progress", "offset": 96, "size": 64},
+    {"name": "transaction", "offset": 160, "size": 256},
+    {"name": "pokemon_images", "offset": 416, "size": 1024},
+    {"name": "transport_private_state", "offset": 1440, "size": 512},
+    {"name": "reserved_zero", "offset": 1952, "size": 2108},
+    {"name": "sha256", "offset": 4060, "size": 32},
+    {"name": "commit_tag", "offset": 4092, "size": 4}
+  ]
+}

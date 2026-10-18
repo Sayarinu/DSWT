@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package platinumwt.v1;
+
+// Internal contracts, not DS protobuf messages. See protocol/README.md for
+// authentication, exact byte lengths, wire encoding and durable replay rules.
+service SaveIdentity {
+  rpc Enroll(EnrollRequest) returns (EnrollReply);
+}
+
+service WonderTrade {
+  rpc Submit(SubmitRequest) returns (MutationReply);
+  rpc Status(StatusRequest) returns (StatusReply);
+  rpc Cancel(CancelRequest) returns (MutationReply);
+  rpc Collect(CollectRequest) returns (CollectReply);
+  rpc Acknowledge(AcknowledgeRequest) returns (MutationReply);
+  rpc Reconcile(ReconcileRequest) returns (ReconcileReply);
+}
+
+// Worker-only, never routed from the DS gateway. One distinct-owner pair/call.
+service TradeMatcher {
+  rpc MatchNext(MatchRequest) returns (MatchReply);
+}
+
+service PokemonLegality {
+  rpc Validate(ValidateRequest) returns (ValidateReply);
+}
+
+enum ResultCode {
+  RESULT_UNSPECIFIED = 0;
+  RESULT_OK = 1;
+  RESULT_PROCESSING = 2;
+  RESULT_INVALID_REQUEST = 3;
+  RESULT_UNAUTHENTICATED = 4;
+  RESULT_CONFLICT = 5;
+  RESULT_NOT_FOUND = 6;
+  RESULT_CAPACITY = 7;
+  RESULT_ILLEGAL_POKEMON = 8;
+  RESULT_COUNTER_MISMATCH = 9;
+  RESULT_CURSOR_AHEAD = 10;
+  RESULT_UNAVAILABLE = 11;
+}
+
+enum TradeState {
+  TRADE_NONE = 0;
+  TRADE_QUEUED = 1;
+  TRADE_MATCHED = 2;
+  TRADE_RETURN_READY = 3;
+  TRADE_ACKNOWLEDGED = 4;
+}
+
+enum EventKind {
+  EVENT_UNSPECIFIED = 0;
+  EVENT_ENROLLED = 1;
+  EVENT_SUBMITTED = 2;
+  EVENT_MATCHED = 3;
+  EVENT_CANCELLED = 4;
+  EVENT_ACKNOWLEDGED = 5;
+  EVENT_REJECTED = 6;
+}
+
+message Credentials {
+  bytes save_id = 1; // 16 random server-issued bytes; not a device identifier.
+  bytes credential = 2; // 32 independently generated CSPRNG bytes; never logged.
+}
+
+message MutationContext {
+  Credentials auth = 1;
+  bytes operation_id = 2; // 16 bytes persisted before the first attempt.
+  uint64 counter = 3; // Starts at 1; one accepted/rejected mutation consumes it.
+}
+
+message ReplyContext {
+  ResultCode result = 1;
+  uint64 next_counter = 2;
+  uint64 event_highwater = 3; // Per identity, externally durable contiguous prefix.
+}
+
+message CanonicalPokemon {
+  bytes pk4 = 1; // Exactly 136 decrypted, unshuffled bytes; no party suffix.
+  bytes sha256 = 2; // 32 bytes over pk4, independently checked by each receiver.
+}
+
+message EnrollRequest {
+  bytes enrollment_id = 1; // 16 random bytes durably saved before enrollment.
+  bytes credential = 2; // 32 CSPRNG bytes already durable on the client.
+  uint32 client_build = 3;
+  bytes hints = 4; // At most 64 optional bytes; never authentication evidence.
+}
+
+message EnrollReply {
+  ReplyContext context = 1;
+  bytes save_id = 2;
+}
+
+message TradeSnapshot {
+  bytes trade_id = 1;
+  TradeState state = 2;
+  bytes offered_asset_id = 3;
+  bytes offered_sha256 = 4;
+  bytes received_asset_id = 5;
+  bytes received_sha256 = 6;
+  bytes receipt_id = 7;
+  uint64 last_event = 8;
+}
+
+message MutationReply {
+  ReplyContext context = 1;
+  uint64 operation_event = 2; // Immutable final outcome's event, not live status.
+  TradeSnapshot outcome = 3;
+}
+
+message SubmitRequest {
+  MutationContext context = 1;
+  uint64 escrow_generation = 2;
+  CanonicalPokemon pokemon = 3;
+}
+
+message StatusRequest {
+  Credentials auth = 1;
+  bytes trade_id = 2; // Empty means the current pending trade, or TRADE_NONE.
+}
+
+message StatusReply {
+  ReplyContext context = 1;
+  TradeSnapshot trade = 2;
+}
+
+message CancelRequest {
+  MutationContext context = 1;
+  bytes trade_id = 2;
+}
+
+message CollectRequest {
+  Credentials auth = 1;
+  bytes trade_id = 2;
+}
+
+message CollectReply {
+  ReplyContext context = 1;
+  TradeSnapshot trade = 2;
+  CanonicalPokemon pokemon = 3;
+}
+
+message AcknowledgeRequest {
+  MutationContext context = 1;
+  bytes trade_id = 2;
+  bytes receipt_id = 3;
+  bytes delivered_sha256 = 4;
+  bytes applied_sha256 = 5; // Canonical bytes after legitimate local trade effects.
+  uint64 applied_generation = 6;
+}
+
+message ReconcileRequest {
+  Credentials auth = 1;
+  uint64 after_event = 2;
+  uint32 limit = 3; // 1..8; no unbounded stream.
+}
+
+message TradeEvent {
+  uint64 sequence = 1;
+  EventKind kind = 2;
+  bytes trade_id = 3;
+  bytes operation_id = 4;
+  bytes asset_id = 5;
+  bytes payload_sha256 = 6;
+  bytes receipt_id = 7;
+  TradeState state = 8;
+}
+
+message ReconcileReply {
+  ReplyContext context = 1;
+  repeated TradeEvent events = 2; // At most 8, contiguous and increasing.
+  bool has_more = 3;
+  uint64 page_end = 4;
+}
+
+message MatchRequest {
+  bytes operation_id = 1; // 16 bytes; retry returns the recorded pair or no-pair.
+}
+
+message MatchReply {
+  ResultCode result = 1;
+  bytes first_trade_id = 2;
+  bytes second_trade_id = 3;
+}
+
+message ValidateRequest {
+  CanonicalPokemon pokemon = 1;
+}
+
+message ValidateReply {
+  bool legal = 1;
+  string policy_version = 2; // At most 64 UTF-8 bytes, pins rules/core/resources.
+  repeated string reason_codes = 3; // At most 8 codes, each at most 32 ASCII bytes.
+  // No repaired or substituted payload: validation cannot mutate an asset.
+}

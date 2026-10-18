@@ -11,17 +11,20 @@ find_package(Boost REQUIRED COMPONENTS system)
 find_package(Threads REQUIRED)
 
 set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
-add_custom_command(
-    OUTPUT connectivity.pb.cc connectivity.pb.h connectivity.grpc.pb.cc connectivity.grpc.pb.h
-    COMMAND protobuf::protoc
-    ARGS --proto_path=${PROTO_DIR} --proto_path=${Protobuf_INCLUDE_DIRS}
-         --cpp_out=${CMAKE_CURRENT_BINARY_DIR} --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
-         --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-         ${PROTO_DIR}/connectivity.proto
-    DEPENDS proto/connectivity.proto
-    VERBATIM)
+foreach(schema IN ITEMS connectivity trade)
+    add_custom_command(
+        OUTPUT ${schema}.pb.cc ${schema}.pb.h ${schema}.grpc.pb.cc ${schema}.grpc.pb.h
+        COMMAND protobuf::protoc
+        ARGS --proto_path=${PROTO_DIR} --proto_path=${Protobuf_INCLUDE_DIRS}
+             --cpp_out=${CMAKE_CURRENT_BINARY_DIR} --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
+             --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+             ${PROTO_DIR}/${schema}.proto
+        DEPENDS proto/${schema}.proto
+        VERBATIM)
+endforeach()
 
-add_library(platinumwt_protocol STATIC connectivity.pb.cc connectivity.grpc.pb.cc)
+add_library(platinumwt_protocol STATIC
+    connectivity.pb.cc connectivity.grpc.pb.cc trade.pb.cc trade.grpc.pb.cc)
 target_include_directories(platinumwt_protocol PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(platinumwt_protocol PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 
