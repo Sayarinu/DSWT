@@ -139,9 +139,7 @@ static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
             || !Zero(entry->destinationAfter + 136, 100)))) return 0;
     if ((!Zero(entry->originalDigest, 32) && (entry->source.kind == 0
             || !DigestMatches(entry->original, entry->source.length, entry->originalDigest, hash)))
-        || (!Zero(entry->incomingDigest, 32) && !DigestMatches(entry->incoming, 136, entry->incomingDigest, hash))
-        || (!Zero(entry->appliedDigest, 32) && (entry->destination.kind == 0
-            || !DigestMatches(entry->destinationAfter, entry->destination.length, entry->appliedDigest, hash)))) return 0;
+        || (!Zero(entry->incomingDigest, 32) && !DigestMatches(entry->incoming, 136, entry->incomingDigest, hash))) return 0;
     return 1;
 }
 

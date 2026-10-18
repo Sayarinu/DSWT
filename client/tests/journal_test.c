@@ -191,7 +191,7 @@ static void ReceiptImagesAndPacketBinding(void)
     memset(entry.destinationBefore, 13, 136); memset(entry.destinationAfter, 14, 136);
     memset(entry.incoming, 15, 136);
     assert(Hash(entry.incoming, 136, entry.incomingDigest) == 0);
-    assert(Hash(entry.destinationAfter, entry.destination.length, entry.appliedDigest) == 0);
+    memset(entry.appliedDigest, 17, 32); /* Canonical conversion belongs to the game adapter. */
     entry.globalCounter = 0x12345678; entry.generalCounter = 0xffffffff; entry.boxCounter = 0x87654321;
     assert(WtJournal_Encode(&entry, Hash, record) == 0);
     assert(record[225] == 0x78 && record[228] == 0x12 && record[233] == 0x21 && record[236] == 0x87);
@@ -201,7 +201,7 @@ static void ReceiptImagesAndPacketBinding(void)
     assert(memcmp(decoded.destinationAfter, entry.destinationAfter, 236) == 0);
     assert(memcmp(decoded.receipt, entry.receipt, 16) == 0 && decoded.generalCounter == 0xffffffff);
     {
-        const int offsets[] = { 416, 1260, 888, 301, 333, 365, 112 };
+        const int offsets[] = { 416, 1260, 301, 333, 112 };
         size_t i;
         WtJournal store;
         for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
@@ -329,7 +329,7 @@ static void DeliveryByteCuts(void)
     before.phase = WT_JOURNAL_APPLYING; before.generation++;
     before.destination.kind = 1; before.destination.slot = 3; before.destination.length = 236;
     memset(before.destinationAfter, 14, 236);
-    assert(Hash(before.destinationAfter, 236, before.appliedDigest) == 0);
+    memset(before.appliedDigest, 17, 32);
     next = before;
     next.phase = WT_JOURNAL_APPLIED; next.generation++;
     memcpy(next.lastReceipt, next.receipt, 16); memset(next.operation, 15, 16); next.operationCounter = 2;

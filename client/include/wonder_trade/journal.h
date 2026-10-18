@@ -51,8 +51,9 @@ typedef struct WtJournalEntry {
     unsigned char deliveryKind;
     uint32_t globalCounter, generalCounter, boxCounter;
     unsigned char inventoryBefore[32], inventoryAfter[32];
-    /* Hash original/source.length, canonical incoming/136 and stored
-     * destinationAfter/destination.length respectively; exclude box padding. */
+    /* Original hashes stored source.length bytes; incoming/applied hash
+     * canonical PK4. The game proves applied canonicalization against the
+     * encrypted destinationAfter image, as it proves original/outgoing binding. */
     unsigned char originalDigest[32], incomingDigest[32], appliedDigest[32];
     unsigned char original[236], destinationBefore[236], destinationAfter[236];
     unsigned char outgoing[136], incoming[136], seed[32];
