@@ -132,6 +132,22 @@
       "requirements": "The upstream project identifies a relinked proprietary Metrowerks compiler. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish its binaries."
     },
     {
+      "name": "Fetched game build dependencies: RapidJSON 1.1.0, yyjson 0.12.0, metang v0.2.0-python and Meson 1.12.0",
+      "license": "RapidJSON: MIT plus BSD/JSON components; yyjson: MIT; metang and Meson: Apache-2.0",
+      "evidence": [
+        "game/pokeplatinum/subprojects/rapidjson.wrap",
+        "game/pokeplatinum/subprojects/yyjson.wrap",
+        "game/pokeplatinum/subprojects/metang.wrap",
+        "game/pokeplatinum/Makefile",
+        "https://github.com/Tencent/rapidjson/blob/v1.1.0/license.txt",
+        "https://github.com/ibireme/yyjson/blob/0.12.0/LICENSE",
+        "https://github.com/lhearachel/metang/blob/v0.2.0-python/LICENSE",
+        "https://github.com/mesonbuild/meson/blob/1.12.0/COPYING"
+      ],
+      "decision": "external_build_dependencies; exclude_from_migration",
+      "requirements": "Keep these external to project source. Before distributing tools or build images, retain their notices and review included components and Meson wrap patches. RapidJSON's bin/jsonchecker uses the JSON license; exclude it from distributions unless separately reviewed."
+    },
+    {
       "name": "Bundled upstream tools and embedded libraries",
       "license": "per-component; not covered by project MIT",
       "evidence": [
