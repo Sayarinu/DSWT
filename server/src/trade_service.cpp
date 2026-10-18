@@ -20,19 +20,23 @@ using detail::UnhexBytes;
 using detail::Unsigned;
 constexpr auto kMaximum = std::numeric_limits<std::uint64_t>::max();
 
+struct BudgetUnavailable : std::exception {};
+
 template <typename Reply, typename Work>
 grpc::Status Guard(grpc::ServerContext *context, Reply &reply, detail::ServiceAdmission &admission,
-                   detail::RequestKind kind, const v1::Credentials &auth, Work work) {
+                   detail::RequestKind kind, Work work) {
   reply.Clear();
   if (context && context->IsCancelled())
     return {grpc::StatusCode::CANCELLED, "request cancelled"};
   try {
-    auto permit = auth.save_id().size() == 16 && auth.credential().size() == 32 ?
-        admission.Acquire(kind, auth.save_id(), auth.credential()) : nullptr;
-    if (auth.save_id().size() == 16 && auth.credential().size() == 32 && !permit)
+    auto permit = admission.Acquire(kind);
+    if (!permit)
       return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
-    work();
+    work(*permit);
     return grpc::Status::OK;
+  } catch (const BudgetUnavailable &) {
+    reply.Clear();
+    return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
   } catch (const std::exception &) {
     reply.Clear();
     return {grpc::StatusCode::UNAVAILABLE, "trade service unavailable"};
@@ -61,7 +65,7 @@ public:
   std::uint64_t next = 0, highwater = 0;
 
   Session(const std::string &info, const v1::Credentials &credentials,
-          detail::RecoveryGate &barrier, bool write)
+          detail::RecoveryGate &barrier, bool write, detail::ServiceAdmission &admission, detail::Quota::Permit &permit)
       : database(info), transaction(database, write ? "BEGIN" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"),
         auth(credentials), recovery(barrier) {
     // Authenticate before acquiring a write lock: knowing a SaveID alone must
@@ -73,6 +77,7 @@ public:
         found ? PQgetvalue(row.get(), 0, 0) : "");
     authenticated = found && matches;
     if (authenticated) {
+      if (!admission.Authorize(permit, auth.save_id(), auth.credential())) throw BudgetUnavailable();
       auto progress = database.Parameters(write ?
           "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
           "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",
@@ -230,7 +235,7 @@ TradeService::TradeService(std::string connection_info, SubmissionValidator vali
 
 grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::SubmitRequest *request,
                                   v1::MutationReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Submission, request->context().auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Submission, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context())) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     if (request->escrow_generation() == 0 || !detail::CanonicalShape(request->pokemon().pk4()) ||
@@ -244,7 +249,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     body += request->pokemon().sha256();
     const auto hash = detail::MutationHash(2, request->context(), body);
     {
-      Session session(connection_info_, request->context().auth(), *recovery_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       session.transaction.Commit();
@@ -254,7 +259,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     std::copy(request->pokemon().pk4().begin(), request->pokemon().pk4().end(), data.begin());
     const auto legality = validator_ ? validator_(data) : LegalityDecision{};
     Allocate([&] {
-      Session session(connection_info_, request->context().auth(), *recovery_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       if (legality.verdict == LegalityVerdict::Unavailable) { session.Publish(*reply, v1::RESULT_UNAVAILABLE); return; }
@@ -282,12 +287,12 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
 
 grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::StatusRequest *request,
                                   v1::StatusReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), 16)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
-    Session session(connection_info_, request->auth(), *recovery_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     *reply->mutable_trade() = session.Snapshot(request->trade_id());
     session.Publish(*reply, !request->trade_id().empty() && reply->trade().state() == v1::TRADE_NONE ?
@@ -298,14 +303,14 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
 
 grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::CancelRequest *request,
                                   v1::MutationReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->context().auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
     const auto hash = detail::MutationHash(4, request->context(), request->trade_id());
     Allocate([&] {
-      Session session(connection_info_, request->context().auth(), *recovery_, true);
+      Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       auto snapshot = session.Snapshot(request->trade_id());
       if (snapshot.state() != v1::TRADE_QUEUED) {
@@ -334,10 +339,10 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
 
 grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::CollectRequest *request,
                                    v1::CollectReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!detail::NonzeroBytes(request->trade_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
-    Session session(connection_info_, request->auth(), *recovery_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     const auto snapshot = session.Snapshot(request->trade_id());
     if (snapshot.state() == v1::TRADE_NONE || snapshot.state() == v1::TRADE_QUEUED) {
@@ -356,7 +361,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
 
 grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::AcknowledgeRequest *request,
                                        v1::MutationReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->context().auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16) ||
         !detail::NonzeroBytes(request->receipt_id(), 16) || request->delivered_sha256().size() != 32 ||
@@ -366,7 +371,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
     std::string body = request->trade_id() + request->receipt_id() + request->delivered_sha256() + request->applied_sha256();
     detail::AppendUnsigned(body, request->applied_generation(), 8);
     const auto hash = detail::MutationHash(6, request->context(), body);
-    Session session(connection_info_, request->context().auth(), *recovery_, true);
+    Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
     if (!session.Begin(request->context(), hash, *reply)) return;
     auto snapshot = session.Snapshot(request->trade_id());
     if ((snapshot.state() != v1::TRADE_MATCHED && snapshot.state() != v1::TRADE_RETURN_READY) ||
@@ -395,10 +400,10 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
 
 grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::ReconcileRequest *request,
                                      v1::ReconcileReply *reply) {
-  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, request->auth(), [&] {
+  return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
-    Session session(connection_info_, request->auth(), *recovery_, false);
+    Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     if (request->after_event() > session.highwater) { session.Publish(*reply, v1::RESULT_CURSOR_AHEAD); return; }
     auto rows = session.database.Parameters("SELECT sequence::text,kind,coalesce(replace(trade_id::text,'-',''),''),"

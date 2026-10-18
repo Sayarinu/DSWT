@@ -73,24 +73,39 @@ TEST(AdmissionTest, ConcurrencyIsAtomicAndLeasesOutliveTheirOwner) {
 
 TEST(AdmissionTest, CredentialsFenceOwnerBudgetsAndNewTradesCannotUseRecoverySlots) {
   ServiceAdmission admission;
+  auto verified = [&](RequestKind kind, std::string_view id, std::string_view credential) {
+    auto permit = admission.Acquire(kind);
+    if (!permit || !admission.Authorize(*permit, id, credential)) return std::unique_ptr<Quota::Permit>{};
+    return permit;
+  };
   const std::string owner(16, 'A'), secret(32, 'Q');
   std::vector<std::unique_ptr<Quota::Permit>> submissions, recovery;
-  for (int i = 0; i < 2; ++i) submissions.push_back(admission.Acquire(RequestKind::Submission, owner, secret));
+  for (int i = 0; i < 2; ++i) submissions.push_back(verified(RequestKind::Submission, owner, secret));
   ASSERT_TRUE(submissions[0]);
   ASSERT_TRUE(submissions[1]);
-  EXPECT_FALSE(admission.Acquire(RequestKind::Submission, owner, secret));
-  EXPECT_TRUE(admission.Acquire(RequestKind::Submission, owner, std::string(32, 'X')));
-  for (int i = 0; i < 2; ++i) submissions.push_back(admission.Acquire(RequestKind::Enrollment, std::string(16, 'B' + i), secret));
+  EXPECT_FALSE(verified(RequestKind::Submission, owner, secret));
+  EXPECT_TRUE(verified(RequestKind::Submission, owner, std::string(32, 'X')));
+  EXPECT_TRUE(admission.Authorize(*submissions[0], owner, secret)); // A second transaction does not recharge.
+  for (int i = 0; i < 2; ++i) submissions.push_back(verified(RequestKind::Enrollment, std::string(16, 'B' + i), secret));
   ASSERT_TRUE(submissions[2]);
   ASSERT_TRUE(submissions[3]);
-  EXPECT_FALSE(admission.Acquire(RequestKind::Enrollment, std::string(16, 'D'), secret));
+  EXPECT_FALSE(verified(RequestKind::Enrollment, std::string(16, 'D'), secret));
   for (int i = 0; i < 8; ++i) {
-    recovery.push_back(admission.Acquire(RequestKind::Recovery, std::string(16, 'A' + i / 2), secret));
+    recovery.push_back(verified(RequestKind::Recovery, std::string(16, 'A' + i / 2), secret));
     ASSERT_TRUE(recovery.back());
   }
-  EXPECT_FALSE(admission.Acquire(RequestKind::Recovery, std::string(16, 'E'), secret));
+  EXPECT_FALSE(verified(RequestKind::Recovery, std::string(16, 'E'), secret));
   recovery.clear();
-  EXPECT_TRUE(admission.Acquire(RequestKind::Recovery, owner, secret));
+  EXPECT_TRUE(verified(RequestKind::Recovery, owner, secret));
+}
+
+TEST(AdmissionTest, UnauthenticatedWorkCannotPopulateTheIdentityCache) {
+  ServiceAdmission admission;
+  for (unsigned i = 0; i < 8192; ++i) ASSERT_TRUE(admission.Acquire(RequestKind::Recovery));
+  auto verified = admission.Acquire(RequestKind::Recovery);
+  ASSERT_TRUE(verified);
+  for (unsigned i = 0; i < 100; ++i)
+    ASSERT_TRUE(admission.Authorize(*verified, std::string(16, 'A'), std::string(32, 'Q')));
 }
 
 TEST(AdmissionTest, NetworksNormalizeMappedAddressesAndGroupIpv6PrivacyAddresses) {

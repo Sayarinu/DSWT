@@ -10,6 +10,8 @@
 
 namespace platinumwt::server::detail {
 
+class ServiceAdmission;
+
 // A bounded token bucket and concurrency lease. Idle entries expire only after
 // their complete burst has replenished; rotating keys cannot reset a budget.
 class Quota {
@@ -25,11 +27,14 @@ public:
     Permit &operator=(const Permit &) = delete;
   private:
     friend class Quota;
+    friend class ServiceAdmission;
     Permit(std::shared_ptr<State>, std::string key);
+    bool Bind(std::string_view key);
     std::shared_ptr<State> state_;
     std::string key_;
   };
   explicit Quota(Limits, Now now = Clock::now);
+  std::unique_ptr<Permit> Acquire();
   std::unique_ptr<Permit> Acquire(std::string_view key);
 private:
   std::shared_ptr<State> state_;
@@ -41,7 +46,10 @@ enum class RequestKind { Enrollment, Submission, Recovery };
 // out of the cache; a forged credential cannot consume the owner's key budget.
 class ServiceAdmission {
 public:
-  std::unique_ptr<Quota::Permit> Acquire(RequestKind, std::string_view identity, std::string_view credential);
+  std::unique_ptr<Quota::Permit> Acquire(RequestKind);
+  // Call only after verifying the credential. One permit spans all transaction
+  // phases/retries, so binding it again does not spend another identity token.
+  bool Authorize(Quota::Permit &, std::string_view identity, std::string_view credential);
 private:
   Quota submissions_{{4, 2, 16, 4}};
   Quota recovery_{{8, 2, 64, 16}};

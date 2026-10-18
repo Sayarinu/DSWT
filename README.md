@@ -67,9 +67,10 @@ with separate four-worker submission and recovery pools. Admission budgets are:
 | Backend recovery calls | 8 | 2 | 64 / 16 |
 
 Gateway keys use the direct IPv4 peer or IPv6 /64; forwarded headers do not
-override them. Backend keys hash the identity and credential, with a separate
-enrollment domain. Each budget holds at most 4,096 keys, expires inactive keys
-after 60 seconds and rejects new keys when full. Limits are per process; account
+override them. Backend identity budgets admit only verified credentials, with a
+separate global concurrency lease held throughout each request. Each budget
+holds at most 4,096 keys, evicts inactive keys older than 60 seconds under pressure
+and rejects new keys when full. Limits are per process; account
 for all replicas in database/validator/node capacity and complete the soak gate
 before production. These limits are resource bounds, not throughput guarantees.
 

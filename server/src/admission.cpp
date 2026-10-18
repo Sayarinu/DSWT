@@ -39,14 +39,28 @@ Quota::Permit::Permit(std::shared_ptr<State> state, std::string key) : state_(st
 Quota::Permit::~Permit() {
   std::lock_guard<std::mutex> lock(state_->mutex);
   --state_->active;
-  --state_->buckets.at(key_).active;
+  if (!key_.empty()) --state_->buckets.at(key_).active;
+}
+
+std::unique_ptr<Quota::Permit> Quota::Acquire() {
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  if (state_->active >= state_->limits.total) return {};
+  auto permit = std::unique_ptr<Permit>(new Permit(state_, {}));
+  ++state_->active;
+  return permit;
 }
 
 std::unique_ptr<Quota::Permit> Quota::Acquire(std::string_view key) {
-  if (key.empty() || key.size() > 64) return {};
+  auto permit = Acquire();
+  if (!permit || !permit->Bind(key)) return {};
+  return permit;
+}
+
+bool Quota::Permit::Bind(std::string_view key) {
+  if (key.empty() || key.size() > 64) return false;
   std::lock_guard<std::mutex> lock(state_->mutex);
+  if (!key_.empty()) return key_ == key;
   const auto now = state_->now();
-  if (state_->active >= state_->limits.total) return {};
   auto found = state_->buckets.find(key);
   if (found == state_->buckets.end()) {
     if (state_->buckets.size() == 4096 && now >= state_->next_sweep) {
@@ -56,7 +70,7 @@ std::unique_ptr<Quota::Permit> Quota::Acquire(std::string_view key) {
         else ++it;
       }
     }
-    if (state_->buckets.size() == 4096) return {};
+    if (state_->buckets.size() == 4096) return false;
     found = state_->buckets.emplace(std::string(key), State::Bucket{static_cast<double>(state_->limits.burst), now, now}).first;
   }
   auto &bucket = found->second;
@@ -64,19 +78,21 @@ std::unique_ptr<Quota::Permit> Quota::Acquire(std::string_view key) {
   bucket.tokens = std::min(static_cast<double>(state_->limits.burst), bucket.tokens + elapsed * state_->limits.per_second);
   bucket.refreshed = std::max(now, bucket.refreshed);
   bucket.touched = std::max(now, bucket.touched);
-  if (bucket.active >= state_->limits.per_key || bucket.tokens < 1) return {};
-  auto permit = std::unique_ptr<Permit>(new Permit(state_, found->first));
+  if (bucket.active >= state_->limits.per_key || bucket.tokens < 1) return false;
+  key_ = found->first;
   --bucket.tokens;
   ++bucket.active;
-  ++state_->active;
-  return permit;
+  return true;
 }
 
-std::unique_ptr<Quota::Permit> ServiceAdmission::Acquire(RequestKind kind, std::string_view identity,
-                                                       std::string_view credential) {
-  if (identity.size() != 16 || credential.size() != 32) return {};
+std::unique_ptr<Quota::Permit> ServiceAdmission::Acquire(RequestKind kind) {
+  return (kind == RequestKind::Recovery ? recovery_ : submissions_).Acquire();
+}
+
+bool ServiceAdmission::Authorize(Quota::Permit &permit, std::string_view identity, std::string_view credential) {
+  if (identity.size() != 16 || credential.size() != 32) return false;
   std::array<unsigned char, 49> input{};
-  input[0] = kind == RequestKind::Enrollment ? 1 : 2;
+  input[0] = 2;
   std::copy(identity.begin(), identity.end(), input.begin() + 1);
   std::copy(credential.begin(), credential.end(), input.begin() + 17);
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
@@ -86,7 +102,7 @@ std::unique_ptr<Quota::Permit> ServiceAdmission::Acquire(RequestKind kind, std::
   if (result != 1 || size != 32) throw std::runtime_error("admission hashing unavailable");
   const std::string key(reinterpret_cast<const char *>(digest.data()), size);
   OPENSSL_cleanse(digest.data(), digest.size());
-  return (kind == RequestKind::Recovery ? recovery_ : submissions_).Acquire(key);
+  return permit.Bind(key);
 }
 
 std::string NetworkKey(const boost::asio::ip::address &address) {

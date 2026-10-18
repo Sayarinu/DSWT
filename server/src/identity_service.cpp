@@ -32,7 +32,7 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
     return grpc::Status::OK;
   }
   try {
-    auto permit = admission_->Acquire(detail::RequestKind::Enrollment, request->enrollment_id(), request->credential());
+    auto permit = admission_->Acquire(detail::RequestKind::Enrollment);
     if (!permit) return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
     IdentityId nonce{};
     CredentialBuffer credential;
@@ -46,9 +46,11 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
       reply->mutable_context()->set_result(v1::RESULT_CONFLICT);
       return grpc::Status::OK;
     }
+    const std::string id(reinterpret_cast<const char *>(identity->data()), identity->size());
+    if (!admission_->Authorize(*permit, id, request->credential()))
+      return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
     detail::Database database(connection_info_);
     detail::Transaction transaction(database, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const std::string id(reinterpret_cast<const char *>(identity->data()), identity->size());
     auto row = database.Parameters("SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",
         {detail::HexBytes(id)});
     if (PQntuples(row.get()) != 1) throw std::runtime_error("identity disappeared");
