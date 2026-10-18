@@ -1,0 +1,9 @@
+**
+!validator/
+!validator/**
+!server/
+!server/proto/
+!server/proto/trade.proto
+validator/.deps/
+validator/**/bin/
+validator/**/obj/

@@ -130,10 +130,11 @@ checksum is the sum of 64 little-endian u16 values in bytes 8..135 modulo 65536;
 the SHA-256 covers all 136 bytes. Party suffixes, encrypted/shuffled guesses and
 automatic repairs are forbidden. Full original local images remain in escrow.
 The pinned isolated PKHeX service checks strict legality for Platinum and returns
-a verdict and bounded policy/reason codes, never a replacement payload. RPC
-failure is unavailable, not an illegal verdict. Eggs, mail and attached capsules
-are rejected without changing the source; the game also protects its last usable
-party Pokémon. Final legality policy and exact dependencies are LUNE-304 work.
+a verdict, exact payload hash and bounded policy/reason codes, never a replacement payload. RPC
+failure is unavailable, not an illegal verdict. The server rejects Eggs and mail;
+the game rejects attached capsules and protects its last usable party Pokémon
+before escrow, since those facts are outside canonical PK4. The pinned policy,
+failure handling and source obligations are in `validator/README.md`.
 
 ## Ownership and save ordering
 

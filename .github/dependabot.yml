@@ -8,6 +8,13 @@ updates:
   - package-ecosystem: docker
     directories:
       - /server
+      - /validator
       - /tools/rom-builder
+    schedule:
+      interval: weekly
+  - package-ecosystem: nuget
+    directories:
+      - /validator
+      - /validator/tests
     schedule:
       interval: weekly

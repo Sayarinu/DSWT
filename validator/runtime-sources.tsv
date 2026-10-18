@@ -1,0 +1,3 @@
+# name repository revision archive_sha256 package_version
+grpc-dotnet grpc/grpc-dotnet 4c6997a214601422dd66c5c74c1969db749479e9 816a5909dc133d5d678d00639539e89cb1995f51133262287db351b250462719 2.84.0
+protobuf protocolbuffers/protobuf 2c74169b34066ceb8ddb6b882fcb3fb32d737a55 ef957adfc3ec0e2794031697e6a94bbc213103cead96c26a1fccb0dbdadd3404 3.36.2

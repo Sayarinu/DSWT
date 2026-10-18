@@ -54,6 +54,11 @@ add_executable(platinumwt-ledger src/ledger_main.cpp)
 target_link_libraries(platinumwt-ledger PRIVATE platinumwt_ledger)
 target_compile_options(platinumwt-ledger PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(platinumwt_legality STATIC src/legality_client.cpp)
+target_include_directories(platinumwt_legality PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(platinumwt_legality PRIVATE platinumwt_protocol OpenSSL::Crypto)
+target_compile_options(platinumwt_legality PRIVATE -Wall -Wextra -Wpedantic)
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)

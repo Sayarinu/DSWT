@@ -25,7 +25,8 @@
         "Check contribution policy",
         "Scan for secrets",
         "Validate source inputs",
-        "Build and test connectivity server"
+        "Build and test connectivity server",
+        "Build and test isolated legality validator"
       ]
     },
     "enforce_admins": true,
