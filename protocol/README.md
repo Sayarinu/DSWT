@@ -26,6 +26,12 @@ identity in both journal banks before submitting anything. Device/MAC/trainer
 IDs, emulator hints, game PRNG output and copied save counters are not secrets.
 TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 
+The server stores SHA-256 of ASCII `PlatinumWT save credential v1`, one zero byte,
+the 16 save-ID bytes and the 32 credential bytes, and compares verifiers in
+constant time. This scheme is for CSPRNG credentials, not human passwords. The
+identity module returns local database records; endpoint integration must still
+apply the external recovery barrier before publishing a final enrollment reply.
+
 Every mutation has a nonzero 16-byte operation ID and a 64-bit counter, persisted
 before sending. Counters start at 1. Under an identity lock, look up the operation
 before checking the counter. An identical retry returns its recorded outcome;

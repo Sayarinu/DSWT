@@ -1,7 +1,7 @@
 FROM ubuntu:24.04 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build g++ pkg-config libgrpc++-dev protobuf-compiler-grpc \
-    libprotobuf-dev libboost-system-dev libgtest-dev python3 libpq-dev postgresql-16 \
+    libprotobuf-dev libboost-system-dev libgtest-dev python3 libpq-dev postgresql-16 libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
