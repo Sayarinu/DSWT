@@ -242,6 +242,7 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     else if (operation == 0) operation = next.phase == WT_JOURNAL_IDLE ? WT_OP_RECONCILE : WT_OP_STATUS;
     if (operation != WT_OP_RECONCILE && operation != WT_OP_STATUS && operation != WT_OP_COLLECT && operation != WT_OP_CANCEL) goto done;
     if ((operation == WT_OP_CANCEL || operation == WT_OP_COLLECT) && next.phase != WT_JOURNAL_QUEUED) goto done;
+    if (operation == WT_OP_CANCEL && (next.deliveryKind || !Zero(next.receipt, 16))) goto done;
     if (next.phase != WT_JOURNAL_IDLE && Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
     if (RequestIdentity(engine, &request, operation) != 0) goto done;
     if (operation == WT_OP_RECONCILE) { request.body.reconcile.after = next.eventCursor; request.body.reconcile.limit = 8; }
@@ -359,6 +360,9 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
             || (operation == WT_OP_CANCEL && next.phase != WT_JOURNAL_QUEUED)
             || (operation == WT_OP_ACKNOWLEDGE && next.phase != WT_JOURNAL_APPLIED)) goto blocked;
         if (operation == WT_OP_ACKNOWLEDGE && next.deliveryKind != snapshot->deliveryKind) goto blocked;
+        if (operation == WT_OP_CANCEL && ((next.deliveryKind && next.deliveryKind != snapshot->deliveryKind)
+            || (!Zero(next.receipt, 16) && memcmp(next.receipt, snapshot->receipt, 16) != 0)
+            || (!Zero(next.incomingDigest, 32) && memcmp(next.incomingDigest, snapshot->receivedDigest, 32) != 0))) goto blocked;
         memcpy(next.lastOperation, next.operation, 16); next.lastOperationCounter = next.operationCounter;
         next.nextCounter = reply.nextCounter; next.eventCursor = reply.body.mutation.event;
         ClearRequest(&next);

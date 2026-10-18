@@ -332,6 +332,7 @@ static void RejectedCancel(void)
         && fixture.engine.entry.nextCounter == 3 && !fixture.restored);
     assert(memcmp(fixture.engine.entry.incomingDigest, digest, 32) == 0);
     Mirrored(&fixture, WT_JOURNAL_QUEUED);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) != 0 && !fixture.engine.blocked && !fixture.engine.frameSize);
     /* Receipt and digest remain bound even across a process restart. */
     WtEngine_Close(&fixture.engine); Open(&fixture); fixture.engine.synchronized = 1;
     assert(WtEngine_Request(&fixture.engine, WT_OP_STATUS) == 0 && fixture.engine.frame[5] == WT_OP_STATUS);
@@ -384,6 +385,7 @@ static void LoadedStateAndMismatch(void)
 static void DeliveryKindBinding(void)
 {
     Fixture fixture;
+    WtJournalEntry known;
     unsigned char packet[902]; size_t size;
     Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
     assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
@@ -404,6 +406,17 @@ static void DeliveryKindBinding(void)
     Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, fixture.pokemon);
     memcpy(packet + 182, fixture.pokemon, 136);
     assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.received);
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    known = fixture.engine.entry; known.generation++;
+    known.deliveryKind = WT_DELIVERY_MATCH; memset(known.receipt, 41, 16);
+    assert(Hash(fixture.pokemon, 136, known.incomingDigest) == 0);
+    assert(WtJournal_Commit(&fixture.engine.journal, &known) == 0);
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.engine.frame[5] == WT_OP_CANCEL);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 3, 146); Put(packet + 44, 3, 8);
+    Snapshot(&fixture, packet + 52, WT_TRADE_RETURN_READY, WT_DELIVERY_RETURN, 3, fixture.pokemon);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.restored);
 }
 
 static void EnrollmentAndRetirementFaults(void)
