@@ -132,6 +132,7 @@ static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
             && (Zero(entry->receipt, 16) || entry->deliveryKind == 0 || Zero(entry->incoming, 136) || Zero(entry->incomingDigest, 32))) return 0;
         if ((entry->phase == WT_JOURNAL_APPLYING || entry->phase == WT_JOURNAL_APPLIED)
             && (entry->destination.kind == 0 || Zero(entry->appliedDigest, 32))) return 0;
+        if (entry->phase == WT_JOURNAL_APPLIED && memcmp(entry->lastReceipt, entry->receipt, 16) != 0) return 0;
     }
     if ((entry->source.kind == 2 && !Zero(entry->original + 136, 100))
         || (entry->destination.kind == 2 && (!Zero(entry->destinationBefore + 136, 100)
@@ -304,6 +305,9 @@ static int TornIdentityKnown(const unsigned char *partial, const unsigned char *
 
 static int Follows(const unsigned char *before, const unsigned char *after)
 {
+    if ((Get(before + 6, 2) == WT_JOURNAL_EMPTY && Get(after + 6, 2) > WT_JOURNAL_ENROLLING)
+        || (Get(before + 6, 2) == WT_JOURNAL_ENROLLING && Get(after + 6, 2) != WT_JOURNAL_ENROLLING
+            && Get(after + 6, 2) != WT_JOURNAL_IDLE)) return 0;
     if (Get(after + 96, 8) < Get(before + 96, 8) || Get(after + 104, 8) < Get(before + 104, 8)
         || Get(after + 144, 8) < Get(before + 144, 8)) return 0;
     if (Get(after + 144, 8) == Get(before + 144, 8) && memcmp(after + 128, before + 128, 16) != 0) return 0;
@@ -424,8 +428,6 @@ int WtJournal_Commit(WtJournal *store, const WtJournalEntry *entry)
     if (!store || !store->usable || !entry) return -1;
     generation = Get(store->record + 16, 8);
     if (generation == UINT64_MAX || entry->generation != generation + 1) goto done;
-    if (Get(store->record + 6, 2) == WT_JOURNAL_EMPTY
-        && entry->phase != WT_JOURNAL_EMPTY && entry->phase != WT_JOURNAL_ENROLLING) goto done;
     if (WtJournal_Encode(entry, store->io.hash, next) != 0 || !Follows(store->record, next)
         || store->io.hash(next, 4096, fingerprint) != 0) goto done;
     store->usable = 0;

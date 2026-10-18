@@ -186,6 +186,7 @@ static void ReceiptImagesAndPacketBinding(void)
     entry.phase = WT_JOURNAL_APPLIED; entry.generation = 10; entry.requestLength = 0;
     memset(entry.request, 0, 256);
     memset(entry.trade, 11, 16); memset(entry.receipt, 12, 16); entry.deliveryKind = 1;
+    memcpy(entry.lastReceipt, entry.receipt, 16);
     entry.destination.kind = 2; entry.destination.box = 17; entry.destination.slot = 29; entry.destination.length = 136;
     memset(entry.destinationBefore, 13, 136); memset(entry.destinationAfter, 14, 136);
     memset(entry.incoming, 15, 136);
@@ -200,7 +201,7 @@ static void ReceiptImagesAndPacketBinding(void)
     assert(memcmp(decoded.destinationAfter, entry.destinationAfter, 236) == 0);
     assert(memcmp(decoded.receipt, entry.receipt, 16) == 0 && decoded.generalCounter == 0xffffffff);
     {
-        const int offsets[] = { 416, 1260, 888, 301, 333, 365 };
+        const int offsets[] = { 416, 1260, 888, 301, 333, 365, 112 };
         size_t i;
         WtJournal store;
         for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
@@ -378,6 +379,9 @@ static void EmptyCannotDiscardActiveEvidence(void)
     Escrow(&active);
     Reset(); assert(WtJournal_Encode(&empty, Hash, banks[0]) == 0);
     assert(WtJournal_Encode(&active, Hash, banks[1]) == 0);
+    memcpy(saved, banks, sizeof(saved));
+    assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+    assert(memcmp(saved, banks, sizeof(saved)) == 0);
     memset(banks[1] + 4092, 0, 4);
     memcpy(saved, banks, sizeof(saved));
     assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
