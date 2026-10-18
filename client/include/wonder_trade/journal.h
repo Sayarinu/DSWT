@@ -54,6 +54,8 @@ typedef struct WtJournalEntry {
     /* Original hashes stored source.length bytes; incoming/applied hash
      * canonical PK4. The game proves applied canonicalization against the
      * encrypted destinationAfter image, as it proves original/outgoing binding. */
+    /* QUEUED may retain a receipt/digest learned from authenticated history
+     * before Collect supplies the payload. No insertion is authorized by it. */
     unsigned char originalDigest[32], incomingDigest[32], appliedDigest[32];
     unsigned char original[236], destinationBefore[236], destinationAfter[236];
     unsigned char outgoing[136], incoming[136], seed[32];
