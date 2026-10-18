@@ -8,7 +8,7 @@
     "evidence": "game/pokeplatinum/UPSTREAM.md",
     "top_level_license": "NOASSERTION"
   },
-  "scope": "MIT covers original project contributions only. This inventory is a source-migration allowlist, not clearance for compiled ROMs, patches, dependencies or images.",
+  "scope": "MIT covers original project contributions only. Paths describe the original audited snapshot; licensing/migration.json records relocation and filtering. This source-migration inventory does not clear compiled ROMs, patches, dependencies or images.",
   "project_files": [
     ".github/workflows/build-rom.yml",
     "AGENTS.md",

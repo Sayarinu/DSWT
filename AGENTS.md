@@ -4,9 +4,9 @@ Pokemon Platinum Patch is a project to modify Pokémon Platinum so that it can
 participate in Wonder Trade. The long-term goal is to pair the game patch with
 a custom Wonder Trade server operated by this project.
 
-The Pokémon Platinum decompilation is maintained in `game/pokeplatinum/` as
-ordinary project files, not as a Git fork or submodule. Keep upstream build
-files and notices intact; record the upstream revision when refreshing it.
+Keep the pinned Pokémon Platinum decompilation local in ignored
+`game/pokeplatinum/`. Project additions and integration changes live in `client/`.
+Preserve upstream notices and record its revision when refreshing the workspace.
 
 ## Planned Platform
 

@@ -2,6 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ ! -f "$repo_root/game/pokeplatinum/Makefile" ]]; then
+    echo "Prepare the local game workspace as described in client/UPSTREAM.md before building." >&2
+    exit 1
+fi
 image="platinumwt-rom-builder"
 trade_url="${WONDER_TRADE_BASE_URL:-http://10.64.0.1:8080}"
 if [[ ! "$trade_url" =~ ^http://[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]; then

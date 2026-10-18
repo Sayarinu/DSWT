@@ -28,10 +28,9 @@ jobs:
 
       - name: Validate changed data and build script
         run: |
-          python3 -m json.tool game/pokeplatinum/res/field/events/events_global_terminal_1f.json >/dev/null
-          python3 -m json.tool game/pokeplatinum/res/text/global_terminal_1f.json >/dev/null
-          python3 -m json.tool game/pokeplatinum/res/text/start_menu.json >/dev/null
-          python3 -m json.tool game/pokeplatinum/res/text/wonder_trade.json >/dev/null
+          python3 -m json.tool client/res/text/wonder_trade.json >/dev/null
+          python3 -m json.tool licensing/redistribution.json >/dev/null
+          python3 -m json.tool licensing/migration.json >/dev/null
           bash -n scripts/build-rom.sh
 
   connectivity-server:

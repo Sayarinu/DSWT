@@ -5,9 +5,9 @@ custom Wonder Trade server.
 
 ## Build the game ROM
 
-The Pokémon Platinum decompilation is in [`game/pokeplatinum`](game/pokeplatinum).
-Its setup and platform-specific dependencies are documented in
-[`game/pokeplatinum/INSTALL.md`](game/pokeplatinum/INSTALL.md).
+Project additions and the integration patch are in [`client`](client). The
+upstream game source and build inputs stay in an ignored local workspace.
+Prepare that workspace using [`client/UPSTREAM.md`](client/UPSTREAM.md).
 
 The simplest build uses Docker and does not install the cross-compiler on your
 host:
@@ -25,5 +25,7 @@ upstream build guide also documents native Linux and other platform setups.
 
 ## Upstream source
 
-The decompilation source snapshot and its provenance are documented in
-[`game/pokeplatinum/UPSTREAM.md`](game/pokeplatinum/UPSTREAM.md).
+The pinned upstream revision is recorded in [`client/UPSTREAM.md`](client/UPSTREAM.md).
+Filtered project history preserves the original authors, dates and messages;
+[`licensing/migration.json`](licensing/migration.json) records the source boundary
+and commit mapping. The complete original repository remains private.
