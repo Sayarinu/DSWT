@@ -53,7 +53,7 @@ int main(void)
     assert(parse("HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n", 1, WT_HTTP_BODY_MAX) == -1);
     assert(parse("HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n", 1, WT_HTTP_BODY_MAX) == -1);
     assert(parse("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n", 1, WT_HTTP_BODY_MAX) == -1);
-    assert(parse("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 3\r\n\r\nab", 1, WT_HTTP_BODY_MAX) == 0);
+    assert(parse("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 3\r\nConnection: close\r\n\r\nab", 1, WT_HTTP_BODY_MAX) == 0);
     strcpy(buffer, prefix);
     memset(buffer + strlen(prefix), 'x', WT_HTTP_HEADER_MAX);
     buffer[strlen(prefix) + WT_HTTP_HEADER_MAX] = 0;

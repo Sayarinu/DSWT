@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from test_wire import messages, wire
 
 
 PROBE = Path(sys.argv.pop(1)).resolve()
@@ -20,6 +21,10 @@ RESPONSE = (
     b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
     b"Content-Length: 18\r\nConnection: close\r\n\r\n" + ACK
 )
+
+def http_response(body):
+    return (b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: "
+            + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
 
 
 def initial_record():
@@ -58,7 +63,8 @@ class TlsTests(unittest.TestCase):
         record = initial_record()
         self.seed.write_bytes(record * 2)
 
-    def exchange(self, key=0, hostname="localhost", response=RESPONSE, fail_write=0, tls13=False, plaintext=False):
+    def exchange(self, key=0, hostname="localhost", response=RESPONSE, fail_write=0, tls13=False, plaintext=False,
+                 packet=None, stall_close=False):
         server = socket.socket()
         server.bind(("127.0.0.1", 0))
         server.listen(1)
@@ -88,11 +94,20 @@ class TlsTests(unittest.TestCase):
                         if not part:
                             break
                         data += part
+                    if packet is not None and b"\r\n\r\n" in data:
+                        header_size = data.index(b"\r\n\r\n") + 4
+                        while len(data) - header_size < len(packet):
+                            part = connection.recv(min(512, len(packet) - (len(data) - header_size)))
+                            if not part:
+                                break
+                            data += part
                     received.append(data)
                     if data:
                         # Split inside the status line, header fields and response body.
                         for start in range(0, len(response), 7):
                             connection.sendall(response[start:start + 7])
+                        if stall_close:
+                            connection.recv(1)
             except (OSError, ssl.SSLError) as error:
                 errors.append(type(error).__name__)
             finally:
@@ -100,9 +115,15 @@ class TlsTests(unittest.TestCase):
 
         thread = threading.Thread(target=serve)
         thread.start()
-        result = subprocess.run([
+        arguments = [
             str(PROBE), str(port), hostname, self.keys[0][2], self.keys[1][2], str(self.seed), str(fail_write),
-        ], capture_output=True, text=True, timeout=8)
+        ]
+        if packet is not None:
+            request_file = self.root / "synthetic-request.bin"
+            request_file.write_bytes(packet)
+            request_file.chmod(0o600)
+            arguments.append(str(request_file))
+        result = subprocess.run(arguments, capture_output=True, text=True, timeout=8)
         thread.join(8)
         self.assertFalse(thread.is_alive(), "peer did not shut down")
         if result.returncode in (0, 1):
@@ -157,6 +178,48 @@ class TlsTests(unittest.TestCase):
             with self.subTest(response=response[:40]):
                 result, _, _ = self.exchange(response=response)
                 self.assertNotEqual(result.returncode, 0)
+
+    def test_all_post_operations_use_exact_frames_and_validate_replies(self):
+        requests, replies = messages()
+        for operation, packet in requests.items():
+            with self.subTest(operation=operation):
+                counter, highwater, body = replies[operation]
+                reply = wire.encode_response(wire.Response(wire.Operation(operation), packet[8:24], wire.Result.OK,
+                                                           counter, highwater, body))
+                result, received, _ = self.exchange(packet=packet, response=http_response(reply))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "wire_result=1\n")
+                headers, actual = received[0].split(b"\r\n\r\n", 1)
+                self.assertEqual(actual, packet)
+                self.assertEqual(headers.split(b"\r\n"), [
+                    b"POST /wt/v1 HTTP/1.1", b"Host: localhost", b"Content-Type: application/octet-stream",
+                    b"Content-Length: " + str(len(packet)).encode(), b"Connection: close"])
+                processing = wire.encode_response(wire.Response(wire.Operation(operation), packet[8:24],
+                                                                wire.Result.PROCESSING, 0, 0, b""))
+                result, _, _ = self.exchange(packet=packet, response=http_response(processing))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "wire_result=2\n")
+
+    def test_post_bindings_trailing_bytes_and_stalled_closure_fail_closed(self):
+        requests, replies = messages()
+        packet = requests[2]
+        counter, highwater, body = replies[2]
+        reply = wire.encode_response(wire.Response(wire.Operation.SUBMIT, packet[8:24], wire.Result.OK, counter, highwater, body))
+        invalid = []
+        for offset in (5, 8, 26, 44 + 8 + 34):
+            changed = bytearray(reply)
+            changed[offset] ^= 1
+            invalid.append(http_response(changed))
+        invalid += [http_response(reply[:-1]), http_response(reply)[:-1], http_response(reply) + b"x",
+                    b"HTTP/1.1 503 Unavailable\r\nContent-Type: application/octet-stream\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"]
+        for response in invalid:
+            with self.subTest(response_size=len(response)):
+                result, _, _ = self.exchange(packet=packet, response=response)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+        result, _, _ = self.exchange(packet=packet, response=http_response(reply), stall_close=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

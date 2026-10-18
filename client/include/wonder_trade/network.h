@@ -4,6 +4,7 @@
 #include <nitro.h>
 
 #include "constants/heap.h"
+#include "wonder_trade/wire.h"
 
 enum WonderTradeNetworkState {
     WT_NET_STARTING,
@@ -11,6 +12,8 @@ enum WonderTradeNetworkState {
     WT_NET_READY,
     WT_NET_PINGING,
     WT_NET_ACKNOWLEDGED,
+    WT_NET_EXCHANGING,
+    WT_NET_RESPONSE,
     WT_NET_ERROR,
     WT_NET_CLOSING,
     WT_NET_CLOSED,
@@ -33,11 +36,17 @@ typedef struct WonderTradeNetwork {
     BOOL driverStopping;
     BOOL requestStarted;
     BOOL timedOut;
+    WtWireReply reply;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);
 void WonderTradeNetwork_Update(WonderTradeNetwork *network);
 void WonderTradeNetwork_Ping(WonderTradeNetwork *network);
+/* Copy an exact frame into owned worker storage. TRUE means a job started;
+ * WT_NET_RESPONSE exposes a validated envelope, whose result may be non-OK.
+ * The caller must first prove/persist the request's journal transition. This
+ * transport does not authorize transfers or retire/rebuild pending packets. */
+BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size);
 void WonderTradeNetwork_Close(WonderTradeNetwork *network);
 
 #endif
