@@ -29,7 +29,9 @@ CREATE TABLE platinumwt.offers (
     state smallint NOT NULL CHECK (state BETWEEN 1 AND 4),
     receipt_id platinumwt.id UNIQUE,
     last_event platinumwt.u64 NOT NULL CHECK (last_event > 0),
+    event_kind smallint GENERATED ALWAYS AS ((state + 1)::smallint) STORED,
     UNIQUE (trade_id, save_id),
+    UNIQUE (trade_id, save_id, receipt_id),
     CHECK ((state = 1) = (receipt_id IS NULL))
 );
 CREATE UNIQUE INDEX one_pending_offer ON platinumwt.offers(save_id) WHERE state <> 4;
@@ -57,6 +59,8 @@ CREATE TABLE platinumwt.receipts (
 );
 ALTER TABLE platinumwt.offers ADD FOREIGN KEY (trade_id, save_id, receipt_id)
     REFERENCES platinumwt.receipts(trade_id, save_id, receipt_id) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE platinumwt.receipts ADD FOREIGN KEY (trade_id, save_id, receipt_id)
+    REFERENCES platinumwt.offers(trade_id, save_id, receipt_id) DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE platinumwt.ownership (
     asset_id platinumwt.id PRIMARY KEY REFERENCES platinumwt.payloads,
@@ -99,7 +103,7 @@ CREATE TABLE platinumwt.trade_events (
     PRIMARY KEY (save_id, sequence),
     UNIQUE (save_id, operation_id),
     UNIQUE (save_id, sequence, operation_id),
-    UNIQUE (save_id, sequence, trade_id, state),
+    UNIQUE (save_id, sequence, trade_id, state, kind),
     FOREIGN KEY (trade_id, save_id) REFERENCES platinumwt.offers(trade_id, save_id),
     FOREIGN KEY (receipt_id, save_id) REFERENCES platinumwt.receipts(receipt_id, save_id),
     FOREIGN KEY (receipt_id, save_id, trade_id, asset_id)
@@ -120,8 +124,8 @@ CREATE TABLE platinumwt.trade_events (
 );
 ALTER TABLE platinumwt.operations ADD FOREIGN KEY (save_id, event_sequence, operation_id)
     REFERENCES platinumwt.trade_events(save_id, sequence, operation_id) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE platinumwt.offers ADD FOREIGN KEY (save_id, last_event, trade_id, state)
-    REFERENCES platinumwt.trade_events(save_id, sequence, trade_id, state) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE platinumwt.offers ADD FOREIGN KEY (save_id, last_event, trade_id, state, event_kind)
+    REFERENCES platinumwt.trade_events(save_id, sequence, trade_id, state, kind) DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE platinumwt.ownership ADD FOREIGN KEY (save_id, last_event)
     REFERENCES platinumwt.trade_events(save_id, sequence) DEFERRABLE INITIALLY DEFERRED;
 
@@ -154,7 +158,7 @@ CREATE FUNCTION platinumwt.fixed_columns(table_name name, image jsonb) RETURNS j
 LANGUAGE sql IMMUTABLE AS $$
     SELECT CASE table_name
         WHEN 'save_identities' THEN image - ARRAY['next_counter', 'event_highwater']
-        WHEN 'offers' THEN image - ARRAY['state', 'receipt_id', 'last_event']
+        WHEN 'offers' THEN image - ARRAY['state', 'receipt_id', 'last_event', 'event_kind']
         WHEN 'ownership' THEN image - ARRAY['save_id', 'trade_id', 'location', 'last_event']
         ELSE image END
 $$;
@@ -188,7 +192,8 @@ RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
                 OR (before_image ->> 'location')::integer = 2 AND (after_image ->> 'location')::integer = 3
                     AND after_image ->> 'save_id' = before_image ->> 'save_id'
                     AND after_image ->> 'trade_id' = before_image ->> 'trade_id')
-            AND (after_image ->> 'last_event')::numeric > (before_image ->> 'last_event')::numeric)
+            AND (after_image ->> 'save_id' <> before_image ->> 'save_id'
+                OR (after_image ->> 'last_event')::numeric > (before_image ->> 'last_event')::numeric))
         ELSE false END
 $$;
 
@@ -252,30 +257,35 @@ END $$;
 CREATE TRIGGER event_counter BEFORE INSERT ON platinumwt.trade_events
     FOR EACH ROW EXECUTE FUNCTION platinumwt.advance_event();
 
-CREATE FUNCTION platinumwt.check_event() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION platinumwt.validate_event(item platinumwt.trade_events) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE operation platinumwt.operations; valid boolean;
 BEGIN
-    IF NEW.operation_id IS NOT NULL THEN
+    IF item.operation_id IS NOT NULL THEN
         SELECT * INTO operation FROM platinumwt.operations
-            WHERE save_id = NEW.save_id AND operation_id = NEW.operation_id;
-        IF NOT FOUND OR operation.event_sequence <> NEW.sequence OR ((NEW.kind = 6) <> (operation.result <> 1))
-            OR (NEW.kind <> 6 AND operation.opcode <> CASE NEW.kind WHEN 2 THEN 2 WHEN 4 THEN 4 ELSE 6 END) THEN
+            WHERE save_id = item.save_id AND operation_id = item.operation_id;
+        IF NOT FOUND OR operation.event_sequence <> item.sequence OR ((item.kind = 6) <> (operation.result <> 1))
+            OR (item.kind <> 6 AND operation.opcode <> CASE item.kind WHEN 2 THEN 2 WHEN 4 THEN 4 ELSE 6 END) THEN
             RAISE EXCEPTION 'event operation is inconsistent' USING ERRCODE = '23514';
         END IF;
     END IF;
-    IF NEW.kind = 2 THEN
-        SELECT EXISTS (SELECT 1 FROM platinumwt.offers WHERE trade_id = NEW.trade_id
-            AND save_id = NEW.save_id AND offered_asset_id = NEW.asset_id) INTO valid;
+    IF item.kind = 2 THEN
+        SELECT EXISTS (SELECT 1 FROM platinumwt.offers WHERE trade_id = item.trade_id
+            AND save_id = item.save_id AND offered_asset_id = item.asset_id) INTO valid;
         IF NOT valid THEN
             RAISE EXCEPTION 'submission event has wrong asset' USING ERRCODE = '23514';
         END IF;
-    ELSIF NEW.kind IN (3, 4) THEN
-        SELECT delivery_kind = CASE NEW.kind WHEN 3 THEN 1 ELSE 2 END INTO valid
-            FROM platinumwt.receipts WHERE receipt_id = NEW.receipt_id;
+    ELSIF item.kind IN (3, 4) THEN
+        SELECT delivery_kind = CASE item.kind WHEN 3 THEN 1 ELSE 2 END INTO valid
+            FROM platinumwt.receipts WHERE receipt_id = item.receipt_id;
         IF valid IS DISTINCT FROM true THEN
             RAISE EXCEPTION 'event delivery kind is inconsistent' USING ERRCODE = '23514';
         END IF;
     END IF;
+    RETURN;
+END $$;
+CREATE FUNCTION platinumwt.check_event() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM platinumwt.validate_event(NEW);
     RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER event_content AFTER INSERT ON platinumwt.trade_events
@@ -308,12 +318,13 @@ BEGIN
     IF offer.state = 1 THEN
         SELECT EXISTS (SELECT 1 FROM platinumwt.ownership o
             WHERE o.asset_id = offer.offered_asset_id AND o.save_id = offer.save_id
-                AND o.trade_id = target AND o.location = 1) INTO valid;
+                AND o.trade_id = target AND o.location = 1 AND o.last_event = offer.last_event) INTO valid;
     ELSE
         SELECT EXISTS (SELECT 1 FROM platinumwt.receipts r
             JOIN platinumwt.ownership o USING (asset_id, save_id, trade_id)
             WHERE r.receipt_id = offer.receipt_id AND r.trade_id = target
-                AND r.save_id = offer.save_id AND o.location = CASE WHEN offer.state = 4 THEN 3 ELSE 2 END
+                AND r.save_id = offer.save_id AND o.last_event = offer.last_event
+                AND o.location = CASE WHEN offer.state = 4 THEN 3 ELSE 2 END
                 AND (offer.state = 4 OR r.delivery_kind = CASE WHEN offer.state = 2 THEN 1 ELSE 2 END)
                 AND ((r.delivery_kind = 2 AND r.asset_id = offer.offered_asset_id)
                     OR (r.delivery_kind = 1 AND EXISTS (
@@ -360,33 +371,43 @@ CREATE CONSTRAINT TRIGGER asset_ownership AFTER INSERT OR UPDATE ON platinumwt.o
 CREATE CONSTRAINT TRIGGER receipt_ownership AFTER INSERT ON platinumwt.receipts
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION platinumwt.check_offer();
 
-CREATE FUNCTION platinumwt.check_match() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION platinumwt.validate_match(item platinumwt.matches) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
-    PERFORM platinumwt.validate_offer(NEW.first_trade_id);
-    PERFORM platinumwt.validate_offer(NEW.second_trade_id);
+    PERFORM platinumwt.validate_offer(item.first_trade_id);
+    PERFORM platinumwt.validate_offer(item.second_trade_id);
     IF NOT EXISTS (SELECT 1 FROM platinumwt.offers a JOIN platinumwt.offers b
-        ON b.trade_id = NEW.second_trade_id
+        ON b.trade_id = item.second_trade_id
         JOIN platinumwt.receipts ar ON ar.receipt_id = a.receipt_id
         JOIN platinumwt.receipts br ON br.receipt_id = b.receipt_id
-        WHERE a.trade_id = NEW.first_trade_id AND a.save_id <> b.save_id
+        WHERE a.trade_id = item.first_trade_id AND a.save_id <> b.save_id
             AND a.state IN (2, 4) AND b.state IN (2, 4)
-            AND ar.match_id = NEW.match_id AND br.match_id = NEW.match_id) THEN
+            AND ar.match_id = item.match_id AND br.match_id = item.match_id) THEN
         RAISE EXCEPTION 'match must commit both distinct owners' USING ERRCODE = '23514';
     END IF;
+    RETURN;
+END $$;
+CREATE FUNCTION platinumwt.check_match() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM platinumwt.validate_match(NEW);
     RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER match_pair AFTER INSERT ON platinumwt.matches
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION platinumwt.check_match();
 
-CREATE FUNCTION platinumwt.check_acknowledgement() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION platinumwt.validate_acknowledgement(item platinumwt.acknowledgements) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM platinumwt.receipts r
         JOIN platinumwt.offers t USING (trade_id, save_id)
-        JOIN platinumwt.operations op ON op.save_id = r.save_id AND op.operation_id = NEW.operation_id
-        WHERE r.receipt_id = NEW.receipt_id AND r.save_id = NEW.save_id AND t.state = 4
+        JOIN platinumwt.operations op ON op.save_id = r.save_id AND op.operation_id = item.operation_id
+        WHERE r.receipt_id = item.receipt_id AND r.save_id = item.save_id AND t.state = 4
             AND t.last_event = op.event_sequence AND op.opcode = 6 AND op.result = 1) THEN
         RAISE EXCEPTION 'acknowledgement is inconsistent' USING ERRCODE = '23514';
     END IF;
+    RETURN;
+END $$;
+CREATE FUNCTION platinumwt.check_acknowledgement() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM platinumwt.validate_acknowledgement(NEW);
     RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER applied_receipt AFTER INSERT ON platinumwt.acknowledgements
@@ -430,6 +451,34 @@ CREATE TRIGGER retain_audit BEFORE UPDATE OR DELETE ON platinumwt.audit_journal
 CREATE TRIGGER retain_audit_table BEFORE TRUNCATE ON platinumwt.audit_journal
     FOR EACH STATEMENT EXECUTE FUNCTION platinumwt.reject_change();
 
+-- Recheck declared FKs even if a privileged restore bypassed their write triggers.
+CREATE FUNCTION platinumwt.verify_foreign_keys() RETURNS void LANGUAGE plpgsql
+SET search_path = pg_catalog AS $$
+DECLARE constraint_row record; orphan boolean;
+BEGIN
+    FOR constraint_row IN
+        SELECT child.relname AS child_name, parent.relname AS parent_name, pn.nspname AS parent_schema,
+            string_agg(format('c.%I = p.%I', ca.attname, pa.attname), ' AND ' ORDER BY keys.ordinality) AS joins,
+            string_agg(format('c.%I IS NOT NULL', ca.attname), ' AND ' ORDER BY keys.ordinality) AS present
+        FROM pg_constraint fk JOIN pg_class child ON child.oid = fk.conrelid
+        JOIN pg_namespace cn ON cn.oid = child.relnamespace
+        JOIN pg_class parent ON parent.oid = fk.confrelid
+        JOIN pg_namespace pn ON pn.oid = parent.relnamespace
+        CROSS JOIN LATERAL unnest(fk.conkey, fk.confkey) WITH ORDINALITY AS keys(child_key, parent_key, ordinality)
+        JOIN pg_attribute ca ON ca.attrelid = child.oid AND ca.attnum = keys.child_key
+        JOIN pg_attribute pa ON pa.attrelid = parent.oid AND pa.attnum = keys.parent_key
+        WHERE cn.nspname = 'platinumwt' AND fk.contype = 'f'
+        GROUP BY fk.oid, child.relname, parent.relname, pn.nspname
+    LOOP
+        EXECUTE format('SELECT EXISTS (SELECT 1 FROM platinumwt.%I c WHERE %s AND NOT EXISTS (SELECT 1 FROM %I.%I p WHERE %s))',
+            constraint_row.child_name, constraint_row.present, constraint_row.parent_schema,
+            constraint_row.parent_name, constraint_row.joins) INTO orphan;
+        IF orphan THEN
+            RAISE EXCEPTION 'foreign key invariant failed' USING ERRCODE = '23514';
+        END IF;
+    END LOOP;
+END $$;
+
 -- Rebuild row images only in a private temporary table under a repeatable snapshot.
 -- Never replay into live tables or print verifier, request or Pokemon bytes.
 CREATE FUNCTION platinumwt.verify_replay() RETURNS bigint LANGUAGE plpgsql
@@ -472,12 +521,19 @@ BEGIN
         END IF;
     END LOOP;
     IF EXISTS (SELECT 1 FROM platinumwt.save_identities i
-        LEFT JOIN (SELECT save_id, count(*) AS events FROM platinumwt.trade_events GROUP BY save_id) e USING (save_id)
-        LEFT JOIN (SELECT save_id, count(*) AS operations FROM platinumwt.operations GROUP BY save_id) o USING (save_id)
-        WHERE i.event_highwater <> coalesce(e.events, 0) OR i.next_counter <> coalesce(o.operations, 0) + 1) THEN
+        LEFT JOIN (SELECT save_id, count(*) AS events, max(sequence) AS last_event FROM platinumwt.trade_events GROUP BY save_id) e USING (save_id)
+        LEFT JOIN (SELECT save_id, count(*) AS operations, max(counter) AS last_counter FROM platinumwt.operations GROUP BY save_id) o USING (save_id)
+        WHERE i.event_highwater = 0 OR i.event_highwater <> coalesce(e.events, 0)
+            OR i.event_highwater <> coalesce(e.last_event, 0)
+            OR i.next_counter <> coalesce(o.operations, 0) + 1
+            OR i.next_counter <> coalesce(o.last_counter, 0) + 1) THEN
         RAISE EXCEPTION 'replay checkpoint history is incomplete' USING ERRCODE = '23514';
     END IF;
+    PERFORM platinumwt.verify_foreign_keys();
     PERFORM platinumwt.validate_offer(trade_id) FROM platinumwt.offers;
+    PERFORM platinumwt.validate_event(e) FROM platinumwt.trade_events e;
+    PERFORM platinumwt.validate_match(m) FROM platinumwt.matches m;
+    PERFORM platinumwt.validate_acknowledgement(a) FROM platinumwt.acknowledgements a;
     DROP TABLE pg_temp.wt_replay_rows;
     RETURN row_count;
 END $$;

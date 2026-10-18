@@ -101,7 +101,7 @@ class LedgerTests(unittest.TestCase):
         digest = hashlib.sha256(payload).digest()
         return f"""
             INSERT INTO platinumwt.payloads VALUES ('{identifier(asset)}',{blob(payload)},{blob(digest)});
-            INSERT INTO platinumwt.offers VALUES
+            INSERT INTO platinumwt.offers(trade_id,save_id,offered_asset_id,state,receipt_id,last_event) VALUES
                 ('{identifier(trade)}','{identifier(owner)}','{identifier(asset)}',1,NULL,{sequence});
             INSERT INTO platinumwt.ownership VALUES
                 ('{identifier(asset)}','{identifier(owner)}','{identifier(trade)}',1,{sequence});
@@ -129,45 +129,50 @@ class LedgerTests(unittest.TestCase):
             COMMIT;""")
 
     def acknowledge(self, owner=1):
-        trade, asset, operation, receipt = [identifier(owner + delta) for delta in (1000, 2000, 6000, 5000)]
+        trade, operation, receipt = [identifier(owner + delta) for delta in (1000, 6000, 5000)]
+        asset = self.sql(f"SELECT asset_id FROM platinumwt.receipts WHERE receipt_id='{receipt}'")
+        counter, sequence = self.sql("SELECT next_counter||':'||(event_highwater+1) FROM platinumwt.save_identities "
+                                     f"WHERE save_id='{identifier(owner)}'").split(':')
         self.sql(f"""BEGIN;
-            UPDATE platinumwt.offers SET state=4,last_event=4 WHERE trade_id='{trade}';
-            UPDATE platinumwt.ownership SET location=3,last_event=4 WHERE asset_id='{asset}';
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{operation}',3,6,
-                {blob(bytes([6]) * 32)},1,4,{blob(bytes(146))});
+            UPDATE platinumwt.offers SET state=4,last_event={sequence} WHERE trade_id='{trade}';
+            UPDATE platinumwt.ownership SET location=3,last_event={sequence} WHERE asset_id='{asset}';
+            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{operation}',{counter},6,
+                {blob(bytes([6]) * 32)},1,{sequence},{blob(bytes(146))});
             INSERT INTO platinumwt.acknowledgements VALUES ('{receipt}','{identifier(owner)}','{operation}',
                 {blob(hashlib.sha256(bytes(136)).digest())},18446744073709551615);
             INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,asset_id,
-                payload_sha256,receipt_id,state) VALUES ('{identifier(owner)}',4,5,'{trade}','{operation}',
+                payload_sha256,receipt_id,state) VALUES ('{identifier(owner)}',{sequence},5,'{trade}','{operation}',
                 '{asset}',{blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',4);
             COMMIT;""")
 
-    def match_sql(self):
+    def match_sql(self, sequences=None):
         match = identifier(7001)
         text = f"INSERT INTO platinumwt.matches VALUES ('{match}','{identifier(8001)}'," \
                f"'{identifier(1001)}','{identifier(1002)}');"
         for owner in (1, 2):
+            sequence = (sequences or {}).get(owner, 3)
             peer = 3 - owner
             trade, receipt = identifier(owner + 1000), identifier(owner + 5000)
             asset = identifier(peer + 2000)
             text += f"""
                 INSERT INTO platinumwt.receipts VALUES ('{receipt}','{trade}','{identifier(owner)}',
                     '{asset}',1,'{match}');
-                UPDATE platinumwt.offers SET state=2,receipt_id='{receipt}',last_event=3 WHERE trade_id='{trade}';
+                UPDATE platinumwt.offers SET state=2,receipt_id='{receipt}',last_event={sequence} WHERE trade_id='{trade}';
                 UPDATE platinumwt.ownership SET save_id='{identifier(owner)}',trade_id='{trade}',location=2,
-                    last_event=3 WHERE asset_id='{asset}';
+                    last_event={sequence} WHERE asset_id='{asset}';
                 INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,
-                    receipt_id,state) VALUES ('{identifier(owner)}',3,3,'{trade}','{asset}',
+                    receipt_id,state) VALUES ('{identifier(owner)}',{sequence},3,'{trade}','{asset}',
                     {blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',2);
             """
         return text
 
-    def rejection_sql(self, owner=1, sequence=2):
+    def rejection_sql(self, owner=1, sequence=2, counter=1, operation=None):
+        operation = operation or owner + 3000
         return f"""
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{identifier(owner + 3000)}',1,2,
+            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',{counter},2,
                 {blob(bytes([3]) * 32)},8,{sequence},{blob(b'')});
             INSERT INTO platinumwt.trade_events(save_id,sequence,kind,operation_id,payload_sha256,state)
-                VALUES ('{identifier(owner)}',{sequence},6,'{identifier(owner + 3000)}',
+                VALUES ('{identifier(owner)}',{sequence},6,'{identifier(operation)}',
                     {blob(hashlib.sha256(bytes(136)).digest())},0);
         """
 
@@ -236,6 +241,22 @@ class LedgerTests(unittest.TestCase):
                          identifier(2002))
         self.assertEqual(self.sql("SELECT asset_id FROM platinumwt.ownership WHERE save_id='" + identifier(2) + "'"),
                          identifier(2001))
+        for owner in (1, 2):
+            self.acknowledge(owner)
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.acknowledgements"), "2")
+        self.tool("verify")
+
+    def test_match_and_acknowledge_with_unequal_owner_histories(self):
+        self.enroll(1)
+        for sequence in range(2, 5):
+            self.sql("BEGIN;" + self.rejection_sql(1, sequence, sequence - 1, 10000 + sequence) + "COMMIT;")
+        self.sql("BEGIN;" + self.submit_sql(1, sequence=5, counter=4) + "COMMIT;")
+        self.enroll(2)
+        self.submit(2)
+        self.sql("BEGIN;" + self.match_sql({1: 6, 2: 3}) + "COMMIT;")
+        for owner in (1, 2):
+            self.acknowledge(owner)
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.acknowledgements"), "2")
         self.tool("verify")
 
     def test_foreign_receipt_cannot_be_acknowledged(self):
@@ -305,6 +326,27 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM platinumwt.save_identities"), "2:2")
         self.assertEqual(self.sql("SELECT result FROM platinumwt.operations"), "8")
         self.tool("verify")
+
+    def test_rejected_submission_cannot_create_queued_ownership(self):
+        self.enroll()
+        text = self.submit_sql()
+        success = f"{blob(bytes([3]) * 32)},1,2,{blob(bytes(146))}"
+        rejection = f"{blob(bytes([3]) * 32)},8,2,{blob(b'')}"
+        self.assertEqual(text.count(success), 1)
+        text = text.replace(success, rejection).replace(f"'{identifier(1)}',2,2,", f"'{identifier(1)}',2,6,")
+        self.sql("BEGIN;" + text + "COMMIT;", ok=False)
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "0")
+        self.assertEqual(self.sql("SELECT next_counter FROM platinumwt.save_identities"), "1")
+        self.tool("verify")
+
+    def test_replay_detects_ownerless_payload_after_audited_bypass(self):
+        payload = bytes(136)
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 "ALTER TABLE platinumwt.payloads ENABLE ALWAYS TRIGGER audit_rows; "
+                 f"INSERT INTO platinumwt.payloads VALUES ('{identifier(777)}',{blob(payload)},"
+                 f"{blob(hashlib.sha256(payload).digest())}); "
+                 "ALTER TABLE platinumwt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_operation_has_exactly_one_outcome_event(self):
         self.enroll()
