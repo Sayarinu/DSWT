@@ -13,7 +13,7 @@ void WtRecovery_Block(void);
 /* Only the serialized game adapter may grant a retail write during recovery.
  * This never grants clearing or authorizes ordinary gameplay. */
 void WtRecovery_InternalWrite(int);
-void WtRecovery_Allow(void);
+void WtRecovery_Allow(unsigned phase);
 int WtRecovery_Check(WtJournalIO);
 
 #endif

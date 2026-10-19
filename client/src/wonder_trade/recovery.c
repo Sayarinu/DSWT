@@ -3,7 +3,7 @@
 #include <string.h>
 #include <mbedtls/platform_util.h>
 
-enum { UNCHECKED, CHECKING, SAFE, BLOCKED };
+enum { UNCHECKED, CHECKING, SAFE, PENDING, BLOCKED };
 static volatile int sState;
 static volatile int sInternalWrite;
 
@@ -37,12 +37,16 @@ static int Blank(const unsigned char record[4096])
 }
 
 int WtRecovery_Started(void) { return sState != UNCHECKED; }
-int WtRecovery_CanWrite(void) { return sState == SAFE || sInternalWrite; }
+int WtRecovery_CanWrite(void) { return sState == SAFE || sState == PENDING || sInternalWrite; }
 int WtRecovery_CanClear(void) { return sState == UNCHECKED || sState == SAFE; }
 void WtRecovery_Begin(void) { sState = CHECKING; }
 void WtRecovery_Block(void) { sState = BLOCKED; }
 void WtRecovery_InternalWrite(int allowed) { sInternalWrite = allowed != 0; }
-void WtRecovery_Allow(void) { sState = SAFE; }
+void WtRecovery_Allow(unsigned phase)
+{
+    sState = phase == WT_JOURNAL_EMPTY || phase == WT_JOURNAL_IDLE ? SAFE
+        : phase == WT_JOURNAL_QUEUED || phase == WT_JOURNAL_RECEIVED ? PENDING : BLOCKED;
+}
 
 int WtRecovery_Check(WtJournalIO source)
 {

@@ -359,7 +359,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     }
     if (transport->trading) {
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
-        if (network->canLeave) WtRecovery_Allow();
+        if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }
     if (network->error == 0 && transport->requestSize) network->reply = transport->reply;

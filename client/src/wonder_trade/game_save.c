@@ -237,7 +237,7 @@ int WtGameSave_Boot(WtGameSave *game, WtJournalIO io)
     if (WtJournal_Open(&journal, io) != 0) return -1;
     if (WtJournal_Read(&journal, &entry) == 0 && entry.generation != UINT64_MAX
         && WtGameSave_CanLeave(game, &entry) && WtJournal_Repair(&journal) == 0) {
-        WtRecovery_Allow(); result = 0;
+        WtRecovery_Allow(entry.phase); result = 0;
     }
     mbedtls_platform_zeroize(&entry, sizeof(entry)); WtJournal_Close(&journal);
     return result;

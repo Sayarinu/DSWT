@@ -101,7 +101,7 @@ diff --git a/src/savedata.c b/src/savedata.c
 @@ -1,0 +2 @@
 +#include "wonder_trade/recovery.h"
 @@ -119,0 +121,2 @@
-+    if (!WtRecovery_CanWrite()) return FALSE;
++    if (!WtRecovery_Started() || !WtRecovery_CanClear()) return FALSE;
 +
 @@ -166,0 +170,2 @@
 +    if (!WtRecovery_CanWrite()) return SAVE_RESULT_CORRUPT;
@@ -241,3 +241,20 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 +    menu->state = START_MENU_STATE_REINIT;
 +    return FALSE;
 +}
+diff --git a/src/game_start.c b/src/game_start.c
+--- a/src/game_start.c
++++ b/src/game_start.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -68,0 +70,2 @@
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(RESET_CLEAN); return FALSE; }
++
+@@ -89,0 +93,2 @@
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(RESET_CLEAN); return FALSE; }
++
+@@ -145,0 +151,2 @@
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(RESET_CLEAN); return; }
++
+@@ -182,0 +190,2 @@
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(RESET_CLEAN); return; }
++
