@@ -276,6 +276,10 @@ static int BuildReceived(WtGameSave *game, SaveData *save, WtJournalEntry *entry
     if (!destination || memcmp(destination, entry->destinationBefore, entry->destination.length) != 0
         || (entry->destination.kind == 1 && party->currentCount != entry->destination.slot)) return -1;
     if (ReceiveEffects(game, save, entry, &mon) != 0) return -1;
+    if (entry->deliveryKind == WT_DELIVERY_MATCH && entry->destination.kind == 2) {
+        BoxPokemon_RestorePP(Pokemon_GetBoxPokemon(&mon));
+        BoxPokemon_SetShayminForm(Pokemon_GetBoxPokemon(&mon), SHAYMIN_FORM_LAND);
+    }
     if (WtPokemon_Decode((const unsigned char *)&mon, canonical) != 0) return -1;
     if (prepare) {
         memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
