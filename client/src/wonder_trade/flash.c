@@ -87,3 +87,18 @@ int WtFlash_Hash(const unsigned char *bytes, size_t length, unsigned char digest
     /* Stack-only hashing is available before the TLS allocator/RNG starts. */
     return mbedtls_sha256(bytes, length, digest, 0);
 }
+
+int WtFlash_ReadRange(unsigned address, unsigned char *bytes, size_t length)
+{
+    s32 lockID;
+    int result = -1;
+    if (address > 0x80000 || length > 0x80000 - address) return -1;
+    lockID = OS_GetLockID();
+    if (lockID == OS_LOCK_ID_ERROR) return -1;
+    CARD_LockBackup(lockID);
+    if (CARD_GetCurrentBackupType() == CARD_BACKUP_TYPE_FLASH_4MBITS
+        && Capability() && CARD_ReadFlash(address, bytes, length)) result = 0;
+    CARD_UnlockBackup(lockID);
+    OS_ReleaseLockID(lockID);
+    return result;
+}

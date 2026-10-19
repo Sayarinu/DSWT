@@ -13,5 +13,7 @@ typedef struct WtFlashAccess {
 int WtFlash_ReadBank(void *, int, unsigned char[4096]);
 int WtFlash_WriteBank(void *, int, const unsigned char[4096]);
 int WtFlash_Hash(const unsigned char *, size_t, unsigned char[32]);
+/* Checked raw reads for retail-copy verification; no fatal SDK load handler. */
+int WtFlash_ReadRange(unsigned address, unsigned char *, size_t);
 
 #endif

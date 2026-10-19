@@ -5,6 +5,7 @@
 
 #include "constants/heap.h"
 #include "wonder_trade/wire.h"
+#include "savedata.h"
 
 enum WonderTradeNetworkState {
     WT_NET_STARTING,
@@ -37,6 +38,8 @@ typedef struct WonderTradeNetwork {
     BOOL requestStarted;
     BOOL timedOut;
     WtWireReply reply;
+    unsigned tradePhase;
+    BOOL canLeave;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);
@@ -47,6 +50,8 @@ void WonderTradeNetwork_Ping(WonderTradeNetwork *network);
  * The caller must first prove/persist the request's journal transition. This
  * transport does not authorize transfers or retire/rebuild pending packets. */
 BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size);
+/* A negative slot resumes/reconciles; a nonnegative slot confirms a deposit. */
+BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *, SaveData *, int slot);
 void WonderTradeNetwork_Close(WonderTradeNetwork *network);
 
 #endif

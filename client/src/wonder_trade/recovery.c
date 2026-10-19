@@ -5,6 +5,7 @@
 
 enum { UNCHECKED, CHECKING, SAFE, BLOCKED };
 static volatile int sState;
+static volatile int sInternalWrite;
 
 typedef struct BootRead {
     WtJournalIO source;
@@ -36,10 +37,12 @@ static int Blank(const unsigned char record[4096])
 }
 
 int WtRecovery_Started(void) { return sState != UNCHECKED; }
-int WtRecovery_CanWrite(void) { return sState == SAFE; }
+int WtRecovery_CanWrite(void) { return sState == SAFE || sInternalWrite; }
 int WtRecovery_CanClear(void) { return sState == UNCHECKED || sState == SAFE; }
 void WtRecovery_Begin(void) { sState = CHECKING; }
 void WtRecovery_Block(void) { sState = BLOCKED; }
+void WtRecovery_InternalWrite(int allowed) { sInternalWrite = allowed != 0; }
+void WtRecovery_Allow(void) { sState = SAFE; }
 
 int WtRecovery_Check(WtJournalIO source)
 {
