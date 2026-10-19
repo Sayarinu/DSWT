@@ -103,7 +103,8 @@ done:
 int WtGameSave_Checkpoint(WtGameSave *game)
 {
     unsigned char digest[32];
-    return Hash(game->save, digest) == 0 ? SaveBoth(game, digest) : -1;
+    if (Hash(game->save, digest) != 0) return -1;
+    return Verify(game->save, digest) == 0 ? 0 : SaveBoth(game, digest);
 }
 
 static void Counters(WtGameSave *game, WtJournalEntry *entry)
@@ -233,7 +234,6 @@ int WtGameSave_Boot(WtGameSave *game, WtJournalIO io)
     WtJournal journal;
     WtJournalEntry entry;
     int result = -1;
-    if (WtRecovery_Check(io) == 0) return 0;
     if (WtJournal_Open(&journal, io) != 0) return -1;
     if (WtJournal_Read(&journal, &entry) == 0 && entry.generation != UINT64_MAX
         && WtGameSave_CanLeave(game, &entry) && WtJournal_Repair(&journal) == 0) {

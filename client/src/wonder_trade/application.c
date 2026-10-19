@@ -236,12 +236,7 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
         return;
     }
 
-    Pokemon *mon = Party_GetPokemonBySlotIndex(&app->partySnapshot, slot);
-    u32 species = Pokemon_GetValue(mon, MON_DATA_SPECIES, NULL);
-    if (Pokemon_GetValue(mon, MON_DATA_IS_EGG, NULL)
-        || Pokemon_GetValue(mon, MON_DATA_SANITY_IS_EGG, NULL)
-        || species == SPECIES_NONE || species > SPECIES_ARCEUS
-        || !WtGameSave_Eligible(app->fieldSystem->saveData, slot)) {
+    if (!WtGameSave_Eligible(app->fieldSystem->saveData, slot)) {
         WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Ineligible);
         return;
     }
@@ -277,9 +272,15 @@ static void WonderTrade_BootWorker(void *arg)
 {
     WonderTradeBootWorker *worker = arg;
     WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
-    worker->flash.requireDurability = TRUE;
+    /* Ordinary play remains available on stock emulators for checked blank
+     * or EMPTY journals. Only active recovery requires durable capability. */
+    worker->flash.requireDurability = FALSE;
     worker->game.save = SaveData_Ptr(); worker->game.heapID = HEAP_ID_WONDER_TRADE;
-    worker->result = WtGameSave_Boot(&worker->game, io);
+    worker->result = WtRecovery_Check(io);
+    if (worker->result != 0) {
+        worker->flash.requireDurability = TRUE;
+        worker->result = WtGameSave_Boot(&worker->game, io);
+    }
 }
 
 static BOOL WonderTrade_BootInit(ApplicationManager *appMan, int *state)

@@ -29,6 +29,7 @@
 enum WonderTradeTransportPhase {
     WT_TRANSPORT_CONNECTING,
     WT_TRANSPORT_REQUEST,
+    WT_TRANSPORT_SAVING,
     WT_TRANSPORT_DRAINING,
 };
 
@@ -173,7 +174,13 @@ static int WonderTradeNetwork_Random(void *arg, unsigned char *bytes, size_t siz
 
 static int WonderTradeNetwork_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
-    return WtGameSave_Inventory(&((WonderTradeTransport *)arg)->game, step, entry, slot);
+    WonderTradeTransport *transport = arg;
+    int phase = transport->phase;
+    int result;
+    transport->phase = WT_TRANSPORT_SAVING;
+    result = WtGameSave_Inventory(&transport->game, step, entry, slot);
+    transport->phase = phase;
+    return result;
 }
 
 static void WonderTradeNetwork_DrainSocket(WonderTradeTransport *transport)
@@ -255,8 +262,11 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (engine->entry.phase == WT_JOURNAL_EMPTY && WtEngine_Enroll(engine, 1) != 0) { result = -30; break; }
         if (engine->entry.phase == WT_JOURNAL_IDLE && engine->synchronized) {
             if (transport->slot < 0) { result = 0; break; }
-            if (WtGameSave_Checkpoint(&transport->game) != 0
-                || WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
+            transport->phase = WT_TRANSPORT_SAVING;
+            result = WtGameSave_Checkpoint(&transport->game);
+            transport->phase = WT_TRANSPORT_CONNECTING;
+            if (transport->cancel) { result = -15; break; }
+            if (result != 0 || WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
             transport->slot = -1;
         }
         operation = engine->lastResult == WT_RESULT_ILLEGAL_POKEMON ? WT_OP_RECONCILE : 0;
@@ -274,9 +284,10 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     }
     if (count == 24) result = -33;
     transport->tradePhase = engine->entry.phase;
+    transport->phase = WT_TRANSPORT_SAVING;
     transport->canLeave = !engine->blocked && WtGameSave_CanLeave(&transport->game, &engine->entry);
-    if (transport->canLeave) WtRecovery_Allow();
-    else WtRecovery_Block();
+    /* The main thread also checks the worker stack before opening gameplay. */
+    WtRecovery_Block();
     return result;
 }
 
@@ -344,9 +355,12 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     network->stackBytes = size - unused;
     if (unused < 256 || OS_GetStackStatus(&transport->thread) != OS_STACK_NO_ERROR) {
         network->error = -16;
+        transport->canLeave = FALSE;
     }
     if (transport->trading) {
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
+        if (network->canLeave) WtRecovery_Allow();
+        else WtRecovery_Block();
     }
     if (network->error == 0 && transport->requestSize) network->reply = transport->reply;
     mbedtls_platform_zeroize(transport, sizeof(*transport));
@@ -525,6 +539,9 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
             network->maxFrameMs = elapsed;
         }
         network->lastUpdate = now;
+        if (transport->trading && transport->phase == WT_TRANSPORT_SAVING) {
+            network->deadline = now + OS_SecondsToTicks(180);
+        }
         if (!transport->trading && transport->phase == WT_TRANSPORT_REQUEST && !network->requestStarted) {
             network->requestStarted = TRUE;
             network->deadline = now + OS_SecondsToTicks(15);
