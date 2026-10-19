@@ -39,6 +39,8 @@ enum WonderTradeAppState {
     WT_APP_PICKER_FADE,
     WT_APP_PICKER,
     WT_APP_CONFIRM,
+    WT_APP_COLLECT_CONFIRM,
+    WT_APP_CANCEL_CONFIRM,
     WT_APP_PINGING,
     WT_APP_MESSAGE,
     WT_APP_ERROR,
@@ -158,7 +160,11 @@ static void WonderTrade_Draw(WonderTradeApp *app)
     WonderTrade_Print(app, app->statusMessage, 8, 32);
 
     if (app->state == WT_APP_MENU) {
-        const int choices[] = { WonderTrade_Text_Trade, WonderTrade_Text_Info, WonderTrade_Text_Exit };
+        const int choices[] = {
+            app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Trade : WonderTrade_Text_Collect,
+            app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Info : WonderTrade_Text_CancelOffer,
+            WonderTrade_Text_Exit
+        };
         for (int i = 0; i < 3; i++) {
             WonderTrade_Print(app, choices[i], 24, 96 + i * 24);
         }
@@ -187,7 +193,8 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         WonderTrade_Print(app, WonderTrade_Text_Back, 24, 160);
         Window_DrawMenuCursor(&app->window, 8, 160);
     } else if (app->state != WT_APP_BOOT && app->state != WT_APP_RECOVERY) {
-        if (app->state != WT_APP_CONFIRM && app->network.canLeave) WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
+        if (app->state != WT_APP_CONFIRM && app->state != WT_APP_COLLECT_CONFIRM
+            && app->state != WT_APP_CANCEL_CONFIRM && app->network.canLeave) WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
     }
     Window_CopyToVRAM(&app->window);
 }
@@ -372,6 +379,10 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
         } else if (app->network.state == WT_NET_RESPONSE) {
             app->selectedSlot = -1;
             if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
+            else if (app->network.completed) WonderTrade_Show(app, WT_APP_MESSAGE,
+                app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
+            else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
+            else if (app->network.tradePhase == WT_JOURNAL_RECEIVED) WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_NoRoom);
             else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
         }
         return FALSE;
@@ -388,9 +399,19 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
         return FALSE;
     }
 
+    if (app->state == WT_APP_COLLECT_CONFIRM || app->state == WT_APP_CANCEL_CONFIRM) {
+        if (JOY_NEW(PAD_BUTTON_A)) {
+            WonderTradeNetwork_Collect(&app->network, SaveData_Ptr(), app->state == WT_APP_CANCEL_CONFIRM);
+            WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
+        } else if (JOY_NEW(PAD_BUTTON_B | PAD_BUTTON_X)) {
+            WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_Queued);
+        }
+        return FALSE;
+    }
+
     if (app->state == WT_APP_MESSAGE) {
         if (JOY_NEW(PAD_BUTTON_A | PAD_BUTTON_B)) {
-            WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_Choose);
+            WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
         } else if (JOY_NEW(PAD_BUTTON_X)) {
             WonderTrade_Close(app);
         }
@@ -418,12 +439,10 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
             }
         } else if (app->cursor == 0) {
             if (app->network.tradePhase == WT_JOURNAL_IDLE && app->fieldSystem) WonderTrade_StartPicker(app);
-            else {
-                WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), -1);
-                WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
-            }
+            else WonderTrade_Show(app, WT_APP_COLLECT_CONFIRM, WonderTrade_Text_ConfirmCollect);
         } else if (app->cursor == 1) {
-            WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Explanation);
+            if (app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Explanation);
+            else WonderTrade_Show(app, WT_APP_CANCEL_CONFIRM, WonderTrade_Text_ConfirmCancel);
         } else {
             WonderTrade_Close(app);
         }
