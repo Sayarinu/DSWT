@@ -10,6 +10,7 @@
 #include "wonder_trade/network.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/recovery.h"
+#include "wonder_trade/game_save.h"
 
 #include "bag.h"
 #include "bg_window.h"
@@ -19,6 +20,7 @@
 #include "mail.h"
 #include "message.h"
 #include "party.h"
+#include "play_time_manager.h"
 #include "pokemon.h"
 #include "render_window.h"
 #include "save_player.h"
@@ -36,6 +38,7 @@ enum WonderTradeAppState {
     WT_APP_MENU,
     WT_APP_PICKER_FADE,
     WT_APP_PICKER,
+    WT_APP_CONFIRM,
     WT_APP_PINGING,
     WT_APP_MESSAGE,
     WT_APP_ERROR,
@@ -47,6 +50,7 @@ enum WonderTradeAppState {
 typedef struct WonderTradeBootWorker {
     OSThread thread;
     WtFlashAccess flash;
+    WtGameSave game;
     int result;
     unsigned char stack[WT_BOOT_STACK_SIZE + 8];
 } WonderTradeBootWorker;
@@ -183,7 +187,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         WonderTrade_Print(app, WonderTrade_Text_Back, 24, 160);
         Window_DrawMenuCursor(&app->window, 8, 160);
     } else if (app->state != WT_APP_BOOT && app->state != WT_APP_RECOVERY) {
-        WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
+        if (app->state != WT_APP_CONFIRM && app->network.canLeave) WonderTrade_Print(app, WonderTrade_Text_Cancel, 8, 144);
     }
     Window_CopyToVRAM(&app->window);
 }
@@ -198,6 +202,7 @@ static void WonderTrade_Show(WonderTradeApp *app, int state, int message)
 
 static void WonderTrade_Close(WonderTradeApp *app)
 {
+    if (!app->network.canLeave) return;
     WonderTradeNetwork_Close(&app->network);
     WonderTrade_Show(app, WT_APP_CLOSING, WonderTrade_Text_Disconnecting);
 }
@@ -231,26 +236,22 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
         return;
     }
 
-    Pokemon *mon = Party_GetPokemonBySlotIndex(&app->partySnapshot, slot);
-    u32 species = Pokemon_GetValue(mon, MON_DATA_SPECIES, NULL);
-    if (Pokemon_GetValue(mon, MON_DATA_IS_EGG, NULL)
-        || Pokemon_GetValue(mon, MON_DATA_SANITY_IS_EGG, NULL)
-        || species == SPECIES_NONE || species > SPECIES_ARCEUS) {
+    if (!WtGameSave_Eligible(app->fieldSystem->saveData, slot)) {
         WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Ineligible);
         return;
     }
 
     app->selectedSlot = slot;
-    WonderTradeNetwork_Ping(&app->network);
-    WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
+    WonderTrade_Show(app, WT_APP_CONFIRM, WonderTrade_Text_Confirm);
 }
 
 static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSystem *fieldSystem, int state, int message)
 {
-    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x50000);
+    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x80000);
     WonderTradeApp *app = ApplicationManager_NewData(appMan, sizeof(WonderTradeApp), HEAP_ID_WONDER_TRADE);
     memset(app, 0, sizeof(*app));
     app->fieldSystem = fieldSystem;
+    PlayTime_FlagNotStarted();
     app->selectedSlot = -1;
     app->messages = MessageLoader_Init(MSG_LOADER_PRELOAD_ENTIRE_BANK, NARC_INDEX_MSGDATA__PL_MSG, TEXT_BANK_WONDER_TRADE, HEAP_ID_WONDER_TRADE);
     app->bgConfig = BgConfig_New(HEAP_ID_WONDER_TRADE);
@@ -271,7 +272,15 @@ static void WonderTrade_BootWorker(void *arg)
 {
     WonderTradeBootWorker *worker = arg;
     WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
+    /* Ordinary play remains available on stock emulators for checked blank
+     * or EMPTY journals. Only active recovery requires durable capability. */
+    worker->flash.requireDurability = FALSE;
+    worker->game.save = SaveData_Ptr(); worker->game.heapID = HEAP_ID_WONDER_TRADE;
     worker->result = WtRecovery_Check(io);
+    if (worker->result != 0) {
+        worker->flash.requireDurability = TRUE;
+        worker->result = WtGameSave_Boot(&worker->game, io);
+    }
 }
 
 static BOOL WonderTrade_BootInit(ApplicationManager *appMan, int *state)
@@ -314,7 +323,13 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = ApplicationManager_Data(appMan);
     if (app->state == WT_APP_BOOT) return WonderTrade_BootPoll(app);
-    if (app->state == WT_APP_RECOVERY) return FALSE;
+    if (app->state == WT_APP_RECOVERY) {
+        if (JOY_NEW(PAD_BUTTON_A)) {
+            WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
+            WonderTrade_Show(app, WT_APP_CONNECTING, WonderTrade_Text_Connecting);
+        }
+        return FALSE;
+    }
     WonderTradeNetwork_Update(&app->network);
 
     if (app->state == WT_APP_PICKER_FADE) {
@@ -347,20 +362,28 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
     }
 
     if (app->state == WT_APP_CONNECTING || app->state == WT_APP_PINGING) {
-        if (JOY_NEW(PAD_BUTTON_B | PAD_BUTTON_X)) {
+        if (JOY_NEW(PAD_BUTTON_B | PAD_BUTTON_X) && app->network.canLeave) {
             WonderTrade_Close(app);
         } else if (app->network.state == WT_NET_ERROR) {
             WonderTrade_Show(app, WT_APP_ERROR, app->state == WT_APP_CONNECTING ? WonderTrade_Text_ConnectionError : WonderTrade_Text_PingError);
         } else if (app->state == WT_APP_CONNECTING && app->network.state == WT_NET_READY) {
-            if (app->selectedSlot >= 0) {
-                WonderTradeNetwork_Ping(&app->network);
-                WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
-            } else {
-                WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_Choose);
-            }
-        } else if (app->network.state == WT_NET_ACKNOWLEDGED) {
+            WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), -1);
+            WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
+        } else if (app->network.state == WT_NET_RESPONSE) {
             app->selectedSlot = -1;
-            WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Acknowledged);
+            if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
+            else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
+        }
+        return FALSE;
+    }
+
+    if (app->state == WT_APP_CONFIRM) {
+        if (JOY_NEW(PAD_BUTTON_A)) {
+            WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), app->selectedSlot);
+            WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
+        } else if (JOY_NEW(PAD_BUTTON_B | PAD_BUTTON_X)) {
+            app->selectedSlot = -1;
+            WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_Choose);
         }
         return FALSE;
     }
@@ -394,7 +417,11 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
                 WonderTrade_Close(app);
             }
         } else if (app->cursor == 0) {
-            WonderTrade_StartPicker(app);
+            if (app->network.tradePhase == WT_JOURNAL_IDLE && app->fieldSystem) WonderTrade_StartPicker(app);
+            else {
+                WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), -1);
+                WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
+            }
         } else if (app->cursor == 1) {
             WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Explanation);
         } else {
@@ -407,6 +434,7 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
 static BOOL WonderTrade_Exit(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = ApplicationManager_Data(appMan);
+    if (app->fieldSystem) PlayTime_Start(SaveData_GetPlayTime(app->fieldSystem->saveData));
     WonderTrade_FreeGraphics(app);
     Heap_Free(app->bgConfig);
     MessageLoader_Free(app->messages);

@@ -86,6 +86,17 @@ int main(void)
     io.hash = Hash; io.read = NULL;
     assert(WtRecovery_Check(io) != 0 && !WtRecovery_CanClear());
     Check(1); WtRecovery_Block(); assert(!WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    WtRecovery_Allow(WT_JOURNAL_QUEUED);
+    assert(WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    WtRecovery_Allow(WT_JOURNAL_RECEIVED);
+    assert(WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    WtRecovery_Block(); WtRecovery_InternalWrite(1);
+    assert(WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    WtRecovery_InternalWrite(0); assert(!WtRecovery_CanWrite());
+    WtRecovery_Allow(WT_JOURNAL_APPLYING);
+    assert(!WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    WtRecovery_Allow(WT_JOURNAL_IDLE);
+    assert(WtRecovery_CanWrite() && WtRecovery_CanClear());
     puts("Read-only boot classification, mutation gates and evidence preservation passed");
     return 0;
 }

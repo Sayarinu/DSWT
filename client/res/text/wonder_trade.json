@@ -39,11 +39,11 @@
     },
     {
       "id": "WonderTrade_Text_Choose",
-      "en_US": "Choose a party Pokémon\nto test server connectivity."
+      "en_US": "Choose a party Pokémon\nto offer for Wonder Trade."
     },
     {
       "id": "WonderTrade_Text_Pinging",
-      "en_US": "Contacting the Wonder Trade\nserver... Please wait."
+      "en_US": "Saving and contacting the\nWonder Trade server...\nDo not turn off the power."
     },
     {
       "id": "WonderTrade_Text_ConnectionError",
@@ -55,7 +55,7 @@
     },
     {
       "id": "WonderTrade_Text_Ineligible",
-      "en_US": "Eggs and invalid Pokémon\ncannot be selected."
+      "en_US": "Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail or capsules."
     },
     {
       "id": "WonderTrade_Text_Acknowledged",
@@ -63,7 +63,7 @@
     },
     {
       "id": "WonderTrade_Text_Explanation",
-      "en_US": "Secure connection test.\nTrading is not available yet."
+      "en_US": "One pending trade per save.\nReconnect to check its status."
     },
     {
       "id": "WonderTrade_Text_ErrorCode",
@@ -91,7 +91,15 @@
     },
     {
       "id": "WonderTrade_Text_RecoveryRequired",
-      "en_US": "Save recovery required.\nKeep this save and its\nrecovery files.\n\nDo not delete or replace them."
+      "en_US": "Trade recovery required.\nA: Connect and retry\n\nKeep this save and its\nrecovery files."
+    },
+    {
+      "id": "WonderTrade_Text_Confirm",
+      "en_US": "Offer the selected Pokémon?\nIt will leave your party.\n\nA: Confirm    B: Back"
+    },
+    {
+      "id": "WonderTrade_Text_Queued",
+      "en_US": "Your trade is pending.\nChoose Wonder Trade again\nto check its status."
     }
   ]
 }
