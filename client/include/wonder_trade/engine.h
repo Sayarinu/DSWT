@@ -29,7 +29,10 @@ typedef struct WtEngine {
     WtEngineIO io;
     unsigned char frame[WT_WIRE_REQUEST_MAX];
     size_t frameSize;
-    int synchronized, blocked, lastResult;
+    int synchronized, blocked;
+    /* Recovery state for the pending operation; preparing a new ACK resets
+     * this to zero. The decoded reply owns the current wire result. */
+    int lastResult;
 } WtEngine;
 
 /* Open repairs supported mirrors. Unknown evidence and generation exhaustion
