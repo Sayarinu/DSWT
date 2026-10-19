@@ -159,6 +159,19 @@ static void WonderTrade_Draw(WonderTradeApp *app)
     WonderTrade_Print(app, WonderTrade_Text_Title, 8, 0);
     WonderTrade_Print(app, app->statusMessage, 8, 32);
 
+    if (app->state == WT_APP_CONFIRM && app->selectedSlot >= 0
+        && app->selectedSlot < Party_GetCurrentCount(&app->partySnapshot)) {
+        Pokemon *mon = Party_GetPokemonBySlotIndex(&app->partySnapshot, app->selectedSlot);
+        charcode_t species[MON_NAME_LEN + 1];
+        String *name = String_Init(MON_NAME_LEN + 1, HEAP_ID_WONDER_TRADE);
+        MessageLoader_GetSpeciesName(Pokemon_GetValue(mon, MON_DATA_SPECIES, NULL), HEAP_ID_WONDER_TRADE, species);
+        String_CopyChars(name, species);
+        Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, name, 8, 112, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
+        Pokemon_GetValue(mon, MON_DATA_NICKNAME_STRING, name);
+        Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, name, 8, 128, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
+        String_Free(name);
+    }
+
     if (app->state == WT_APP_MENU) {
         const int choices[] = {
             app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Trade : WonderTrade_Text_Collect,
