@@ -100,6 +100,38 @@
     {
       "id": "WonderTrade_Text_Queued",
       "en_US": "Your trade is pending.\nChoose Wonder Trade again\nto check its status."
+    },
+    {
+      "id": "WonderTrade_Text_Collect",
+      "en_US": "Collect result"
+    },
+    {
+      "id": "WonderTrade_Text_CancelOffer",
+      "en_US": "Cancel offer"
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmCollect",
+      "en_US": "Collect your trade result?\nTrade evolution keeps the\ncurrent moves.\n\nA: Confirm    B: Back"
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmCancel",
+      "en_US": "Cancel an unmatched offer?\nIf matched, collect instead.\nEvolution keeps current moves.\n\nA: Confirm    B: Back"
+    },
+    {
+      "id": "WonderTrade_Text_Completed",
+      "en_US": "Trade completed!\nYour Pokémon is saved in\nyour party or PC."
+    },
+    {
+      "id": "WonderTrade_Text_Returned",
+      "en_US": "Offer cancelled.\nYour original Pokémon\nis saved in your party or PC."
+    },
+    {
+      "id": "WonderTrade_Text_Rejected",
+      "en_US": "The server rejected the offer.\nYour original Pokémon\nhas been restored."
+    },
+    {
+      "id": "WonderTrade_Text_NoRoom",
+      "en_US": "Your result is kept pending.\nMake space in your party\nor PC, then collect again."
     }
   ]
 }

@@ -40,6 +40,7 @@ typedef struct WonderTradeNetwork {
     WtWireReply reply;
     unsigned tradePhase;
     BOOL canLeave;
+    BOOL completed, returned, rejected;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);
@@ -52,6 +53,7 @@ void WonderTradeNetwork_Ping(WonderTradeNetwork *network);
 BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size);
 /* A negative slot resumes/reconciles; a nonnegative slot confirms a deposit. */
 BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *, SaveData *, int slot);
+BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *, SaveData *, BOOL cancel);
 void WonderTradeNetwork_Close(WonderTradeNetwork *network);
 
 #endif

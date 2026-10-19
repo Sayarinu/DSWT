@@ -41,6 +41,8 @@ typedef struct WonderTradeTransport {
     WtGameSave game;
     BOOL trading;
     int slot;
+    unsigned action;
+    BOOL completed, returned, rejected;
     unsigned tradePhase;
     BOOL canLeave;
     WtFlashAccess flash;
@@ -269,15 +271,24 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
             if (result != 0 || WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
             transport->slot = -1;
         }
-        operation = engine->lastResult == WT_RESULT_ILLEGAL_POKEMON ? WT_OP_RECONCILE : 0;
+        operation = transport->action;
+        if (engine->entry.deliveryKind == WT_DELIVERY_RETURN) operation = WT_OP_COLLECT;
+        if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON
+            || (engine->entry.requestLength && engine->entry.request[5] == WT_OP_CANCEL
+                && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) operation = WT_OP_RECONCILE;
+        if (operation == WT_OP_CANCEL && engine->entry.deliveryKind == WT_DELIVERY_MATCH) operation = WT_OP_COLLECT;
         result = WtEngine_Request(engine, operation);
-        if (result != 0) { if (result < 0) result = -30; break; }
+        if (result != 0) { result = result < 0 ? -30 : 0; break; }
         transport->requestSize = engine->frameSize;
         memcpy(transport->request, engine->frame, engine->frameSize);
         operation = transport->request[5];
+        if (operation == WT_OP_ACKNOWLEDGE) transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
-        if (engine->lastResult != WT_RESULT_OK && engine->lastResult != WT_RESULT_ILLEGAL_POKEMON) {
+        if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
+        if (operation == WT_OP_ACKNOWLEDGE && engine->lastResult == WT_RESULT_OK) transport->completed = TRUE;
+        if (engine->lastResult != WT_RESULT_OK && engine->lastResult != WT_RESULT_ILLEGAL_POKEMON
+            && !(operation == WT_OP_CANCEL && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) {
             result = -100 - engine->lastResult; break;
         }
         if (operation == WT_OP_STATUS) { result = 0; break; }
@@ -359,6 +370,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     }
     if (transport->trading) {
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
+        network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }
@@ -394,7 +406,7 @@ void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID)
     network->deadline = OS_GetTick() + OS_SecondsToTicks(30);
 }
 
-static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const unsigned char *frame, size_t size, SaveData *save, int slot)
+static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const unsigned char *frame, size_t size, SaveData *save, int slot, unsigned action)
 {
     WonderTradeTransport *transport;
     void *stackTop;
@@ -417,6 +429,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
     transport->requestSize = size;
     transport->trading = save != NULL; transport->game.save = save;
     transport->game.heapID = network->heapID; transport->slot = slot;
+    transport->action = action;
     if (save) network->canLeave = FALSE;
     if (size) memcpy(transport->request, frame, size);
     network->transport = transport;
@@ -439,7 +452,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
 
 void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
 {
-    WonderTradeNetwork_BeginRequest(network, NULL, 0, NULL, -1);
+    WonderTradeNetwork_BeginRequest(network, NULL, 0, NULL, -1, 0);
 }
 
 BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size)
@@ -448,12 +461,17 @@ BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned cha
         mbedtls_platform_zeroize(&network->reply, sizeof(network->reply));
         return FALSE;
     }
-    return WonderTradeNetwork_BeginRequest(network, frame, size, NULL, -1);
+    return WonderTradeNetwork_BeginRequest(network, frame, size, NULL, -1, 0);
 }
 
 BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *network, SaveData *save, int slot)
 {
-    return save && WonderTradeNetwork_BeginRequest(network, NULL, 0, save, slot);
+    return save && WonderTradeNetwork_BeginRequest(network, NULL, 0, save, slot, 0);
+}
+
+BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *network, SaveData *save, BOOL cancel)
+{
+    return save && WonderTradeNetwork_BeginRequest(network, NULL, 0, save, -1, cancel ? WT_OP_CANCEL : WT_OP_COLLECT);
 }
 
 void WonderTradeNetwork_Close(WonderTradeNetwork *network)
