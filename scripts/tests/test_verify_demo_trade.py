@@ -46,23 +46,33 @@ def retail(party, box):
     return raw
 
 
-def idle(raw, identity, counter=3):
+def idle(raw, identity, counter=3, cursor=4, generation=12, receipt=None):
     journal = bytearray(4096)
     journal[:6] = b'PWTJ\1\0'
     struct.pack_into('<HI', journal, 6, 2, 4096)
-    struct.pack_into('<Q', journal, 16, 12)
+    struct.pack_into('<Q', journal, 16, generation)
     journal[32:48] = bytes([identity])*16
     journal[48:80] = bytes([identity+10])*32
     journal[80:96] = bytes([identity+20])*16
-    struct.pack_into('<QQ', journal, 96, counter, 4)
-    journal[112:128] = bytes([identity+30])*16
-    journal[128:144] = bytes([identity+40])*16
+    struct.pack_into('<QQ', journal, 96, counter, cursor)
+    journal[112:128] = bytes([identity+30 if receipt is None else receipt])*16
+    if counter > 1:
+        journal[128:144] = bytes([identity+40])*16
     struct.pack_into('<Q', journal, 144, counter-1)
+    journal[1440:1444] = b'\1\0\x20\0'
     journal[1444:1476] = bytes([identity+50])*32
     journal[4060:4092] = verify.sha(journal[:4060])
     journal[4092:] = b'CMIT'
     for bank in (0x30000, 0x70000):
         raw[bank:bank+4096] = journal
+
+
+def reseal(raw, offset, value):
+    record = bytearray(raw[0x30000:0x31000])
+    record[offset:offset+len(value)] = value
+    record[4060:4092] = verify.sha(record[:4060])
+    for bank in (0x30000, 0x70000):
+        raw[bank:bank+4096] = record
 
 
 def publication(path, raw, lineage):
@@ -143,6 +153,47 @@ class DemoTradeTests(unittest.TestCase):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(BlockingIOError):
                 verify.verify(self.before, self.after, [0, 1])
+
+    def test_resealed_unknown_layouts_and_bank_tails_are_rejected(self):
+        original = self.after[0].read_bytes()
+        for offset in (12, 24, 152, 397, 1396, 1440, 1442, 1476, 1954, 2216):
+            with self.subTest(offset=offset):
+                raw = bytearray(original); reseal(raw, offset, b'\x02')
+                with self.assertRaisesRegex(ValueError, 'layout|transaction evidence'):
+                    verify.journal(raw)
+        raw = bytearray(original); raw[0x31000] = 1
+        with self.assertRaisesRegex(ValueError, 'bank tail'):
+            verify.journal(raw)
+
+    def test_seeded_empty_baseline_requires_known_layout_and_state(self):
+        raw = bytearray(self.after[0].read_bytes())
+        reseal(raw, 6, bytes(2)); reseal(raw, 32, bytes(1408))
+        self.assertIsNone(verify.journal(raw, baseline=True))
+        for offset, value in ((1440, b'\x02'), (1476, b'\x01'), (1444, bytes(32)), (32, b'\x01')):
+            with self.subTest(offset=offset):
+                changed = bytearray(raw); reseal(changed, offset, value)
+                with self.assertRaisesRegex(ValueError, 'layout|entropy|EMPTY'):
+                    verify.journal(changed, baseline=True)
+        blank = bytearray(self.before[0].read_bytes()); blank[0x31000] = 1
+        with self.assertRaisesRegex(ValueError, 'bank tail'):
+            verify.journal(blank, baseline=True)
+
+    def test_repeated_exchange_preserves_identity_and_advances_history(self):
+        for i in range(2):
+            raw = bytearray(self.before[i].read_bytes())
+            idle(raw, i+1, counter=3, cursor=9, generation=12)
+            self.before[i].write_bytes(raw)
+            raw = bytearray(self.after[i].read_bytes())
+            idle(raw, i+1, counter=5, cursor=12, generation=16, receipt=i+60)
+            publication(self.after[i], raw, i+1)
+        self.assertTrue(verify.verify(self.before, self.after, [0, 1])['verified'])
+        original = self.after[0].read_bytes()
+        for offset, value in ((48, b'\x03'), (80, b'\x03'), (104, struct.pack('<Q', 4))):
+            with self.subTest(offset=offset):
+                raw = bytearray(original); reseal(raw, offset, value)
+                publication(self.after[0], raw, 1)
+                with self.assertRaisesRegex(ValueError, 'history mismatch'):
+                    verify.verify(self.before, self.after, [0, 1])
 
 
 if __name__ == '__main__':

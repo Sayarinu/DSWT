@@ -69,24 +69,33 @@ def inventory(raw, bank):
 
 
 def journal(raw, baseline=False):
+    require(len(raw) == SIZE, 'Expected a 512 KiB save')
+    for bank in (0x30000, 0x70000):
+        tail = raw[bank+4096:bank+65536]
+        require(tail in (bytes(len(tail)), b'\xff'*len(tail)), 'Unknown reserved journal bank tail')
     a, b = (raw[bank:bank+4096] for bank in (0x30000, 0x70000))
     if baseline and all(record in (bytes(4096), b'\xff'*4096) for record in (a, b)):
         return None
     require(a == b and a[:6] == b'PWTJ\1\0' and a[4092:] == b'CMIT'
             and struct.unpack_from('<I', a, 8)[0] == 4096 and sha(a[:4060]) == a[4060:4092],
             'Journal mirrors are not identical committed v1 records')
+    require(a[1440:1444] == b'\1\0\x20\0' and any(a[1444:1476])
+            and all(not any(a[start:end]) for start, end in
+                    ((12, 16), (24, 32), (152, 160), (1476, 1952), (2216, 4060))),
+            'Unsupported journal layout or entropy state')
     phase = struct.unpack_from('<H', a, 6)[0]
+    require(not any(a[160:1440]) and not any(a[1952:2216]), 'IDLE retains transaction evidence')
     if baseline and phase == 0:
+        require(not any(a[32:1440]), 'Unsupported EMPTY journal state')
         return None
     require(phase == 2 and any(a[32:48]) and any(a[48:80]) and any(a[80:96]),
             'Trade must be fully acknowledged and IDLE')
-    require(not any(a[160:1440]) and not any(a[1952:2216]), 'IDLE retains transaction evidence')
     counter, cursor = struct.unpack_from('<QQ', a, 96)
     require(counter >= (1 if baseline else 3) and (baseline or cursor >= 4)
-            and (counter == 1 or any(a[128:144])) and any(a[1444:1476])
+            and bool(any(a[128:144])) == (counter > 1)
             and struct.unpack_from('<Q', a, 144)[0] == counter-1
             and 0 < struct.unpack_from('<Q', a, 16)[0] < (1 << 64)-1, 'Invalid IDLE progress')
-    return {'identity': a[32:48], 'receipt': a[112:128],
+    return {'identity': a[32:48], 'binding': a[32:96], 'cursor': cursor, 'receipt': a[112:128],
             'counter': counter, 'generation': struct.unpack_from('<Q', a, 16)[0]}
 
 
@@ -124,7 +133,9 @@ def verify(before, after, slots):
             new = journal(results[i])
             require(new['counter'] == (old['counter'] if old else 1)+2 and any(new['receipt']), 'Wrong completed mutation count')
             if old:
-                require(old['identity'] == new['identity'] and old['receipt'] != new['receipt'] and new['generation'] > old['generation'], 'Identity or receipt history mismatch')
+                require(old['binding'] == new['binding'] and old['receipt'] != new['receipt']
+                        and new['cursor'] > old['cursor'] and new['generation'] > old['generation'],
+                        'Identity or receipt history mismatch')
             lineage, generation = host(after[i], results[i])
             journals.append(new); lineages.append(lineage)
             current_party, current_boxes = inventory(results[i], 0)
