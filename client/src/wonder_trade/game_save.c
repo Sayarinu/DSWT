@@ -88,6 +88,7 @@ static int SaveBoth(WtGameSave *game, const unsigned char expected[32])
     unsigned char actual[32];
     int result = -1, i;
     if (Hash(game->save, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
+    if (Verify(game->save, expected) == 0) return 0;
     WtRecovery_InternalWrite(1);
     for (i = 0; i < 2; ++i) {
         SaveData_SetFullSaveRequired();
@@ -161,6 +162,10 @@ static int Absent(SaveData *save, const unsigned char outgoing[136])
 
 static int Removed(WtGameSave *game, const WtJournalEntry *entry)
 {
+    unsigned char canonical[136];
+    if (entry->source.kind != 1 || entry->source.length != sizeof(Pokemon)
+        || WtPokemon_Decode(entry->original, canonical) != 0
+        || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0) return -1;
     /* A selected older retail block cannot be promoted to a new checkpoint. */
     if ((u32)(game->save->globalCounter - entry->globalCounter) >= 0x80000000
         || (u32)(game->save->blockCounters[0] - entry->generalCounter) >= 0x80000000
@@ -177,6 +182,10 @@ int WtGameSave_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *e
     unsigned char digest[32], canonical[136];
     int result = -1, i;
     if (!Layout(game->save)) return -1;
+    if (step != WT_INVENTORY_PREPARE_REMOVE
+        && (entry->source.kind != 1 || entry->source.length != sizeof(Pokemon)
+            || WtPokemon_Decode(entry->original, canonical) != 0
+            || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0)) return -1;
     if (step == WT_INVENTORY_VERIFY_REMOVED) return Removed(game, entry);
     /* Collection is enabled by the separate receive integration. Keep any
      * authenticated delivery pending without applying it or acknowledging. */
