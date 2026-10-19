@@ -252,7 +252,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     WtJournalIO journal = { &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
     WtEngineIO inventory = { transport, WonderTradeNetwork_Random, WonderTradeNetwork_Inventory };
     WtEngine *engine = &transport->engine;
-    unsigned count, operation;
+    unsigned count, operation, wireResult;
     int result = -1;
     if (WtEngine_Open(engine, journal, inventory) != 0) return -30;
     WtRecovery_Block();
@@ -285,11 +285,12 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (operation == WT_OP_ACKNOWLEDGE) transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
-        if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
-        if (operation == WT_OP_ACKNOWLEDGE && engine->lastResult == WT_RESULT_OK) transport->completed = TRUE;
-        if (engine->lastResult != WT_RESULT_OK && engine->lastResult != WT_RESULT_ILLEGAL_POKEMON
-            && !(operation == WT_OP_CANCEL && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) {
-            result = -100 - engine->lastResult; break;
+        wireResult = transport->reply.result;
+        if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
+        if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) transport->completed = TRUE;
+        if (wireResult != WT_RESULT_OK && wireResult != WT_RESULT_ILLEGAL_POKEMON
+            && !(operation == WT_OP_CANCEL && (wireResult == WT_RESULT_CONFLICT || wireResult == WT_RESULT_NOT_FOUND))) {
+            result = -100 - wireResult; break;
         }
         if (operation == WT_OP_STATUS) { result = 0; break; }
     }

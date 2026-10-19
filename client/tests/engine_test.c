@@ -182,11 +182,13 @@ static void Submit(Fixture *fixture)
 static void Collect(Fixture *fixture, const unsigned char incoming[136], unsigned kind, unsigned counter)
 {
     unsigned char packet[902], pending[256];
+    WtWireReply wire;
     size_t size;
     assert(WtEngine_Request(&fixture->engine, WT_OP_COLLECT) == 0 && fixture->engine.frame[5] == WT_OP_COLLECT);
     size = Header(fixture, packet, WT_RESULT_OK, counter, 3, 274);
     Snapshot(fixture, packet + 44, kind == WT_DELIVERY_MATCH ? WT_TRADE_MATCHED : WT_TRADE_RETURN_READY, kind, 3, incoming);
     memcpy(packet + 182, incoming, 136);
+    assert(WtWire_Decode(fixture->engine.frame, fixture->engine.frameSize, packet, size, Hash, &wire) == 0);
     assert(WtEngine_Reply(&fixture->engine, packet, size) == (fixture->full ? 1 : 0));
     if (fixture->full) {
         assert(fixture->engine.entry.phase == WT_JOURNAL_RECEIVED && !fixture->received);
@@ -194,6 +196,10 @@ static void Collect(Fixture *fixture, const unsigned char incoming[136], unsigne
     }
     assert(WtEngine_Request(&fixture->engine, 0) == 0 && fixture->engine.frame[5] == WT_OP_ACKNOWLEDGE);
     Mirrored(fixture, WT_JOURNAL_APPLIED); assert(fixture->received == 1);
+    /* A successful Collect can prepare the next mutation. Its wire result
+     * remains OK while the engine starts fresh ACK recovery bookkeeping. */
+    assert(wire.result == WT_RESULT_OK && fixture->engine.lastResult == 0);
+    assert(fixture->engine.entry.request[5] == WT_OP_ACKNOWLEDGE);
     memcpy(pending, fixture->engine.entry.request, 256);
     WtEngine_Close(&fixture->engine); Open(fixture);
     assert(WtEngine_Request(&fixture->engine, 0) == 0 && memcmp(fixture->engine.frame, pending, 184) == 0);
