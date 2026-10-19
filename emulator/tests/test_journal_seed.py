@@ -41,6 +41,12 @@ class JournalSeedTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="platinumwt-journal-host-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        # ld.so splits LD_PRELOAD on spaces, including spaces in checkout paths.
+        preload = tempfile.TemporaryDirectory(prefix="platinumwt-preload-", dir="/tmp")
+        self.addCleanup(preload.cleanup)
+        alias = Path(preload.name) / "faults.so"
+        alias.symlink_to(self.faults)
+        self.faults = alias
         self.save = self.root / "copy.sav"
 
     def record(self, phase):
