@@ -1,19 +1,18 @@
 # Wonder Trade v1 contract
 
-This defines the exchange before it is enabled. `server/proto/trade.proto` is
-the internal gRPC contract; `wire.py` is a small envelope conformance oracle for
-test clients. It checks envelope shape; endpoints must also enforce the body,
-authorization and state rules here. The server exposes these endpoints; the
-current game still only pings. Transport, database, legality and save fault tests
-must pass first.
+This defines the exchange contract. `server/proto/trade.proto` is the internal
+gRPC contract; `wire.py` is a small envelope conformance oracle for test clients.
+It checks envelope shape; endpoints must also enforce the body, authorization
+and state rules here. The game client implements the trade endpoints over
+DS-compatible HTTPS, while the server uses gRPC internally. Conservation,
+recovery, off-site durability and release acceptance remain separate gates.
 
-The existing X-menu path is DWC access-point setup → GHTTP `/v1/ping` → C++
-gateway → `Connectivity.Ping`. Retail GTS instead uses `network_handler.c`'s
-Post/PostFinish and Get/Return/Delete flows, stores the offered image in
-`GlobalTrade`, and interleaves the network finish step with
+The X-menu Wonder Trade path uses DWC access-point setup, authenticated HTTPS
+`POST /wt/v1`, the C++ gateway and internal gRPC services. Retail GTS instead
+uses `network_handler.c`'s Post/PostFinish and Get/Return/Delete flows, stores
+the offered image in `GlobalTrade`, and interleaves the network finish step with
 `SAVE_RESULT_PROCEED_FINAL`/`SAVE_RESULT_OK`. Wonder Trade uses the independent
-ownership/journal sequence below; its implementation must leave those GTS paths
-and data intact.
+ownership/journal sequence below and leaves those GTS paths and data intact.
 
 ## Identity and commitment
 
@@ -244,8 +243,9 @@ and locally compiled size functions (136/236-byte Pokémon, extra bodies
 0x2AB0/0xBA0/0x1D50 plus 16-byte footers). Cross-check:
 [`SAV4Pt`](https://github.com/kwsch/PKHeX/blob/641c26ba100225f3605e5a44b61b3b16e15a3774/PKHeX.Core/Saves/SAV4Pt.cs).
 These are format facts; no upstream implementation or save/ROM fixture is copied.
-LUNE-294 must implement and inject faults into actual flash writes, load fallback,
-every ordinary save path and migration before the journal is considered proven.
+The client journal, inventory adapter and boot/save guards are implemented;
+fault injection and end-to-end conservation evidence continue to be tracked
+separately. Do not treat emulator SRAM readback alone as proof of host durability.
 
 ## Failure and replay cases
 

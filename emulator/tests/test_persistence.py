@@ -33,6 +33,12 @@ class PersistenceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='platinumwt-host-save-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        # ld.so splits LD_PRELOAD on spaces, including spaces in checkout paths.
+        preload = tempfile.TemporaryDirectory(prefix='platinumwt-preload-', dir='/tmp')
+        self.addCleanup(preload.cleanup)
+        alias = Path(preload.name) / 'faults.so'
+        alias.symlink_to(self.faults)
+        self.faults = alias
         self.save = self.root / 'owner-a.sav'
         self.before, self.after = image(b'owner-a', 0), image(b'owner-a', 1)
         self.save.write_bytes(self.before)
