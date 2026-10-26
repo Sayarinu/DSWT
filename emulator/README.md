@@ -24,8 +24,9 @@ these process/syscall fault tests do not physically power-cycle a host.
 
 Rebuild the save-store tool with launcher updates. Its read-only preflight and
 native seed refresh share the game's journal codec, retaining active credentials,
-escrow and exact retry packets. Unknown evidence blocks launch; the game still
-blocks active phases until recovery is implemented. Reconciliation and end-to-end
-conservation remain gates before actual transfers. Physical DS/TWiLight support
-remains deferred. Preserve the
+escrow and exact retry packets. The game routes unresolved journals through its
+recovery screen and engine; unknown or contradictory evidence stays blocked.
+Full interruption, reconciliation and end-to-end conservation coverage remain
+release gates for actual transfers. Physical DS/TWiLight support remains
+deferred. Preserve the
 [GPL notice and matching source](NOTICE) with any emulator binary distribution.

@@ -179,19 +179,24 @@ static void Submit(Fixture *fixture)
     fixture->engine.synchronized = 1;
 }
 
-static void Collect(Fixture *fixture, const unsigned char incoming[136], unsigned kind, unsigned counter)
+static void Collect(Fixture *fixture, const unsigned char incoming[136], unsigned kind, unsigned counter, unsigned ackEvent)
 {
     unsigned char packet[902], pending[256];
     WtWireReply wire;
     size_t size;
     assert(WtEngine_Request(&fixture->engine, WT_OP_COLLECT) == 0 && fixture->engine.frame[5] == WT_OP_COLLECT);
-    size = Header(fixture, packet, WT_RESULT_OK, counter, 3, 274);
+    size = Header(fixture, packet, WT_RESULT_OK, counter, counter + 1, 274);
     Snapshot(fixture, packet + 44, kind == WT_DELIVERY_MATCH ? WT_TRADE_MATCHED : WT_TRADE_RETURN_READY, kind, 3, incoming);
     memcpy(packet + 182, incoming, 136);
     assert(WtWire_Decode(fixture->engine.frame, fixture->engine.frameSize, packet, size, Hash, &wire) == 0);
     assert(WtEngine_Reply(&fixture->engine, packet, size) == (fixture->full ? 1 : 0));
     if (fixture->full) {
         assert(fixture->engine.entry.phase == WT_JOURNAL_RECEIVED && !fixture->received);
+        assert(memcmp(fixture->engine.entry.incoming, incoming, 136) == 0);
+        assert(memcmp(fixture->engine.entry.incomingDigest, wire.body.collection.snapshot.receivedDigest, 32) == 0);
+        WtEngine_Close(&fixture->engine); Open(fixture);
+        assert(fixture->engine.entry.phase == WT_JOURNAL_RECEIVED && !fixture->received);
+        assert(memcmp(fixture->engine.entry.incoming, incoming, 136) == 0);
         fixture->full = 0;
     }
     assert(WtEngine_Request(&fixture->engine, 0) == 0 && fixture->engine.frame[5] == WT_OP_ACKNOWLEDGE);
@@ -204,8 +209,8 @@ static void Collect(Fixture *fixture, const unsigned char incoming[136], unsigne
     WtEngine_Close(&fixture->engine); Open(fixture);
     assert(WtEngine_Request(&fixture->engine, 0) == 0 && memcmp(fixture->engine.frame, pending, 184) == 0);
     assert(fixture->received == 1);
-    size = Header(fixture, packet, WT_RESULT_OK, counter + 1, 4, 146); Put(packet + 44, 4, 8);
-    Snapshot(fixture, packet + 52, WT_TRADE_ACKNOWLEDGED, kind, 4, incoming);
+    size = Header(fixture, packet, WT_RESULT_OK, counter + 1, ackEvent, 146); Put(packet + 44, ackEvent, 8);
+    Snapshot(fixture, packet + 52, WT_TRADE_ACKNOWLEDGED, kind, ackEvent, incoming);
     assert(WtEngine_Reply(&fixture->engine, packet, size) == 0);
     Mirrored(fixture, WT_JOURNAL_IDLE); assert(fixture->engine.entry.nextCounter == counter + 1);
     assert(memcmp(fixture->delivered, incoming, 136) == 0);
@@ -217,7 +222,7 @@ static void PairAndReturn(void)
     unsigned char packet[902]; size_t size;
     Init(&a, 1, 25); Init(&b, 2, 2); a.rotateSeed = 1;
     Enroll(&a); Enroll(&b); Submit(&a); Submit(&b);
-    b.full = 1; Collect(&a, b.pokemon, WT_DELIVERY_MATCH, 2); Collect(&b, a.pokemon, WT_DELIVERY_MATCH, 2);
+    b.full = 1; Collect(&a, b.pokemon, WT_DELIVERY_MATCH, 2, 4); Collect(&b, a.pokemon, WT_DELIVERY_MATCH, 2, 4);
     assert(a.received == 1 && b.received == 1 && memcmp(a.engine.entry.saveID, b.engine.entry.saveID, 16) != 0);
     Init(&a, 1, 25); Enroll(&a); Submit(&a);
     assert(WtEngine_Request(&a.engine, WT_OP_CANCEL) == 0);
@@ -225,7 +230,7 @@ static void PairAndReturn(void)
     size = Header(&a, packet, WT_RESULT_OK, 3, 3, 146); Put(packet + 44, 3, 8);
     Snapshot(&a, packet + 52, WT_TRADE_RETURN_READY, WT_DELIVERY_RETURN, 3, a.pokemon);
     assert(WtEngine_Reply(&a.engine, packet, size) == 0);
-    Collect(&a, a.pokemon, WT_DELIVERY_RETURN, 3);
+    Collect(&a, a.pokemon, WT_DELIVERY_RETURN, 3, 4);
 }
 
 static void RejectionAndErrors(void)
@@ -346,6 +351,36 @@ static void RejectedCancel(void)
     Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming);
     packet[44 + 114] ^= 1;
     assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.received);
+}
+
+static void MatchedCancelRace(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], incoming[136], digest[32];
+    unsigned char *event;
+    size_t size;
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    WtTest_Pokemon(incoming, 2); assert(Hash(incoming, 136, digest) == 0);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_CONFLICT, 3, 4, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && fixture.removed && !fixture.restored);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 3, 4, 222);
+    packet[44] = 2; Put(packet + 46, 4, 8);
+    event = packet + 54; Put(event, 3, 8); event[8] = WT_EVENT_MATCHED;
+    memcpy(event + 9, fixture.engine.entry.trade, 16); memset(event + 41, 31, 16);
+    memcpy(event + 57, digest, 32); memset(event + 89, 41, 16); event[105] = WT_TRADE_MATCHED;
+    event += 106; Put(event, 4, 8); event[8] = WT_EVENT_REJECTED;
+    memcpy(event + 9, fixture.engine.entry.trade, 16); memcpy(event + 25, fixture.engine.entry.operation, 16);
+    event[105] = WT_TRADE_MATCHED;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.engine.synchronized);
+    assert(fixture.engine.entry.phase == WT_JOURNAL_QUEUED && fixture.engine.entry.deliveryKind == WT_DELIVERY_MATCH);
+    assert(memcmp(fixture.engine.entry.receipt, packet + 54 + 89, 16) == 0);
+    assert(memcmp(fixture.engine.entry.incomingDigest, digest, 32) == 0);
+    assert(fixture.removed && !fixture.restored && !fixture.received);
+    Collect(&fixture, incoming, WT_DELIVERY_MATCH, 3, 5);
+    assert(fixture.engine.entry.phase == WT_JOURNAL_IDLE && fixture.removed && !fixture.restored);
+    assert(fixture.received && memcmp(fixture.delivered, incoming, 136) == 0);
 }
 
 static void LoadedStateAndMismatch(void)
@@ -521,8 +556,8 @@ static void ReadbackAndInventoryFaults(void)
 int main(void)
 {
     PairAndReturn(); RejectionAndErrors(); FailedPersistence(); DeliveryPersistence();
-    RejectedCancel(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
+    RejectedCancel(); MatchedCancelRace(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding();
-    puts("Recoverable engine: paired delivery, return, rejection, retries, full storage, stale context and failed persistence passed");
+    puts("Recoverable engine: paired delivery, match-cancel race, return, rejection, retries, full-storage restart, stale context and failed persistence passed");
     return 0;
 }

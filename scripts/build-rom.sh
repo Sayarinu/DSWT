@@ -35,11 +35,21 @@ docker_args=(--rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "PLA
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
-    make configure
     if [[ "$PLATINUMWT_BUILD_MODE" == pristine ]]; then
+        make configure
         python3 subprojects/meson-1.12.0/meson.py configure build -Drevision="$ROM_REVISION"
         make release check
     else
+        if [[ ! -f build/build.ninja ]]; then
+            make meson skrew build/lsfgen.stamp
+            python3 subprojects/meson-1.12.0/meson.py setup build \
+                --wrap-mode=nopromote \
+                --native-file=meson/native.ini \
+                --cross-file=meson/cross_unix.ini \
+                -Drevision="$ROM_REVISION" \
+                -Dwonder_trade_tls_dir=/tls \
+                -Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h
+        fi
         python3 subprojects/meson-1.12.0/meson.py configure build \
             -Drevision="$ROM_REVISION" \
             -Dwonder_trade_tls_dir=/tls \

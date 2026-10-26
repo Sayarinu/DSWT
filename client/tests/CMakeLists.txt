@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(wonder_trade_tls_tests C)
 
+# These test executables use assert() for their checks, including release builds.
+add_compile_options(-UNDEBUG)
 set(CMAKE_C_STANDARD 99)
 set(MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../include/wonder_trade/tls_config.h" CACHE FILEPATH "" FORCE)
 set(TF_PSA_CRYPTO_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../include/wonder_trade/crypto_config.h" CACHE FILEPATH "" FORCE)
