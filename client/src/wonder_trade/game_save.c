@@ -7,6 +7,7 @@
 #include "heap.h"
 #include "game_records.h"
 #include "journal.h"
+#include "mail.h"
 #include "pokedex.h"
 #include "poketch.h"
 #include "save_catchrecords.h"
@@ -276,6 +277,23 @@ static int BuildReceived(WtGameSave *game, SaveData *save, WtJournalEntry *entry
     if (!destination || memcmp(destination, entry->destinationBefore, entry->destination.length) != 0
         || (entry->destination.kind == 1 && party->currentCount != entry->destination.slot)) return -1;
     if (ReceiveEffects(game, save, entry, &mon) != 0) return -1;
+    if (entry->deliveryKind == WT_DELIVERY_MATCH && entry->destination.kind == 1) {
+        Mail mail;
+        memset(&mail, 0, sizeof(mail));
+        Mail_Reset(&mail);
+        /* The upstream constructor leaves unused sentence IDs uninitialized. */
+        if (!prepare) {
+            Pokemon recorded;
+            Mail retained;
+            unsigned i;
+            if (WtPokemon_Decode(entry->destinationAfter, canonical) != 0) return -1;
+            memcpy(&recorded, entry->destinationAfter, sizeof(recorded));
+            Pokemon_GetValue(&recorded, MON_DATA_MAIL, &retained);
+            /* Preserve the exact image/hash of an already prepared delivery. */
+            for (i = 0; i < MAIL_MAX_SENTENCES; ++i) mail.sentences[i].id = retained.sentences[i].id;
+        }
+        Pokemon_SetValue(&mon, MON_DATA_MAIL, &mail);
+    }
     if (entry->deliveryKind == WT_DELIVERY_MATCH && entry->destination.kind == 2) {
         BoxPokemon_RestorePP(Pokemon_GetBoxPokemon(&mon));
         BoxPokemon_SetShayminForm(Pokemon_GetBoxPokemon(&mon), SHAYMIN_FORM_LAND);
