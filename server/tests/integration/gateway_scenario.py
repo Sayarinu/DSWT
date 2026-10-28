@@ -175,7 +175,13 @@ class GatewayScenario:
         self.first_offer = SNAPSHOT.unpack(offered[3][8:])
         with ThreadPoolExecutor(max_workers=1) as executor:
             pending = executor.submit(self.submit, self.second, 2)
-            self.mark(self.backend, b'TEST_VALIDATION_STARTED')
+            try:
+                self.mark(self.backend, b'TEST_VALIDATION_STARTED')
+            except AssertionError:
+                if pending.done():
+                    outcome = pending.result()[1]
+                    self.test.fail(f'Submit ended before validation marker: result/counter/highwater={outcome[:3]}')
+                raise
             before = time.monotonic()
             self.test.assertEqual(self.post(self.frame(3, ZERO_ID, self.first))[0], 1)
             self.test.assertLess(time.monotonic() - before, 1)
