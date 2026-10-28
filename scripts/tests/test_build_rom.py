@@ -37,6 +37,7 @@ class BuildRomTests(unittest.TestCase):
                         TEST_LOG=str(self.log), TEST_BASH=self.bash,
                         ROM_REVISION='1', WONDER_TRADE_PROFILE=str(self.profile),
                         DOCKER_DEFAULT_PLATFORM='linux/arm64')
+        self.env.pop('ROM_BUILD_JOBS', None)
         # The interpreter's path contains spaces; it must remain a single argument.
         self.env['PYTHON'] = str(binary / 'selected python')
         self.tool(binary / 'selected python', '''
@@ -79,9 +80,15 @@ record('make', sys.argv[1:])
 if sys.argv[1:] == ['configure']:
     Path('build').mkdir(exist_ok=True)
     Path('build/build.ninja').touch()
-elif sys.argv[1:] in (['release'], ['release', 'check']):
+elif sys.argv[1] == 'release':
+    assert sys.argv[2:] == ['NINJA=ninja -j' + os.environ['ROM_BUILD_JOBS']]
+    if os.environ.get('TEST_RELEASE_FAIL'):
+        raise SystemExit(9)
     assert Path('build/build.ninja').is_file()
     Path('built').touch()
+elif sys.argv[1] == 'check':
+    assert sys.argv[2:] == ['NINJA=ninja']
+    assert Path('built').is_file()
 else:
     assert sys.argv[1:] == ['meson', 'skrew', 'build/lsfgen.stamp']
 ''')
@@ -118,13 +125,14 @@ def record(tool, args):
     def calls_for(self, tool):
         return [args for name, args in self.calls if name == tool]
 
-    def assert_docker(self, mode, revision):
+    def assert_docker(self, mode, revision, jobs='1'):
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '--platform', 'linux/amd64', '-f',
                                 str(self.root / 'tools/rom-builder/Dockerfile'), '-t',
                                 'platinumwt-rom-builder', str(self.root / 'tools/rom-builder')])
         self.assertEqual(run[:3], ['run', '--platform', 'linux/amd64'])
         self.assertIn('ROM_REVISION=' + revision, run)
+        self.assertIn('ROM_BUILD_JOBS=' + jobs, run)
         self.assertIn('PLATINUMWT_BUILD_MODE=' + mode, run)
         self.assertEqual(run[run.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         mounts = [run[i + 1] for i, arg in enumerate(run) if arg == '-v']
@@ -157,7 +165,8 @@ def record(tool, args):
                         self.assertIn('--native-file=meson/native.ini', meson[0])
                         self.assertIn('--cross-file=meson/cross_unix.ini', meson[0])
                     self.assertEqual(self.calls_for('make'),
-                                     ([['meson', 'skrew', 'build/lsfgen.stamp']] if fresh else []) + [['release']])
+                                     ([['meson', 'skrew', 'build/lsfgen.stamp']] if fresh else [])
+                                     + [['release', 'NINJA=ninja -j1']])
                     self.assert_docker('modified', revision)
 
     def test_pristine_fresh_and_incremental_builds_without_profile(self):
@@ -174,8 +183,42 @@ def record(tool, args):
                     self.assertFalse(self.calls_for('tls') or self.calls_for('profile'))
                     self.assertEqual(len(self.calls_for('python')), 2)
                     self.assertEqual(self.calls_for('meson'), [['configure', 'build', '-Drevision=' + revision]])
-                    self.assertEqual(self.calls_for('make'), [['configure'], ['release', 'check']])
+                    self.assertEqual(self.calls_for('make'),
+                                     [['configure'], ['release', 'NINJA=ninja -j1'], ['check', 'NINJA=ninja']])
                     self.assert_docker('pristine', revision)
+
+    def test_positive_job_overrides_apply_to_both_build_modes(self):
+        for mode in ('modified', 'pristine'):
+            for jobs in ('1', '2', '8'):
+                with self.subTest(mode=mode, jobs=jobs):
+                    args = ('--pristine',) if mode == 'pristine' else ()
+                    result = self.run_build(*args, env=dict(self.env, ROM_BUILD_JOBS=jobs))
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(['release', 'NINJA=ninja -j' + jobs], self.calls_for('make'))
+                    if mode == 'pristine':
+                        self.assertEqual(self.calls_for('make')[-1], ['check', 'NINJA=ninja'])
+                    self.assert_docker(mode, '1', jobs)
+
+    def test_invalid_job_override_fails_before_any_preparation(self):
+        for mode in ('modified', 'pristine'):
+            for jobs in ('', '0', '-1', '+2', '01', '1.5', ' 2', '2 ', '1\n2', '2;touch unexpected', '$(touch unexpected)'):
+                with self.subTest(mode=mode, jobs=jobs):
+                    args = ('--pristine',) if mode == 'pristine' else ()
+                    result = self.run_build(*args, env=dict(self.env, ROM_BUILD_JOBS=jobs))
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn('ROM_BUILD_JOBS', result.stderr)
+                    self.assertEqual(self.calls, [])
+                    self.assertFalse((self.workspace / '.git/platinumwt-connection.h').exists())
+
+    def test_release_failure_stops_before_checks_without_retry(self):
+        for mode in ('modified', 'pristine'):
+            with self.subTest(mode=mode):
+                args = ('--pristine',) if mode == 'pristine' else ()
+                result = self.run_build(*args, env=dict(self.env, TEST_RELEASE_FAIL='1'))
+                self.assertEqual(result.returncode, 9, result.stdout + result.stderr)
+                calls = self.calls_for('make')
+                self.assertEqual(calls.count(['release', 'NINJA=ninja -j1']), 1)
+                self.assertFalse(any('check' in call for call in calls))
 
     def test_old_or_missing_python_fails_before_preparation(self):
         for env in (dict(self.env, TEST_OLD_PYTHON='1'),
