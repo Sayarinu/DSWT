@@ -2,6 +2,7 @@
 """Build and inspect private local OCI images. Never publish or reset a workspace."""
 
 import argparse
+import ast
 from collections import Counter
 import hashlib
 import json
@@ -21,6 +22,7 @@ import oci
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("pins.json")
+PUBLIC_SELFTESTS = Path(__file__).with_name("public-selftests.json")
 SERVICES = ("server", "validator")
 
 
@@ -159,9 +161,38 @@ def installed_packages(image):
     return packages
 
 
+def verified_public_selftests(workspace):
+    policy = json.loads(PUBLIC_SELFTESTS.read_text())
+    source = policy["source"]
+    archive = workspace / "gnutls-source.tar.xz"
+    if digest_file(archive) != source["archive_sha256"]:
+        raise ValueError("Public self-test source archive hash mismatch")
+    with tarfile.open(archive, "r:xz") as upstream:
+        data = upstream.extractfile(source["file"]).read()
+    if oci.sha256(data) != source["file_sha256"]:
+        raise ValueError("Public self-test source file hash mismatch")
+    keys = {}
+    for match in re.finditer(rb'const char (\w+)\[\]\s*=\s*((?:"(?:[^"\\]|\\.)*"\s*)+);', data):
+        value = "".join(ast.literal_eval(s.decode()) for s in re.findall(rb'"(?:[^"\\]|\\.)*"', match[2])).encode()
+        for block in oci.KEY_BLOCK.finditer(value):
+            keys[oci.sha256(block.group())] = match[1].decode()
+    if keys != policy["keys"]:
+        raise ValueError("Public self-test key hashes do not match pinned source constants")
+    return policy
+
+
+def public_selftest_bindings(image, policy):
+    if image.public_selftests and (policy["package"]["name"], policy["package"]["version"]) not in installed_packages(image):
+        raise ValueError("Public self-test library does not match installed package")
+
+
 def resource_evidence(image, resources):
     prefix = oci.SOURCE + "validator/.deps/pkhex/PKHeX.Core/Resources/"
-    expected = {"PKHeX.Core.Resources." + path[len(prefix):].replace("/", "."):
+    def manifest_name(path):
+        folder, name = path[len(prefix):].rsplit("/", 1)
+        # Match MSBuild's directory identifiers for this exact pinned source.
+        return "PKHeX.Core.Resources." + folder.replace("-", "_").replace("/", ".") + "." + name
+    expected = {manifest_name(path):
                 {"sha256": entry["sha256"], "size": entry["size"]}
                 for path, entry in image.files.items() if path.startswith(prefix) and entry["type"] == "file"}
     assembly = image.files["app/PKHeX.Core.dll"]["sha256"]
@@ -192,6 +223,11 @@ def build_digest_bindings(workspace, service, metadata):
         raise ValueError("Exported image digests differ from BuildKit output metadata")
 
 
+def package_version(package):
+    return ((str(package["Epoch"]) + ":" if package.get("Epoch") else "") + package["Version"]
+            + ("-" + package["Release"] if package.get("Release") else ""))
+
+
 def scanner_coverage(report, sbom, service, context, config_digest, expected_os):
     if report.get("SchemaVersion") != 2 or report.get("ArtifactType") != "container_image":
         raise ValueError("Unsupported or empty scanner result")
@@ -199,7 +235,7 @@ def scanner_coverage(report, sbom, service, context, config_digest, expected_os)
         raise ValueError("Scanner image ID does not bind the audited OCI configuration")
     results = report.get("Results", [])
     os_packages = [p for r in results if r.get("Class") == "os-pkgs" for p in r.get("Packages", [])]
-    actual_os = {(p["Name"], p["Version"]) for p in os_packages}
+    actual_os = {(p["Name"], package_version(p)) for p in os_packages}
     if not expected_os or actual_os != expected_os:
         raise ValueError("Scanner OS inventory differs from installed dpkg packages: "
                          f"missing={sorted(expected_os - actual_os)}, unexpected={sorted(actual_os - expected_os)}")
@@ -216,7 +252,7 @@ def scanner_coverage(report, sbom, service, context, config_digest, expected_os)
     if sbom.get("bomFormat") != "CycloneDX" or not components:
         raise ValueError("Missing CycloneDX component coverage")
     for package in os_packages + runtime:
-        if (package["Name"], package["Version"]) not in components:
+        if (package["Name"], package_version(package)) not in components:
             raise ValueError("SBOM omitted a scanned OS/runtime package: " + package["Name"])
     licenses = [license for r in results for license in r.get("Licenses", [])]
     if not licenses:
@@ -309,7 +345,8 @@ class Runner:
                 "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                 "--network", "none" if offline else "bridge", "--tmpfs", "/tmp:rw,nosuid,nodev,size=768m"]
         if offline:
-            args += ["--mount", f"type=bind,src={self.workspace / 'cache/db'},dst=/tmp/trivy/db,readonly",
+            args += ["--tmpfs", f"/tmp/trivy:rw,noexec,nosuid,nodev,size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700",
+                     "--mount", f"type=bind,src={self.workspace / 'cache/db'},dst=/tmp/trivy/db,readonly",
                      "--mount", f"type=bind,src={self.workspace},dst=/audit,readonly"]
         else:
             args += ["--mount", f"type=bind,src={self.workspace / 'cache'},dst=/tmp/trivy"]
@@ -319,6 +356,8 @@ class Runner:
             (self.workspace / output).write_text(result)
 
     def execute(self, report):
+        public_policy = verified_public_selftests(self.workspace)
+        report["public_selftest_policy"] = public_policy
         buildkit_config = self.workspace / "buildkitd.toml"
         buildkit_config.write_text('[worker.oci]\n  max-parallelism = 2\n')
         self.owned_builder = True
@@ -338,12 +377,14 @@ class Runner:
                                        for name in ("trivy.db", "metadata.json")}
         report["advisory_metadata"] = json.loads((self.workspace / "cache/db/metadata.json").read_text())
         for service in SERVICES:
-            archive = oci.Archive(self.workspace / (service + ".oci.tar"))
+            archive = oci.Archive(self.workspace / (service + ".oci.tar"), public_policy)
             try:
                 image, metadata = archive.inspect(self.platform)
+                archive.write_layout(self.workspace / (service + ".oci"))
             finally:
                 archive.close()
             build_digest_bindings(self.workspace, service, metadata)
+            public_selftest_bindings(image, public_policy)
             context = self.workspace / "contexts" / service
             metadata["source"] = audit_sources(image, context, service, self.workspace / "pkhex-source.tar.gz")
             write_json(self.workspace / (service + ".filesystem.json"), image.inventory())
@@ -363,7 +404,7 @@ class Runner:
                 resources = json.loads(result)
                 write_json(self.workspace / "validator.resources.json", resources)
                 metadata["embedded_resources"] = resource_evidence(image, resources)
-            shared = ["image", "--input", "/audit/" + service + ".oci.tar", "--scanners", "vuln,license", "--license-full",
+            shared = ["image", "--input", "/audit/" + service + ".oci", "--scanners", "vuln,license", "--license-full",
                       "--list-all-pkgs", "--skip-db-update", "--skip-java-db-update", "--offline-scan", "--no-progress"]
             self.scanner(shared + ["--format", "json"], "scan-" + service, output=service + ".trivy.json")
             self.scanner(shared + ["--format", "cyclonedx"], "sbom-" + service, output=service + ".cdx.json")
@@ -396,16 +437,21 @@ def verify(workspace):
         path = workspace / oci.safe_path(name)
         if path.is_symlink() or not path.is_file() or path.stat().st_size != expected["size"] or digest_file(path) != expected["sha256"]:
             raise ValueError("Audit artifact changed: " + name)
+    public_policy = verified_public_selftests(workspace)
+    if public_policy != report["public_selftest_policy"]:
+        raise ValueError("Public self-test source/policy summary mismatch")
     for service in SERVICES:
-        archive = oci.Archive(workspace / (service + ".oci.tar"))
+        archive = oci.Archive(workspace / (service + ".oci.tar"), public_policy)
         try:
             image, metadata = archive.inspect(report["platform"])
+            archive.verify_layout(workspace / (service + ".oci"))
         finally:
             archive.close()
         recorded = report["images"][service]
         build_digest_bindings(workspace, service, metadata)
+        public_selftest_bindings(image, public_policy)
         evidence_bindings(workspace, report, service, image, metadata)
-        for key in ("layout_index_digest", "index_digest", "manifest_digest", "config_digest", "layers", "provenance", "config"):
+        for key in ("layout_index_digest", "index_digest", "manifest_digest", "config_digest", "layers", "provenance", "config", "public_selftests"):
             if metadata[key] != recorded[key]:
                 raise ValueError("OCI report binding mismatch: " + key)
         if image.inventory() != json.loads((workspace / (service + ".filesystem.json")).read_text()):
@@ -450,6 +496,9 @@ def main():
             shutil.copyfileobj(source, target)
         if digest_file(workspace / "pkhex-source.tar.gz") != pin["PKHEX_ARCHIVE_SHA256"]:
             raise ValueError("PKHeX reference download failed pinned digest check")
+        url = json.loads(PUBLIC_SELFTESTS.read_text())["source"]["url"]
+        with urllib.request.urlopen(url, timeout=120) as source, (workspace / "gnutls-source.tar.xz").open("xb") as target:
+            shutil.copyfileobj(source, target)
         runner = Runner(workspace, args.platform)
         report["owned_builder"] = runner.name
         runner.execute(report)

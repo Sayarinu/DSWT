@@ -79,6 +79,32 @@ class EvidenceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.context = Path(self.temp.name)
 
+    def test_public_selftests_bind_source_constants_and_installed_package(self):
+        key = (b'-----' + b'BEGIN PRIVATE KEY-----') + b"A" * 64 + (b'-----' + b'END PRIVATE KEY-----')
+        source = b'const char sample[] = "' + key + b'";'
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:xz") as output:
+            entry = tarfile.TarInfo("source.c")
+            entry.size = len(source)
+            output.addfile(entry, io.BytesIO(source))
+        (self.context / "gnutls-source.tar.xz").write_bytes(archive.getvalue())
+        policy = {"source": {"archive_sha256": oci.sha256(archive.getvalue()), "file": "source.c",
+                             "file_sha256": oci.sha256(source)}, "keys": {oci.sha256(key): "sample"},
+                  "package": {"name": "libgnutls30t64", "version": "fixed"}}
+        policy_path = self.context / "policy.json"
+        policy_path.write_text(json.dumps(policy))
+        with patch.object(audit, "PUBLIC_SELFTESTS", policy_path):
+            self.assertEqual(audit.verified_public_selftests(self.context), policy)
+            policy["keys"] = {oci.sha256(key): "wrong_constant"}
+            policy_path.write_text(json.dumps(policy))
+            with self.assertRaisesRegex(ValueError, "source constants"):
+                audit.verified_public_selftests(self.context)
+        image = oci.Image()
+        image.public_selftests = [{"path": "library"}]
+        image.files["var/lib/dpkg/status"] = {"type": "file", "data": b"Package: libc6\nStatus: install ok installed\nVersion: 1\n\n"}
+        with self.assertRaisesRegex(ValueError, "installed package"):
+            audit.public_selftest_bindings(image, policy)
+
     def test_missing_or_changed_canonical_notice_is_rejected(self):
         image = oci.Image()
         for name in ("LICENSE", "NOTICE"):
@@ -189,6 +215,18 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "libpq5"):
             audit.scanner_coverage(report, sbom, "server", self.context, "sha256:config", self.expected_os)
 
+    def test_os_version_binding_includes_trivy_epoch_and_release(self):
+        report, sbom = self.scan()
+        package = report["Results"][0]["Packages"][0]
+        package.update(Epoch=1, Release="0ubuntu1")
+        sbom["components"][0]["version"] = "1:1-0ubuntu1"
+        self.expected_os.remove(("libc6", "1"))
+        self.expected_os.add(("libc6", "1:1-0ubuntu1"))
+        audit.scanner_coverage(report, sbom, "server", self.context, "sha256:config", self.expected_os)
+        package["Release"] = "0ubuntu2"
+        with self.assertRaisesRegex(ValueError, "OS inventory"):
+            audit.scanner_coverage(report, sbom, "server", self.context, "sha256:config", self.expected_os)
+
     def test_buildkit_output_metadata_must_identify_the_image_index(self):
         path = self.context / "server.build.json"
         build = {"containerimage.digest": "sha256:index", "containerimage.descriptor": {
@@ -211,8 +249,9 @@ class EvidenceTests(unittest.TestCase):
         resources = {}
         for i in range(1731):
             value = {"size": 1, "sha256": oci.sha256(bytes([i % 256]))}
-            image.files[prefix + f"text/{i}.txt"] = dict(value, type="file")
-            resources[f"PKHeX.Core.Resources.text.{i}.txt"] = value
+            path = f"text/other/es-419/{i}-es-419.txt"
+            image.files[prefix + path] = dict(value, type="file")
+            resources[f"PKHeX.Core.Resources.text.other.es_419.{i}-es-419.txt"] = value
         image.files["app/PKHeX.Core.dll"] = {"sha256": "assembly hash"}
         audit.write_json(self.context / "validator.resources.json", {"count": 1731, "assembly_sha256": "assembly hash", "resources": resources})
         report = {"source_commit": "commit", "advisory_database": {name: audit.digest_file(database / name) for name in ("trivy.db", "metadata.json")},

@@ -59,9 +59,9 @@ class OciTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "image.tar"
 
-    def inspect(self, layers, **kwargs):
+    def inspect(self, layers, *, public_policy=None, **kwargs):
         make_export(self.path, layers, **kwargs)
-        archive = oci.Archive(self.path)
+        archive = oci.Archive(self.path, public_policy)
         try:
             return archive.inspect("linux/arm64")
         finally:
@@ -80,9 +80,35 @@ class OciTests(unittest.TestCase):
 
     def test_removed_private_content_and_prohibited_names_are_still_rejected(self):
         for name, data in [("innocent.txt", oci.PRIVATE_SENTINEL), ("private.sav", b"payload"),
-                           ("config.txt", b"-----BEGIN PRIVATE KEY-----")]:
+                           ("config.txt", (b'-----' + b'BEGIN PRIVATE KEY-----\n') + b"A" * 64)]:
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Prohibited|Private input"):
                 self.inspect([tar_bytes([(name, data)]), tar_bytes([(".wh." + name, b"")])])
+
+    def test_header_templates_differ_from_encoded_private_key_material(self):
+        self.inspect([tar_bytes([("parser", (b'-----' + b'BEGIN PRIVATE KEY-----\x00format string'))])])
+        for label in (b"RSA ", b"EC ", b"DSA ", b"OPENSSH ", b"ENCRYPTED ", b""):
+            for newline in (b"", b"\n"):
+                key = b"-----BEGIN " + label + b"PRIVATE KEY-----" + newline + b"A" * 64
+                with self.subTest(label=label, newline=newline), self.assertRaisesRegex(ValueError, "Private input"):
+                    self.inspect([tar_bytes([("unknown", key)])])
+        wrapped = (b'-----' + b'BEGIN PRIVATE KEY-----\n') + (b"A" * 16 + b"\n") * 4
+        with self.assertRaisesRegex(ValueError, "Private input"):
+            self.inspect([tar_bytes([("unknown", wrapped)])])
+
+    def test_public_selftest_requires_exact_file_path_hash_and_all_key_blocks(self):
+        # Synthetic text is not a usable key; real public key bytes are never vendored.
+        key = (b'-----' + b'BEGIN EC PRIVATE KEY-----') + b"A" * 64 + (b'-----' + b'END EC PRIVATE KEY-----')
+        binary = b"synthetic library\0" + key + b"\0"
+        path = "usr/lib/example.so"
+        policy = {"libraries": {path: {"sha256": oci.sha256(binary)}}, "keys": {oci.sha256(key): "test_constant"}}
+        image, metadata = self.inspect([tar_bytes([(path, binary)])], public_policy=policy)
+        self.assertEqual(metadata["public_selftests"][0]["keys"], [oci.sha256(key)])
+        for name, data in (("wrong-location", binary), (path, binary + b"changed"),
+                           (path, binary.replace(b"A" * 64, b"B" * 64))):
+            with self.subTest(path=name), self.assertRaisesRegex(ValueError, "Private input|self-test"):
+                self.inspect([tar_bytes([(name, data)])], public_policy=policy)
+        with self.assertRaisesRegex(ValueError, "hardlink"):
+            self.inspect([tar_bytes([(path, binary), ("alias", (tarfile.LNKTYPE, path))])], public_policy=policy)
 
     def test_hardlink_keeps_its_bytes_when_original_path_is_removed(self):
         image, _ = self.inspect([tar_bytes([("original", b"retained bytes"), ("alias", (tarfile.LNKTYPE, "original"))]),
@@ -130,6 +156,26 @@ class OciTests(unittest.TestCase):
             _, metadata = archive.inspect("linux/arm64")
             self.assertEqual(metadata["index_digest"], expected)
             self.assertNotEqual(metadata["layout_index_digest"], metadata["index_digest"])
+        finally:
+            archive.close()
+
+    def test_scanner_directory_must_preserve_exact_oci_export_bytes(self):
+        make_export(self.path, [tar_bytes([("ordinary", b"payload")])], nested=True)
+        archive = oci.Archive(self.path)
+        destination = self.path.parent / "layout"
+        try:
+            archive.inspect("linux/arm64")
+            archive.write_layout(destination)
+            archive.verify_layout(destination)
+            index = destination / "index.json"
+            original = index.read_bytes()
+            index.write_bytes(original.replace(b"schemaVersion", b"schemaVersioX"))
+            with self.assertRaisesRegex(ValueError, "layout bytes"):
+                archive.verify_layout(destination)
+            index.write_bytes(original)
+            (destination / "unexpected").write_bytes(b"unreviewed")
+            with self.assertRaisesRegex(ValueError, "file set"):
+                archive.verify_layout(destination)
         finally:
             archive.close()
 

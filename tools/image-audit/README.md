@@ -37,6 +37,8 @@ the image ID, not an image manifest suitable for deployment pinning.
 Trivy is pinned by the multi-platform image checksum in `pins.json`. One advisory
 database download is recorded by its exact bytes and metadata; all subsequent
 OS and .NET runtime scans use that same database with networking disabled.
+The scanner reads an OCI directory whose files are checked against the retained
+tar export; it has a private temporary cache and a read-only advisory database.
 CycloneDX generation explicitly enables vulnerabilities. JSON and SBOM coverage
 must match every installed OS package name/version from the exported dpkg database
 and include the validator's actual `app/Validator.deps.json`
@@ -46,8 +48,15 @@ inventory and independently checked exact notices/source remain separate evidenc
 
 Every OCI blob and uncompressed layer digest is checked. All layers are scanned
 before whiteouts are applied, then the final filesystem inventory is recorded.
-Checks reject prohibited game/save/SDK paths, private-key markers and test
+Checks reject prohibited game/save/SDK paths, encoded private-key markers and test
 sentinels; they do not establish the origin or rights of arbitrary bytes.
+Header-only parser strings are distinct from encoded keys. The ten GnuTLS public
+self-test keys are classified only at the exact library paths and hashes in
+`public-selftests.json`, with the installed Ubuntu package version checked.
+Their hashes must match named constants in a retained, hash-pinned official
+source archive. Unknown keys, changed libraries and copies at other paths fail;
+reports retain hashes and source/package bindings, never key bytes. These checks
+are an artifact audit, not a general secret detector.
 Canonical project notices, selected PKHeX source against its hash-pinned upstream
 archive, and complete matching gRPC/Protobuf source archives are verified. The
 existing validator test target independently opens the exported image's actual

@@ -22,10 +22,12 @@ static class ImageAudit
             long total = 0;
             int count = 0;
             foreach (var path in Directory.GetFiles(Path.Combine(resources, directory), "*", SearchOption.AllDirectories)
-                .OrderBy(p => Path.GetRelativePath(Path.Combine(resources, directory), p), StringComparer.Ordinal))
+                .OrderBy(p => Path.GetRelativePath(Path.Combine(resources, directory), p).Replace('/', '\0'), StringComparer.Ordinal))
             {
                 var relative = Path.GetRelativePath(Path.Combine(resources, directory), path).Replace('\\', '/');
-                var name = "PKHeX.Core.Resources." + directory + "." + relative.Replace('/', '.');
+                // The pinned source's language-directory hyphens become MSBuild identifier underscores.
+                var folder = Path.GetDirectoryName(directory + "/" + relative)!.Replace('-', '_').Replace('/', '.');
+                var name = "PKHeX.Core.Resources." + folder + "." + Path.GetFileName(relative);
                 if (!names.Remove(name)) throw new InvalidDataException("Missing or ambiguous embedded resource: " + name);
                 using var stream = assembly.GetManifestResourceStream(name)!;
                 var digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
@@ -33,14 +35,14 @@ static class ImageAudit
                 if (digest != Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant())
                     throw new InvalidDataException("Assembly/source resource mismatch: " + name);
                 inventory[name] = new { sha256 = digest, size = data.Length };
-                records.Append(relative).Append('\0').Append(digest).Append('\n');
+                records.Append(directory).Append('/').Append(relative).Append('\0').Append(digest).Append('\n');
                 total += data.Length;
                 count++;
             }
             var categoryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(records.ToString()))).ToLowerInvariant();
             if (count != category.GetProperty("files").GetInt32() || total != category.GetProperty("bytes").GetInt64()
                 || categoryHash != category.GetProperty("inventory_sha256").GetString())
-                throw new InvalidDataException("Pinned resource inventory mismatch: " + directory);
+                throw new InvalidDataException($"Pinned resource inventory mismatch: {directory} ({count} files, {total} bytes, SHA256 {categoryHash})");
         }
         if (names.Count != 0 || inventory.Count != 1731)
             throw new InvalidDataException("Unexpected embedded resource set");

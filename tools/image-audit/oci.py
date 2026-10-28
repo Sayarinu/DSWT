@@ -6,11 +6,16 @@ import json
 from pathlib import PurePosixPath
 import posixpath
 import re
+import shutil
 import tarfile
 
 
 PRIVATE_SENTINEL = b"PLATINUMWT_PRIVATE_INPUT_SENTINEL"
 SOURCE = "usr/share/platinumwt-validator/source/"
+KEY_LABEL = rb"(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY"
+KEY_PREFIX = re.compile(rb"-----BEGIN " + KEY_LABEL + rb"-----[ \t\r\n]*"
+                        rb"(?:(?:Proc-Type:|DEK-Info:)[^\r\n]*\r?\n[ \t\r\n]*)*(?:[A-Za-z0-9+/=][\r\n]*){32}")
+KEY_BLOCK = re.compile(rb"-----BEGIN (" + KEY_LABEL + rb")-----[A-Za-z0-9+/=\r\n]+-----END \1-----")
 
 
 def sha256(data):
@@ -37,7 +42,8 @@ def prohibited(path):
 
 
 def private_marker(data):
-    return PRIVATE_SENTINEL in data or re.search(rb"-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----", data)
+    # Header-only parser/template strings are not encoded key material.
+    return PRIVATE_SENTINEL in data or KEY_PREFIX.search(data)
 
 
 class HashReader:
@@ -45,14 +51,16 @@ class HashReader:
         self.stream = stream
         self.digest = hashlib.sha256()
         self.size, self.last_nonzero, self.tail = 0, -1, b""
+        self.key_offsets = set()
 
     def read(self, size=-1):
         data = self.stream.read(size)
         self.digest.update(data)
         check = self.tail + data
-        if private_marker(check):
+        if PRIVATE_SENTINEL in check:
             raise ValueError("Private input marker in image layer bytes")
-        self.tail = check[-128:]
+        self.key_offsets.update(self.size - len(self.tail) + match.start() for match in KEY_PREFIX.finditer(check))
+        self.tail = check[-4096:]
         nonzero = len(data.rstrip(b"\0"))
         if nonzero:
             self.last_nonzero = self.size + nonzero - 1
@@ -61,13 +69,16 @@ class HashReader:
 
 
 class Image:
-    def __init__(self):
+    def __init__(self, public_selftests=None):
         self.files = {}
         self.layers = []
+        self.public_policy = public_selftests or {"libraries": {}, "keys": {}}
+        self.public_selftests = []
 
     def apply_layer(self, stream, expected_diff_id, digest):
         reader = HashReader(stream)
         records, whiteouts, seen = [], [], set()
+        allowed_key_offsets = set()
         with tarfile.open(fileobj=reader, mode="r|") as archive:
             for member in archive:
                 if member.name in (".", "./") and member.isdir():
@@ -94,18 +105,19 @@ class Image:
                 elif member.islnk():
                     entry.update(type="hardlink", target=safe_path(member.linkname))
                 elif member.isfile():
+                    public = self.public_policy["libraries"].get(path)
                     capture = (path.startswith(SOURCE) or path.startswith("usr/share/platinumwt/")
                                or path.startswith("usr/local/share/platinumwt/migrations/")
-                               or path in ("app/PKHeX.Core.dll", "var/lib/dpkg/status"))
+                               or path in ("app/PKHeX.Core.dll", "var/lib/dpkg/status") or public is not None)
                     chunks, tail, size, content_hash = [], b"", 0, hashlib.sha256()
                     source = archive.extractfile(member)
                     while chunk := source.read(1024 * 1024):
                         content_hash.update(chunk)
                         size += len(chunk)
                         check = tail + chunk
-                        if private_marker(check):
+                        if PRIVATE_SENTINEL in check or (public is None and KEY_PREFIX.search(check)):
                             raise ValueError("Private input marker in image layer: " + path)
-                        tail = check[-128:]
+                        tail = check[-4096:]
                         if capture:
                             chunks.append(chunk)
                     if size != member.size:
@@ -113,6 +125,16 @@ class Image:
                     entry.update(type="file", size=size, sha256=content_hash.hexdigest())
                     if capture:
                         entry["data"] = b"".join(chunks)
+                    if public is not None:
+                        data = entry.pop("data")
+                        keys = {match.start(): sha256(match.group()) for match in KEY_BLOCK.finditer(data)}
+                        if entry["sha256"] != public["sha256"] or set(keys.values()) != set(self.public_policy["keys"]):
+                            raise ValueError("Public self-test library/hash mismatch: " + path)
+                        if {match.start() for match in KEY_PREFIX.finditer(data)} != set(keys):
+                            raise ValueError("Unknown encoded key in public self-test library: " + path)
+                        allowed_key_offsets.update(member.offset_data + offset for offset in keys)
+                        self.public_selftests.append({"path": path, "sha256": entry["sha256"],
+                                                      "layer": digest, "keys": sorted(keys.values())})
                 else:
                     raise ValueError("Unsupported device or special file in layer: " + path)
                 records.append(entry)
@@ -121,6 +143,8 @@ class Image:
             pass
         if reader.size - logical_end < 1024 or reader.last_nonzero >= logical_end:
             raise ValueError("Layer tar has missing terminator or nonzero trailing data")
+        if reader.key_offsets != allowed_key_offsets:
+            raise ValueError("Unknown encoded private key in layer bytes")
         actual = "sha256:" + reader.digest.hexdigest()
         if actual != expected_diff_id:
             raise ValueError("Layer uncompressed diff ID mismatch")
@@ -152,6 +176,8 @@ class Image:
                 target = resolve_link(entry["target"], resolving | {path})
                 if target["type"] != "file":
                     raise ValueError("Image hardlink must reference a regular file")
+                if any(target["sha256"] == record["sha256"] for record in self.public_selftests):
+                    raise ValueError("Public self-test library at an unapproved hardlink path: " + path)
                 entry.update({key: target[key] for key in ("size", "sha256", "data") if key in target})
                 entry["type"] = "file"
                 del entry["target"]
@@ -191,13 +217,14 @@ class Image:
 
 
 class Archive:
-    def __init__(self, path):
+    def __init__(self, path, public_selftests=None):
+        self.public_policy = public_selftests
         with open(path, "rb") as source:
             tail = b""
             while chunk := source.read(1024 * 1024):
                 if private_marker(tail + chunk):
                     raise ValueError("Private input marker in OCI archive bytes")
-                tail = chunk[-128:]
+                tail = chunk[-4096:]
         self.tar = tarfile.open(path, "r:")
         try:
             self.load()
@@ -232,6 +259,32 @@ class Archive:
 
     def close(self):
         self.tar.close()
+
+    def write_layout(self, destination):
+        # Trivy accepts an OCI directory, not BuildKit's OCI tar export.
+        destination.mkdir()
+        for path, entry in self.entries.items():
+            target = destination / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with self.tar.extractfile(entry) as source, target.open("xb") as output:
+                shutil.copyfileobj(source, output)
+        self.verify_layout(destination)
+
+    def verify_layout(self, destination):
+        members = list(destination.rglob("*"))
+        if any(path.is_symlink() for path in members):
+            raise ValueError("Scanner OCI layout contains a symlink")
+        paths = {path.relative_to(destination).as_posix() for path in members if not path.is_dir()}
+        if paths != set(self.entries):
+            raise ValueError("Scanner OCI layout file set differs from audited export")
+        for path in paths:
+            target = destination / path
+            if target.is_symlink() or not target.is_file() or target.stat().st_size != self.entries[path].size:
+                raise ValueError("Scanner OCI layout file differs from audited export")
+            expected = path[13:] if path.startswith("blobs/sha256/") else sha256(self.read(path))
+            with target.open("rb") as source:
+                if hashlib.file_digest(source, "sha256").hexdigest() != expected:
+                    raise ValueError("Scanner OCI layout bytes differ from audited export")
 
     def read(self, path):
         entry = self.entries[path]
@@ -291,7 +344,7 @@ class Archive:
         diff_ids = config.get("rootfs", {}).get("diff_ids", [])
         if config.get("rootfs", {}).get("type") != "layers" or len(diff_ids) != len(manifest["layers"]):
             raise ValueError("OCI rootfs/layer mismatch")
-        image = Image()
+        image = Image(self.public_policy)
         for layer, diff_id in zip(manifest["layers"], diff_ids):
             kind = layer["mediaType"]
             stream = self.tar.extractfile(self.entries[self.blob_path(layer)])
@@ -321,5 +374,6 @@ class Archive:
         metadata = {"layout_index_digest": layout_digest, "index_digest": image_index,
                     "manifest_digest": descriptor["digest"], "config_digest": manifest["config"]["digest"],
                     "platform": platform, "layers": image.layers, "provenance": provenances,
+                    "public_selftests": image.public_selftests,
                     "config": config.get("config", {})}
         return image, metadata
