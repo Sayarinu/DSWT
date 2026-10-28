@@ -25,7 +25,7 @@ def tar_bytes(files):
     return output.getvalue()
 
 
-def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=False):
+def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=False, nested=False):
     blobs = {}
 
     def blob(data, kind):
@@ -43,11 +43,14 @@ def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=
     provenance = blob(json.dumps({"predicateType": "https://slsa.dev/provenance/v0.2", "predicate": {"buildType": "test"},
                                  "subject": [{"digest": {"sha256": "0" * 64 if wrong_subject else manifest["digest"][7:]}}]}).encode(), "application/vnd.in-toto+json")
     attestation = document({"schemaVersion": 2, "config": document({}, "config"), "layers": [provenance]}, "manifest")
+    attestation["annotations"] = {"vnd.docker.reference.digest": manifest["digest"], "vnd.docker.reference.type": "attestation-manifest"}
+    image_index = {"schemaVersion": 2, "manifests": [manifest, attestation]}
+    index = json.dumps({"schemaVersion": 2, "manifests": [document(image_index, "index")]} if nested else image_index).encode()
     if corrupt:
         first = next(iter(blobs))
         blobs[first] = b"x" * len(blobs[first])
-    index = json.dumps({"schemaVersion": 2, "manifests": [manifest, attestation]}).encode()
     path.write_bytes(tar_bytes([("oci-layout", b'{"imageLayoutVersion":"1.0.0"}'), ("index.json", index), *blobs.items()]))
+    return "sha256:" + oci.sha256(json.dumps(image_index).encode())
 
 
 class OciTests(unittest.TestCase):
@@ -117,6 +120,16 @@ class OciTests(unittest.TestCase):
         try:
             with self.assertRaisesRegex(ValueError, "platform"):
                 archive.inspect("linux/amd64")
+        finally:
+            archive.close()
+
+    def test_layout_wrapper_is_distinct_from_the_deployable_image_index(self):
+        expected = make_export(self.path, [tar_bytes([("ordinary", b"payload")])], nested=True)
+        archive = oci.Archive(self.path)
+        try:
+            _, metadata = archive.inspect("linux/arm64")
+            self.assertEqual(metadata["index_digest"], expected)
+            self.assertNotEqual(metadata["layout_index_digest"], metadata["index_digest"])
         finally:
             archive.close()
 

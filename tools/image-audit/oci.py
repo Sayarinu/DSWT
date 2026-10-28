@@ -277,7 +277,8 @@ class Archive:
                 for layer in document["layers"]:
                     if layer["mediaType"] != "application/vnd.in-toto+json":
                         raise ValueError("Mixed attestation/image layers")
-                    attestations.append(self.json_file(self.blob_path(layer)))
+                    reference = descriptor.get("annotations", {}).get("vnd.docker.reference.digest")
+                    attestations.append((self.json_file(self.blob_path(layer)), reference))
             else:
                 manifests.append((descriptor, document, config))
 
@@ -300,16 +301,24 @@ class Archive:
                 raise ValueError("Unsupported OCI compression/media type")
             with stream:
                 image.apply_layer(stream, diff_id, layer["digest"])
-        provenances = [a for a in attestations if a.get("predicateType", "").startswith("https://slsa.dev/provenance/")]
-        for statement in provenances:
+        provenances = []
+        for statement, reference in attestations:
+            if statement.get("predicateType") not in ("https://slsa.dev/provenance/v0.2", "https://slsa.dev/provenance/v1"):
+                continue
+            if reference != descriptor["digest"]:
+                raise ValueError("Attestation descriptor does not bind the image manifest")
             if not any(s.get("digest", {}).get("sha256") == descriptor["digest"][7:]
                        for s in statement.get("subject", [])):
                 raise ValueError("Provenance subject does not bind the image manifest")
+            provenances.append(statement)
         if not provenances:
             raise ValueError("Missing OCI provenance")
         if self.verified != {p for p in self.entries if p.startswith("blobs/")}:
             raise ValueError("Unreferenced OCI blobs were not audited")
-        metadata = {"index_digest": "sha256:" + sha256(self.index_bytes),
+        layout_digest = "sha256:" + sha256(self.index_bytes)
+        roots = self.index["manifests"]
+        image_index = roots[0]["digest"] if len(roots) == 1 and roots[0]["mediaType"] == "application/vnd.oci.image.index.v1+json" else layout_digest
+        metadata = {"layout_index_digest": layout_digest, "index_digest": image_index,
                     "manifest_digest": descriptor["digest"], "config_digest": manifest["config"]["digest"],
                     "platform": platform, "layers": image.layers, "provenance": provenances,
                     "config": config.get("config", {})}

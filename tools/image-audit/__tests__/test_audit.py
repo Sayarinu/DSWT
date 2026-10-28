@@ -189,6 +189,18 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "libpq5"):
             audit.scanner_coverage(report, sbom, "server", self.context, "sha256:config", self.expected_os)
 
+    def test_buildkit_output_metadata_must_identify_the_image_index(self):
+        path = self.context / "server.build.json"
+        build = {"containerimage.digest": "sha256:index", "containerimage.descriptor": {
+            "digest": "sha256:index", "mediaType": "application/vnd.oci.image.index.v1+json"}}
+        path.write_text(json.dumps(build))
+        metadata = {"index_digest": "sha256:index", "config_digest": "sha256:config"}
+        audit.build_digest_bindings(self.context, "server", metadata)
+        build["containerimage.digest"] = "sha256:config"
+        path.write_text(json.dumps(build))
+        with self.assertRaisesRegex(ValueError, "BuildKit"):
+            audit.build_digest_bindings(self.context, "server", metadata)
+
     def test_single_field_report_mutations_do_not_pass_internal_evidence_bindings(self):
         database = self.context / "cache/db"
         database.mkdir(parents=True)

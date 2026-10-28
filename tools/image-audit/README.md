@@ -30,7 +30,8 @@ two parallel steps. It is removed before scanners run. The validator test image
 remains locally tagged with the run's unique `platinumwt-audit-...` name for
 independent inspection. No existing builder, image, container or volume is reset.
 The exported OCI archives include maximum BuildKit provenance. Reports separately
-record the OCI index, platform manifest and configuration digests; the last is
+record the layout wrapper, deployable image index, platform manifest and
+configuration digests; the last is
 the image ID, not an image manifest suitable for deployment pinning.
 
 Trivy is pinned by the multi-platform image checksum in `pins.json`. One advisory

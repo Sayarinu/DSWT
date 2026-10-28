@@ -183,6 +183,15 @@ def evidence_bindings(workspace, report, service, image, metadata):
             raise ValueError("Embedded resource summary mismatch")
 
 
+def build_digest_bindings(workspace, service, metadata):
+    build = json.loads((workspace / (service + ".build.json")).read_text())
+    descriptor = build.get("containerimage.descriptor", {})
+    if (build.get("containerimage.digest") != metadata["index_digest"] or descriptor.get("digest") != metadata["index_digest"]
+            or descriptor.get("mediaType") != "application/vnd.oci.image.index.v1+json"
+            or ("containerimage.config.digest" in build and build["containerimage.config.digest"] != metadata["config_digest"])):
+        raise ValueError("Exported image digests differ from BuildKit output metadata")
+
+
 def scanner_coverage(report, sbom, service, context, config_digest, expected_os):
     if report.get("SchemaVersion") != 2 or report.get("ArtifactType") != "container_image":
         raise ValueError("Unsupported or empty scanner result")
@@ -260,7 +269,8 @@ class Runner:
         if test:
             args += ["--target", "validator-tests", "--load", "--tag", self.test_image]
         else:
-            args += ["--output", f"type=oci,dest={self.workspace / (service + '.oci.tar')},compression=gzip,force-compression=true",
+            args += ["--tag", self.name + "-" + service + ":local",
+                     "--output", f"type=oci,dest={self.workspace / (service + '.oci.tar')},compression=gzip,force-compression=true",
                      "--metadata-file", str(self.workspace / (service + ".build.json"))]
         self.run(args + [str(self.workspace / "contexts" / service)], "build-" + target)
 
@@ -333,6 +343,7 @@ class Runner:
                 image, metadata = archive.inspect(self.platform)
             finally:
                 archive.close()
+            build_digest_bindings(self.workspace, service, metadata)
             context = self.workspace / "contexts" / service
             metadata["source"] = audit_sources(image, context, service, self.workspace / "pkhex-source.tar.gz")
             write_json(self.workspace / (service + ".filesystem.json"), image.inventory())
@@ -392,8 +403,9 @@ def verify(workspace):
         finally:
             archive.close()
         recorded = report["images"][service]
+        build_digest_bindings(workspace, service, metadata)
         evidence_bindings(workspace, report, service, image, metadata)
-        for key in ("index_digest", "manifest_digest", "config_digest", "layers", "provenance", "config"):
+        for key in ("layout_index_digest", "index_digest", "manifest_digest", "config_digest", "layers", "provenance", "config"):
             if metadata[key] != recorded[key]:
                 raise ValueError("OCI report binding mismatch: " + key)
         if image.inventory() != json.loads((workspace / (service + ".filesystem.json")).read_text()):
