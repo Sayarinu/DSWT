@@ -30,6 +30,9 @@ definition is in `tools/rom-builder/Dockerfile`. This project script builds the
 modified ROM. To reproduce and check the unmodified US baseline, run
 `./scripts/build-rom.sh --pristine` (also accepts `ROM_REVISION=0`). This uses
 `game/pokeplatinum-pristine/` and runs all upstream pristine checksum checks.
+Both build modes default to one compiler job; set `ROM_BUILD_JOBS=2` (a positive
+integer without leading zeros) to opt into parallel compilation. Serial builds
+avoid the compiler failures observed with parallel macOS Docker builds.
 ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
 
 ## Server ledger
