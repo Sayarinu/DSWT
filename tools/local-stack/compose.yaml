@@ -1,0 +1,105 @@
+x-server: &server
+  image: ${PWT_LOCAL_PROJECT}-server
+  platform: ${PWT_LOCAL_PLATFORM}
+  build:
+    context: ../../server
+    target: build
+  user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 15s
+
+x-database-client: &database-client
+  PGHOST: /test/run
+  PGPORT: "5432"
+  PGDATABASE: platinumwt_e2e
+  PGUSER: platinumwt_local
+
+services:
+  database:
+    image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+    platform: ${PWT_LOCAL_PLATFORM}
+    network_mode: none
+    environment:
+      POSTGRES_USER: platinumwt_local
+      POSTGRES_DB: platinumwt_e2e
+      # Only the explicitly mounted local socket is reachable.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: [postgres, -c, "listen_addresses=", -c, fsync=on, -c, full_page_writes=on, -c, synchronous_commit=on]
+    volumes:
+      - data:/var/lib/postgresql/data
+      - socket:/var/run/postgresql
+    healthcheck:
+      test: [CMD, pg_isready, -h, /var/run/postgresql, -U, platinumwt_local, -d, platinumwt_e2e]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 30s
+
+  migrate:
+    <<: *server
+    profiles: [tools]
+    network_mode: none
+    environment: *database-client
+    volumes: [socket:/test/run]
+    command: [/build/platinumwt-ledger, migrate, /src/migrations]
+
+  gateway:
+    <<: *server
+    command: [/build/platinumwt-server]
+    ports: ["127.0.0.1:8443:8443"]
+    environment:
+      WT_HTTP_PORT: "8443"
+      WT_TRADE_TARGET: 127.0.0.1:50053
+      WT_TLS_CERTIFICATE: /tls/current.pem
+      WT_TLS_PRIVATE_KEY: /tls/current.key
+    volumes:
+      - type: bind
+        source: ${PWT_LOCAL_WORKSPACE}/tls
+        target: /tls
+        read_only: true
+        bind: {create_host_path: false}
+
+  validator:
+    image: ${PWT_LOCAL_PROJECT}-validator
+    platform: ${PWT_LOCAL_PLATFORM}
+    build:
+      context: ../..
+      dockerfile: validator/Dockerfile
+    network_mode: service:gateway
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 2
+    pids_limit: 128
+    stop_grace_period: 10s
+
+  backend:
+    <<: *server
+    network_mode: service:gateway
+    depends_on:
+      database: {condition: service_healthy}
+      validator: {condition: service_started}
+    environment:
+      <<: *database-client
+      PLATINUMWT_DISPOSABLE_DEVICE_TEST: "1"
+    volumes:
+      - type: bind
+        source: ${PWT_LOCAL_WORKSPACE}/control
+        target: /test
+        read_only: true
+        bind: {create_host_path: false}
+      - socket:/test/run
+    command: [/build/tests/platinumwt-device-fixture]
+
+volumes:
+  data:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-data
+  socket:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-socket

@@ -29,6 +29,33 @@ service IP needs a new profile/build. No deployment authority is in the profile.
 The [local acceptance record](acceptance.md) distinguishes actual ROM scenarios
 from host/native tests and lists the remaining release gates.
 
+Start the real local services with Docker Compose and Python 3.9 or newer:
+
+```sh
+python3 tools/local-stack/stack.py --workspace game/local-e2e init
+python3 tools/local-stack/stack.py --workspace game/local-e2e up
+python3 tools/local-stack/stack.py --workspace game/local-e2e status
+python3 tools/local-stack/stack.py --workspace game/local-e2e verify
+python3 tools/local-stack/stack.py --workspace game/local-e2e down
+```
+
+`init` exclusively creates private TLS keys and a workspace manifest. `up`
+builds native arm64/amd64 services, migrates PostgreSQL and checks the real
+validator policy, matcher and HTTPS trade route. Only `127.0.0.1:8443` is published;
+gRPC shares the gateway's private network namespace and PostgreSQL uses a shared
+Unix socket. Remote Docker contexts and inherited Compose/database overrides
+cannot redirect this stack. The local-only test backend is absent from the final
+production image; its same-host durability allowance is not an off-site claim.
+
+Use `game/local-e2e/tls/connection.json` for the Linux melonDS ROM build: its
+SLIRP host address is `10.64.0.1`, which reaches the host loopback port. Native
+host clients use `localhost:8443` with the same certificate/pins. `down` preserves
+database volumes and keys; subsequent `up` refuses missing volumes or a changed
+database identity. Keep the workspace and volumes together with enrolled saves;
+there is no reset command. `control/matcher-hold` pauses new matches for tests.
+The manifest records the source revision, dirty-source flag and actual image IDs.
+Ordinary readiness checks create no identities or trades.
+
 Use a local, isolated gateway/backend/validator/database stack and two
 independent disposable saves. Pin the local HTTPS gateway in
 `WONDER_TRADE_PROFILE`; the ping-only `scripts/tls-test-server.py` fixture is
