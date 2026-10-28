@@ -2,10 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-prepare_args=()
 build_mode="modified"
 if [[ $# == 1 && $1 == --pristine ]]; then
-    prepare_args+=(--pristine)
     build_mode="pristine"
 elif [[ $# != 0 ]]; then
     echo "Usage: $0 [--pristine]" >&2
@@ -22,16 +20,20 @@ if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
     exit 2
 fi
 
-workspace="$(python3 "$repo_root/scripts/prepare-game.py" "${prepare_args[@]}")"
-tls_args=()
-if [[ "$build_mode" == modified ]]; then
-    tls_workspace="$(python3 "$repo_root/scripts/prepare-tls.py")"
-    python3 "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/platinumwt-connection.h"
-    tls_args=(-v "$tls_workspace:/tls:ro")
+python="${PYTHON:-python3}"
+if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+    echo "Python 3.12 or newer is required. Install it separately and set PYTHON=/path/to/python3.12; leave the system Python unchanged." >&2
+    exit 2
 fi
-docker build -f "$repo_root/tools/rom-builder/Dockerfile" -t "$image" "$repo_root/tools/rom-builder"
 
-docker_args=(--rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "PLATINUMWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" "${tls_args[@]}" -w /workspace)
+workspace="$("$python" "$repo_root/scripts/prepare-game.py" "$@")"
+docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "PLATINUMWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
+if [[ "$build_mode" == modified ]]; then
+    tls_workspace="$("$python" "$repo_root/scripts/prepare-tls.py")"
+    "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/platinumwt-connection.h"
+    docker_args+=(-v "$tls_workspace:/tls:ro")
+fi
+docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile" -t "$image" "$repo_root/tools/rom-builder"
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
