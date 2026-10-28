@@ -14,7 +14,10 @@ The build script prepares pinned source automatically; see
 [`client/UPSTREAM.md`](client/UPSTREAM.md) for provenance and local-edit handling.
 
 The simplest build uses Docker and does not install the cross-compiler on your
-host. First create a local public endpoint/pins profile using the
+host. Local preparation requires Python 3.12 or newer; set `PYTHON=python3.12`
+when needed to select a separately installed interpreter. Docker uses
+`linux/amd64` for the ROM toolchain, including on Apple Silicon.
+First create a local public endpoint/pins profile using the
 [secure connection test guide](client/tests/README.md), then pass its path:
 
 ```sh
