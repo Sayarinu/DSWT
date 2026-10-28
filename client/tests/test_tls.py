@@ -48,8 +48,10 @@ class TlsTests(unittest.TestCase):
             cert = cls.root / f"{name}.pem"
             subprocess.run([
                 "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                "-pkeyopt", "ec_param_enc:named_curve",
                 "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1",
                 "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+                "-addext", "basicConstraints=critical,CA:TRUE",
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             public = subprocess.check_output(["openssl", "pkey", "-in", str(key), "-pubout", "-outform", "DER"])
             cls.keys.append((key, cert, hashlib.sha256(public).hexdigest()))

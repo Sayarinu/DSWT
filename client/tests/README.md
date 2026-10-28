@@ -56,6 +56,39 @@ there is no reset command. `control/matcher-hold` pauses new matches for tests.
 The manifest records the source revision, dirty-source flag and actual image IDs.
 Ordinary readiness checks create no identities or trades.
 
+Run the native client recovery gate with Python 3.12+, CMake, a C compiler and
+Docker after `up` succeeds:
+
+```sh
+python3.12 tools/local-stack/acceptance.py --workspace game/local-e2e --case all
+```
+
+The runner builds `trade_probe` with the production C engine, journal, seed,
+wire, Pokemon codec, HTTP and TLS. Only its POSIX I/O and persisted synthetic
+inventory are test adapters. The pinned validator test image generates fresh
+legal starter/wild encounters and an illegal RNG mutation; no ROM/save inputs
+are required. Each case has independent clients. Runs refuse existing pending
+offers or a matcher hold instead of disturbing retained work.
+
+`--case` also accepts `repeat`, `cancel`, `storage`, `reply-loss`, `interruption`,
+`older-copy`, `outages` and `illegal`. Tests bind exact inventory multisets to
+case-owned asset/receipt IDs, mutation counters, applied hashes and ledger
+replay. Process kills occur after an observed checkpoint; injected I/O errors
+exercise the same synthetic persistence boundaries. The storage case tests a
+persisted synthetic capacity refusal, not the SDK's party/PC implementation.
+
+Private clients, generated fixtures, checkpoint logs and `report.json` remain
+under the workspace's `acceptance/` directory, including failed runs. Reports
+record source/image/binary identities and `evidence_layer=native-client`;
+Linux SDK, retail saves/effects and physical power loss remain `not_run`.
+This gate does not establish prevention of arbitrary offline save cloning.
+
+Older macOS-generated workspaces may have explicit-curve certificates or lack
+the local trust-anchor constraint. New test certificates specify named P-256
+and that constraint explicitly for both LibreSSL and OpenSSL. Preserve old
+workspaces and their keys; initialize a new workspace for native acceptance
+instead of silently replacing pins associated with retained saves.
+
 Use a local, isolated gateway/backend/validator/database stack and two
 independent disposable saves. Pin the local HTTPS gateway in
 `WONDER_TRADE_PROFILE`; the ping-only `scripts/tls-test-server.py` fixture is
