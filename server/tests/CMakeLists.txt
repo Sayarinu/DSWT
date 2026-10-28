@@ -58,10 +58,19 @@ target_compile_options(platinumwt-gateway-fixture PRIVATE -Wall -Wextra -Wpedant
 # A strict-legality backend/matcher for disposable ROM acceptance only. The final
 # service image does not copy this executable or expose its local test barrier.
 add_executable(platinumwt-device-fixture integration/device_fixture.cpp)
-target_link_libraries(platinumwt-device-fixture PRIVATE platinumwt_trading)
+target_include_directories(platinumwt-device-fixture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_link_libraries(platinumwt-device-fixture PRIVATE platinumwt_trading PostgreSQL::PostgreSQL)
 target_compile_options(platinumwt-device-fixture PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME integration.device_fixture_refuses_unconfigured_start
     COMMAND ${CMAKE_COMMAND} -E env --unset=PLATINUMWT_DISPOSABLE_DEVICE_TEST
         $<TARGET_FILE:platinumwt-device-fixture>)
 set_tests_properties(integration.device_fixture_refuses_unconfigured_start
     PROPERTIES WILL_FAIL TRUE TIMEOUT 10 LABELS "integration")
+
+add_executable(platinumwt-device-matcher-tests integration/device_matcher_test.cpp)
+target_link_libraries(platinumwt-device-matcher-tests PRIVATE platinumwt_protocol OpenSSL::Crypto GTest::gtest_main)
+gtest_discover_tests(platinumwt-device-matcher-tests TEST_PREFIX "integration." PROPERTIES TIMEOUT 15 LABELS "integration")
+add_test(NAME integration.device_fixture_connection_guards
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_device_fixture.py"
+        $<TARGET_FILE:platinumwt-device-fixture>)
+set_tests_properties(integration.device_fixture_connection_guards PROPERTIES TIMEOUT 15 LABELS "integration")

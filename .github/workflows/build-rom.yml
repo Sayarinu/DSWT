@@ -35,6 +35,7 @@ jobs:
           python3 -m json.tool licensing/migration.json >/dev/null
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
+          python3 -m unittest discover -s tools/local-stack/__tests__
 
   connectivity-server:
     name: Build and test connectivity server
