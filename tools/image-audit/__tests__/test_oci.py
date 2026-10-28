@@ -25,7 +25,7 @@ def tar_bytes(files):
     return output.getvalue()
 
 
-def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=False, nested=False):
+def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=False, nested=False, environment=None):
     blobs = {}
 
     def blob(data, kind):
@@ -36,7 +36,7 @@ def make_export(path, layers, *, wrong_diff=False, wrong_subject=False, corrupt=
     def document(value, kind):
         return blob(json.dumps(value).encode(), "application/vnd.oci.image." + kind + ".v1+json")
 
-    config = document({"os": "linux", "architecture": "arm64", "config": {"User": "65532:65532"},
+    config = document({"os": "linux", "architecture": "arm64", "config": {"User": "65532:65532", "Env": environment or []},
                        "rootfs": {"type": "layers", "diff_ids": ["sha256:" + ("0" * 64 if wrong_diff else oci.sha256(x)) for x in layers]}}, "config")
     manifest = document({"schemaVersion": 2, "config": config,
                          "layers": [blob(gzip.compress(x), "application/vnd.oci.image.layer.v1.tar+gzip") for x in layers]}, "manifest")
@@ -94,6 +94,15 @@ class OciTests(unittest.TestCase):
         wrapped = (b'-----' + b'BEGIN PRIVATE KEY-----\n') + (b"A" * 16 + b"\n") * 4
         with self.assertRaisesRegex(ValueError, "Private input"):
             self.inspect([tar_bytes([("unknown", wrapped)])])
+        for whitespace in (b" ", b"\t", b"\r\n", b"\v", b"\f"):
+            key = (b'-----' + b'BEGIN RSA PRIVATE KEY-----\n') + whitespace.join([b"A"] * 64) + (b'\n-----' + b'END RSA PRIVATE KEY-----')
+            with self.subTest(whitespace=whitespace), self.assertRaisesRegex(ValueError, "Private input"):
+                self.inspect([tar_bytes([("unknown", key)])])
+
+    def test_encoded_private_key_in_json_metadata_is_rejected_after_unescaping(self):
+        key = ('-----' + 'BEGIN PRIVATE KEY-----\n') + "A" * 64 + ('\n-----' + 'END PRIVATE KEY-----')
+        with self.assertRaisesRegex(ValueError, "decoded OCI metadata"):
+            self.inspect([tar_bytes([("ordinary", b"payload")])], environment=["KEY=" + key])
 
     def test_public_selftest_requires_exact_file_path_hash_and_all_key_blocks(self):
         # Synthetic text is not a usable key; real public key bytes are never vendored.

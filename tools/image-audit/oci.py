@@ -13,8 +13,8 @@ import tarfile
 PRIVATE_SENTINEL = b"PLATINUMWT_PRIVATE_INPUT_SENTINEL"
 SOURCE = "usr/share/platinumwt-validator/source/"
 KEY_LABEL = rb"(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY"
-KEY_PREFIX = re.compile(rb"-----BEGIN " + KEY_LABEL + rb"-----[ \t\r\n]*"
-                        rb"(?:(?:Proc-Type:|DEK-Info:)[^\r\n]*\r?\n[ \t\r\n]*)*(?:[A-Za-z0-9+/=][\r\n]*){32}")
+KEY_PREFIX = re.compile(rb"-----BEGIN " + KEY_LABEL + rb"-----\s*"
+                        rb"(?:(?:Proc-Type:|DEK-Info:)[^\r\n]*\r?\n\s*)*(?:[A-Za-z0-9+/=]\s*){32}")
 KEY_BLOCK = re.compile(rb"-----BEGIN (" + KEY_LABEL + rb")-----[A-Za-z0-9+/=\r\n]+-----END \1-----")
 
 
@@ -255,7 +255,7 @@ class Archive:
         if self.json_file("oci-layout") != {"imageLayoutVersion": "1.0.0"}:
             raise ValueError("Unsupported OCI layout")
         self.index_bytes = self.read("index.json")
-        self.index = json.loads(self.index_bytes)
+        self.index = self.json_file("index.json")
 
     def close(self):
         self.tar.close()
@@ -293,7 +293,18 @@ class Archive:
         return self.tar.extractfile(entry).read()
 
     def json_file(self, path):
-        return json.loads(self.read(path))
+        document = json.loads(self.read(path))
+        pending = [document]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, str) and private_marker(value.encode()):
+                raise ValueError("Private input marker in decoded OCI metadata")
+            if isinstance(value, dict):
+                pending.extend(value)
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+        return document
 
     def blob_path(self, descriptor):
         digest = descriptor.get("digest", "")
