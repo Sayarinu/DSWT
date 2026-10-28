@@ -288,6 +288,7 @@ class Runner:
             (config / "cli-plugins/docker-buildx").symlink_to(plugin.resolve())
         self.docker = ["docker", "--config", str(config), "--host", endpoint]
         self.owned_builder = False
+        self.cleanup_attempt = 0
         self.test_image = self.name + "-validator-tests"
 
     def run(self, args, log, *, capture=False):
@@ -418,7 +419,8 @@ class Runner:
 
     def cleanup(self):
         if self.owned_builder:
-            self.run(["buildx", "rm", "--force", self.name], "remove-owned-builder")
+            self.cleanup_attempt += 1
+            self.run(["buildx", "rm", "--force", self.name], "remove-owned-builder-" + str(self.cleanup_attempt))
             self.owned_builder = False
 
 

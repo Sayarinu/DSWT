@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import tarfile
 import unittest
@@ -78,6 +79,23 @@ class EvidenceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.context = Path(self.temp.name)
+
+    def test_failed_builder_removal_can_retry_without_overwriting_failure_log(self):
+        runner = audit.Runner.__new__(audit.Runner)
+        runner.workspace, runner.docker, runner.env = self.context, ["docker"], {}
+        runner.name, runner.owned_builder, runner.cleanup_attempt = "owned-test-builder", True, 0
+        error = subprocess.CalledProcessError(1, ["docker", "buildx", "rm"])
+        with patch.object(audit, "command", side_effect=[error, None]) as command:
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.cleanup()
+            self.assertTrue(runner.owned_builder)
+            runner.cleanup()
+            runner.cleanup()
+            self.assertFalse(runner.owned_builder)
+            self.assertEqual(command.call_count, 2)
+            self.assertEqual(command.call_args_list[0].args, command.call_args_list[1].args)
+        self.assertEqual({p.name for p in self.context.glob("*.log")},
+                         {"remove-owned-builder-1.log", "remove-owned-builder-2.log"})
 
     def test_public_selftests_bind_source_constants_and_installed_package(self):
         key = (b'-----' + b'BEGIN PRIVATE KEY-----') + b"A" * 64 + (b'-----' + b'END PRIVATE KEY-----')
