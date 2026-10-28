@@ -99,7 +99,7 @@ separate; provision a new copy for each client because restoring or cloning an
 older seeded save can repeat random state.
 
 Build the strict-legality ROM test backend with
-`docker build --target build -t platinumwt-local-tests server`. The executable is
+`docker build -f server/Dockerfile --target build -t platinumwt-local-tests .`. The executable is
 `/build/tests/platinumwt-device-fixture`; it exists only in the test/build stage,
 not the final service image. It refuses startup unless
 `PLATINUMWT_DISPOSABLE_DEVICE_TEST=1`, `PGDATABASE=platinumwt_e2e` and

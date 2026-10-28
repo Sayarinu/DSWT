@@ -12,7 +12,7 @@
     "upstream test fixtures",
     "all other upstream paths"
   ],
-  "resource_inventory_algorithm": "SHA256 of sorted UTF-8 relative/path + NUL + lowercase file SHA256 + LF for every resource within each category",
+  "resource_inventory_algorithm": "SHA256 of UTF-8 category/relative/path + NUL + lowercase file SHA256 + LF, grouped by category and sorted lexicographically by path components; paths are relative to PKHeX.Core/Resources/",
   "resource_categories": [
     {
       "directory": "byte",

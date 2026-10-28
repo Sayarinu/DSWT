@@ -37,8 +37,10 @@ ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches
 
 ## Server ledger
 
-`docker build -t platinumwt-server server` builds the C++ server and runs its
+`docker build -f server/Dockerfile -t platinumwt-server .` builds the C++ server and runs its
 tests, including a disposable PostgreSQL 16 cluster with synthetic data.
+The [private image audit](tools/image-audit/README.md) checks local OCI artifacts,
+source/notices, SBOMs and scan findings without publishing them.
 Final trading remains gated on off-site recovery. The image also contains an operator tool:
 
 ```sh
