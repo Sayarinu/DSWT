@@ -99,7 +99,7 @@ class GatewayScenario:
                             client.save if client else ZERO_ID, client.credential if client else b'Q' * 32, counter) + body
 
     def post(self, packet, *, port=None, status=200):
-        connection = http.client.HTTPSConnection('localhost', port or self.port, context=self.context, timeout=7)
+        connection = http.client.HTTPSConnection('127.0.0.1', port or self.port, context=self.context, timeout=7)
         try:
             connection.request('POST', '/wt/v1', packet, {'Content-Type': 'application/octet-stream', 'Connection': 'close'})
             response = connection.getresponse()
