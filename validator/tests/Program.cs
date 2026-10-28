@@ -58,6 +58,48 @@ starter.MetDate = new DateOnly(2020, 1, 1);
 var good = Canonical(starter);
 Require(starter.Species == 387 && starter.Version == GameVersion.Pt && starter.MetLevel == 5, "unexpected fixture encounter");
 
+byte[] Wild()
+{
+    var encounter = EncounterMovesetGenerator.GenerateEncounters(new PK4 { Species = 399 }, trainer,
+        ReadOnlyMemory<ushort>.Empty, [GameVersion.Pt]).OfType<EncounterSlot4>().First();
+    return Canonical((PK4)encounter.ConvertToPKM(trainer));
+}
+if (args.Length != 0)
+{
+    Require(args.Length == 2 && args[0] == "--export-fixtures", "use --export-fixtures PRIVATE_EMPTY_DIRECTORY");
+    var directory = new DirectoryInfo(args[1]);
+    Require(directory.Exists && !directory.EnumerateFileSystemInfos().Any()
+        && directory.LinkTarget is null, "fixture directory must already exist, empty and unlinked");
+    if (!OperatingSystem.IsWindows())
+        Require((File.GetUnixFileMode(directory.FullName) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite
+            | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) == 0,
+            "fixture directory must be private");
+    var fixtures = new Dictionary<string, byte[]> {
+        ["starter.pk4"] = good, ["wild.pk4"] = Wild(),
+        ["illegal-rng.pk4"] = Mutate(good, pk => pk.IV32 ^= 0x3FFFFFFF),
+    };
+    var hashes = new Dictionary<string, string>();
+    foreach (var (name, data) in fixtures)
+    {
+        var verdict = Policy.Analyze(data);
+        CheckReply(verdict, data);
+        Require(name == "illegal-rng.pk4" ? !verdict.Legal && verdict.ReasonCodes.Contains("ILLEGAL_RNG") : verdict.Legal,
+            "generated fixture verdict mismatch");
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var output = new FileStream(Path.Combine(directory.FullName, name), options);
+        output.Write(data); output.Flush(true);
+        hashes[name] = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+    }
+    var metadata = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new {
+        version = 1, policy = Policy.Version, source = "generated pinned PKHeX test encounters", sha256 = hashes,
+    });
+    using (var output = new FileStream(Path.Combine(directory.FullName, "manifest.json"), FileMode.CreateNew))
+    { output.Write(metadata); output.Flush(true); }
+    Console.WriteLine("Exported three generated test fixtures; no ROM or save inputs");
+    return;
+}
+
 await Test("legal Platinum starter and unchanged canonical input", () =>
 {
     byte[] before = good.ToArray();
@@ -70,10 +112,7 @@ await Test("legal Platinum starter and unchanged canonical input", () =>
 
 await Test("legal generated wild encounter", () =>
 {
-    var encounter = EncounterMovesetGenerator.GenerateEncounters(new PK4 { Species = 399 }, trainer,
-        ReadOnlyMemory<ushort>.Empty, [GameVersion.Pt]).OfType<EncounterSlot4>().First();
-    var pk = (PK4)encounter.ConvertToPKM(trainer);
-    var data = Canonical(pk);
+    var data = Wild();
     var reply = Policy.Analyze(data);
     CheckReply(reply, data);
     Require(reply.Legal, "generated wild encounter rejected");

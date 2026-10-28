@@ -27,8 +27,10 @@ def prepare(directory, ipv4, hostname, port):
             key, cert = stage / f"{name}.key", stage / f"{name}.pem"
             subprocess.run([
                 "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                "-pkeyopt", "ec_param_enc:named_curve",
                 "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "30",
                 "-subj", f"/CN={hostname}", "-addext", f"subjectAltName=DNS:{hostname}",
+                "-addext", "basicConstraints=critical,CA:TRUE",
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             key.chmod(0o600)
             public = subprocess.check_output(["openssl", "pkey", "-in", str(key), "-pubout", "-outform", "DER"])
