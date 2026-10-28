@@ -2,7 +2,8 @@ x-server: &server
   image: ${PWT_LOCAL_PROJECT}-server
   platform: ${PWT_LOCAL_PLATFORM}
   build:
-    context: ../../server
+    context: ../..
+    dockerfile: server/Dockerfile
     target: build
   user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
   read_only: true

@@ -1,0 +1,15 @@
+{
+  "trivy": {
+    "version": "0.76.1",
+    "revision": "e713f67f7d54decdcd9b3132c9751833dcced698",
+    "image": "aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c",
+    "release": "https://github.com/aquasecurity/trivy/releases/tag/v0.76.1"
+  },
+  "buildkit": {
+    "version": "0.34.1",
+    "revision": "f5b59a1f2fb25a0cb7072c398cab9aed7835da4e",
+    "image": "moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c",
+    "release": "https://github.com/moby/buildkit/releases/tag/v0.34.1"
+  },
+  "advisory_repository": "ghcr.io/aquasecurity/trivy-db:2"
+}

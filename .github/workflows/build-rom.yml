@@ -36,6 +36,7 @@ jobs:
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
           python3 -m unittest discover -s tools/local-stack/__tests__
+          python3 -m unittest discover -s tools/image-audit/__tests__
 
   connectivity-server:
     name: Build and test connectivity server
@@ -47,7 +48,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build server and run integration tests
-        run: docker build -t platinumwt-server server
+        run: docker build -f server/Dockerfile -t platinumwt-server .
 
   tls-transport:
     name: Test bounded TLS transport

@@ -11,6 +11,12 @@ using PKHeX.Core;
 using PlatinumWT.Validator;
 using Platinumwt.V1;
 
+if (args.Length == 2 && args[0] == "--audit-image")
+{
+    ImageAudit.Run(args[1]);
+    return;
+}
+
 int passed = 0;
 void Require(bool condition, string message)
 {

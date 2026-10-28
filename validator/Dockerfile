@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:0d99ebf1ccad15037b5c98c9fe89
 WORKDIR /source
 COPY validator validator
 COPY server/proto/trade.proto server/proto/trade.proto
-COPY LICENSE LICENSE
+COPY LICENSE NOTICE ./
 RUN sh validator/fetch-core.sh
 RUN dotnet restore validator/tests/Validator.Tests.csproj --locked-mode
 RUN dotnet build validator/tests/Validator.Tests.csproj -c Release --no-restore \
@@ -26,4 +26,5 @@ ENV DOTNET_EnableDiagnostics=0 \
     DOTNET_PROCESSOR_COUNT=2 \
     DOTNET_GCHeapHardLimit=8000000
 USER 1654:1654
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 ENTRYPOINT ["dotnet", "Validator.dll"]
