@@ -18,7 +18,11 @@ def identify(path, catalog):
         for chunk in iter(lambda: rom.read(1024 * 1024), b""):
             digest.update(chunk)
             size += len(chunk)
-    sha256 = digest.hexdigest()
+    return match(size, digest.hexdigest(), catalog)
+
+
+def match(size, sha256, catalog):
+    """Select the single verified pristine catalogue entry for an input's size and SHA-256."""
     matches = [
         variant for variant in catalog["variants"]
         if variant["size"] == size and variant["sha256"] == sha256
