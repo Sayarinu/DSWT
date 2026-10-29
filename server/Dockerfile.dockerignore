@@ -17,12 +17,15 @@
 !server/include/platinumwt/server/ledger_store.h
 !server/include/platinumwt/server/legality_client.h
 !server/include/platinumwt/server/matcher_service.h
+!server/include/platinumwt/server/metrics_server.h
 !server/include/platinumwt/server/recovery_barrier.h
 !server/include/platinumwt/server/server.h
 !server/include/platinumwt/server/trade_gateway.h
 !server/include/platinumwt/server/trade_service.h
+!server/include/platinumwt/server/telemetry.h
 !server/migrations/0001_ledger.sql
 !server/migrations/0002_matcher.sql
+!server/migrations/0003_observation_time.sql
 !server/proto/connectivity.proto
 !server/proto/trade.proto
 !server/src/admission.cpp
@@ -43,6 +46,7 @@
 !server/src/legality_client.cpp
 !server/src/main.cpp
 !server/src/matcher_service.cpp
+!server/src/metrics_server.cpp
 !server/src/postgres.cpp
 !server/src/postgres.h
 !server/src/recovery_gate.cpp
@@ -52,6 +56,7 @@
 !server/src/trade_encoding.h
 !server/src/trade_gateway.cpp
 !server/src/trade_service.cpp
+!server/src/telemetry.cpp
 !server/tests/CMakeLists.txt
 !server/tests/integration/device_fixture.cpp
 !server/tests/integration/device_matcher.h
@@ -73,3 +78,4 @@
 !server/tests/unit/connectivity_service_test.cpp
 !server/tests/unit/http_request_handler_test.cpp
 !server/tests/unit/legality_client_test.cpp
+!server/tests/unit/telemetry_test.cpp

@@ -82,6 +82,37 @@ and rejects new keys when full. Limits are per process; account
 for all replicas in database/validator/node capacity and complete the soak gate
 before production. These limits are resource bounds, not throughput guarantees.
 
+## Private telemetry
+
+Set `WT_METRICS_PORT` to a nonzero port to enable `GET /metrics` on IPv4 loopback;
+zero (the default) disables export. The local stack uses gateway port 9091 and
+backend port 9092 inside their shared namespace, publishing only HTTPS 8443.
+The game endpoint never serves metrics. Scrapes have 1 KiB headers, no body,
+two-second I/O deadlines and at most sixteen concurrent connections.
+
+Prometheus labels are fixed service, operation and result enums. Request,
+operation and trade IDs appear only as bounded hexadecimal correlation fields
+in JSON stderr logs. Credentials, save IDs, hints, trainer/device information,
+Pokémon data and payload hashes are excluded. Dropped log records are counted;
+ownership evidence remains in the protected PostgreSQL ledger.
+
+The backend independently samples aggregate queue/delivery counts, ages,
+matches, completed pairs and database health every five seconds through a
+read-only connection with a one-second client connect deadline, 500 ms client
+query deadline and 250 ms server statement timeout. Sampling requires a Unix
+socket, numeric host or explicit numeric `hostaddr`; DNS/service discovery
+configurations report unavailable to keep observation and shutdown bounded.
+Migration 0003 timestamps new audit records without changing ownership images
+or replay. Pre-existing records retain unknown times: affected ages are `NaN`
+with explicit unknown-age counts. Database outages also produce unknown gauges.
+Matched pairs, pairs with both sides acknowledged and acknowledged offers are
+separate gauges. RPC latency excludes Wi-Fi/TLS establishment and HTTP queue
+wait; use client timings for capacity acceptance.
+
+Restrict collector/dashboard access and apply seven-day log and fifteen-day
+metric retention in the storage layer. Operational telemetry cannot authorize
+delivery or replace retained ownership/recovery evidence.
+
 ## Upstream source
 
 The pinned upstream revision is recorded in [`client/UPSTREAM.md`](client/UPSTREAM.md).

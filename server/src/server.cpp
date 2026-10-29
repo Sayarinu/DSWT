@@ -3,6 +3,7 @@
 #include "platinumwt/server/connectivity_service.h"
 #include "platinumwt/server/http_listener.h"
 #include "http_services.h"
+#include "platinumwt/server/metrics_server.h"
 
 #include <boost/asio/ssl/context.hpp>
 #include <openssl/ssl.h>
@@ -43,6 +44,8 @@ std::shared_ptr<grpc::Channel> Channel(const std::string &target) {
 } // namespace
 
 void RunServer(const ServerConfig &config) {
+  Telemetry::Global().Initialize(TelemetryRole::Gateway);
+  MetricsServer metrics(config.metrics_port);
   auto tls = TlsContext(config.tls);
   ConnectivityService service;
   grpc::ServerBuilder builder;

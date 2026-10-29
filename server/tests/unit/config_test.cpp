@@ -39,10 +39,10 @@ protected:
   }
 
 private:
-  const std::array<const char *, 11> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
+  const std::array<const char *, 12> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
       "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "PLATINUMWT_DATABASE_URL",
-      "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY"};
-  std::array<std::optional<std::string>, 11> saved_;
+      "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY", "WT_METRICS_PORT"};
+  std::array<std::optional<std::string>, 12> saved_;
 };
 
 TEST_F(ConfigTest, LoadsDefaults) {
@@ -51,6 +51,16 @@ TEST_F(ConfigTest, LoadsDefaults) {
   EXPECT_EQ(config.http_port, 8080);
   EXPECT_EQ(config.grpc_address, "127.0.0.1:50051");
   EXPECT_FALSE(config.grpc_target.has_value());
+  EXPECT_EQ(config.metrics_port, 0);
+}
+
+TEST_F(ConfigTest, MetricsAreOptInWithBoundedPorts) {
+  Set("WT_METRICS_PORT", "9091");
+  EXPECT_EQ(LoadServerConfig().metrics_port, 9091);
+  for (const char *port : {"", "-1", "+1", "65536", "12junk"}) {
+    Set("WT_METRICS_PORT", port);
+    EXPECT_THROW(LoadMetricsPort(), std::invalid_argument);
+  }
 }
 
 TEST_F(ConfigTest, LoadsEnvironmentOverrides) {

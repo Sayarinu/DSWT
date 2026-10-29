@@ -5,6 +5,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <openssl/crypto.h>
 
@@ -25,6 +26,7 @@ IdentityService::IdentityService(std::string connection_info, RecoveryBarrier re
       admission_(admission ? std::move(admission) : std::make_shared<detail::ServiceAdmission>()) {}
 
 grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::EnrollRequest *request, v1::EnrollReply *reply) {
+  RpcTelemetry trace(Operation::Enroll, context, [reply] { return reply->context().result(); }, request->enrollment_id());
   reply->Clear();
   if (context && context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "request cancelled"};
   if (!detail::NonzeroBytes(request->enrollment_id(), 16) || !detail::NonzeroBytes(request->credential(), 32) || request->hints().size() > 64) {
@@ -33,7 +35,7 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
   }
   try {
     auto permit = admission_->Acquire(detail::RequestKind::Enrollment);
-    if (!permit) return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
+    if (!permit) { Telemetry::Global().Refused(); return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"}; }
     IdentityId nonce{};
     CredentialBuffer credential;
     std::copy(request->enrollment_id().begin(), request->enrollment_id().end(), nonce.begin());
@@ -47,8 +49,10 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
       return grpc::Status::OK;
     }
     const std::string id(reinterpret_cast<const char *>(identity->data()), identity->size());
-    if (!admission_->Authorize(*permit, id, request->credential()))
+    if (!admission_->Authorize(*permit, id, request->credential())) {
+      Telemetry::Global().Refused();
       return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
+    }
     detail::Database database(connection_info_);
     detail::Transaction transaction(database, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     auto row = database.Parameters("SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",

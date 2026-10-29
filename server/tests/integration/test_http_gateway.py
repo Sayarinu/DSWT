@@ -1,9 +1,30 @@
 import socket
+import http.client
 
 from server_fixture import ACK, ServerTestCase
 
 
 class HttpGatewayTests(ServerTestCase):
+    def test_metrics_use_a_separate_listener_and_are_absent_from_game_routes(self):
+        with socket.socket() as reserve:
+            reserve.bind(("127.0.0.1", 0))
+            metrics_port = reserve.getsockname()[1]
+        game_port = self.start_server(WT_METRICS_PORT=str(metrics_port))
+        connection = http.client.HTTPConnection("127.0.0.1", metrics_port, timeout=4)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/metrics")
+        response = connection.getresponse()
+        text = response.read().decode()
+        self.assertEqual(response.status, 200)
+        self.assertIn("version=0.0.4", response.getheader("Content-Type"))
+        self.assertIn('service="gateway"', text)
+        self.assertNotIn("platinumwt_database_up", text)
+        self.assertEqual(self.request(game_port, path="/metrics")[0], 404)
+        connection = http.client.HTTPConnection("127.0.0.1", metrics_port, timeout=4)
+        self.addCleanup(connection.close)
+        connection.request("POST", "/metrics")
+        self.assertEqual(connection.getresponse().status, 405)
+
     def test_acknowledgement_and_routes(self):
         port = self.start_server()
         for _ in range(3):

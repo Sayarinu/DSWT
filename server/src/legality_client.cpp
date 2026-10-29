@@ -1,4 +1,5 @@
 #include "platinumwt/server/legality_client.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -50,6 +51,8 @@ LegalityClient::~LegalityClient() = default;
 
 LegalityDecision LegalityClient::CheckNewSubmission(
     const std::array<unsigned char, 136> &pk4) {
+  unsigned verdict = 11;
+  RpcTelemetry trace(Operation::Legality, nullptr, [&] { return verdict; });
   std::array<unsigned char, 32> digest{};
   std::size_t digest_size = 0;
   if (EVP_Q_digest(nullptr, "SHA256", nullptr, pk4.data(), pk4.size(),
@@ -67,9 +70,11 @@ LegalityDecision LegalityClient::CheckNewSubmission(
   if (!status.ok() || reply.policy_version() != impl_->policy || reply.sha256() != hash ||
       reply.reason_codes_size() > 8)
     return {};
-  if (reply.legal())
-    return reply.reason_codes().empty() ? LegalityDecision{LegalityVerdict::Legal, {}}
-                                       : LegalityDecision{};
+  if (reply.legal()) {
+    if (!reply.reason_codes().empty()) return {};
+    verdict = 1;
+    return {LegalityVerdict::Legal, {}};
+  }
   if (reply.reason_codes().empty())
     return {};
   LegalityDecision decision{LegalityVerdict::Illegal, {}};
@@ -78,6 +83,7 @@ LegalityDecision LegalityClient::CheckNewSubmission(
       return {};
     decision.reasons.push_back(reason);
   }
+  verdict = 8;
   return decision;
 }
 
