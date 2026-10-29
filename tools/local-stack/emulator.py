@@ -30,11 +30,18 @@ def digest(data):
 
 
 @contextmanager
-def private_lock(path, operation, *, create=True):
+def private_lock(path, operation, *, create=True, timeout=0):
     descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if create else 0), 0o600)
     try:
         stack.private_file(path)
-        fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline: raise
+                time.sleep(0.05)
         yield
     finally:
         os.close(descriptor)
@@ -129,18 +136,38 @@ class Emulator:
 
     def support(self, image):
         source = Path(__file__).with_name("qt-control.cpp").read_bytes()
-        directory = self.local.workspace / "emulator-support" / (digest(source)[:16] + "-" + image[-12:])
+        key = digest(source)[:16] + "-" + image[-12:]
+        with private_lock(self.local.workspace / (".emulator-support-" + key + ".lock"), fcntl.LOCK_EX, timeout=65):
+            return self._support(image, source, key)
+
+    def _support(self, image, source, key):
+        directory = self.local.workspace / "emulator-support" / key
         if directory.resolve() != directory: raise ValueError("Emulator support must not be linked")
         if directory.exists():
-            if directory.is_symlink() or (directory / "qt-control.cpp").read_bytes() != source or not (directory / "qt-control.so").is_file():
+            if (directory / "qt-control.cpp").is_symlink() or (directory / "qt-control.cpp").read_bytes() != source:
                 raise ValueError("Preserve incomplete/changed emulator support")
-            return directory
-        directory.mkdir(mode=0o700, parents=True)
-        (directory / "qt-control.cpp").write_bytes(source)
+            if (directory / "manifest.json").exists():
+                stack.private_file(directory / "manifest.json")
+                stack.private_file(directory / "qt-control.so")
+                ready = json.loads((directory / "manifest.json").read_text())
+                if ready != {"source_sha256": digest(source), "image": image, "library_sha256": digest((directory / "qt-control.so").read_bytes())}:
+                    raise ValueError("Preserve changed emulator control library")
+                return directory
+        else:
+            directory.mkdir(mode=0o700, parents=True)
+            (directory / "qt-control.cpp").write_bytes(source)
+        # Preserve failed compiler outputs. Only a completed, synced library and
+        # readiness manifest may be reused by another independently started save.
+        temporary = directory / ("qt-control-" + secrets.token_hex(8) + ".new")
         self.local.run(["run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp", "--user", f"{os.getuid()}:{os.getgid()}",
                         "--mount", f"type=bind,source={directory},target=/support", image, "sh", "-c",
-                        "g++ -shared -fPIC /support/qt-control.cpp -o /support/qt-control.so $(pkg-config --cflags --libs Qt6Widgets Qt6Test) -ldl"],
+                        "g++ -shared -fPIC /support/qt-control.cpp -o /support/" + temporary.name + " $(pkg-config --cflags --libs Qt6Widgets Qt6Test) -ldl"],
                        capture=True, timeout=60)
+        temporary.chmod(0o600)
+        with temporary.open("rb") as compiled: os.fsync(compiled.fileno())
+        temporary.replace(directory / "qt-control.so")
+        stack.save_manifest(directory, {"source_sha256": digest(source), "image": image,
+                                         "library_sha256": digest((directory / "qt-control.so").read_bytes())})
         return directory
 
     def logs(self):

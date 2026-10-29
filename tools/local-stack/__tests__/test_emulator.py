@@ -3,6 +3,8 @@ import fcntl
 import json
 from pathlib import Path
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -96,3 +98,37 @@ class EmulatorTests(unittest.TestCase):
             runner.kill_at_fault(1)
         self.assertEqual(killed, [True])
         self.assertTrue(save.call_args.args[1]["last_start"]["observed_fault_and_sigkill"])
+
+    def test_concurrent_profiles_reuse_only_a_finished_control_library(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            compiling, release = threading.Event(), threading.Event()
+            calls, results, failures = [], [], []
+            def compile(arguments, **kwargs):
+                calls.append(arguments)
+                mount = arguments[arguments.index("--mount") + 1]
+                directory = Path(mount.split("source=", 1)[1].split(",target=", 1)[0])
+                output = directory / arguments[-1].split("-o /support/", 1)[1].split()[0]
+                output.write_bytes(b"partial linker output"); compiling.set()
+                if not release.wait(5): raise TimeoutError("synthetic compiler release")
+                output.write_bytes(b"complete control library")
+                return SimpleNamespace(stdout="", returncode=0)
+            local = SimpleNamespace(workspace=root, manifest={"project": "owned"}, run=compile)
+            def start(name):
+                try: results.append(emulator.Emulator(local, name).support("sha256:" + "1" * 64))
+                except Exception as error: failures.append(error)
+            first = threading.Thread(target=start, args=("a",)); second = threading.Thread(target=start, args=("b",))
+            try:
+                first.start(); self.assertTrue(compiling.wait(3))
+                self.assertFalse(list(root.glob("emulator-support/*/qt-control.so")))
+                second.start(); time.sleep(0.1)
+                self.assertEqual(results, [])
+            finally:
+                release.set(); first.join(5)
+                if second.ident is not None: second.join(5)
+            self.assertFalse(first.is_alive()); self.assertFalse(second.is_alive())
+            self.assertEqual(failures, []); self.assertEqual(len(calls), 1)
+            self.assertEqual(len(results), 2); self.assertEqual(results[0], results[1])
+            self.assertEqual((results[0] / "qt-control.so").read_bytes(), b"complete control library")
+            ready = json.loads((results[0] / "manifest.json").read_text())
+            self.assertEqual(ready["library_sha256"], emulator.digest(b"complete control library"))
