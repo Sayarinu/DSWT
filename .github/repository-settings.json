@@ -26,7 +26,9 @@
         "Scan for secrets",
         "Validate source inputs",
         "Build and test connectivity server",
-        "Build and test isolated legality validator"
+        "Build and test isolated legality validator",
+        "Test bounded TLS transport",
+        "Test durable emulator persistence"
       ]
     },
     "enforce_admins": true,

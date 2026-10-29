@@ -71,7 +71,9 @@ are required. Each case has independent clients. Runs refuse existing pending
 offers or a matcher hold instead of disturbing retained work.
 
 `--case` also accepts `repeat`, `cancel`, `storage`, `reply-loss`, `interruption`,
-`older-copy`, `outages` and `illegal`. Tests bind exact inventory multisets to
+`older-copy`, `outages`, `validator-recovery` and `illegal`. The validator-recovery
+case completes a real matched Collect/ACK while the validator is stopped and
+preserves a new submission for an exact retry after restart. Tests bind inventory multisets to
 case-owned asset/receipt IDs, mutation counters, applied hashes and ledger
 replay. Process kills occur after an observed checkpoint; injected I/O errors
 exercise the same synthetic persistence boundaries. The storage case tests a
@@ -82,6 +84,28 @@ under the workspace's `acceptance/` directory, including failed runs. Reports
 record source/image/binary identities and `evidence_layer=native-client`;
 Linux SDK, retail saves/effects and physical power loss remain `not_run`.
 This gate does not establish prevention of arbitrary offline save cloning.
+
+For local policy and isolation evidence, install the hash-pinned YAML parser in
+a separate Python 3.12–3.14 environment and inspect the existing stack:
+
+```sh
+python3 -m venv game/policy-env
+game/policy-env/bin/pip install --require-hashes -r tools/local-stack/requirements.txt
+game/policy-env/bin/python tools/local-stack/isolation.py policy --github
+docker build -f server/Dockerfile -t platinumwt-local-production .
+game/policy-env/bin/python tools/local-stack/isolation.py audit --github --workspace game/local-e2e --production-image platinumwt-local-production
+```
+
+`--github` uses read-only `gh api` requests with your existing GitHub CLI access.
+It distinguishes mismatches, denied/unavailable reads and the untested public-fork
+policy while private. The runtime audit checks rendered Compose, actual owned
+containers, listeners, retained volume/database identity and the final C++ image.
+It briefly creates an unstarted inspection container, removes only that container,
+and retains private filesystem/report evidence under the workspace's `isolation/`.
+These checks are review aids; internal services share one trust domain. They do
+not run a hostile fork, establish off-site durability or validate hosted controls.
+Select an available local Docker context explicitly, for example by prefixing
+these Docker/stack commands with `DOCKER_CONTEXT=default`; remote engines are refused.
 
 Older macOS-generated workspaces may have explicit-curve certificates or lack
 the local trust-anchor constraint. New test certificates specify named P-256
