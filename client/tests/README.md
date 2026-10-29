@@ -218,6 +218,8 @@ the same moment. The server must accept one Submit and return `counter_mismatch`
 to the other, whose escrow stays pending. The original, now behind its identity,
 must stop at verification and must not collect or cancel the copy's offer. Use
 `inspect` on both forks and the original to compare journals and inventories.
+`save_variant.py ORIGINAL NEW --edit JSON` derives a blank-journal test save with
+party Eggs, HP, held items, capsules or moves edited in both retail copies.
 
 With the isolated trade services running, opening Wonder Trade connects and
 reconciles the save identity/history. Confirming a Pokémon persists its escrow
