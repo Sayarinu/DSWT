@@ -38,7 +38,7 @@ def save_files(directory):
 
 
 def read_private(path):
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)  # Never wait on a planted FIFO.
     with os.fdopen(descriptor, "rb") as source:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or info.st_mode & 0o077:
@@ -194,7 +194,7 @@ class Emulator:
             if self.directory.exists() or self.directory.is_symlink(): raise FileExistsError(self.directory)
             staging.rename(self.directory)
         except BaseException:
-            shutil.rmtree(staging)  # Holds only copies of retained, checked inputs.
+            shutil.rmtree(staging, ignore_errors=True)  # Only copies of retained, checked inputs.
             raise
         descriptor = os.open(self.directory.parent, os.O_RDONLY | os.O_DIRECTORY)
         try: os.fsync(descriptor)
