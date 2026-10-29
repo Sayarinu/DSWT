@@ -60,8 +60,9 @@ def workflow(data):
     require(set(triggers) <= {"pull_request", "push", "workflow_dispatch"}, "Privileged or unreviewed workflow trigger")
     permissions(data.get("permissions"))
     for text in strings(data):
-        for expression in re.findall(r"\$\{\{(.*?)\}\}", text, re.S):
-            require(not re.search(r"\bsecrets\b|\bgithub\b(?!\s*\.)|\bgithub\s*\.\s*(?:token|github_token)\b", expression, re.I),
+        if "${{" in text:
+            # Conservative review aid: quoted `}}` cannot hide a later context reference.
+            require(not re.search(r"\bsecrets\b|\bgithub\b(?!\s*\.)|\bgithub\s*\.\s*(?:token|github_token)\b", text, re.I),
                     "Explicit secret/token expression in contribution CI")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and bool(jobs), "Workflow needs jobs")
