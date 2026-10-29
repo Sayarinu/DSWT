@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import struct
 import socket
+import threading
 import subprocess
 import sys
 import tempfile
@@ -285,6 +286,73 @@ class LedgerTests(unittest.TestCase):
                 process.kill(); process.wait(timeout=5)
                 self.fail("metrics sampler blocked shutdown")
             log.close()
+
+    def test_metrics_shutdown_does_not_wait_for_a_stalled_database(self):
+        for phase in ("startup", "query", "query-timeout"):
+            with self.subTest(phase=phase), socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0)); listener.listen(); listener.settimeout(5)
+                entered, release, disconnected = threading.Event(), threading.Event(), threading.Event()
+                failures = []
+
+                def peer():
+                    try:
+                        with listener.accept()[0] as connection:
+                            connection.settimeout(5)
+                            def read(size):
+                                data = b""
+                                while len(data) < size:
+                                    part = connection.recv(size - len(data))
+                                    if not part: raise EOFError("incomplete database packet")
+                                    data += part
+                                return data
+                            length = struct.unpack("!I", read(4))[0]
+                            read(length - 4)
+                            if phase != "startup":
+                                # PostgreSQL v3 AuthenticationOk, then ReadyForQuery.
+                                connection.sendall(b"R" + struct.pack("!II", 8, 0) + b"Z" + struct.pack("!I", 5) + b"I")
+                                if read(1) != b"Q": raise ValueError("missing sampler query")
+                                read(struct.unpack("!I", read(4))[0] - 4)
+                            entered.set()
+                            if phase == "query-timeout":
+                                while connection.recv(1024): pass
+                                disconnected.set()
+                            else:
+                                release.wait(10)  # Never respond while shutdown is measured.
+                    except Exception as error:
+                        failures.append(error)
+                        entered.set()
+
+                thread = threading.Thread(target=peer)
+                thread.start()
+                env = dict(self.env, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT="1", WT_LEGALITY_POLICY="synthetic-policy",
+                           PLATINUMWT_DATABASE_URL=f"host=127.0.0.1 port={listener.getsockname()[1]} dbname=stalled sslmode=disable gssencmode=disable")
+                # Reserve a normal unprivileged exporter port, independently of the fake database.
+                with socket.socket() as reserve:
+                    reserve.bind(("127.0.0.1", 0)); env["WT_METRICS_PORT"] = str(reserve.getsockname()[1])
+                with (self.root / f"stalled-metrics-{phase}.log").open("wb") as log:
+                    process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=log, stderr=subprocess.STDOUT)
+                    try:
+                        self.assertTrue(entered.wait(5), "sampler did not reach the database checkpoint")
+                        self.assertEqual(failures, [])
+                        self.assertIsNone(process.poll())
+                        deadline = time.monotonic() + 5
+                        while "Trade backend listening on loopback port " not in Path(log.name).read_text():
+                            self.assertIsNone(process.poll())
+                            self.assertLess(time.monotonic(), deadline, "backend did not become ready")
+                            time.sleep(0.01)
+                        # Allow startup's signal registration after its listening marker.
+                        time.sleep(0.05)
+                        if phase == "query-timeout":
+                            self.assertTrue(disconnected.wait(2), "query has no client-side deadline")
+                            self.assertIsNone(process.poll(), "sampler failure stopped the service")
+                        process.terminate()
+                        process.wait(timeout=2)
+                        self.assertEqual(process.returncode, 0)
+                    finally:
+                        if process.poll() is None:
+                            process.kill(); process.wait(timeout=5)
+                        release.set(); thread.join(timeout=5)
+                        self.assertFalse(thread.is_alive())
 
     def test_matcher_attempts_are_immutable_and_replayed(self):
         operation = identifier(9001)

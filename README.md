@@ -98,7 +98,10 @@ ownership evidence remains in the protected PostgreSQL ledger.
 
 The backend independently samples aggregate queue/delivery counts, ages,
 matches, completed pairs and database health every five seconds through a
-read-only connection with a one-second connect and 250 ms statement timeout.
+read-only connection with a one-second client connect deadline, 500 ms client
+query deadline and 250 ms server statement timeout. Sampling requires a Unix
+socket, numeric host or explicit numeric `hostaddr`; DNS/service discovery
+configurations report unavailable to keep observation and shutdown bounded.
 Migration 0003 timestamps new audit records without changing ownership images
 or replay. Pre-existing records retain unknown times: affected ages are `NaN`
 with explicit unknown-age counts. Database outages also produce unknown gauges.

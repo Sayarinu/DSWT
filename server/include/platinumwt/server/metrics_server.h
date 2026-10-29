@@ -18,6 +18,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-LedgerMetrics SampleLedgerMetrics(const std::string &database);
-
 } // namespace platinumwt::server
