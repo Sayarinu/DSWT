@@ -27,6 +27,7 @@ LOG_FIELDS = {"event", "service", "timestamp_ms", "operation", "result", "durati
               "request_id", "operation_id", "trade_id"}
 CAPTURE = "http://127.0.0.1:9099/alerts"
 BACKUP_METRIC = "platinumwt_backup_last_success_timestamp_seconds"
+SCRAPE_JOBS = {"gateway", "backend", "host", "collectors"}
 
 
 def write_backup_timestamp(workspace, timestamp):
@@ -81,15 +82,18 @@ class Observer:
     def configuration(self):
         flags = json.loads(self.internal("http://127.0.0.1:9090/api/v1/status/flags"))["data"]
         require(flags["storage.tsdb.retention.time"] == "15d", "Prometheus must retain metrics for 15 days")
-        deadline = time.monotonic() + 60  # a freshly started stack has not completed its first scrapes
+        deadline = time.monotonic() + 120  # freshly started collectors (notably Loki) need time to become ready
         while True:
             targets = json.loads(self.internal("http://127.0.0.1:9090/api/v1/targets"))["data"]["activeTargets"]
             health = {(t["labels"]["job"], t["labels"]["instance"]): t["health"] for t in targets}
-            if all(value == "up" for value in health.values()) or time.monotonic() >= deadline:
+            jobs = {job for job, _ in health}
+            # An empty target list right after a restart must not count as healthy.
+            if (jobs == SCRAPE_JOBS and all(value == "up" for value in health.values())) or time.monotonic() >= deadline:
                 break
             time.sleep(2)
-        require({job for job, _ in health} == {"gateway", "backend", "host", "collectors"}
-                and all(value == "up" for value in health.values()), "Every scrape target must be up")
+        unhealthy = sorted(f"{job} {instance} {value}" for (job, instance), value in health.items() if value != "up")
+        require(jobs == SCRAPE_JOBS and not unhealthy,
+                "Every scrape target must be up: " + ", ".join(unhealthy))
         loki = self.internal("http://127.0.0.1:3100/config")
         require("retention_period: 1w" in loki or "retention_period: 168h" in loki, "Loki must retain logs for 7 days")
         require("retention_enabled: true" in loki, "Loki compactor retention must be enabled")

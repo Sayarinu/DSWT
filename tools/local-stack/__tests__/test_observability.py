@@ -76,6 +76,15 @@ class CaptureTests(unittest.TestCase):
             with self.subTest(config=config), patch.object(self.observer, "internal", internal(config)), \
                     self.assertRaisesRegex(ValueError, "local capture"):
                 self.observer.configuration()
+        # Right after a restart Prometheus lists no targets; that must be waited out, not treated as healthy.
+        target_responses = iter([{"data": {"activeTargets": []}}, targets])
+        fetch = internal(loaded)
+        with patch.object(self.observer, "internal",
+                          lambda url, timeout=20: json.dumps(next(target_responses)) if "targets" in url else fetch(url)), \
+                patch.object(observability.time, "sleep"), \
+                patch.object(self.observer, "grafana", return_value=(200, [])), \
+                self.assertRaisesRegex(ValueError, "unauthenticated"):
+            self.observer.configuration()
         responses = iter([(200, [])])
         with patch.object(self.observer, "internal", internal(loaded)), \
                 patch.object(self.observer, "grafana", side_effect=lambda *a, **k: next(responses)), \
