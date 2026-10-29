@@ -1,0 +1,35 @@
+groups:
+  - name: platinumwt-local
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"gateway|backend"} == 0
+        for: 15s
+        labels: {severity: critical}
+        annotations: {summary: "{{ $labels.job }} metrics endpoint is unreachable"}
+      - alert: LedgerDatabaseUnavailable
+        expr: platinumwt_database_up == 0
+        for: 15s
+        labels: {severity: critical}
+        annotations: {summary: Backend ledger sampler cannot reach PostgreSQL}
+      # Written by local backup tooling to observability/textfile; no backup is treated as stale.
+      - alert: BackupStale
+        expr: >-
+          (time() - platinumwt_backup_last_success_timestamp_seconds > 26 * 3600)
+          or absent(platinumwt_backup_last_success_timestamp_seconds)
+        for: 10s
+        labels: {severity: warning}
+        annotations: {summary: No verified local backup in the last 26 hours}
+      - alert: FilesystemPressure
+        expr: node_filesystem_avail_bytes{mountpoint=~"/textfile|/monitored/.+"} / node_filesystem_size_bytes < 0.10
+        for: 10s
+        labels: {severity: warning}
+        annotations: {summary: "{{ $labels.mountpoint }} has less than 10% free space"}
+      - alert: MemoryPressure
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: Host memory available is below 5%}
+      - alert: LogsDropped
+        expr: increase(platinumwt_dropped_logs_total[5m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "{{ $labels.service }} dropped structured logs"}

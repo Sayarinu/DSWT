@@ -10,6 +10,11 @@ updates:
       - /server
       - /validator
       - /tools/rom-builder
+      - /tools/bps-patch
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /tools/local-stack
     schedule:
       interval: weekly
   - package-ecosystem: nuget

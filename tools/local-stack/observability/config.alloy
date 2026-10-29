@@ -1,0 +1,42 @@
+// Docker's fluentd log driver forwards gateway/backend/validator/database output here.
+otelcol.receiver.fluentforward "docker" {
+  endpoint = "0.0.0.0:24224"
+  output {
+    logs = [otelcol.exporter.loki.local.input]
+  }
+}
+
+otelcol.exporter.loki "local" {
+  forward_to = [loki.process.platinumwt.receiver]
+}
+
+// Keep the original container line and one low-cardinality service label; identifiers stay in the line.
+loki.process "platinumwt" {
+  stage.json {
+    expressions = { line = "body", container = "attributes.container_name" }
+  }
+  stage.regex {
+    source     = "container"
+    expression = "-(?P<service>gateway|backend|validator|database)-[0-9]+$"
+  }
+  stage.labels {
+    values = { service = "" }
+  }
+  stage.output {
+    source = "line"
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}
+
+prometheus.exporter.unix "host" {
+  set_collectors = ["filesystem", "meminfo", "textfile"]
+  textfile {
+    directory = "/textfile"
+  }
+}

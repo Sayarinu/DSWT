@@ -15,7 +15,7 @@ stack = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stack)
 
 
-class StackTests(unittest.TestCase):
+class StackFixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="local stack tests ")
         self.addCleanup(temporary.cleanup)
@@ -27,15 +27,25 @@ class StackTests(unittest.TestCase):
         self.calls = []
         self.volumes = {}
 
+        self.profile_ports = []
+
         def prepare(directory, ipv4, hostname, port):
+            self.profile_ports.append(port)
             directory.mkdir(mode=0o700)
             for name in ("current", "next", "untrusted"):
                 key = directory / (name + ".key")
                 key.write_text("private synthetic key")
                 key.chmod(0o600)
+        self.prepare = prepare
         with patch.object(stack, "load_module", return_value=SimpleNamespace(prepare=prepare)):
             stack.initialize(self.workspace)
         self.manifest = stack.read_manifest(self.workspace)
+
+    def initialize_observed(self, name="observed run"):
+        workspace = self.root / "game" / name
+        with patch.object(stack, "load_module", return_value=SimpleNamespace(prepare=self.prepare)):
+            stack.initialize(workspace, 18443, {"grafana_port": 13000, "log_port": 24224})
+        return workspace
 
     def fake_command(self, arguments, **kwargs):
         self.calls.append((arguments, kwargs))
@@ -67,6 +77,8 @@ class StackTests(unittest.TestCase):
     def make_stack(self):
         return stack.Stack(self.workspace, self.manifest)
 
+
+class StackTests(StackFixture):
     def test_init_is_exclusive_and_paths_reject_aliases(self):
         original = (self.workspace / "manifest.json").read_bytes()
         with self.assertRaises(FileExistsError):
@@ -176,6 +188,65 @@ class StackTests(unittest.TestCase):
             start = next(i for i, args in enumerate(arguments) if "--force-recreate" in args)
             self.assertLess(migration, start)
             self.assertFalse(any("--volumes" in args or "rm" in args for args in arguments))
+
+
+class PortAndObservabilityTests(StackFixture):
+    def test_default_manifest_is_unchanged_and_custom_port_reaches_profile_and_compose(self):
+        self.assertNotIn("https_port", self.manifest)
+        self.assertNotIn("observability", self.manifest)
+        self.assertEqual(self.manifest["host_endpoint"], "https://localhost:8443/wt/v1")
+        workspace = self.initialize_observed()
+        manifest = stack.read_manifest(workspace)
+        self.assertEqual((manifest["https_port"], manifest["host_endpoint"]), (18443, "https://localhost:18443/wt/v1"))
+        self.assertEqual(self.profile_ports, [8443, 18443])
+        password = workspace / "observability/grafana-admin-password"
+        self.assertEqual(password.stat().st_mode & 0o777, 0o600)
+        self.assertGreaterEqual(len(password.read_text()), 64)
+        with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=self.fake_command):
+            local = stack.Stack(workspace, manifest)
+            local.compose("ps")
+            self.assertEqual(local.services, stack.SERVICES + stack.OBSERVABILITY_SERVICES)
+        arguments, options = self.calls[-1]
+        files = [arguments[i + 1] for i, value in enumerate(arguments) if value == "--file"]
+        self.assertEqual(files, [str(stack.COMPOSE), str(stack.OBSERVABILITY)])
+        self.assertEqual((options["env"]["PWT_LOCAL_HTTPS_PORT"], options["env"]["PWT_OBS_GRAFANA_PORT"],
+                          options["env"]["PWT_OBS_LOG_PORT"]), ("18443", "13000", "24224"))
+        with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=self.fake_command):
+            self.make_stack().compose("ps")
+        arguments, options = self.calls[-1]
+        self.assertEqual(arguments.count("--file"), 1)
+        self.assertEqual(options["env"]["PWT_LOCAL_HTTPS_PORT"], "8443")
+        self.assertNotIn("PWT_OBS_LOG_PORT", options["env"])
+
+    def test_invalid_or_tampered_ports_are_refused(self):
+        for port, observability in ((80, None), (70000, None), (18443, {"grafana_port": 18443, "log_port": 24224}),
+                                    (18443, {"grafana_port": 13000, "log_port": 22})):
+            with self.subTest(port=port, observability=observability), self.assertRaises(ValueError):
+                stack.initialize(self.root / "game/rejected", port, observability)
+            self.assertFalse((self.root / "game/rejected").exists())
+        workspace = self.initialize_observed()
+        manifest = stack.read_manifest(workspace)
+        for change in ({"https_port": 8443}, {"https_port": "18443"}, {"host_endpoint": "https://localhost:8443/wt/v1"},
+                       {"observability": {"grafana_port": 13000}}, {"observability": {"grafana_port": 1, "log_port": 24224}}):
+            with self.subTest(change=change):
+                stack.save_manifest(workspace, dict(manifest, **change))
+                with self.assertRaises(ValueError):
+                    stack.read_manifest(workspace)
+        stack.save_manifest(workspace, manifest)
+        (workspace / "observability/grafana-admin-password").chmod(0o644)
+        with self.assertRaises(ValueError):
+            stack.read_manifest(workspace)
+
+    def test_observability_volumes_are_owned_and_the_pressure_probe_is_bounded(self):
+        workspace = self.initialize_observed()
+        self.manifest = stack.read_manifest(workspace)
+        with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=self.fake_command):
+            stack.Stack(workspace, self.manifest).volumes(create=True)
+        project = self.manifest["project"]
+        self.assertEqual(set(self.volumes), {f"{project}-{name}" for name in ("data", "socket", *stack.OBSERVABILITY_VOLUMES)})
+        [pressure] = [args for args, _ in self.calls if "create" in args and args[-1].endswith("-pressure")]
+        self.assertIn("type=tmpfs", pressure)
+        self.assertTrue(any(item.startswith("o=size=16m,") for item in pressure))
 
 
 if __name__ == "__main__":

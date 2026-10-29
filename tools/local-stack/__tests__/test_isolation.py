@@ -129,11 +129,19 @@ class GithubTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    observability = None
+
     def setUp(self):
-        self.local = SimpleNamespace(workspace=Path("/private/run"), manifest={"project": "platinumwt-local-case", "images": {}})
+        manifest = {"project": "platinumwt-local-case", "images": {}}
+        if self.observability:
+            manifest.update(https_port=18443, observability=self.observability)
+        services = isolation.stack.SERVICES + (isolation.stack.OBSERVABILITY_SERVICES if self.observability else ())
+        self.local = SimpleNamespace(workspace=Path("/private/run"), manifest=manifest, services=services,
+                                     observability=self.observability)
+        bindings = {f"{target}/tcp": [{"HostIp": address, "HostPort": port}] for address, port, target in isolation.published(self.local)}
         self.containers = {}
         gateway = "a" * 64
-        for index, name in enumerate(isolation.stack.SERVICES):
+        for index, name in enumerate(services):
             image = "sha256:" + str(index) * 64
             self.local.manifest["images"][name] = image
             mounts = []
@@ -144,14 +152,14 @@ class RuntimeTests(unittest.TestCase):
                 "State": {"Running": True},
                 "Config": {"User": "1000:1000", "Labels": {"com.docker.compose.project": "platinumwt-local-case", "com.docker.compose.service": name}},
                 "HostConfig": {"Privileged": False, "CapAdd": [], "Devices": [], "PidMode": "", "IpcMode": "private",
-                               "PortBindings": {"8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}]} if name == "gateway" else {},
+                               "PortBindings": copy.deepcopy(bindings) if name == "gateway" else {},
                                "ReadonlyRootfs": name != "database", "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"],
                                "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=64m" if name == "validator" else "rw"},
                                "NetworkMode": "none" if name == "database" else "platinumwt-local-case_default" if name == "gateway" else "container:" + gateway,
                                "Memory": 512 * 1024 * 1024, "NanoCpus": 2_000_000_000, "PidsLimit": 128}}
 
     def test_runtime_is_bound_to_owned_images_network_mounts_and_limits(self):
-        self.assertEqual(set(isolation.runtime_evidence(self.local, self.containers)), set(isolation.stack.SERVICES))
+        self.assertEqual(set(isolation.runtime_evidence(self.local, self.containers)), set(self.local.services))
         changes = [
             lambda d: d["gateway"]["HostConfig"].update(Privileged=True),
             lambda d: d["gateway"]["HostConfig"].update(CapAdd=["SYS_ADMIN"]),
@@ -180,25 +188,31 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     isolation.runtime_evidence(self.local, mutated)
 
-    def test_rendered_compose_rejects_public_ports_networking_and_foreign_mounts(self):
-        config = {"services": {}, "volumes": {key: {"name": "platinumwt-local-case-" + key, "external": True} for key in ("data", "socket")}}
-        for name in (*isolation.stack.SERVICES, "migrate"):
+    def compose(self):
+        volumes = ("data", "socket") + (isolation.stack.OBSERVABILITY_VOLUMES if self.observability else ())
+        config = {"services": {}, "volumes": {key: {"name": "platinumwt-local-case-" + key, "external": True} for key in volumes}}
+        ports = [{"host_ip": address, "published": port, "target": target} for address, port, target in sorted(isolation.published(self.local))]
+        for name in (*self.local.services, "migrate"):
             volumes = []
             for target, (kind, source, rw) in isolation.volume_contract(self.local, name).items():
                 volumes.append({"target": target, "type": kind, "source": source.rsplit("-", 1)[-1] if kind == "volume" else source, "read_only": not rw})
             config["services"][name] = {
-                "volumes": volumes, "ports": [{"host_ip": "127.0.0.1", "published": "8443", "target": 8443}] if name == "gateway" else [],
+                "volumes": volumes, "ports": copy.deepcopy(ports) if name == "gateway" else [],
                 "read_only": name != "database", "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"],
                 "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=64m"] if name == "validator" else ["/tmp"],
                 "mem_limit": 512 * 1024 * 1024, "cpus": 2, "pids_limit": 128}
             if name in ("database", "migrate"):
                 config["services"][name]["network_mode"] = "none"
-            elif name in ("backend", "validator"):
+            elif name != "gateway":
                 config["services"][name]["network_mode"] = "service:gateway"
         config["services"]["database"].update(image="postgres:16.15@sha256:" + "1" * 64,
             command=["postgres", "-c", "listen_addresses=", "-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on"])
         config["services"]["gateway"]["environment"] = {"WT_METRICS_PORT": "9091"}
         config["services"]["backend"]["environment"] = {"WT_METRICS_PORT": "9092"}
+        return config
+
+    def test_rendered_compose_rejects_public_ports_networking_and_foreign_mounts(self):
+        config = self.compose()
         self.assertEqual(isolation.compose_evidence(self.local, config)["status"], "pass")
         for change in (lambda d: d["services"]["gateway"]["ports"][0].update(host_ip="0.0.0.0"),
                        lambda d: d["services"]["database"].update(network_mode="host"),
@@ -213,6 +227,25 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 isolation.compose_evidence(self.local, mutated)
 
+    def test_logs_may_only_reach_the_owned_local_collector(self):
+        config = self.compose()
+        config["services"]["backend"]["logging"] = {"driver": "fluentd", "options": {"fluentd-address": "tcp://127.0.0.1:24224"}}
+        mutated = copy.deepcopy(self.containers)
+        mutated["backend"]["HostConfig"]["LogConfig"] = {"Type": "fluentd", "Config": {"fluentd-address": "tcp://127.0.0.1:24224"}}
+        if self.observability:
+            self.assertEqual(isolation.compose_evidence(self.local, config)["status"], "pass")
+            self.assertIn("backend", isolation.runtime_evidence(self.local, mutated))
+        for address in ("tcp://192.0.2.1:24224", "tcp://127.0.0.1:1"):
+            config["services"]["backend"]["logging"]["options"]["fluentd-address"] = address
+            mutated["backend"]["HostConfig"]["LogConfig"]["Config"]["fluentd-address"] = address
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                isolation.compose_evidence(self.local, config)
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                isolation.runtime_evidence(self.local, mutated)
+        mutated["backend"]["HostConfig"]["LogConfig"] = {"Type": "syslog", "Config": {}}
+        with self.assertRaises(ValueError):
+            isolation.runtime_evidence(self.local, mutated)
+
     def test_grpc_must_be_loopback_and_database_must_not_listen_on_tcp(self):
         def row(address, port):
             return "0: " + address + ":" + format(port, "04X") + " 00000000:0000 0A 0 0\n"
@@ -224,6 +257,47 @@ class RuntimeTests(unittest.TestCase):
                                          (gateway, row("00000000", 5432), False),
                                          (gateway + row("00000000", 12345), "", False)):
             self.local.compose = lambda *args, **kwargs: SimpleNamespace(stdout=shared if "gateway" in args else database)
+            if passes:
+                self.assertEqual(isolation.listener_evidence(self.local)["status"], "pass")
+            else:
+                with self.assertRaises(ValueError):
+                    isolation.listener_evidence(self.local)
+
+
+class ObservabilityRuntimeTests(RuntimeTests):
+    """The same contract with the opt-in collectors, a non-default HTTPS port and loopback-only admin ports."""
+
+    observability = {"grafana_port": 13000, "log_port": 24224}
+
+    def test_collectors_publish_only_loopback_admin_and_ingest_ports(self):
+        config = self.compose()
+        for change in (lambda d: d["services"]["gateway"]["ports"].append({"host_ip": "127.0.0.1", "published": "9090", "target": 9090}),
+                       lambda d: d["services"]["gateway"]["ports"][0].update(host_ip="0.0.0.0"),
+                       lambda d: d["services"]["grafana"].update(ports=[{"host_ip": "127.0.0.1", "published": "3000", "target": 3000}]),
+                       lambda d: d["services"]["alloy"].update(network_mode="bridge"),
+                       lambda d: d["services"]["capture"]["volumes"].append({"target": "/tls", "type": "bind", "source": "/private/run/tls", "read_only": True}),
+                       lambda d: d["services"]["prometheus"].update(read_only=False),
+                       lambda d: d["volumes"].pop("loki")):
+            mutated = copy.deepcopy(config)
+            change(mutated)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                isolation.compose_evidence(self.local, mutated)
+        for change in (lambda d: d["gateway"]["HostConfig"]["PortBindings"]["3000/tcp"][0].update(HostIp="0.0.0.0"),
+                       lambda d: d["grafana"]["HostConfig"].update(NetworkMode="host"),
+                       lambda d: d.pop("capture")):
+            mutated = copy.deepcopy(self.containers)
+            change(mutated)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                isolation.runtime_evidence(self.local, mutated)
+
+    def test_grpc_must_be_loopback_and_database_must_not_listen_on_tcp(self):
+        def row(address, port):
+            return "0: " + address + ":" + format(port, "04X") + " 00000000:0000 0A 0 0\n"
+        loopback = (50051, 50052, 50053, 50054, 9091, 9092) + isolation.COLLECTOR_LOOPBACK
+        gateway = "".join(row("0100007F", port) for port in loopback) + "".join(row("00000000", port) for port in (8443, 3000, 24224))
+        for shared, passes in ((gateway, True), (gateway.replace(row("0100007F", 9093), row("00000000", 9093)), False),
+                               (gateway.replace(row("00000000", 3000), ""), False), (gateway + row("00000000", 9094), False)):
+            self.local.compose = lambda *args, **kwargs: SimpleNamespace(stdout=shared if "gateway" in args else "")
             if passes:
                 self.assertEqual(isolation.listener_evidence(self.local)["status"], "pass")
             else:

@@ -1,0 +1,140 @@
+# Optional private observability profile, loaded only for workspaces initialized with --observability.
+# Every collector shares the gateway's private namespace; only Grafana and log ingest are published on loopback.
+x-collector: &collector
+  platform: ${PWT_LOCAL_PLATFORM}
+  network_mode: service:gateway
+  depends_on: [gateway]
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 512m
+  pids_limit: 256
+  stop_grace_period: 15s
+
+x-logging: &logging
+  driver: fluentd
+  options:
+    fluentd-address: tcp://127.0.0.1:${PWT_OBS_LOG_PORT}
+    # Containers start before the collector; the daemon buffers and retries.
+    fluentd-async: "true"
+    tag: platinumwt.{{.Name}}
+
+services:
+  gateway:
+    ports:
+      - 127.0.0.1:${PWT_OBS_GRAFANA_PORT}:3000
+      - 127.0.0.1:${PWT_OBS_LOG_PORT}:24224
+    logging: *logging
+  backend:
+    logging: *logging
+  validator:
+    logging: *logging
+  database:
+    logging: *logging
+
+  prometheus:
+    <<: *collector
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    user: "65534:65534"
+    tmpfs: [/tmp]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - prometheus:/prometheus
+      - {type: bind, source: ./observability/prometheus.yml, target: /etc/prometheus/prometheus.yml, read_only: true}
+      - {type: bind, source: ./observability/rules.yml, target: /etc/prometheus/rules.yml, read_only: true}
+
+  alertmanager:
+    <<: *collector
+    image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    user: "65534:65534"
+    tmpfs: [/tmp]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=127.0.0.1:9093
+      - --cluster.listen-address=
+    volumes:
+      - alertmanager:/alertmanager
+      - {type: bind, source: ./observability/alertmanager.yml, target: /etc/alertmanager/alertmanager.yml, read_only: true}
+
+  loki:
+    <<: *collector
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+    user: "10001:10001"
+    tmpfs: [/tmp]
+    command: [-config.file=/etc/loki/loki.yaml]
+    volumes:
+      - loki:/loki
+      - {type: bind, source: ./observability/loki.yaml, target: /etc/loki/loki.yaml, read_only: true}
+
+  alloy:
+    <<: *collector
+    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    tmpfs: [/tmp]
+    # The fluent-forward receiver is "experimental" in this pinned Alloy; it is used only for local log ingest.
+    command: [run, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/tmp/alloy, --disable-reporting,
+              --stability.level=experimental, /etc/alloy/config.alloy]
+    volumes:
+      - {type: bind, source: ./observability/config.alloy, target: /etc/alloy/config.alloy, read_only: true}
+      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/textfile", target: /textfile, read_only: true, bind: {create_host_path: false}}
+      - pressure:/monitored/pressure:ro
+
+  grafana:
+    <<: *collector
+    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=256m"]
+    environment:
+      GF_SERVER_HTTP_ADDR: 0.0.0.0
+      GF_SERVER_HTTP_PORT: "3000"
+      # Stateless: provisioning and the workspace password file define everything; nothing is retained.
+      GF_PATHS_DATA: /tmp
+      GF_PATHS_LOGS: /tmp
+      GF_PATHS_PLUGINS: /tmp
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/platinumwt/grafana-admin-password
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+    volumes:
+      - {type: bind, source: ./observability/grafana, target: /etc/grafana/provisioning, read_only: true}
+      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/grafana-admin-password", target: /run/platinumwt/grafana-admin-password, read_only: true, bind: {create_host_path: false}}
+
+  # Local-only Alertmanager webhook capture; no external notification receiver exists.
+  capture:
+    <<: *collector
+    image: ${PWT_LOCAL_PROJECT}-server
+    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    tmpfs: [/tmp]
+    command: [python3, /capture/capture.py, /alerts/received.jsonl]
+    volumes:
+      - {type: bind, source: ./observability/capture.py, target: /capture/capture.py, read_only: true}
+      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/alerts", target: /alerts, bind: {create_host_path: false}}
+      - pressure:/monitored/pressure
+
+volumes:
+  prometheus:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-prometheus
+  alertmanager:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-alertmanager
+  loki:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-loki
+  pressure:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-pressure

@@ -26,16 +26,45 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+COLLECTOR_LOOPBACK = (9090, 9093, 3100, 9096, 12345, 9099)
+# Grafana and log ingest bind the namespace interface so Docker can publish them on host loopback only.
+COLLECTOR_PUBLISHED = (3000, 24224)
+
+
 def volume_contract(local, service):
     project = local.manifest["project"]
     socket = ("volume", project + "-socket", True)
+    config = stack.OBSERVABILITY.parent / "observability"
+    observe = local.workspace / "observability"
+    pressure = ("volume", project + "-pressure", True)
     return {
         "database": {"/var/lib/postgresql/data": ("volume", project + "-data", True), "/var/run/postgresql": socket},
         "gateway": {"/tls": ("bind", str(local.workspace / "tls"), False)},
         "backend": {"/test": ("bind", str(local.workspace / "control"), False), "/test/run": socket},
         "validator": {},
         "migrate": {"/test/run": socket},
+        "prometheus": {"/prometheus": ("volume", project + "-prometheus", True),
+                       "/etc/prometheus/prometheus.yml": ("bind", str(config / "prometheus.yml"), False),
+                       "/etc/prometheus/rules.yml": ("bind", str(config / "rules.yml"), False)},
+        "alertmanager": {"/alertmanager": ("volume", project + "-alertmanager", True),
+                         "/etc/alertmanager/alertmanager.yml": ("bind", str(config / "alertmanager.yml"), False)},
+        "loki": {"/loki": ("volume", project + "-loki", True), "/etc/loki/loki.yaml": ("bind", str(config / "loki.yaml"), False)},
+        "alloy": {"/etc/alloy/config.alloy": ("bind", str(config / "config.alloy"), False),
+                  "/textfile": ("bind", str(observe / "textfile"), False), "/monitored/pressure": pressure[:2] + (False,)},
+        "grafana": {"/etc/grafana/provisioning": ("bind", str(config / "grafana"), False),
+                    "/run/platinumwt/grafana-admin-password": ("bind", str(observe / "grafana-admin-password"), False)},
+        "capture": {"/capture/capture.py": ("bind", str(config / "capture.py"), False),
+                    "/alerts": ("bind", str(observe / "alerts"), True), "/monitored/pressure": pressure},
     }[service]
+
+
+def published(local):
+    """Expected (host_ip, host_port, container_port) publications on the gateway."""
+    result = {("127.0.0.1", str(stack.https_port(local.manifest)), 8443)}
+    if local.observability:
+        result |= {("127.0.0.1", str(local.observability["grafana_port"]), 3000),
+                   ("127.0.0.1", str(local.observability["log_port"]), 24224)}
+    return result
 
 
 def mounts(actual, expected):
@@ -56,17 +85,24 @@ def validator_tmpfs(options):
 
 def compose_evidence(local, config):
     services = config["services"]
-    require(set(services) == {*stack.SERVICES, "migrate"}, "Unexpected local service set")
-    require(all(config["volumes"][key].get("external") is True
+    require(set(services) == {*local.services, "migrate"}, "Unexpected local service set")
+    volumes = ("data", "socket") + (stack.OBSERVABILITY_VOLUMES if local.observability else ())
+    require(set(config["volumes"]) == set(volumes) and all(config["volumes"][key].get("external") is True
                 and config["volumes"][key]["name"] == local.manifest["project"] + "-" + key
-                for key in ("data", "socket")), "Unexpected external volume binding")
+                for key in volumes), "Unexpected external volume binding")
     for name, service in services.items():
         require(not service.get("privileged", False) and not service.get("devices")
                 and not service.get("cap_add") and service.get("pid") != "host"
                 and service.get("ipc") != "host", "Privileged local service")
         ports = service.get("ports", [])
         actual_ports = {(p.get("host_ip"), str(p["published"]), p["target"], p.get("protocol", "tcp")) for p in ports}
-        require(actual_ports == ({("127.0.0.1", "8443", 8443, "tcp")} if name == "gateway" else set()), "Unexpected published endpoint")
+        expected_ports = {item + ("tcp",) for item in published(local)} if name == "gateway" else set()
+        require(actual_ports == expected_ports, "Unexpected published endpoint")
+        logging = service.get("logging")
+        if logging is not None:
+            require(local.observability and name in stack.SERVICES and logging.get("driver") == "fluentd"
+                    and logging["options"].get("fluentd-address") == f"tcp://127.0.0.1:{local.observability['log_port']}",
+                    "Logs may only be forwarded to the local collector")
         actual_mounts = {}
         for item in service.get("volumes", []):
             source = item["source"]
@@ -77,10 +113,10 @@ def compose_evidence(local, config):
         mounts(actual_mounts, volume_contract(local, name))
         if name in ("database", "migrate"):
             require(service.get("network_mode") == "none", "Database/migration networking must be disabled")
-        elif name in ("backend", "validator"):
-            require(service.get("network_mode") == "service:gateway", "Internal services must share the gateway namespace")
-        else:
+        elif name == "gateway":
             require(not service.get("network_mode"), "Unexpected gateway network mode")
+        else:
+            require(service.get("network_mode") == "service:gateway", "Internal services must share the gateway namespace")
         if name != "database":
             require(service.get("read_only") is True and service.get("cap_drop") == ["ALL"]
                     and "no-new-privileges:true" in service.get("security_opt", [])
@@ -101,7 +137,7 @@ def compose_evidence(local, config):
 
 
 def runtime_evidence(local, containers):
-    require(set(containers) == set(stack.SERVICES), "Missing runtime containers")
+    require(set(containers) == set(local.services), "Missing runtime containers")
     gateway = containers["gateway"]["Id"]
     report = {}
     for name, item in containers.items():
@@ -113,8 +149,13 @@ def runtime_evidence(local, containers):
         require(not host.get("Privileged") and not host.get("CapAdd") and not host.get("Devices")
                 and host.get("PidMode") != "host" and host.get("IpcMode") != "host", "Privileged runtime configuration")
         ports = {key: value for key, value in (host.get("PortBindings") or {}).items() if value}
-        require(ports == ({"8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}]} if name == "gateway" else {}),
-                "Unexpected runtime port publication")
+        expected = {f"{target}/tcp": [{"HostIp": address, "HostPort": port}] for address, port, target in published(local)}
+        require(ports == (expected if name == "gateway" else {}), "Unexpected runtime port publication")
+        log = host.get("LogConfig") or {}
+        if log.get("Type") not in (None, "json-file", "local"):
+            require(local.observability and name in stack.SERVICES and log["Type"] == "fluentd"
+                    and log["Config"].get("fluentd-address") == f"tcp://127.0.0.1:{local.observability['log_port']}",
+                    "Runtime logs may only be forwarded to the local collector")
         actual_mounts = {}
         for mount in item["Mounts"]:
             require(mount["Destination"] not in actual_mounts, "Duplicate runtime mount")
@@ -123,10 +164,10 @@ def runtime_evidence(local, containers):
         mode = host["NetworkMode"]
         if name == "database":
             require(mode == "none", "Database must have no container network")
-        elif name in ("backend", "validator"):
-            require(mode == "container:" + gateway, "Unexpected internal namespace")
-        else:
+        elif name == "gateway":
             require(mode == local.manifest["project"] + "_default", "Unexpected gateway network")
+        else:
+            require(mode == "container:" + gateway, "Unexpected internal namespace")
         if name != "database":
             require(host["ReadonlyRootfs"] and host["CapDrop"] == ["ALL"]
                     and "no-new-privileges:true" in host["SecurityOpt"] and set(host["Tmpfs"]) == {"/tmp"}, "Missing runtime restrictions")
@@ -154,11 +195,13 @@ def listener_evidence(local):
     bound = listeners(output)
     # Linux gRPC may represent 127.0.0.1 in the IPv6-mapped TCP table.
     loopback = {"0100007F", "00000000000000000000000001000000", "0000000000000000FFFF00000100007F"}
-    for port in (50051, 50052, 50053, 50054, 9091, 9092):
+    internal = (50051, 50052, 50053, 50054, 9091, 9092) + (COLLECTOR_LOOPBACK if local.observability else ())
+    exposed = (8443,) + (COLLECTOR_PUBLISHED if local.observability else ())
+    for port in internal:
         endpoints = {address for address, number in bound if number == port}
-        require(bool(endpoints) and endpoints <= loopback, "Internal gRPC listener is not loopback")
-    require(any(port == 8443 for _, port in bound), "HTTPS listener is absent")
-    require(all(port in (8443, 50051, 50052, 50053, 50054, 9091, 9092) or address == "0B00007F" for address, port in bound),
+        require(bool(endpoints) and endpoints <= loopback, "Internal listener is not loopback")
+    require(all(any(number == port for _, number in bound) for port in exposed), "Published listener is absent")
+    require(all(port in internal + exposed or address == "0B00007F" for address, port in bound),
             "Unexpected listener in the shared namespace")
     output = local.compose("exec", "-T", "database", "sh", "-c", "cat /proc/net/tcp /proc/net/tcp6", capture=True, timeout=10).stdout
     require(not listeners(output), "Database TCP must be disabled")
@@ -244,7 +287,7 @@ def main():
                 config = json.loads(local.compose("--profile", "tools", "config", "--format", "json", capture=True, timeout=30).stdout)
                 report["compose"] = compose_evidence(local, config)
                 containers = {}
-                for name in stack.SERVICES:
+                for name in local.services:
                     identifier = local.compose("ps", "-q", name, capture=True, timeout=10).stdout.strip()
                     require(re.fullmatch(r"[0-9a-f]{64}", identifier), "Missing/ambiguous local container")
                     containers[name] = json.loads(local.run(["inspect", identifier], capture=True, timeout=10).stdout)[0]

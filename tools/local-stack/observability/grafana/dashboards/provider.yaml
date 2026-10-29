@@ -1,0 +1,3 @@
+apiVersion: 1
+providers:
+  - {name: platinumwt, type: file, disableDeletion: true, allowUiUpdates: false, options: {path: /etc/grafana/provisioning/dashboards}}
