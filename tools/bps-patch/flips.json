@@ -1,0 +1,10 @@
+{
+  "project": "Alcaro/Flips",
+  "version": "v198",
+  "revision": "359d414cff73b3e0400871d3c288a59b36564834",
+  "url": "https://codeload.github.com/Alcaro/Flips/tar.gz/359d414cff73b3e0400871d3c288a59b36564834",
+  "sha256": "36e140b6c7fd5438c2cc46013c338b9e579df199cefd5a8f1292a8947ee05d74",
+  "size": 44532360,
+  "license": "GPL-3.0-or-later",
+  "notices": ["COPYING", "COPYING.gpl3", "libdivsufsort-2.0.1/COPYING"]
+}
