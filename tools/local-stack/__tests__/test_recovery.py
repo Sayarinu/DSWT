@@ -10,12 +10,12 @@ import stack
 
 
 SAVE = "11111111-1111-4111-8111-111111111111"
-RECEIPT = "22222222-2222-4222-8222-222222222222"
+DIGEST = "d" * 64
 
 
-def snapshot(acknowledged=(RECEIPT,), **identities):
+def snapshot(applied=(DIGEST,), **identities):
     return {"tables": {name: {"rows": 1, "sha256": "a" * 64} for name in recovery.TABLES},
-            "identities": identities or {SAVE: [3, 4]}, "acknowledged": list(acknowledged)}
+            "identities": identities or {SAVE: [3, 4]}, "applied": {SAVE: list(applied)}}
 
 
 def case(**checks):
@@ -24,7 +24,7 @@ def case(**checks):
 
 
 class DecisionTests(unittest.TestCase):
-    highwater = [{"save_id": SAVE, "next_counter": 3, "event_cursor": 4, "receipt_id": RECEIPT}]
+    highwater = [{"save_id": SAVE, "next_counter": 3, "event_cursor": 4, "holding": [DIGEST]}]
 
     def test_only_an_exact_replayed_restore_is_accepted(self):
         self.assertEqual(recovery.decide(case()), "accepted")
@@ -34,10 +34,10 @@ class DecisionTests(unittest.TestCase):
             with self.subTest(checks=checks):
                 self.assertIn(reason, recovery.decide(case(**checks)))
 
-    def test_client_highwater_rejects_lagging_identities_or_receipts(self):
+    def test_client_highwater_rejects_lagging_identities_or_held_payloads(self):
         self.assertEqual(recovery.behind(self.highwater, snapshot()), [])
         self.assertEqual(recovery.behind(self.highwater, snapshot(**{SAVE: [4, 9]})), [])
-        for restored in (snapshot(**{SAVE: [2, 4]}), snapshot(**{SAVE: [3, 3]}), snapshot(acknowledged=())):
+        for restored in (snapshot(**{SAVE: [2, 4]}), snapshot(**{SAVE: [3, 3]}), snapshot(applied=())):
             with self.subTest(restored=restored):
                 self.assertEqual(len(recovery.behind(self.highwater, restored)), 1)
         missing = snapshot()
@@ -63,20 +63,20 @@ class DecisionTests(unittest.TestCase):
         changed["tables"]["receipts"] = {"rows": 1, "sha256": "b" * 64}
         self.assertEqual(recovery.differences(reference, changed), ["receipts"])
         self.assertEqual(recovery.differences(reference, snapshot(**{SAVE: [3, 5]})), ["identities"])
-        self.assertEqual(recovery.differences(reference, snapshot(acknowledged=())), ["acknowledged"])
+        self.assertEqual(recovery.differences(reference, snapshot(applied=())), ["applied"])
 
     def test_capture_digests_every_retained_table_and_migrations(self):
         queries = []
 
         def sql(query):
             queries.append(query)
-            if "json_object_agg" in query:
-                return '{"%s": ["3", "4"]}' % SAVE
-            return '["%s"]' % RECEIPT if "acknowledgements" in query and "json_agg" in query else "2 " + "c" * 64
+            if "location = 3" in query:
+                return '{"%s": ["%s"]}' % (SAVE, DIGEST)
+            return '{"%s": ["3", "4"]}' % SAVE if "json_object_agg" in query else "2 " + "c" * 64
         result = recovery.capture(sql)
         self.assertEqual(set(result["tables"]), set(recovery.TABLES) | {"platinumwt_meta.schema_migrations"})
         self.assertEqual(result["identities"], {SAVE: [3, 4]})
-        self.assertEqual(result["acknowledged"], [RECEIPT])
+        self.assertEqual(result["applied"], {SAVE: [DIGEST]})
         self.assertTrue(all("bytea_output = 'hex'" in query for query in queries[:-2]))
 
     def test_only_complete_wal_segment_names_are_listed(self):

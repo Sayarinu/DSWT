@@ -60,21 +60,22 @@ def capture(sql):
         tables[table] = {"rows": int(count), "sha256": digest}
     identities = json.loads(sql("SELECT coalesce(json_object_agg(save_id::text, json_build_array("
                                 "next_counter::text, event_highwater::text)), '{}') FROM platinumwt.save_identities"))
-    acknowledged = json.loads(sql("SELECT coalesce(json_agg(receipt_id::text ORDER BY receipt_id), '[]') "
-                                  "FROM platinumwt.acknowledgements"))
+    applied = json.loads(sql("SELECT coalesce(json_object_agg(save_id, digests), '{}') FROM (SELECT o.save_id::text, "
+                             "json_agg(DISTINCT encode(p.sha256, 'hex')) AS digests FROM platinumwt.ownership o "
+                             "JOIN platinumwt.payloads p USING (asset_id) WHERE o.location = 3 GROUP BY o.save_id) held"))
     return {"tables": tables, "identities": {key: [int(value) for value in pair] for key, pair in identities.items()},
-            "acknowledged": acknowledged}
+            "applied": {key: sorted(value) for key, value in applied.items()}}
 
 
 def client_highwater(state):
     """The client's own retained checkpoint, recorded independently of the backup lineage."""
     return {"save_id": str(uuid.UUID(hex=state["save_id"])), "next_counter": state["next_counter"],
             "event_cursor": state["event_cursor"], "phase": state["phase"], "pending": bool(state["pending_sha256"]),
-            "receipt_id": str(uuid.UUID(hex=state["receipt_id"])) if int(state["receipt_id"], 16) else None}
+            "holding": sorted(set(state["inventory"][0]))}
 
 
 def behind(highwater, restored):
-    """List clients whose acknowledged operations, events or applied receipt the restore does not cover."""
+    """List clients whose acknowledged operations, events or held payloads the restore does not cover."""
     reasons = []
     for client in highwater:
         identity = restored["identities"].get(client["save_id"])
@@ -83,8 +84,10 @@ def behind(highwater, restored):
         elif identity[0] < client["next_counter"] or identity[1] < client["event_cursor"]:
             reasons.append(f"{client['save_id']}: restored counter/events {identity} behind client "
                            f"{[client['next_counter'], client['event_cursor']]}")
-        if client["receipt_id"] and client["receipt_id"] not in restored["acknowledged"]:
-            reasons.append(f"{client['save_id']}: applied receipt {client['receipt_id']} not acknowledged")
+        # Every client in the rehearsal has applied a receipt, so what it holds must be an applied delivery.
+        missing = set(client["holding"]) - set(restored["applied"].get(client["save_id"], []))
+        if missing:
+            reasons.append(f"{client['save_id']}: held payloads {sorted(missing)} have no applied receipt")
     return reasons
 
 
@@ -96,7 +99,7 @@ def matches_clients(highwater, reference):
 
 def differences(reference, restored):
     tables = sorted(name for name in reference["tables"] if reference["tables"][name] != restored["tables"].get(name))
-    for name in ("identities", "acknowledged"):
+    for name in ("identities", "applied"):
         if reference[name] != restored[name]:
             tables.append(name)
     return tables
