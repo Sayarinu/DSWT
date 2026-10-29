@@ -154,7 +154,9 @@ class Acceptance:
             arguments += [fault, checkpoint, "1"]
         log = self.case_directory / (str(self.serial) + "-" + client.name + "-" + action + ".jsonl")
         code, events = supervise(arguments, log, checkpoint=checkpoint, kill=fault == "kill")
-        unavailable = allow_unavailable and code != 0 and any(event.get("wire_result") == 11 for event in events)
+        require(code in (0, 1) or (fault == "kill" and code == -signal.SIGKILL),
+                "Unexpected probe exit (memory/process failure): " + str(code) + "; see " + str(log))
+        unavailable = allow_unavailable and code == 1 and any(event.get("wire_result") == 11 for event in events)
         require((code != 0) == (failure or bool(fault)) or unavailable, "unexpected native exit " + str(code) + "; see " + str(log))
         summary = self.inspect(client)
         self.evidence.append({"client": str(client.relative_to(self.directory)), "action": action,

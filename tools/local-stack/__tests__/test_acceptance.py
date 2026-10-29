@@ -32,6 +32,21 @@ class SupervisorTests(unittest.TestCase):
 
 
 class OracleTests(unittest.TestCase):
+    def test_native_run_rejects_allocator_and_signal_failures_even_if_unavailable(self):
+        runner = acceptance.Acceptance.__new__(acceptance.Acceptance)
+        runner.serial, runner.evidence = 0, []
+        runner.probe = Path("/probe")
+        runner.case_directory = runner.directory = Path("/private")
+        runner.profile = {"port": 8443, "hostname": "localhost", "current_spki_sha256": "a", "next_spki_sha256": "b"}
+        runner.inspect = lambda _: {"phase": "submit_ready"}
+        for code in (2, -signal.SIGKILL, -signal.SIGABRT):
+            for options in ({"allow_unavailable": True}, {"failure": True}):
+                with self.subTest(code=code, options=options), patch.object(acceptance, "supervise", return_value=(code, [{"wire_result": 11}])), \
+                        self.assertRaisesRegex(AssertionError, "memory/process failure"):
+                    runner.run(Path("/private/client"), **options)
+        with patch.object(acceptance, "supervise", return_value=(1, [{"wire_result": 11}])):
+            runner.run(Path("/private/client"), allow_unavailable=True)
+
     def test_transient_validation_retry_preserves_packet_and_authoritative_history(self):
         runner = acceptance.Acceptance.__new__(acceptance.Acceptance)
         original = {"phase": "submit_ready", "pending_sha256": "packet", "request_sha256": "request", "inventory": [[], []]}
