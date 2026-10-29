@@ -74,6 +74,7 @@ target_link_libraries(platinumwt_legality PRIVATE platinumwt_protocol platinumwt
 target_compile_options(platinumwt_legality PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(platinumwt_admission STATIC src/admission.cpp)
+target_include_directories(platinumwt_admission PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(platinumwt_admission PUBLIC Boost::system PRIVATE OpenSSL::Crypto)
 target_compile_options(platinumwt_admission PRIVATE -Wall -Wextra -Wpedantic)
 
