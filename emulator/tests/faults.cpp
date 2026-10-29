@@ -15,8 +15,31 @@
 
 namespace {
 std::atomic<unsigned> serial{0};
+std::atomic<bool> phase_ready{false};
+
+void ObservePhase(const void *bytes, std::size_t size) {
+    const auto *phase = std::getenv("PWT_FAULT_JOURNAL_PHASE");
+    if (!phase || phase_ready.load() || !std::getenv("PWT_FAULT_ARMED")) return;
+    const auto *data = static_cast<const unsigned char *>(bytes);
+    const std::size_t prefix = size == 524288 + 96 && std::memcmp(data, "PWTHS001", 8) == 0 ? 64 : 0;
+    if (size != 524288 + (prefix ? 96 : 0)) return;
+    for (const auto bank : {0x30000U, 0x70000U}) {
+        const auto *record = data + prefix + bank;
+        // A test selector, not journal validation or ownership authority.
+        // The host/SDK verifiers still check the complete published records.
+        const unsigned value = record[6] | (static_cast<unsigned>(record[7]) << 8);
+        if (std::memcmp(record, "PWTJ\1\0", 6) == 0 && std::memcmp(record + 4092, "CMIT", 4) == 0 &&
+            value == std::strtoul(phase, nullptr, 10)) {
+            phase_ready.store(true);
+            ::syscall(SYS_write, STDERR_FILENO, "PHASE_READY\n", 12);
+            return;
+        }
+    }
+}
+
 bool Hit(int fd, bool directory = false) {
     if (!std::getenv("PWT_FAULT_ARMED")) return false;
+    if (std::getenv("PWT_FAULT_JOURNAL_PHASE") && !phase_ready.load()) return false;
     struct stat info{};
     if (::fstat(fd, &info) != 0 || (!S_ISREG(info.st_mode) && !(directory && S_ISDIR(info.st_mode)))) return false;
     // The real Qt process also writes configuration/firmware. Restrict optional
@@ -70,6 +93,7 @@ extern "C" ssize_t getrandom(void *bytes, size_t size, unsigned flags) {
 
 extern "C" ssize_t write(int fd, const void *bytes, size_t size) {
     static auto real = reinterpret_cast<decltype(&write)>(::dlsym(RTLD_NEXT, "write"));
+    ObservePhase(bytes, size);
     const auto hit = Hit(fd);
     if (Before(hit)) return -1;
     const auto result = real(fd, bytes, size); After(hit); return result;

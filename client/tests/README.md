@@ -173,6 +173,20 @@ unmatched cancellation, reconciliation and restart behavior. Savestate/rewind
 restoration and loading a different save inside a running emulator are
 unsupported; exit and relaunch the intended save through this tool.
 
+For repeatable GUI fault tests, build `platinumwt-emulator-builder` from
+`emulator/Dockerfile` and use `tools/local-stack/emulator.py --help`. `create`
+exclusively provisions a named profile from a blank-journal original and a built
+US ROM. `start` runs the pinned image with only that profile writable, sharing
+the owned gateway namespace; source hashes reject stale persistence tools.
+`events` accepts bounded key/menu/screenshot controls. `start --fault-phase N
+--fault-at K --fault-mode before` arms the test-only publisher shim after a
+committed journal phase appears; `kill-at-fault` waits for its marker before
+SIGKILL. `after` and `error` exercise post-syscall termination and ENOSPC.
+`quit` closes normally; `snapshot NAME` retains checked raw/A/B/HEAD evidence
+only after exit. Profiles, controls and captures stay private under the existing
+local workspace. Run on Btrfs, ext4 or XFS; a memory-backed `/tmp` is unsupported.
+These are emulator/process and syscall tests, not physical host power-loss tests.
+
 With the isolated trade services running, opening Wonder Trade connects and
 reconciles the save identity/history. Confirming a Pokémon persists its escrow
 before sending a deposit. Collection persists the received image and receipt
