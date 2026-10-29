@@ -225,7 +225,8 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     next = engine->entry;
     result = -1;
     rejectionLookup = operation == WT_OP_RECONCILE && next.requestLength
-        && ((next.phase == WT_JOURNAL_SUBMIT_READY && engine->lastResult == WT_RESULT_ILLEGAL_POKEMON)
+        && ((next.phase == WT_JOURNAL_SUBMIT_READY
+                && (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON || engine->lastResult == WT_RESULT_COUNTER_MISMATCH))
             || (next.phase == WT_JOURNAL_QUEUED && next.request[5] == WT_OP_CANCEL
                 && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND)));
     if (next.requestLength && !rejectionLookup) {
@@ -274,6 +275,23 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     unsigned i;
     enum { NO_REJECTION, REJECTED_SUBMIT, REJECTED_CANCEL } rejected = NO_REJECTION;
     unsigned char outgoingDigest[32];
+    if (next->phase == WT_JOURNAL_SUBMIT_READY && reply->body.page.count
+        && memcmp(reply->body.page.events[0].operation, next->operation, 16) != 0) {
+        /* Counters only advance and every counted operation records one event
+         * with its ID. The first event after this cursor is the operation that
+         * used this Submit's counter; if it is another copy's, this request
+         * can never be accepted and its escrow is safe to restore. */
+        const WtWireEvent *event = &reply->body.page.events[0];
+        if (event->sequence != next->eventCursor + 1 || Zero(event->operation, 16)
+            || next->operationCounter != next->nextCounter || reply->nextCounter <= next->operationCounter) return -1;
+        /* Finalize the unaccepted operation so its retained request may be dropped. */
+        memcpy(next->lastOperation, next->operation, 16); next->lastOperationCounter = next->operationCounter;
+        next->nextCounter = next->operationCounter + 1;
+        next->phase = WT_JOURNAL_RESTORING; ClearRequest(next);
+        if (Commit(engine, next) != 0) return -1;
+        engine->synchronized = 0;  /* The cursor stays behind the other copy's history. */
+        return 0;
+    }
     if (engine->journal.io.hash(next->outgoing, 136, outgoingDigest) != 0) return -1;
     for (i = 0; i < reply->body.page.count; ++i) {
         const WtWireEvent *event = &reply->body.page.events[i];
@@ -341,10 +359,14 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         int definitiveRejection = next.requestLength && next.operationCounter == next.nextCounter
             && ((operation == WT_OP_SUBMIT && reply.result == WT_RESULT_ILLEGAL_POKEMON)
                 || (operation == WT_OP_CANCEL && (reply.result == WT_RESULT_CONFLICT || reply.result == WT_RESULT_NOT_FOUND)));
+        /* A mismatch is not restoration proof either; reconcile who used the counter. */
+        int fenced = operation == WT_OP_SUBMIT && reply.result == WT_RESULT_COUNTER_MISMATCH
+            && next.phase == WT_JOURNAL_SUBMIT_READY && next.requestLength && next.operationCounter == next.nextCounter
+            && reply.nextCounter > next.operationCounter && reply.highwater > next.eventCursor;
         engine->synchronized = 0;
-        if (reply.result == WT_RESULT_COUNTER_MISMATCH || reply.result == WT_RESULT_CURSOR_AHEAD
+        if ((reply.result == WT_RESULT_COUNTER_MISMATCH && !fenced) || reply.result == WT_RESULT_CURSOR_AHEAD
             || reply.result == WT_RESULT_UNAUTHENTICATED || reply.result == WT_RESULT_INVALID_REQUEST
-            || (reply.nextCounter && ((!ContextMatches(engine, &reply, 0)
+            || (reply.nextCounter && !fenced && ((!ContextMatches(engine, &reply, 0)
                     && !(definitiveRejection && ContextMatches(engine, &reply, 1)))))) goto blocked;
         result = 1;
         goto done;

@@ -559,9 +559,50 @@ static void ReadbackAndInventoryFaults(void)
     assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.restored && !fixture.removed);
 }
 
+static void SupersededSubmit(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], before[2][4096], *event = packet + 54;
+    size_t size;
+    unsigned variant;
+    for (variant = 0; variant < 4; ++variant) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        assert(WtEngine_Deposit(&fixture.engine, 0) == 0 && WtEngine_Request(&fixture.engine, 0) == 0);
+        memcpy(before, fixture.banks, sizeof(before));
+        /* Another copy used counter 1: the server is ahead of this retained Submit. */
+        size = Header(&fixture, packet, WT_RESULT_COUNTER_MISMATCH, variant == 3 ? 1 : 2, 2, 0);
+        if (variant == 3) {
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.restored);
+            continue;
+        }
+        assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && !fixture.engine.blocked && fixture.removed);
+        assert(memcmp(before, fixture.banks, sizeof(before)) == 0);
+        assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0 && fixture.engine.frame[5] == WT_OP_RECONCILE);
+        size = Header(&fixture, packet, WT_RESULT_OK, 2, 2, 116);
+        packet[44] = 1; Put(packet + 46, 2, 8); Put(event, 2, 8);
+        memset(event + 9, 0x11, 16); memset(event + 41, 0x22, 16); memset(event + 57, 0x33, 32);
+        if (variant == 2) { event[8] = WT_EVENT_MATCHED; event[105] = WT_TRADE_MATCHED; memset(event + 89, 0x44, 16); }
+        else {
+            event[8] = WT_EVENT_SUBMITTED; event[105] = WT_TRADE_QUEUED;
+            if (variant == 1) memcpy(event + 25, fixture.engine.entry.operation, 16);
+            else memset(event + 25, 0x55, 16);
+        }
+        if (variant) {
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.restored);
+            assert(memcmp(before, fixture.banks, sizeof(before)) == 0);
+            continue;
+        }
+        assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.restored && !fixture.removed);
+        Mirrored(&fixture, WT_JOURNAL_IDLE);
+        /* The restored copy keeps its own counter and cursor, so it stays fenced. */
+        assert(fixture.engine.entry.nextCounter == 2 && fixture.engine.entry.lastOperationCounter == 1
+               && fixture.engine.entry.eventCursor == 1 && !fixture.engine.synchronized);
+    }
+}
+
 int main(void)
 {
-    PairAndReturn(); RejectionAndErrors(); FailedPersistence(); DeliveryPersistence();
+    PairAndReturn(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding();
     puts("Recoverable engine: paired delivery, match-cancel race, return, rejection, retries, full-storage restart, stale context and failed persistence passed");

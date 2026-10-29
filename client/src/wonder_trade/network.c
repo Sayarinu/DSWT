@@ -42,7 +42,7 @@ typedef struct WonderTradeTransport {
     BOOL trading;
     int slot;
     unsigned action;
-    BOOL completed, returned, rejected, waiting;
+    BOOL completed, returned, rejected, waiting, superseded;
     unsigned tradePhase;
     BOOL canLeave;
     WtFlashAccess flash;
@@ -262,6 +262,8 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (psa_crypto_init() != PSA_SUCCESS) { result = -31; break; }
         if (WtJournal_Read(&engine->journal, &engine->entry) != 0) { result = -30; break; }
         if (engine->entry.phase == WT_JOURNAL_EMPTY && WtEngine_Enroll(engine, 1) != 0) { result = -30; break; }
+        /* A restored superseded copy stays fenced behind the other copy's history. */
+        if (transport->superseded && engine->entry.phase == WT_JOURNAL_IDLE) { result = 0; break; }
         if (engine->entry.phase == WT_JOURNAL_IDLE && engine->synchronized) {
             if (transport->slot < 0) { result = 0; break; }
             transport->phase = WT_TRANSPORT_SAVING;
@@ -274,6 +276,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         operation = transport->action;
         if (engine->entry.deliveryKind == WT_DELIVERY_RETURN) operation = WT_OP_COLLECT;
         if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON
+            || (engine->entry.phase == WT_JOURNAL_SUBMIT_READY && engine->lastResult == WT_RESULT_COUNTER_MISMATCH)
             || (engine->entry.requestLength && engine->entry.request[5] == WT_OP_CANCEL
                 && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) operation = WT_OP_RECONCILE;
         if (operation == WT_OP_CANCEL && engine->entry.deliveryKind == WT_DELIVERY_MATCH) operation = WT_OP_COLLECT;
@@ -287,6 +290,9 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (result < 0) break;
         wireResult = transport->reply.result;
         if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
+        if (operation == WT_OP_SUBMIT && wireResult == WT_RESULT_COUNTER_MISMATCH && !engine->blocked) {
+            transport->superseded = TRUE; continue;
+        }
         if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) transport->completed = TRUE;
         /* Collect reports CONFLICT only while the offer is still queued; the journal stays QUEUED. */
         if (operation == WT_OP_COLLECT && wireResult == WT_RESULT_CONFLICT) { transport->waiting = TRUE; result = 0; break; }
@@ -374,7 +380,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     if (transport->trading) {
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
-        network->waiting = transport->waiting;
+        network->waiting = transport->waiting; network->superseded = transport->superseded;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }

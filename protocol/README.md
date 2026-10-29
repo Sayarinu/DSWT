@@ -269,12 +269,14 @@ Whole-save deletion, pre-enrollment rollback, out-of-band editing/cloning and
 loss of every local credential/escrow copy are outside automatic recovery. They
 cannot be detected or undone reliably by a DS patch; never promise otherwise.
 Each identity has one operation counter, so copies of an enrolled save cannot
-both mutate with the same counter: the losing copy keeps its escrow and stops at a verification error,
-and an older copy refuses to collect or cancel offers it did not escrow. Copies
-still keep whatever Pokémon they held, and Collect is a recovery read outside
-the fence, so copies taken after submission can each import the same delivery.
-A pre-escrow backup can offer that Pokémon again (payloads are not deduplicated
-by content); a pre-enrollment backup re-enrolls as an unrelated identity.
+both mutate with the same counter. A losing Submit restores its exact escrow
+only after reconciliation shows another operation durably used its counter;
+the restored copy, like any older copy, then stops at verification and never
+collects or cancels offers it did not escrow. Copies still keep whatever Pokémon
+they held, and Collect is a recovery read outside the fence, so copies taken
+after submission can each import the same delivery. A pre-enrollment backup
+re-enrolls as an unrelated identity and can offer its Pokémon again; payloads
+are not deduplicated because distinct legitimate Pokémon may share bytes.
 Savestates and live save imports are refused only in managed emulator sessions.
 Hardware/emulator recovery tests, strict legality, backup rehearsal and capacity
 evidence remain release gates, with no timeout-based deletion of pending assets.
