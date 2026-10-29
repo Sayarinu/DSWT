@@ -89,6 +89,7 @@ services:
     environment:
       <<: *database-client
       PLATINUMWT_DISPOSABLE_DEVICE_TEST: "1"
+      PLATINUMWT_DEVICE_MATCHERS: ${PWT_LOCAL_MATCHERS:-1}
       WT_METRICS_PORT: "9092"
     volumes:
       - type: bind

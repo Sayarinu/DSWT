@@ -15,7 +15,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace {
 volatile std::sig_atomic_t stopping = 0;
@@ -35,6 +37,15 @@ bool Configured() {
 }
 
 constexpr auto kDatabase = "host=/test/run port=5432 dbname=platinumwt_e2e";
+
+// Load rehearsals may run several independent matcher workers; acceptance keeps one.
+int MatcherWorkers() {
+  const char *value = std::getenv("PLATINUMWT_DEVICE_MATCHERS");
+  if (!value || !*value) return 1;
+  const std::string text(value);
+  if (text.size() != 1 || text[0] < '1' || text[0] > '8') throw std::invalid_argument("matcher workers must be 1-8");
+  return text[0] - '0';
+}
 
 int Check() {
   using namespace platinumwt::server;
@@ -90,17 +101,22 @@ int main(int argc, char **argv) try {
   auto matcherServer = matcherBuilder.BuildAndStart();
   if (!backend || !matcherServer) return 1;
 
-  DeviceMatcher worker("127.0.0.1:50054");
   std::signal(SIGINT, Stop);
   std::signal(SIGTERM, Stop);
+  std::vector<std::thread> workers;
+  for (int index = MatcherWorkers(); index > 0; --index)
+    workers.emplace_back([] {
+      DeviceMatcher worker("127.0.0.1:50054");
+      while (!stopping) {
+        if (std::filesystem::exists("/test/matcher-hold")) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          continue;
+        }
+        std::this_thread::sleep_for(worker.Poll());
+      }
+    });
   std::cout << "Disposable real-ledger backend ready; no production/off-site claim" << std::endl;
-  while (!stopping) {
-    if (std::filesystem::exists("/test/matcher-hold")) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      continue;
-    }
-    std::this_thread::sleep_for(worker.Poll());
-  }
+  for (auto &worker : workers) worker.join();
   backend->Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(2));
   matcherServer->Shutdown();
 } catch (const std::exception &) {

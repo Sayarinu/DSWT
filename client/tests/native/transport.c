@@ -59,10 +59,12 @@ int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned c
     char checkpoint[64];
     unsigned operation = probe->engine.frame[5];
     const char *stage = "connect";
+    struct timespec started, finished;
     int fd = -1, result = -1, opened = 0;
     if (!WtSeed_RequestMatches(&probe->engine.journal, probe->engine.frame, probe->engine.frameSize)) return -1;
     snprintf(checkpoint, sizeof(checkpoint), "wire.%u.send", operation);
     if (Checkpoint(probe, checkpoint) != 0) return -1;
+    clock_gettime(CLOCK_MONOTONIC, &started);
     fd = socket(AF_INET, SOCK_STREAM, 0);
     address.sin_family = AF_INET; address.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) != 1) goto done;
@@ -81,8 +83,11 @@ int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned c
     stage = "wire-decode";
     result = WtWire_Decode(probe->engine.frame, probe->engine.frameSize, http.body, http.bodySize, Hash, &reply);
     if (result != 0) goto done;
-    printf("{\"wire_operation\":%u,\"wire_result\":%u,\"next_counter\":%llu,\"highwater\":%llu}\n",
-        operation, reply.result, (unsigned long long)reply.nextCounter, (unsigned long long)reply.highwater);
+    clock_gettime(CLOCK_MONOTONIC, &finished);
+    /* Client-observed connect-to-decoded-reply time, including TLS, for load reports. */
+    printf("{\"wire_operation\":%u,\"wire_result\":%u,\"next_counter\":%llu,\"highwater\":%llu,\"elapsed_us\":%lld}\n",
+        operation, reply.result, (unsigned long long)reply.nextCounter, (unsigned long long)reply.highwater,
+        (long long)(finished.tv_sec - started.tv_sec) * 1000000 + (finished.tv_nsec - started.tv_nsec) / 1000);
     /* The supervisor can discard a validated, committed response before application. */
     snprintf(checkpoint, sizeof(checkpoint), "wire.%u.reply", operation);
     if (Checkpoint(probe, checkpoint) != 0) { result = -1; goto done; }
