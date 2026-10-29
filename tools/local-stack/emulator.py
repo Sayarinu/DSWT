@@ -254,11 +254,28 @@ class Emulator:
 
     def quit(self, timeout=30):
         self.events([{"op": "quit"}])
+        self.wait_exit(expected=0, timeout=timeout)
+
+    def wait_exit(self, *, expected, timeout=300):
+        manifest = self.manifest()
+        if not manifest.get("last_start"): raise ValueError("No recorded emulator run")
         deadline = time.monotonic() + timeout
-        while self.owned_container()["State"]["Running"]:
+        while True:
+            state = self.owned_container()
+            if not state or manifest["last_start"].get("container", state["Id"]) != state["Id"]:
+                raise ValueError("Emulator instance changed before exit")
+            if not state["State"]["Running"]: break
             if time.monotonic() >= deadline: raise TimeoutError("Emulator did not exit; profile retained")
             time.sleep(0.25)
-        self.logs()
+        log = self.logs().read_text()
+        if state["State"].get("OOMKilled") or state["State"]["ExitCode"] != expected:
+            raise ValueError("Unexpected emulator exit; preserve its log")
+        if expected == 74 and manifest["last_start"]["fault_mode"] == "error":
+            if "Managed save failed; emulator stopped before continuing" not in log or (
+                    manifest["last_start"]["fault_phase"] is not None and "PHASE_READY" not in log):
+                raise ValueError("Save fault did not reach its selected checkpoint")
+        manifest["last_start"]["observed_exit_code"] = expected
+        stack.save_manifest(self.directory, manifest)
 
     def kill_at_fault(self, timeout):
         manifest = self.manifest()
@@ -337,6 +354,8 @@ def main():
     events = sub.add_parser("events"); events.add_argument("json")
     snapshot = sub.add_parser("snapshot"); snapshot.add_argument("name")
     fault = sub.add_parser("kill-at-fault"); fault.add_argument("--timeout", type=int, choices=range(1, 301), default=180)
+    exited = sub.add_parser("wait-exit"); exited.add_argument("--expected", type=int, choices=range(256), required=True)
+    exited.add_argument("--timeout", type=int, choices=range(1, 601), default=300)
     for name in ("inspect", "logs", "kill", "quit"): sub.add_parser(name)
     args = parser.parse_args()
     os.umask(0o077)
@@ -355,6 +374,7 @@ def main():
         elif args.action == "snapshot": print(emulator.snapshot(args.name))
         elif args.action == "kill": emulator.kill()
         elif args.action == "quit": emulator.quit()
+        elif args.action == "wait-exit": emulator.wait_exit(expected=args.expected, timeout=args.timeout)
         elif args.action == "kill-at-fault": emulator.kill_at_fault(args.timeout)
         elif args.action == "logs": print(emulator.logs())
 

@@ -132,3 +132,20 @@ class EmulatorTests(unittest.TestCase):
             self.assertEqual((results[0] / "qt-control.so").read_bytes(), b"complete control library")
             ready = json.loads((results[0] / "manifest.json").read_text())
             self.assertEqual(ready["library_sha256"], emulator.digest(b"complete control library"))
+
+    def test_save_failure_requires_the_exact_exit_and_checkpoint_without_masking_oom(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            runner = emulator.Emulator(SimpleNamespace(workspace=root, manifest={"project": "owned"}), "a")
+            log = root / "run.log"
+            log.write_text("PHASE_READY\nManaged save failed; emulator stopped before continuing\n")
+            runner.logs = lambda: log
+            runner.manifest = lambda: {"last_start": {"container": "instance", "fault_mode": "error", "fault_phase": 6}}
+            for code, oom in ((1, False), (134, False), (137, False), (74, True), (74, False)):
+                runner.owned_container = lambda: {"Id": "instance", "State": {"Running": False, "ExitCode": code, "OOMKilled": oom}}
+                with self.subTest(code=code, oom=oom), patch.object(emulator.stack, "save_manifest"):
+                    if code == 74 and not oom: runner.wait_exit(expected=74)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "Unexpected emulator exit"): runner.wait_exit(expected=74)
+            log.write_text("Managed save failed; emulator stopped before continuing\n")
+            with self.assertRaisesRegex(ValueError, "selected checkpoint"): runner.wait_exit(expected=74)
