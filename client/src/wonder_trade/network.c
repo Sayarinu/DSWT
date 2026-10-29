@@ -42,7 +42,7 @@ typedef struct WonderTradeTransport {
     BOOL trading;
     int slot;
     unsigned action;
-    BOOL completed, returned, rejected;
+    BOOL completed, returned, rejected, waiting;
     unsigned tradePhase;
     BOOL canLeave;
     WtFlashAccess flash;
@@ -288,6 +288,8 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         wireResult = transport->reply.result;
         if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
         if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) transport->completed = TRUE;
+        /* Collect reports CONFLICT only while the offer is still queued; the journal stays QUEUED. */
+        if (operation == WT_OP_COLLECT && wireResult == WT_RESULT_CONFLICT) { transport->waiting = TRUE; result = 0; break; }
         if (wireResult != WT_RESULT_OK && wireResult != WT_RESULT_ILLEGAL_POKEMON
             && !(operation == WT_OP_CANCEL && (wireResult == WT_RESULT_CONFLICT || wireResult == WT_RESULT_NOT_FOUND))) {
             result = -100 - wireResult; break;
@@ -372,6 +374,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     if (transport->trading) {
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
+        network->waiting = transport->waiting;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }
