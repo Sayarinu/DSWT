@@ -1,8 +1,11 @@
 import importlib.util
+import fcntl
 import json
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 DIRECTORY = Path(__file__).resolve().parents[1]
@@ -48,3 +51,48 @@ class EmulatorTests(unittest.TestCase):
                                 run=lambda *args, **kwargs: next(replies))
         with self.assertRaisesRegex(ValueError, "Cannot inspect"):
             emulator.Emulator(local, "a").owned_container()
+
+    def test_snapshot_refuses_an_exclusive_standard_save_lock_then_copies_coherently(self):
+        fixture = emulator.stack.load_module("snapshot_fixture", emulator.stack.ROOT / "scripts/tests/test_verify_demo_trade.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            local = SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"})
+            runner = emulator.Emulator(local, "a")
+            runner.directory.mkdir(parents=True)
+            runner.owned_container = lambda: None
+            runner.manifest = lambda: {"profile": "a"}
+            raw = fixture.retail([fixture.pk(10, 1), fixture.pk(20, 2)], fixture.pk(30, 3))
+            fixture.idle(raw, 1)
+            save = runner.directory / "platinum.sav"
+            fixture.publication(save, raw, 1)
+            lock = Path(str(save) + ".platinumwt.lock"); lock.chmod(0o600)
+            with lock.open("r+b") as writer:
+                fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(BlockingIOError): runner.snapshot("blocked")
+                self.assertFalse((runner.directory / "snapshots").exists())
+            result = runner.snapshot("released")
+            self.assertEqual((result / "platinum.sav").read_bytes(), raw)
+            report = json.loads((result / "manifest.json").read_text())
+            self.assertEqual(report["files"], {name: emulator.digest((result / name).read_bytes()) for name in ("platinum.sav", "A", "B", "HEAD")})
+
+    def test_independent_profile_controls_share_the_stack_lock_and_exclude_their_own_writer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with emulator.private_lock(root / "stack", fcntl.LOCK_SH), emulator.private_lock(root / "a", fcntl.LOCK_EX):
+                with emulator.private_lock(root / "stack", fcntl.LOCK_SH), emulator.private_lock(root / "b", fcntl.LOCK_EX): pass
+                for path in (root / "a", root / "stack"):
+                    with self.subTest(path=path.name), self.assertRaises(BlockingIOError):
+                        with emulator.private_lock(path, fcntl.LOCK_EX): pass
+            with emulator.private_lock(root / "stack", fcntl.LOCK_EX): pass
+
+    def test_fault_markers_remain_distinct_when_stdout_has_no_final_newline(self):
+        local = SimpleNamespace(workspace=Path("/private/game/run"), manifest={"project": "owned"},
+                                run=lambda *args, **kwargs: SimpleNamespace(stdout="partial wifi line", stderr="PHASE_READY\nSTOPPED\n"))
+        runner = emulator.Emulator(local, "a")
+        runner.manifest = lambda: {"last_start": {"fault_at": 1, "fault_mode": "before", "fault_phase": 3, "container": "instance"}}
+        runner.owned_container = lambda: {"Id": "instance", "State": {"Running": True}}
+        killed = []
+        runner.kill = lambda: killed.append(True)
+        with patch.object(emulator.stack, "save_manifest") as save:
+            runner.kill_at_fault(1)
+        self.assertEqual(killed, [True])
+        self.assertTrue(save.call_args.args[1]["last_start"]["observed_fault_and_sigkill"])

@@ -2,6 +2,7 @@
 """Control disposable durable melonDS profiles against the owned local stack."""
 
 import argparse
+from contextlib import contextmanager, ExitStack
 import fcntl
 import hashlib
 import json
@@ -11,6 +12,7 @@ import re
 import secrets
 import struct
 import sys
+import tempfile
 import time
 
 import stack
@@ -25,6 +27,17 @@ KEYS = {"A": 65, "B": 66, "X": 88, "Y": 89, "Start": 16777220, "Select": 1677724
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+@contextmanager
+def private_lock(path, operation, *, create=True):
+    descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if create else 0), 0o600)
+    try:
+        stack.private_file(path)
+        fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def journal(data):
@@ -117,6 +130,7 @@ class Emulator:
     def support(self, image):
         source = Path(__file__).with_name("qt-control.cpp").read_bytes()
         directory = self.local.workspace / "emulator-support" / (digest(source)[:16] + "-" + image[-12:])
+        if directory.resolve() != directory: raise ValueError("Emulator support must not be linked")
         if directory.exists():
             if directory.is_symlink() or (directory / "qt-control.cpp").read_bytes() != source or not (directory / "qt-control.so").is_file():
                 raise ValueError("Preserve incomplete/changed emulator support")
@@ -132,9 +146,12 @@ class Emulator:
     def logs(self):
         value = self.owned_container()
         if not value: raise ValueError("No retained emulator container")
-        result = self.local.run(["logs", self.container], capture=True, timeout=10)
+        result = self.local.run(["logs", value["Id"]], capture=True, timeout=10)
         path = self.directory / ("run-" + value["Id"][:12] + ".log")
-        path.write_text(result.stdout + result.stderr)
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.directory, prefix=".run-log-", delete=False) as output:
+            temporary = Path(output.name)
+            output.write(result.stdout + result.stderr)
+        temporary.replace(path)
         return path
 
     def start(self, *, fault_at=None, fault_mode="before", fault_phase=None, fast=False):
@@ -144,12 +161,13 @@ class Emulator:
         if prior:
             if prior["State"]["Running"]: raise ValueError("Profile is already running")
             self.logs()
-            self.local.run(["rm", self.container], capture=True, timeout=10)
+            self.local.run(["rm", prior["Id"]], capture=True, timeout=10)
         self.local.ready()
         if digest((self.directory / "platinum.nds").read_bytes()) != manifest["rom_sha256"] or digest((self.directory / "melonDS").read_bytes()) != manifest["emulator_sha256"]:
             raise ValueError("Profile binaries changed; preserve the original run")
         support = self.support(manifest["image"])
         config = self.directory / "portable/melonDS.toml"
+        stack.private_file(config)
         config.write_text(re.sub(r"^LimitFPS = .*", "LimitFPS = " + ("false" if fast else "true"), config.read_text(), flags=re.M))
         (self.directory / "control.json").unlink(missing_ok=True)
         gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
@@ -169,11 +187,11 @@ class Emulator:
                      "--env", "XDG_CONFIG_HOME=/profile/config", "--env", "XDG_CACHE_HOME=/profile/cache", manifest["image"],
                      "python3", "/src/scripts/run-emulator.py", "--save", "/profile/platinum.sav", "--target", manifest["target"],
                      "--store-tool", "/checks/platinumwt-save-store", "--", "python3", "-c", script, json.dumps(child)]
-        self.local.run(arguments, capture=True, timeout=20)
+        container = self.local.run(arguments, capture=True, timeout=20).stdout.strip()
         manifest["last_start"] = {"source_commit": stack.command(["git", "-C", str(stack.ROOT), "rev-parse", "HEAD"], capture=True).stdout.strip(),
                                   "source_dirty": bool(stack.command(["git", "-C", str(stack.ROOT), "status", "--porcelain"], capture=True).stdout.strip()),
                                   "fault_at": fault_at, "fault_mode": fault_mode, "fault_phase": fault_phase, "fast": fast,
-                                  "control_sha256": digest((support / "qt-control.so").read_bytes()), "gateway": gateway}
+                                  "control_sha256": digest((support / "qt-control.so").read_bytes()), "gateway": gateway, "container": container}
         stack.save_manifest(self.directory, manifest)
 
     def events(self, events):
@@ -201,9 +219,10 @@ class Emulator:
         temporary.replace(path)
 
     def kill(self):
-        if not self.owned_container() or not self.owned_container()["State"]["Running"]:
+        state = self.owned_container()
+        if not state or not state["State"]["Running"]:
             raise ValueError("No running owned emulator")
-        self.local.run(["kill", "--signal", "KILL", self.container], capture=True, timeout=15)
+        self.local.run(["kill", "--signal", "KILL", state["Id"]], capture=True, timeout=15)
         self.logs()
 
     def quit(self, timeout=30):
@@ -224,8 +243,10 @@ class Emulator:
             if not state or not state["State"]["Running"]:
                 if state: self.logs()
                 raise ValueError("Emulator exited before its fault marker")
-            result = self.local.run(["logs", "--tail", "200", self.container], capture=True, timeout=10)
-            lines = (result.stdout + result.stderr).splitlines()
+            if manifest["last_start"].get("container", state["Id"]) != state["Id"]:
+                raise ValueError("Emulator instance changed before its checkpoint")
+            result = self.local.run(["logs", "--tail", "200", state["Id"]], capture=True, timeout=10)
+            lines = result.stdout.splitlines() + result.stderr.splitlines()
             if "STOPPED" in lines:
                 if manifest["last_start"]["fault_phase"] is not None and "PHASE_READY" not in lines:
                     raise ValueError("Stopped without the selected journal checkpoint")
@@ -247,6 +268,10 @@ class Emulator:
 
     def snapshot(self, name):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name): raise ValueError("Invalid snapshot name")
+        with private_lock(Path(str(self.directory / "platinum.sav") + ".platinumwt.lock"), fcntl.LOCK_SH, create=False):
+            return self._snapshot(name)
+
+    def _snapshot(self, name):
         state = self.owned_container()
         if state and state["State"]["Running"]: raise ValueError("Close the emulator before a checked snapshot")
         manifest = self.manifest()
@@ -262,7 +287,8 @@ class Emulator:
         for item, path in files.items():
             if path.is_symlink(): raise ValueError("Preserve linked snapshot inputs")
             data = path.read_bytes()
-            with (destination / item).open("xb") as output: output.write(data)
+            with (destination / item).open("xb") as output:
+                output.write(data); output.flush(); os.fsync(output.fileno())
             hashes[item] = digest(data)
         stack.save_manifest(destination, {"version": 1, "profile": manifest, "state": status,
                                           "host_generation": generation, "files": hashes})
@@ -288,11 +314,11 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     workspace = stack.workspace_path(args.workspace)
-    descriptor = os.open(workspace / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    try:
-        stack.private_file(workspace / ".lock")
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with ExitStack() as locks:
+        locks.enter_context(private_lock(workspace / ".lock", fcntl.LOCK_SH))
         emulator = Emulator(stack.Stack(workspace, stack.read_manifest(workspace)), args.profile)
+        if args.action not in ("inspect", "logs"):
+            locks.enter_context(private_lock(workspace / (".emulator-" + args.profile + ".lock"), fcntl.LOCK_EX))
         if args.action == "create": emulator.create(args.save, args.rom, args.target, args.image)
         elif args.action == "start":
             if args.fault_phase is not None and args.fault_at is None: parser.error("--fault-phase requires --fault-at")
@@ -304,8 +330,6 @@ def main():
         elif args.action == "quit": emulator.quit()
         elif args.action == "kill-at-fault": emulator.kill_at_fault(args.timeout)
         elif args.action == "logs": print(emulator.logs())
-    finally:
-        os.close(descriptor)
 
 
 if __name__ == "__main__":
