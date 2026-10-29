@@ -110,7 +110,9 @@ class Emulator:
                  "client/src/wonder_trade/journal.c", "scripts/run-emulator.py")
         result = self.local.run(["run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
                                  "--user", f"{os.getuid()}:{os.getgid()}", image, "sha256sum",
-                                 *("/src/" + name for name in names)], capture=True, timeout=15)
+                                 *("/src/" + name for name in names)], capture=True, timeout=15, check=False)
+        if result.returncode not in (0, 1):  # sha256sum exits 1 for a missing file; anything else is the engine's.
+            raise stack.subprocess.CalledProcessError(result.returncode, "emulator image source check", result.stdout, result.stderr)
         actual = {line.split()[1].removeprefix("/src/"): line.split()[0] for line in result.stdout.splitlines()}
         expected = {name: digest((stack.ROOT / name).read_bytes()) for name in names}
         if actual != expected: raise ValueError("Rebuild the emulator image from these checked sources")
@@ -123,6 +125,7 @@ class Emulator:
             raise ValueError("Use the matching US Rev 0/1 built ROM")
         provisioned = PROVISION.provision(original, target)
         image = self.image(image)
+        sources = self.image_sources(image)  # Refuse a stale image before anything is provisioned.
         self.profiles_directory()
         self.directory.mkdir(mode=0o700)  # Never reinitialize an enrolled profile.
         for name, content in (("platinum.sav", provisioned), ("platinum.nds", program), ("baseline.sav", original)):
@@ -134,7 +137,7 @@ class Emulator:
         (self.directory / "melonDS").chmod(0o700)
         stack.save_manifest(self.directory, {"version": 1, "profile": self.name, "workspace": str(self.local.workspace),
             "target": target, "source_save": str(source), "source_sha256": digest(original), "rom_sha256": digest(program),
-            "image": image, "emulator_sha256": digest((self.directory / "melonDS").read_bytes())})
+            "image": image, "image_source_sha256": sources, "emulator_sha256": digest((self.directory / "melonDS").read_bytes())})
 
     def profiles_directory(self):
         parent = self.directory.parent
