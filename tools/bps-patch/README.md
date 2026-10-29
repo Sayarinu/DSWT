@@ -9,7 +9,8 @@ Requires Python 3.12+ and Docker. `prepare` downloads the checksum-pinned Flips
 v198 source (`flips.json`) and builds its upstream CLI target, statically linked
 and without network access, into `game/tools/`. The retained source archive,
 GPL/libdivsufsort notices and `provenance.json` (toolchain, binary and image
-hashes) stay beside it; the built binary must match its per-platform pin, and
+hashes) stay beside it; the built binary must match its per-platform pin (only
+linux/amd64 is pinned; other Docker platforms are refused), and
 `create`/`apply` re-verify all of these before use (run `prepare` once first).
 All Flips runs use that image with networking disabled, `--exact`, and never
 `--ignore-checksum`.

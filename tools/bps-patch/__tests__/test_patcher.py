@@ -331,7 +331,7 @@ class InstalledToolTests(Fixture):
     def setUp(self):
         super().setUp()
         self.binary, archive, notice = b"pinned binary", b"archive", b"notice"
-        pin = {"sha256": hashlib.sha256(archive).hexdigest(), "size": len(archive),
+        pin = {"sha256": hashlib.sha256(archive).hexdigest(), "size": len(archive), "notices": ["COPYING"],
                "binaries": {"linux/amd64": {"size": len(self.binary), "sha256": hashlib.sha256(self.binary).hexdigest()}}}
         self.destination = self.root / "game/tools/flips"
         (self.destination / "notices").mkdir(parents=True)
@@ -365,6 +365,22 @@ class InstalledToolTests(Fixture):
                     self.verify()
                 path.unlink()
                 path.write_bytes(original)
+        provenance = self.destination / "provenance.json"
+        original = provenance.read_text()
+        for name, change in (("notice dropped", lambda r: r.update(notices={})),
+                             ("unpinned platform", lambda r: r["build"].update(platform="linux/riscv64")),
+                             ("missing field", lambda r: r.pop("archive")),
+                             ("archive outside", lambda r: r["archive"].update(file="../source.tar.gz"))):
+            with self.subTest(name):
+                record = json.loads(original)
+                change(record)
+                provenance.unlink()
+                provenance.write_text(json.dumps(record))
+                with self.assertRaises(patcher.PatchError):
+                    self.verify()
+        provenance.unlink()
+        provenance.write_text(original)
+        self.verify()
         moved = self.destination.with_name("real")
         self.destination.rename(moved)
         self.destination.symlink_to(moved)

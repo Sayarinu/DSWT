@@ -43,7 +43,7 @@ FLIPS_TIMEOUT = 30 * 60
 MAX_MANIFEST = 1024 * 1024
 MAX_PROFILE = 64 * 1024
 OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-UNSUPPORTED_RENAME = {errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EPERM}
+UNSUPPORTED_RENAME = {errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV}
 
 
 class PatchError(ValueError):
@@ -124,16 +124,29 @@ def _fsync_directory(name, dir_fd):
         os.close(fd)
 
 
-def _renameat_noreplace(source_fd, source, target_fd, target):
-    """Atomic rename that fails if the target exists; returns 0 or an errno."""
+def _libc_rename():
+    # The host may be Linux (renameat2) or macOS (renameatx_np) whatever the Docker platform is.
     libc = ctypes.CDLL(None, use_errno=True)
     for function, flag in (("renameat2", 1), ("renameatx_np", 4)):  # RENAME_NOREPLACE / RENAME_EXCL
         call = getattr(libc, function, None)
         if call is not None:
-            if call(source_fd, os.fsencode(source), target_fd, os.fsencode(target), flag) == 0:
-                return 0
-            return ctypes.get_errno()
-    return errno.ENOSYS
+            call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+            call.restype = ctypes.c_int
+            return call, flag
+    return None, 0
+
+
+_RENAME = _libc_rename()
+
+
+def _renameat_noreplace(source_fd, source, target_fd, target):
+    """Atomic rename that fails if the target exists; returns 0 or an errno."""
+    call, flag = _RENAME
+    if call is None:
+        return errno.ENOSYS
+    if call(source_fd, os.fsencode(source), target_fd, os.fsencode(target), flag) == 0:
+        return 0
+    return ctypes.get_errno()
 
 
 class Stage:
@@ -168,7 +181,7 @@ class Stage:
     def write_tree(self, name, files):
         """Write {relative: (data, mode)} into a new staged directory and flush it."""
         os.mkdir(name, 0o755, dir_fd=self.fd)
-        directories = sorted({str(Path(relative).parent) for relative in files} - {"."})
+        directories = sorted({str(parent) for relative in files for parent in Path(relative).parents} - {"."})
         top = os.open(name, OPEN_DIRECTORY, dir_fd=self.fd)
         try:
             for directory in directories:
@@ -275,7 +288,7 @@ def _tool_location(root):
     dockerfile = (HERE / "Dockerfile").read_bytes()
     pin = json.loads(pin_bytes)
     key = sha256(pin_bytes + b"\0" + dockerfile)[:16]
-    tools = _private_dir(_private_dir(root / "game") / "tools")
+    tools = root / "game" / "tools"
     return pin, dockerfile, key, tools, tools / f"flips-{pin['version']}-{key}"
 
 
@@ -284,19 +297,25 @@ def installed_flips(root=ROOT):
     pin, _, _, tools, destination = _tool_location(root)
     if destination.is_symlink() or not destination.is_dir():
         raise PatchError("Pinned Flips is not prepared; run: python3 tools/bps-patch/patcher.py prepare")
-    record = json.loads(read_private(destination / "provenance.json", MAX_MANIFEST, "Flips provenance")[0])
-    expected = pin["binaries"].get(record["build"]["platform"])
-    archive = read_private(destination / record["archive"]["file"], pin["size"], "Flips source archive")[0]
-    if sha256(archive) != pin["sha256"] or record["archive"]["sha256"] != pin["sha256"]:
+    try:
+        record = json.loads(read_private(destination / "provenance.json", MAX_MANIFEST, "Flips provenance")[0])
+        expected = pin["binaries"].get(record["build"]["platform"])
+        archive_name, notices, image_id = record["archive"]["file"], record["notices"], record["image_id"]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise PatchError(f"Flips provenance in {destination} is malformed; move it aside and rerun prepare") from None
+    if not isinstance(archive_name, str) or "/" in archive_name or not isinstance(notices, dict) or set(notices) != set(pin["notices"]):
+        raise PatchError("Flips provenance does not cover the pinned archive and notices")
+    archive = read_private(destination / archive_name, pin["size"], "Flips source archive")[0]
+    if sha256(archive) != pin["sha256"]:
         raise PatchError("Retained Flips source archive does not match its pin")
-    for name, digest in record["notices"].items():
+    for name, digest in notices.items():
         if sha256(read_private(destination / "notices" / name, MAX_MANIFEST, "Flips notice")[0]) != digest:
             raise PatchError(f"Retained Flips notice {name} changed")
     binary = read_private(destination / "flips", 16 * 1024 * 1024, "Flips binary")[0]
     if expected is None or record["binary"] != expected or sha256(binary) != expected["sha256"]:
         raise PatchError("Retained Flips binary does not match its pin")
     with tempfile.TemporaryDirectory(prefix=".flips-check-", dir=tools) as temporary:
-        if sha256(_image_binary(record["image_id"], Path(temporary))) != expected["sha256"]:
+        if sha256(_image_binary(image_id, Path(temporary))) != expected["sha256"]:
             raise PatchError("Pinned Flips image does not contain the pinned binary")
     return record
 
@@ -306,6 +325,7 @@ def prepare_flips(root=ROOT, archive=None):
     pin, dockerfile, key, tools, destination = _tool_location(root)
     if destination.exists() or destination.is_symlink():
         return installed_flips(root)
+    _private_dir(_private_dir(root / "game") / "tools")
     platform = _docker("version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
     if platform not in pin["binaries"]:
         raise PatchError(f"No pinned Flips binary for Docker platform {platform}")
