@@ -80,17 +80,31 @@ record('make', sys.argv[1:])
 if sys.argv[1:] == ['configure']:
     Path('build').mkdir(exist_ok=True)
     Path('build/build.ninja').touch()
+    if not Path('build/revision').exists():
+        Path('build/revision').write_text('1')
 elif sys.argv[1] == 'release':
-    assert sys.argv[2:] == ['NINJA=ninja -j' + os.environ['ROM_BUILD_JOBS']]
     if os.environ.get('TEST_RELEASE_FAIL'):
         raise SystemExit(9)
     assert Path('build/build.ninja').is_file()
-    Path('built').touch()
+    command = sys.argv[2].removeprefix('NINJA=')
+    # GNU Make exports command-line variables to Ninja and its children.
+    os.environ['NINJA'] = command
+    raise SystemExit(subprocess.run(shlex.split(command)).returncode)
 elif sys.argv[1] == 'check':
     assert sys.argv[2:] == ['NINJA=ninja']
     assert Path('built').is_file()
 else:
     assert sys.argv[1:] == ['meson', 'skrew', 'build/lsfgen.stamp']
+''')
+        self.tool(binary / 'ninja', '''
+record('ninja', sys.argv[1:])
+assert sys.argv[1:] == ['-j' + os.environ['ROM_BUILD_JOBS']]
+if Path('build/regenerate').exists():
+    # Meson interprets NINJA as one executable name during regeneration.
+    assert shutil.which(os.environ.get('NINJA', 'ninja')), 'Could not detect Ninja'
+    record('regenerate', [Path('build/revision').read_text()])
+    Path('build/regenerate').unlink()
+Path('built').touch()
 ''')
         meson = self.workspace / 'subprojects/meson-1.12.0/meson.py'
         meson.parent.mkdir(parents=True)
@@ -101,11 +115,16 @@ if sys.argv[1] == 'setup':
     Path('build/build.ninja').touch()
 else:
     assert sys.argv[1] == 'configure' and Path('build/build.ninja').is_file()
+revision = next(arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('-Drevision='))
+previous = Path('build/revision')
+if previous.exists() and previous.read_text() != revision:
+    Path('build/regenerate').touch()
+previous.write_text(revision)
 ''')
 
     def tool(self, path, source):
         path.write_text('#!' + sys.executable + '''
-import json, os, subprocess, sys
+import json, os, shlex, shutil, subprocess, sys
 from pathlib import Path
 def record(tool, args):
     with open(os.environ['TEST_LOG'], 'a') as log:
@@ -166,7 +185,7 @@ def record(tool, args):
                         self.assertIn('--cross-file=meson/cross_unix.ini', meson[0])
                     self.assertEqual(self.calls_for('make'),
                                      ([['meson', 'skrew', 'build/lsfgen.stamp']] if fresh else [])
-                                     + [['release', 'NINJA=ninja -j1']])
+                                     + [['release', 'NINJA=env -u NINJA ninja -j1']])
                     self.assert_docker('modified', revision)
 
     def test_pristine_fresh_and_incremental_builds_without_profile(self):
@@ -184,7 +203,7 @@ def record(tool, args):
                     self.assertEqual(len(self.calls_for('python')), 2)
                     self.assertEqual(self.calls_for('meson'), [['configure', 'build', '-Drevision=' + revision]])
                     self.assertEqual(self.calls_for('make'),
-                                     [['configure'], ['release', 'NINJA=ninja -j1'], ['check', 'NINJA=ninja']])
+                                     [['configure'], ['release', 'NINJA=env -u NINJA ninja -j1'], ['check', 'NINJA=ninja']])
                     self.assert_docker('pristine', revision)
 
     def test_positive_job_overrides_apply_to_both_build_modes(self):
@@ -194,10 +213,23 @@ def record(tool, args):
                     args = ('--pristine',) if mode == 'pristine' else ()
                     result = self.run_build(*args, env=dict(self.env, ROM_BUILD_JOBS=jobs))
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn(['release', 'NINJA=ninja -j' + jobs], self.calls_for('make'))
+                    self.assertIn(['release', 'NINJA=env -u NINJA ninja -j' + jobs], self.calls_for('make'))
                     if mode == 'pristine':
                         self.assertEqual(self.calls_for('make')[-1], ['check', 'NINJA=ninja'])
                     self.assert_docker(mode, '1', jobs)
+
+    def test_revision_switches_regenerate_with_discoverable_ninja_in_both_modes(self):
+        for mode in ('modified', 'pristine'):
+            shutil.rmtree(self.workspace / 'build', ignore_errors=True)
+            for index, revision in enumerate(('1', '0', '1')):
+                with self.subTest(mode=mode, revision=revision, index=index):
+                    args = ('--pristine',) if mode == 'pristine' else ()
+                    result = self.run_build(*args, env=dict(self.env, ROM_REVISION=revision, ROM_BUILD_JOBS='2'))
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(self.calls_for('ninja'), [['-j2']])
+                    self.assertEqual(self.calls_for('regenerate'), [[revision]] if index else [])
+                    if mode == 'pristine':
+                        self.assertEqual(self.calls_for('make')[-1], ['check', 'NINJA=ninja'])
 
     def test_invalid_job_override_fails_before_any_preparation(self):
         for mode in ('modified', 'pristine'):
@@ -217,7 +249,7 @@ def record(tool, args):
                 result = self.run_build(*args, env=dict(self.env, TEST_RELEASE_FAIL='1'))
                 self.assertEqual(result.returncode, 9, result.stdout + result.stderr)
                 calls = self.calls_for('make')
-                self.assertEqual(calls.count(['release', 'NINJA=ninja -j1']), 1)
+                self.assertEqual(calls.count(['release', 'NINJA=env -u NINJA ninja -j1']), 1)
                 self.assertFalse(any('check' in call for call in calls))
 
     def test_old_or_missing_python_fails_before_preparation(self):

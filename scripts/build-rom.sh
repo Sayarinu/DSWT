@@ -42,10 +42,11 @@ docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile"
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
+    # Make exports NINJA; clear its command-with-flags before Meson regeneration.
     if [[ "$PLATINUMWT_BUILD_MODE" == pristine ]]; then
         make configure
         python3 subprojects/meson-1.12.0/meson.py configure build -Drevision="$ROM_REVISION"
-        make release NINJA="ninja -j${ROM_BUILD_JOBS}"
+        make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
         # Meson checks require NINJA to name one executable, without flags.
         make check NINJA=ninja
     else
@@ -63,6 +64,6 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
             -Drevision="$ROM_REVISION" \
             -Dwonder_trade_tls_dir=/tls \
             -Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h
-        make release NINJA="ninja -j${ROM_BUILD_JOBS}"
+        make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
     fi
 '
