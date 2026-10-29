@@ -102,6 +102,26 @@ class PersistenceTests(unittest.TestCase):
         self.tool('check')
         self.assertEqual(self.save.read_bytes(), self.after)
 
+    def test_optional_journal_phase_waits_for_the_selected_snapshot_before_faulting(self):
+        image = bytearray(self.after)
+        record = bytearray(4096)
+        struct.pack_into('<4sHHIIQ', record, 0, b'PWTJ', 1, 3, 4096, 0, 1)
+        record[4060:4092] = hashlib.sha256(record[:4060]).digest()
+        record[-4:] = b'CMIT'
+        for bank in (0x30000, 0x70000): image[bank:bank + 4096] = record
+        self.input.write_bytes(image)
+        for phase in (4, 3):
+            with self.subTest(phase=phase):
+                self.reset()
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_AT='1', PWT_FAULT_MODE='error',
+                           PWT_FAULT_SAVE=str(self.save), PWT_FAULT_JOURNAL_PHASE=str(phase))
+                result = subprocess.run([str(self.probe), str(self.save), str(self.input)], env=env,
+                                        capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 74 if phase == 3 else 0, result.stderr)
+                self.assertEqual(b'PHASE_READY\n' in result.stderr, phase == 3)
+                self.tool('prepare'); self.tool('check')
+                self.assertIn(self.save.read_bytes(), (self.before, bytes(image)))
+
     def test_truncated_raw_file_and_one_damaged_snapshot_recover_exact_bytes(self):
         self.save.write_bytes(self.before[:113])
         (Path(str(self.save) + '.platinumwt') / 'A').write_bytes(b'PWT')
