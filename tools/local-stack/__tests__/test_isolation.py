@@ -57,6 +57,7 @@ class WorkflowTests(unittest.TestCase):
             lambda d: d.update(env={"TOKEN": "${{ (github['token']) }}"}),
             lambda d: d.update(env={"TOKEN": "${{ toJSON(secrets) }}"}),
             lambda d: d.update(env={"TOKEN": "${{ toJSON(github) }}"}),
+            lambda d: d.update(env={"TOKEN": "${{ toJSON(github.*) }}"}),
             lambda d: d.update(env={"TOKEN": "${{ github[format('{0}{1}', 'to', 'ken')] }}"}),
             lambda d: d.update(env={"TOKEN": "${{ format('}}{0}', secrets.PRODUCTION_TOKEN) }}"}),
             lambda d: d.update(env={"TOKEN": "${{ format('}}{0}', github.token) }}"}),

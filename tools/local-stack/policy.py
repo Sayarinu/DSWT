@@ -62,8 +62,10 @@ def workflow(data):
     for text in strings(data):
         if "${{" in text:
             # Conservative review aid: quoted `}}` cannot hide a later context reference.
-            require(not re.search(r"\bsecrets\b|\bgithub\b(?!\s*\.)|\bgithub\s*\.\s*(?:token|github_token)\b", text, re.I),
-                    "Explicit secret/token expression in contribution CI")
+            require(not re.search(r"\bsecrets\b", text, re.I), "Secret context in contribution CI")
+            for context in re.finditer(r"\bgithub\b", text, re.I):
+                field = re.match(r"\s*\.\s*([a-zA-Z_][a-zA-Z_0-9]*)", text[context.end():])
+                require(field and field[1].lower() not in ("token", "github_token"), "Token or unreviewed GitHub context access")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and bool(jobs), "Workflow needs jobs")
     names = []
