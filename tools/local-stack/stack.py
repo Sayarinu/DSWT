@@ -9,9 +9,9 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import ssl
 import stat
-import secrets
 import subprocess
 import sys
 import time

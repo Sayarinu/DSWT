@@ -66,8 +66,8 @@ class Observer:
         self.capture = local.workspace / "observability/alerts/received.jsonl"
         self.password = (local.workspace / "observability/grafana-admin-password").read_text().strip()
 
-    def internal(self, url, timeout=20, attempts=10):
-        """GET an endpoint that exists only inside the private gateway namespace, retrying while collectors start."""
+    def internal(self, url, timeout=15, attempts=3):
+        """GET an endpoint that exists only inside the private gateway namespace, retrying briefly while collectors start."""
         for attempt in range(attempts):
             try:
                 return self.local.compose("exec", "-T", "prometheus", "wget", "-T", str(timeout - 5), "-qO-", url,
@@ -196,13 +196,18 @@ class Observer:
             results.append(self.scenario("BackupStale", lambda: write_backup_timestamp(workspace, time.time() - 2 * 86400),
                                          lambda: write_backup_timestamp(workspace, time.time())))
         finally:
-            if prior is None:
-                textfile.unlink(missing_ok=True)
-            else:
-                temporary = textfile.with_name(".backup.prom.restore")
-                temporary.write_bytes(prior)
-                os.chmod(temporary, 0o644)
-                os.replace(temporary, textfile)
+            failing = sys.exc_info()[1] is not None
+            try:
+                if prior is None:
+                    textfile.unlink(missing_ok=True)
+                else:
+                    temporary = textfile.with_name(".backup.prom.restore")
+                    temporary.write_bytes(prior)
+                    os.chmod(temporary, 0o644)
+                    os.replace(temporary, textfile)
+            except OSError:
+                if not failing:  # never mask the scenario's own failure
+                    raise
         fill = "import os; f=os.statvfs('/monitored/pressure'); open('/monitored/pressure/fill','wb').write(b'\\0'*int(f.f_bavail*f.f_frsize*0.95))"
         results.append(self.scenario(
             "FilesystemPressure",
