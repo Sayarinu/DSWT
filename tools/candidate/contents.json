@@ -1,0 +1,13 @@
+{
+  "instructions": [
+    "patches/README.md",
+    "tools/bps-patch/README.md"
+  ],
+  "notices": [
+    "LICENSE",
+    "NOTICE",
+    "client/UPSTREAM.md",
+    "client/tls-dependency.json",
+    "licensing/mbedtls.txt"
+  ]
+}
