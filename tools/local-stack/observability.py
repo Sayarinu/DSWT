@@ -4,7 +4,6 @@
 import argparse
 import base64
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+import isolation
 import policy
 import stack
 
@@ -43,13 +43,15 @@ def write_backup_timestamp(workspace, timestamp):
 
 
 def notifications(path, offset):
-    """Return (alertname, labels, status, receiver, end offset) for each captured delivery after offset."""
+    """Return (alertname, labels, status, receiver, end offset) for each complete captured delivery after offset."""
     events = []
     if not path.exists():
         return events
     with path.open("rb") as source:
         source.seek(offset)
         for line in source:
+            if not line.endswith(b"\n"):
+                break  # still being appended; read it on the next poll
             offset += len(line)
             payload = json.loads(line)
             for alert in payload.get("alerts", []):
@@ -64,10 +66,16 @@ class Observer:
         self.capture = local.workspace / "observability/alerts/received.jsonl"
         self.password = (local.workspace / "observability/grafana-admin-password").read_text().strip()
 
-    def internal(self, url, timeout=20):
-        """GET an endpoint that exists only inside the private gateway namespace."""
-        return self.local.compose("exec", "-T", "prometheus", "wget", "-T", str(timeout - 5), "-qO-", url,
-                                  capture=True, timeout=timeout).stdout
+    def internal(self, url, timeout=20, attempts=10):
+        """GET an endpoint that exists only inside the private gateway namespace, retrying while collectors start."""
+        for attempt in range(attempts):
+            try:
+                return self.local.compose("exec", "-T", "prometheus", "wget", "-T", str(timeout - 5), "-qO-", url,
+                                          capture=True, timeout=timeout).stdout
+            except subprocess.SubprocessError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(3)
 
     def grafana(self, path, authenticated=True):
         request = urllib.request.Request(f"http://127.0.0.1:{self.local.observability['grafana_port']}{path}")
@@ -94,12 +102,13 @@ class Observer:
         unhealthy = sorted(f"{job} {instance} {value}" for (job, instance), value in health.items() if value != "up")
         require(jobs == SCRAPE_JOBS and not unhealthy,
                 "Every scrape target must be up: " + ", ".join(unhealthy))
-        loki = self.internal("http://127.0.0.1:3100/config")
-        require("retention_period: 1w" in loki or "retention_period: 168h" in loki, "Loki must retain logs for 7 days")
-        require("retention_enabled: true" in loki, "Loki compactor retention must be enabled")
+        loki = policy.yaml.safe_load(self.internal("http://127.0.0.1:3100/config"))
+        loki_retention = loki["limits_config"]["retention_period"]
+        require(loki_retention in ("1w", "7d", "168h"), "Loki must retain logs for 7 days")
+        require(loki["compactor"]["retention_enabled"] is True, "Loki compactor retention must be enabled")
         # The API masks webhook URLs, so bind the loaded receiver shape to the reviewed source file.
         loaded = policy.yaml.safe_load(json.loads(self.internal("http://127.0.0.1:9093/api/v2/status"))["config"]["original"])
-        source = policy.yaml.safe_load((stack.OBSERVABILITY.parent / "observability/alertmanager.yml").read_text())
+        source = policy.yaml.safe_load((stack.OBSERVABILITY_CONFIG / "alertmanager.yml").read_text())
         shapes = [{key for key, value in receiver.items() if key.endswith("_configs") and value} for receiver in loaded["receivers"]]
         urls = [hook["url"] for receiver in source["receivers"] for hook in receiver.get("webhook_configs", [])]
         require(shapes == [{"webhook_configs"}] and len(loaded["receivers"][0]["webhook_configs"]) == 1
@@ -112,12 +121,12 @@ class Observer:
                 "Grafana must provision only the local data sources")
         code, dashboard = self.grafana("/api/dashboards/uid/platinumwt-local")
         require(code == 200, "Provisioned dashboard is missing")
-        bindings = json.loads(self.local.run(["inspect", "--format", "{{json .HostConfig.PortBindings}}",
-                                              self.local.compose("ps", "-q", "gateway", capture=True).stdout.strip()],
-                                             capture=True).stdout)
+        gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
+        bindings = json.loads(self.local.run(["inspect", "--format", "{{json .HostConfig.PortBindings}}", gateway],
+                                             capture=True, timeout=10).stdout)
         require(all(item["HostIp"] == "127.0.0.1" for values in bindings.values() for item in values),
                 "Administrative and ingest ports must be loopback-only")
-        return {"prometheus_retention": flags["storage.tsdb.retention.time"], "loki_retention": "168h",
+        return {"prometheus_retention": flags["storage.tsdb.retention.time"], "loki_retention": loki_retention,
                 "targets": sorted(f"{job} {instance}" for job, instance in health), "alert_receivers": urls,
                 "grafana_unauthenticated": 401, "grafana_datasources": sorted(item["uid"] for item in sources),
                 "published": {key: [item["HostIp"] + ":" + item["HostPort"] for item in value] for key, value in bindings.items()}}
@@ -172,24 +181,35 @@ class Observer:
 
     def alerts(self):
         workspace = self.local.workspace
+        compose = self.local.compose
         results = []
-        results.append(self.scenario("ServiceDown", lambda: self.local.compose("stop", "backend", capture=True),
-                                     lambda: self.local.compose("start", "backend", capture=True), {"job": "backend"}))
-        # No backup has been recorded yet: absence is stale; a fresh, then old, then fresh value follows.
-        write_backup_timestamp(workspace, time.time())
-        results.append(self.scenario("BackupStale", lambda: write_backup_timestamp(workspace, time.time() - 2 * 86400),
-                                     lambda: write_backup_timestamp(workspace, time.time())))
+        results.append(self.scenario("ServiceDown", lambda: compose("stop", "backend", capture=True, timeout=60),
+                                     lambda: compose("start", "backend", capture=True, timeout=60), {"job": "backend"}))
+        results.append(self.scenario("LedgerDatabaseUnavailable",
+                                     lambda: compose("stop", "database", capture=True, timeout=60),
+                                     lambda: compose("start", "database", capture=True, timeout=60)))
+        # The real backup tool owns backup.prom; preserve whatever it recorded (or its absence) afterwards.
+        textfile = workspace / "observability/textfile/backup.prom"
+        prior = textfile.read_bytes() if textfile.exists() else None
+        try:
+            write_backup_timestamp(workspace, time.time())
+            results.append(self.scenario("BackupStale", lambda: write_backup_timestamp(workspace, time.time() - 2 * 86400),
+                                         lambda: write_backup_timestamp(workspace, time.time())))
+        finally:
+            if prior is None:
+                textfile.unlink(missing_ok=True)
+            else:
+                temporary = textfile.with_name(".backup.prom.restore")
+                temporary.write_bytes(prior)
+                os.chmod(temporary, 0o644)
+                os.replace(temporary, textfile)
         fill = "import os; f=os.statvfs('/monitored/pressure'); open('/monitored/pressure/fill','wb').write(b'\\0'*int(f.f_bavail*f.f_frsize*0.95))"
         results.append(self.scenario(
             "FilesystemPressure",
-            lambda: self.local.compose("exec", "-T", "capture", "python3", "-c", fill, capture=True),
-            lambda: self.local.compose("exec", "-T", "capture", "rm", "-f", "/monitored/pressure/fill", capture=True),
+            lambda: compose("exec", "-T", "capture", "python3", "-c", fill, capture=True, timeout=60),
+            lambda: compose("exec", "-T", "capture", "rm", "-f", "/monitored/pressure/fill", capture=True, timeout=60),
             {"mountpoint": "/monitored/pressure"}))
         return results
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():
@@ -220,17 +240,17 @@ def main():
             directory.mkdir(mode=0o700)
             report.update(source_commit=local.manifest["source_commit"], source_dirty=local.manifest["source_dirty"],
                           images=local.manifest["images"], database_system_id=local.manifest["database_system_id"],
-                          configs={name: digest(stack.OBSERVABILITY.parent / "observability" / name) for name in CONFIGS},
-                          compose={name: digest(path) for name, path in (("compose.yaml", stack.COMPOSE),
-                                                                         ("observability.yaml", stack.OBSERVABILITY))})
+                          configs={name: isolation.digest(stack.OBSERVABILITY_CONFIG / name) for name in CONFIGS},
+                          compose={path.name: isolation.digest(path) for path in (stack.COMPOSE, stack.OBSERVABILITY)})
             report["configuration"] = observer.configuration()
             report["logs"] = observer.logs()
             report["alerts"] = observer.alerts()
+            local.database_identity()
             local.ready()
             local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
             report["ledger_replay_after"] = "pass"
         report["status"] = "pass"
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, policy.yaml.YAMLError) as error:
         report.update(status="fail", failure=type(error).__name__ + ": " + str(error))
     finally:
         if directory:

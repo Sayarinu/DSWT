@@ -58,14 +58,16 @@ Ordinary readiness checks create no identities or trades.
 
 `init --port N` selects another loopback HTTPS port for a parallel workspace and
 its ROM profile. `init --port 18443 --observability 13000 24224` also enables
-the private profile in `tools/local-stack/observability.yaml`: pinned Prometheus
-(15-day metrics), Loki (7-day logs), Alertmanager, Alloy and Grafana. They share
-the gateway namespace, and only Grafana and Docker's log ingest are published,
-on `127.0.0.1`. The Grafana `admin` password is in
-`observability/grafana-admin-password`. Alerts go only to a local capture file
-(`observability/alerts/received.jsonl`); no external receiver exists. Local backup
-tooling records `platinumwt_backup_last_success_timestamp_seconds` in
-`observability/textfile/`; until then the backup alert fires. With Python 3.12+:
+the private profile in `tools/local-stack/compose.observability.yaml`: pinned
+Prometheus (15-day metrics), Loki (7-day logs), Alertmanager, Alloy and Grafana.
+They share the gateway namespace. Only Grafana and Docker's log ingest are
+published, on `127.0.0.1`; like 8443, they are reachable from this host only.
+Log ingest is unauthenticated, so local processes could add lines. The Grafana
+`admin` password is in `observability/grafana-admin-password`. Alerts go only to
+a local capture file (`observability/alerts/received.jsonl`); no external
+receiver exists. Backup tooling must record
+`platinumwt_backup_last_success_timestamp_seconds` in `observability/textfile/`;
+until a backup is recorded, the backup alert fires. With Python 3.12+:
 
 ```sh
 python3.12 tools/local-stack/observability.py --workspace game/obs verify
@@ -73,7 +75,8 @@ python3.12 tools/local-stack/observability.py --workspace game/obs verify
 
 The verifier checks retention, private access and receivers, and finds a fresh
 gateway request in Loki. It then captures real firing and resolution for a
-stopped backend, a stale backup, and a filled 16 MiB pressure-probe filesystem.
+stopped backend and database, a stale backup (restoring the prior backup metric
+afterwards) and a filled 16 MiB pressure-probe filesystem.
 Lines emitted while the collector restarts can be delayed or lost. Alloy's
 fluent-forward receiver is experimental in the pinned release. This profile was
 validated on a native Linux Docker engine; it makes no hosted-operation claim.

@@ -34,7 +34,7 @@ COLLECTOR_PUBLISHED = (3000, 24224)
 def volume_contract(local, service):
     project = local.manifest["project"]
     socket = ("volume", project + "-socket", True)
-    config = stack.OBSERVABILITY.parent / "observability"
+    config = stack.OBSERVABILITY_CONFIG
     observe = local.workspace / "observability"
     pressure = ("volume", project + "-pressure", True)
     return {
@@ -50,7 +50,8 @@ def volume_contract(local, service):
                          "/etc/alertmanager/alertmanager.yml": ("bind", str(config / "alertmanager.yml"), False)},
         "loki": {"/loki": ("volume", project + "-loki", True), "/etc/loki/loki.yaml": ("bind", str(config / "loki.yaml"), False)},
         "alloy": {"/etc/alloy/config.alloy": ("bind", str(config / "config.alloy"), False),
-                  "/textfile": ("bind", str(observe / "textfile"), False), "/monitored/pressure": pressure[:2] + (False,)},
+                  "/textfile": ("bind", str(observe / "textfile"), False),
+                  "/monitored/pressure": ("volume", project + "-pressure", False)},
         "grafana": {"/etc/grafana/provisioning": ("bind", str(config / "grafana"), False),
                     "/run/platinumwt/grafana-admin-password": ("bind", str(observe / "grafana-admin-password"), False)},
         "capture": {"/capture/capture.py": ("bind", str(config / "capture.py"), False),

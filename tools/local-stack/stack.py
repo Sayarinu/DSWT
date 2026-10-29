@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import ssl
 import stat
+import secrets
 import subprocess
 import sys
 import time
@@ -19,7 +20,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = Path(__file__).with_name("compose.yaml")
-OBSERVABILITY = Path(__file__).with_name("observability.yaml")
+OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
+OBSERVABILITY_CONFIG = Path(__file__).with_name("observability")
 LABEL = "studio.nouvellelune.platinumwt.local-workspace"
 SERVICES = ("database", "gateway", "validator", "backend")
 OBSERVABILITY_SERVICES = ("prometheus", "alertmanager", "loki", "alloy", "grafana", "capture")
@@ -77,9 +79,15 @@ def valid_port(value):
     return type(value) is int and 1024 <= value <= 65535
 
 
-def initialize(workspace, port=DEFAULT_PORT, observability=None):
+def valid_ports(port, observability):
+    if observability is not None and (not isinstance(observability, dict) or set(observability) != {"grafana_port", "log_port"}):
+        return False
     ports = [port, *(observability or {}).values()]
-    if not all(valid_port(item) for item in ports) or len(set(ports)) != len(ports):
+    return all(valid_port(item) for item in ports) and len(set(ports)) == len(ports)
+
+
+def initialize(workspace, port=DEFAULT_PORT, observability=None):
+    if not valid_ports(port, observability):
         raise ValueError("Use distinct host ports between 1024 and 65535")
     workspace.parent.mkdir(parents=True, exist_ok=True)
     workspace.mkdir(mode=0o700)  # Exclusive: an existing run is never reinitialized.
@@ -98,11 +106,12 @@ def initialize(workspace, port=DEFAULT_PORT, observability=None):
         manifest["https_port"] = port
     if observability:
         observe = workspace / "observability"
-        for child in ("", "alerts", "textfile"):
-            (observe / child).mkdir(mode=0o700, exist_ok=child != "")
+        observe.mkdir(mode=0o700)
+        for child in ("alerts", "textfile"):
+            (observe / child).mkdir(mode=0o700)
         secret = os.open(observe / "grafana-admin-password", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(secret, "w") as output:
-            output.write(uuid.uuid4().hex + uuid.uuid4().hex)
+            output.write(secrets.token_hex(32))
         manifest["observability"] = dict(observability)
     save_manifest(workspace, manifest)
 
@@ -125,9 +134,8 @@ def read_manifest(workspace):
             or manifest.get("profile") != "tls/connection.json"
             or ("https_port" in manifest and (not valid_port(manifest["https_port"]) or manifest["https_port"] == DEFAULT_PORT))
             or manifest.get("host_endpoint") != f"https://localhost:{https_port(manifest)}/wt/v1"
-            or ("observability" in manifest and (not isinstance(manifest["observability"], dict)
-                                                 or set(manifest["observability"]) != {"grafana_port", "log_port"}
-                                                 or not all(valid_port(v) for v in manifest["observability"].values())))
+            or ("observability" in manifest and manifest["observability"] is None)
+            or not valid_ports(https_port(manifest), manifest.get("observability"))
             or (manifest.get("database_system_id") is not None
                 and (not isinstance(manifest["database_system_id"], str)
                      or not re.fullmatch(r"[0-9]+", manifest["database_system_id"])))):
@@ -250,11 +258,12 @@ class Stack:
     def up(self):
         self.volumes(create=True)
         self.compose("build", "gateway", "validator")
-        self.compose("stop", *reversed(self.services[1:]))
+        applications = [service for service in self.services if service != "database"]
+        self.compose("stop", *reversed(applications))
         self.compose("up", "-d", "--wait", "--wait-timeout", "90", "database")
         self.database_identity()
         self.compose("run", "--rm", "--no-deps", "migrate")
-        self.compose("up", "-d", "--force-recreate", *self.services[1:])
+        self.compose("up", "-d", "--force-recreate", *applications)
         deadline = time.monotonic() + 60
         while True:
             try:

@@ -11,7 +11,10 @@ LIMIT = 1024 * 1024
 
 class Capture(BaseHTTPRequestHandler):
     def do_POST(self):
-        length = int(self.headers.get("Content-Length") or -1)
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            length = -1
         if self.path != "/alerts" or not 0 < length <= LIMIT:
             self.send_error(400)
             return

@@ -44,6 +44,14 @@ class CaptureTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.observer.await_alert(0, "ServiceDown", "resolved", {"job": "backend"}, timeout=0.01)
 
+    def test_a_partially_appended_delivery_is_read_on_a_later_poll(self):
+        line = delivery("ServiceDown", "firing", job="backend")
+        self.observer.capture.write_text(line[:-10])
+        self.assertEqual(observability.notifications(self.observer.capture, 0), [])
+        self.observer.capture.write_text(line)
+        [(name, labels, status, receiver, end)] = observability.notifications(self.observer.capture, 0)
+        self.assertEqual((name, status, end), ("ServiceDown", "firing", len(line)))
+
     def test_backup_metric_is_published_atomically(self):
         observability.write_backup_timestamp(self.workspace, 1234.4)
         directory = self.workspace / "observability/textfile"
@@ -66,7 +74,7 @@ class CaptureTests(unittest.TestCase):
                 if "targets" in url:
                     return json.dumps(targets)
                 if ":3100" in url:
-                    return "retention_period: 1w\nretention_enabled: true\n"
+                    return "limits_config: {retention_period: 1w}\ncompactor: {retention_enabled: true}\n"
                 return json.dumps({"config": {"original": policy.yaml.safe_dump(config)}})
             return fetch
 
