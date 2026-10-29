@@ -53,7 +53,8 @@ unsigned short LoadMetricsPort() {
 }
 
 unsigned LoadSubmissionWorkers() {
-  const auto workers = Environment("WT_SUBMISSION_WORKERS", "4");
+  const auto workers = Environment("WT_SUBMISSION_WORKERS", "");
+  if (workers.empty() && !std::getenv("WT_SUBMISSION_WORKERS")) return kDefaultSubmissionWorkers;
   unsigned value = 0;
   const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), value);
   if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || value < 1 || value > 16)

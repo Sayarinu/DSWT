@@ -35,6 +35,18 @@ RESTARTABLE = ("backend", "validator", "database")
 # Local CPU/memory limits for the measured services; the validator is sized per Submit worker.
 CONSTRAINTS = {"gateway": ["--cpus", "2", "--memory", "512m", "--memory-swap", "512m"], "backend": ["--cpus", "2", "--memory", "1g", "--memory-swap", "1g"]}
 GATEWAY_PORT = 8443
+# The LUNE-409 targets; shorter or smaller runs are reported but never qualify.
+SPEC = {"duration": 3600, "clients": 1000, "pairs": 10, "p95_ms": 500}
+PROBE_TIMEOUT = 90
+DRAIN_TIMEOUT = 600
+CHECKPOINT_SECONDS = 300
+NOTES = [
+    "Clients connect to the gateway's 127.0.0.1:8443 inside its namespace, bypassing Docker's published-port forwarding.",
+    "The backend is the disposable device fixture with its local-test recovery barrier, not the production backend binary.",
+    "The native client is the sanitizer-instrumented test build; client latency is conservative versus service latency.",
+    "Offered load is paced at a fixed multiple of the target; this is not a search for the local ceiling.",
+    "The database and driver container are not CPU/memory limited; gateway restarts are excluded (shared namespace owner).",
+]
 
 
 def percentile(values, fraction):
@@ -73,14 +85,17 @@ def source(index):
     return f"127.10.{index // 250}.{1 + index % 250}"
 
 
-def verdict(report, targets):
+def verdict(report):
+    """Gate on the fixed LUNE-409 targets, whatever arguments the run used."""
     measured = report["measured"]
+    latency = measured["latency"]
     checks = {
-        "duration": measured["window_seconds"] >= targets["duration"],
-        "active_clients": measured["active_clients"] >= targets["clients"],
-        "completed_pairs_per_second": (measured["completed_pairs"]["per_second"] or 0) >= targets["pairs"],
-        # Client-observed, including the native client's own TLS handshake; stricter than gateway time.
-        "api_p95_below_500ms": (measured["latency"]["all"]["p95_ms"] or math.inf) < 500,
+        "duration": measured["window_seconds"] >= SPEC["duration"],
+        "active_clients": measured["active_clients"]["trading"] >= SPEC["clients"],
+        "completed_pairs_per_second": (measured["completed_pairs"]["per_second"] or 0) >= SPEC["pairs"],
+        # Client-observed per attempt, failures and timeouts included, with the native client's own TLS
+        # handshake; every operation and the aggregate must be below the limit.
+        "api_p95_below_500ms": bool(latency) and all((item["p95_ms"] or math.inf) < SPEC["p95_ms"] for item in latency.values()),
         "conservation": report["conservation"]["status"] == "pass",
     }
     return {"checks": checks, "status": "pass" if all(checks.values()) else "fail"}
@@ -96,6 +111,7 @@ class Driver:
         self.latency, self.results, self.failures = {}, Counter(), Counter()
         self.measuring = self.stopping = False
         self.submitted = self.completed = 0
+        self.active = set()
 
     async def probe(self, client, action):
         spec = self.spec
@@ -110,17 +126,23 @@ class Driver:
             except TimeoutError:
                 process.kill()
                 await process.wait()
-                self.failures["probe_timeout"] += 1
+                if self.measuring:
+                    self.failures["probe_timeout"] += 1
+                    self.latency.setdefault("timeout", []).append(PROBE_TIMEOUT * 1_000_000)
                 return None
         summary = None
         for line in output.splitlines():
             event = json.loads(line)
-            if "wire_operation" in event:
+            if "transport_stage" in event:
+                # A failed attempt still costs the client its elapsed time; keep it in the latency sample.
                 if self.measuring:
+                    self.failures["transport:" + event["transport_stage"]] += 1
+                    self.latency.setdefault(str(event["failed_operation"]), []).append(event["elapsed_us"])
+            elif "wire_operation" in event:
+                if self.measuring:
+                    self.active.add(client["path"])
                     self.latency.setdefault(str(event["wire_operation"]), []).append(event["elapsed_us"])
                     self.results[f"{event['wire_operation']}:{event['wire_result']}"] += 1
-            elif "transport_stage" in event and self.measuring:
-                self.failures["transport:" + event["transport_stage"]] += 1
             elif event.get("summary"):
                 summary = event
         acceptance.require(process.returncode in (0, 1) and summary,
@@ -154,7 +176,8 @@ class Driver:
                 await asyncio.sleep(wait)
             if self.stopping:
                 break
-            self.submitted += self.measuring
+            if self.measuring and client["legal"]:
+                self.submitted += 1
             state = await self.probe(client, "submit")
             deadline = time.monotonic() + spec["match_timeout"]
             while not state or state["phase"] != SETTLED or state["pending_sha256"]:
@@ -162,7 +185,8 @@ class Driver:
                     await self.settle(client, "cancel")  # Unmatched when the run drains.
                     break
                 state = await self.poll(client, state)
-            self.completed += self.measuring and client["legal"]
+            if self.measuring and client["legal"]:
+                self.completed += 1
 
     async def pace(self):
         interval = 1 / (2 * self.spec["offer_rate"])
@@ -203,10 +227,18 @@ class Driver:
         self.measuring = False
         self.stopping = True
         pacer.cancel()
-        await asyncio.gather(*tasks)
+        # Bound the drain; a client that cannot settle fails conservation instead of hanging the run.
+        done, pending = await asyncio.wait(tasks, timeout=DRAIN_TIMEOUT)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            if task.exception():
+                raise task.exception()
         final = await asyncio.gather(*(self.inspect(client) for client in clients))
         return {"window": wall, "latency": self.latency, "results": dict(self.results), "failures": dict(self.failures),
-                "client_submissions": self.submitted, "client_cycles_completed": self.completed,
+                "legal_submissions": self.submitted, "legal_cycles_completed": self.completed,
+                "clients_exchanging": len(self.active), "drain_unsettled": len(pending),
                 "initial": initial, "final": final}
 
 
@@ -245,6 +277,7 @@ class Load:
         workers = str(args.submission_workers)
         self.local.env.update(PWT_LOCAL_MATCHERS=str(args.matchers), PWT_LOCAL_SUBMISSION_WORKERS=workers,
                               PWT_LOCAL_VALIDATOR_WORKERS=workers)
+        acceptance.require((os.cpu_count() or 0) >= args.submission_workers + 8, "too few host CPUs for this sizing")
         self.local.up()
         self.local.run(["update", "--cpus", workers, self.container_id("validator")], capture=True)
         if args.constrained:
@@ -283,20 +316,24 @@ class Load:
             self.samples.append({"at": time.time(), "containers": [
                 {key: row[key] for key in ("Name", "CPUPerc", "MemUsage", "PIDs")}
                 for row in map(json.loads, stats.stdout.splitlines()) if row["Name"].startswith(project)]})
-            if len(self.samples) % 10 == 0:
+            if len(self.samples) % (CHECKPOINT_SECONDS // 60) == 0:
                 self.checkpoints.append(await asyncio.to_thread(self.retained))
 
     def retained(self, sequence=None):
-        """Digest receipts/acknowledgements visible at a journal position; later reads must match."""
+        """Digest acknowledged receipts and terminal (applied) ownership at a journal position; later reads must match."""
         if sequence is None:
             sequence = int(self.runner.sql("SELECT coalesce(max(sequence), 0) FROM platinumwt.audit_journal"))
-        digest = self.runner.sql(
-            "SET bytea_output = 'hex'; SELECT count(*) || ' ' || encode(sha256(convert_to(coalesce(string_agg(row, E'\\n' "
-            "ORDER BY row), ''), 'UTF8')), 'hex') FROM (SELECT to_jsonb(r)::text || coalesce(to_jsonb(a)::text, '') AS row "
-            "FROM platinumwt.receipts r LEFT JOIN platinumwt.acknowledgements a USING (receipt_id) "
-            "WHERE r.receipt_id IN (SELECT (row_key ->> 'receipt_id')::uuid FROM platinumwt.audit_journal "
-            f"WHERE table_name = 'acknowledgements' AND sequence <= {sequence})) item").splitlines()[-1]
-        return {"sequence": sequence, "digest": digest}
+        digest = ("SET bytea_output = 'hex'; SELECT count(*) || ' ' || encode(sha256(convert_to(coalesce(string_agg(row, "
+                  "E'\\n' ORDER BY row), ''), 'UTF8')), 'hex') FROM ({}) item")
+        receipts = self.runner.sql(digest.format(
+            "SELECT to_jsonb(r)::text || to_jsonb(a)::text AS row FROM platinumwt.receipts r "
+            "JOIN platinumwt.acknowledgements a USING (receipt_id) WHERE r.receipt_id IN (SELECT (row_key ->> "
+            f"'receipt_id')::uuid FROM platinumwt.audit_journal WHERE table_name = 'acknowledgements' AND sequence <= {sequence})"))
+        ownership = self.runner.sql(digest.format(
+            "SELECT to_jsonb(o)::text AS row FROM platinumwt.ownership o WHERE o.asset_id IN (SELECT (row_key ->> "
+            "'asset_id')::uuid FROM platinumwt.audit_journal WHERE table_name = 'ownership' "
+            f"AND after_image ->> 'location' = '3' AND sequence <= {sequence})"))
+        return {"sequence": sequence, "receipts": receipts.splitlines()[-1], "ownership": ownership.splitlines()[-1]}
 
     async def drive(self, spec):
         """Run the driver container while restarts and sampling proceed on the host."""
@@ -304,29 +341,41 @@ class Load:
         spec_path, output = self.directory / "spec.json", self.directory / "driver.json"
         acceptance.save_json(spec_path, dict(spec, started=str(started)))
         root, run = str(stack.ROOT), str(self.directory)
+        name = f"{self.local.manifest['project']}-load-{self.directory.name[-8:]}"
         process = await asyncio.create_subprocess_exec(
-            *self.local.docker, "run", "--rm", "--name", f"{self.local.manifest['project']}-load-{self.directory.name[-8:]}",
+            *self.local.docker, "run", "--rm", "--name", name,
             "--network", "container:" + self.container_id("gateway"), "--read-only", "--tmpfs", "/tmp",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", f"{os.getuid()}:{os.getgid()}",
             "--mount", f"type=bind,source={root},target={root},readonly", "--mount", f"type=bind,source={run},target={run}",
             self.image, "python3", str(Path(__file__).resolve()), "drive", str(spec_path), str(output),
             env=self.local.env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         logging = asyncio.create_task(process.stdout.read())
-        while not started.exists():
-            acceptance.require(process.returncode is None, "load driver exited before measuring")
-            await asyncio.sleep(1)
-        helpers = [asyncio.create_task(self.faults(json.loads(started.read_text())["started"])),
-                   asyncio.create_task(self.monitor())]
-        await process.wait()
-        for helper in helpers:
-            if helper.done() and helper.exception():
-                raise helper.exception()
-            helper.cancel()
-        (self.directory / "driver.log").write_bytes(await logging)
+        helpers = []
+        try:
+            while not started.exists():
+                acceptance.require(process.returncode is None, "load driver exited before measuring")
+                await asyncio.sleep(1)
+            helpers = [asyncio.create_task(self.faults(json.loads(started.read_text())["started"])),
+                       asyncio.create_task(self.monitor())]
+            while process.returncode is None:
+                await asyncio.wait([asyncio.create_task(process.wait())], timeout=5)
+                for helper in helpers:
+                    if helper.done() and not helper.cancelled() and helper.exception():
+                        raise helper.exception()
+            self.checkpoints.append(await asyncio.to_thread(self.retained))
+        finally:
+            for helper in helpers:
+                helper.cancel()
+            if process.returncode is None:
+                # Never leave the client container running in the gateway namespace.
+                await asyncio.to_thread(self.local.run, ["rm", "-f", name], capture=True, check=False)
+                await process.wait()
+            (self.directory / "driver.log").write_bytes(await logging)
         acceptance.require(process.returncode == 0, "load driver failed; see driver.log")
         return json.loads(output.read_text())
 
-    def pair_times(self):
+    def pair_times(self, start, end):
+        """Completed pairs (both ACKs) and accepted offers by commit time, and distinct saves trading in the window."""
         rows = self.runner.rows(
             "SELECT extract(epoch FROM max(j.recorded_at))::float8 AS completed FROM platinumwt.matches m "
             "JOIN platinumwt.receipts r ON r.match_id = m.match_id JOIN platinumwt.audit_journal j "
@@ -336,7 +385,12 @@ class Load:
             "SELECT extract(epoch FROM j.recorded_at)::float8 AS accepted FROM platinumwt.operations o "
             "JOIN platinumwt.audit_journal j ON j.table_name = 'operations' AND j.row_key ->> 'operation_id' = o.operation_id::text "
             "AND j.row_key ->> 'save_id' = o.save_id::text WHERE o.opcode = 2 AND o.result = 1")
-        return [row["completed"] for row in rows], [row["accepted"] for row in offers]
+        traders = int(self.runner.sql(
+            "SELECT count(DISTINCT o.save_id) FROM platinumwt.operations o JOIN platinumwt.audit_journal j "
+            "ON j.table_name = 'operations' AND j.row_key ->> 'operation_id' = o.operation_id::text "
+            "AND j.row_key ->> 'save_id' = o.save_id::text WHERE o.opcode = 2 AND o.result = 1 "
+            f"AND j.recorded_at >= to_timestamp({start}) AND j.recorded_at < to_timestamp({end})"))
+        return [row["completed"] for row in rows], [row["accepted"] for row in offers], traders
 
     def server_latency(self, service, start, end):
         """Service-measured handling time per operation/result from structured logs, excluding client TLS work."""
@@ -373,7 +427,10 @@ class Load:
                 "SELECT count(*) FROM platinumwt.receipts r JOIN platinumwt.ownership o USING (asset_id, save_id, trade_id) "
                 "JOIN platinumwt.payloads p USING (asset_id) LEFT JOIN platinumwt.acknowledgements a USING (receipt_id, save_id) "
                 "WHERE o.location <> 3 OR a.applied_sha256 IS DISTINCT FROM p.sha256") == "0",
-            "receipts_immutable": all(self.retained(item["sequence"]) == item for item in self.checkpoints),
+            # At least one checkpoint must exist; acknowledged receipts and applied ownership never change afterwards.
+            "receipts_and_ownership_immutable": bool(self.checkpoints)
+                and all(self.retained(item["sequence"]) == item for item in self.checkpoints),
+            "drain_settled": results["drain_unsettled"] == 0,
         }
         self.local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=1200)
         checks["ledger_replay"] = True
@@ -391,8 +448,9 @@ def run(local, directory, args):
                        "cpus": os.cpu_count(), "python": platform.python_version()},
               "stack": local.manifest, "excluded": ["matchmaking wait between polls", "WiFi/DS radio", "hosted network"],
               "client_networks": "one loopback /32 per client inside the gateway namespace",
-              "targets": {"duration_seconds": args.duration, "active_clients": args.clients,
-                          "completed_pairs_per_second": args.pairs, "api_p95_ms_below": 500},
+              "targets": {"duration_seconds": SPEC["duration"], "active_clients": SPEC["clients"],
+                          "completed_pairs_per_second": SPEC["pairs"], "api_p95_ms_below": SPEC["p95_ms"]},
+              "measurement_notes": NOTES,
               "workload": {key: getattr(args, key) for key in ("clients", "illegal", "offer_rate", "concurrency", "poll",
                                                                 "idle_poll", "matchers", "submission_workers", "restart", "restart_at", "constrained")}}
     load = Load(local, directory, args)
@@ -420,19 +478,21 @@ def run(local, directory, args):
                                        ("duration", "offer_rate", "concurrency", "poll", "idle_poll", "match_timeout")}}
         results = asyncio.run(load.drive(spec))
         start, end = results["window"]
-        pairs, offers = load.pair_times()
+        pairs, offers, traders = load.pair_times(start, end)
         latency = {op: summarize(values) for op, values in sorted(results["latency"].items())}
         latency["all"] = summarize([value for values in results["latency"].values() for value in values])
         report["measured"] = {
-            "window": [start, end], "window_seconds": round(end - start, 3), "active_clients": args.clients,
-            "completed_pairs": rates(pairs, start, end), "acknowledged_offers": rates(offers, start, end),
+            "window": [start, end], "window_seconds": round(end - start, 3),
+            "active_clients": {"configured": args.clients, "exchanging": results["clients_exchanging"], "trading": traders},
+            "completed_pairs": rates(pairs, start, end), "accepted_offers": rates(offers, start, end),
             "latency": latency, "gateway_latency": load.server_latency("gateway", start, end),
             "backend_latency": load.server_latency("backend", start, end),
-            **{key: results[key] for key in ("results", "failures", "client_submissions", "client_cycles_completed")},
+            **{key: results[key] for key in ("results", "failures", "legal_submissions", "legal_cycles_completed",
+                                             "drain_unsettled")},
             "restarts": load.events, "resource_samples": load.samples,
         }
         report["conservation"] = load.verify(results, args.clients, load.runner.fixture_manifest["sha256"])
-        report["verdict"] = verdict(report, {"duration": args.duration, "clients": args.clients, "pairs": args.pairs})
+        report["verdict"] = verdict(report)
         report["status"] = report["verdict"]["status"]
     except Exception as error:
         report.update(status="fail", failure=type(error).__name__ + ": " + str(error))

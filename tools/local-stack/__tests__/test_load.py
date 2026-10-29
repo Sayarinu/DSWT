@@ -6,13 +6,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import load
 
 
-def report(per_second=10.0, p95=420.0, conservation="pass", window=3600, clients=1000):
-    return {"measured": {"window_seconds": window, "active_clients": clients,
-                         "completed_pairs": {"per_second": per_second}, "latency": {"all": {"p95_ms": p95}}},
+def report(per_second=10.0, p95=420.0, conservation="pass", window=3600, trading=1000, submit_p95=480.0):
+    return {"measured": {"window_seconds": window, "active_clients": {"configured": 1000, "trading": trading},
+                         "completed_pairs": {"per_second": per_second},
+                         "latency": {"all": {"p95_ms": p95}, "2": {"p95_ms": submit_p95}}},
             "conservation": {"status": conservation}}
-
-
-TARGETS = {"duration": 3600, "clients": 1000, "pairs": 10}
 
 
 class MeasurementTests(unittest.TestCase):
@@ -44,16 +42,17 @@ class MeasurementTests(unittest.TestCase):
         self.assertTrue(all(address.startswith("127.") for address in addresses))
         self.assertTrue(all(0 < int(address.rsplit(".", 1)[1]) < 255 for address in addresses))
 
-    def test_every_target_must_be_met_without_weakening(self):
-        self.assertEqual(load.verdict(report(), TARGETS)["status"], "pass")
+    def test_every_fixed_target_must_be_met_without_weakening(self):
+        self.assertEqual(load.verdict(report())["status"], "pass")
         for changed, check in ((report(per_second=9.99), "completed_pairs_per_second"),
                                (report(p95=500.0), "api_p95_below_500ms"),
                                (report(p95=None), "api_p95_below_500ms"),
+                               (report(submit_p95=510.0), "api_p95_below_500ms"),
                                (report(conservation="fail"), "conservation"),
-                               (report(window=3599), "duration"),
-                               (report(clients=999), "active_clients")):
+                               (report(window=300), "duration"),
+                               (report(trading=999), "active_clients")):
             with self.subTest(check=check):
-                result = load.verdict(changed, TARGETS)
+                result = load.verdict(changed)
                 self.assertEqual(result["status"], "fail")
                 self.assertFalse(result["checks"][check])
 

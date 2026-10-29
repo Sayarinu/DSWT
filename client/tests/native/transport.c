@@ -7,9 +7,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -109,8 +109,10 @@ int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned c
     if (result >= 0 && reply.result != WT_RESULT_OK && reply.result != WT_RESULT_ILLEGAL_POKEMON
         && !(operation == WT_OP_CANCEL && (reply.result == WT_RESULT_CONFLICT || reply.result == WT_RESULT_NOT_FOUND))) result = -100 - reply.result;
 done:
-    if (result < 0) printf("{\"transport_stage\":\"%s\",\"result\":%d,\"tls_state\":%d,\"tls_flags\":%u}\n",
-        stage, result, connection.tls.ssl.MBEDTLS_PRIVATE(state), (unsigned)mbedtls_ssl_get_verify_result(&connection.tls.ssl));
+    clock_gettime(CLOCK_MONOTONIC, &finished);
+    if (result < 0) printf("{\"transport_stage\":\"%s\",\"result\":%d,\"tls_state\":%d,\"tls_flags\":%u,\"failed_operation\":%u,\"elapsed_us\":%lld}\n",
+        stage, result, connection.tls.ssl.MBEDTLS_PRIVATE(state), (unsigned)mbedtls_ssl_get_verify_result(&connection.tls.ssl),
+        operation, opened || fd >= 0 ? (long long)(finished.tv_sec - started.tv_sec) * 1000000 + (finished.tv_nsec - started.tv_nsec) / 1000 : 0LL);
     if (opened) WtTls_Close(&connection.tls);
     if (fd >= 0) close(fd);
     return result;

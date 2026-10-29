@@ -21,7 +21,7 @@ public:
   using Response = boost::beast::http::response<boost::beast::http::string_body>;
   HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
                 boost::asio::thread_pool &recovery,
-                std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers = 4);
+                std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers = kDefaultSubmissionWorkers);
   std::unique_ptr<HttpConnection> Connect(const boost::asio::ip::address &peer);
   bool Dispatch(Request request, std::shared_ptr<grpc::ClientContext> context, bool secure, std::string_view network,
                 std::function<void(Response)> complete);
