@@ -267,7 +267,7 @@ separately. Do not treat emulator SRAM readback alone as proof of host durabilit
 | Acknowledgement commits but reply is lost, then server restarts | Replay acknowledgement and reconcile retained receipt/events; never insert a second copy. |
 | Retail loader falls back or loads mixed block copies | Follow the journal's proven transition or pause; do not infer completion from one block or a slot alone. |
 | Copied client or old post-enrollment save reconnects | Same identity/history; fence counters and reconcile before trading. Ambiguous inventory requires recovery. |
-| Copy's Submit loses its counter to another copy | Reconcile; restore its escrow once only if the next durable event is another operation, then stay fenced. Copies sharing a journal seed outside managed sessions may reuse an operation ID and stay blocked instead. |
+| Copy's Submit loses its counter to another copy | Reconcile; restore its escrow once only if the next durable event is another operation, then stay fenced. Copies sharing a journal seed outside managed sessions may reuse an operation ID: identical Submits share the one offer; differing ones stay blocked. |
 | Database restored behind acknowledged events | Pause writes until the off-site durable watermark is recovered; never blindly requeue or reissue. |
 
 Whole-save deletion, pre-enrollment rollback, out-of-band editing/cloning and
