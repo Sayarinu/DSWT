@@ -38,6 +38,8 @@ class SaveVariantTests(unittest.TestCase):
 
     def test_invalid_edits_and_slots_are_refused(self):
         for text in ('{}', '{"0": {}}', '{"0": {"shiny": true}}', '{"0": {"hp": -1}}', '{"0": {"item": 999}}',
-                     '{"0": {"egg": 1}}', '{"0": {"move": [4, 1]}}', '{"0": {"move": [0, 0]}}'):
+                     '{"0": {"egg": 1}}', '{"0": {"move": [4, 1]}}', '{"0": {"move": [0, 0]}}', '{"0": {"move": 5}}',
+                     '{"0": {"move": [0.5, 1]}}', '{"0": {"move": [0, true]}}', '{"0": {"move": [0, 1, 2]}}',
+                     '{"1": {"hp": 0}, "1": {"egg": true}}', '{"01": {"hp": 0}}', '{" 1": {"hp": 0}}', '{"6": {"hp": 0}}'):
             with self.subTest(text=text), self.assertRaises(ValueError): variant.parse(text)
         with self.assertRaisesRegex(ValueError, "occupied"): variant.variant(self.raw, {2: {"hp": 0}})

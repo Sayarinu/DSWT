@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import sys
 
@@ -72,17 +73,27 @@ def variant(raw, changes):
     return bytes(raw)
 
 
+def integer(value, low, high):
+    return type(value) is int and low <= value <= high
+
+
+def unique(pairs):
+    if len({key for key, _ in pairs}) != len(pairs): raise ValueError("Repeated JSON key")
+    return dict(pairs)
+
+
 def parse(text):
-    value = json.loads(text)
+    value = json.loads(text, object_pairs_hook=unique)
     if not isinstance(value, dict) or not value: raise ValueError("Describe at least one party slot")
     changes = {}
     for slot, change in value.items():
+        if not re.fullmatch(r"[0-5]", slot): raise ValueError("Use party slot keys 0-5")
         if not isinstance(change, dict) or not change or set(change) - FIELDS: raise ValueError("Unsupported party edit")
-        if "move" in change:
-            index, move = change["move"]
-            if not (0 <= index < 4 and 0 < move < 468): raise ValueError("Use a move index 0-3 and a Platinum move")
+        if "move" in change and not (isinstance(change["move"], list) and len(change["move"]) == 2
+                                     and integer(change["move"][0], 0, 3) and integer(change["move"][1], 1, 467)):
+            raise ValueError("Use a move as [index 0-3, Platinum move ID]")
         for key, limit in (("hp", 0xFFFF), ("item", 467), ("capsule", 0xFF)):
-            if key in change and not (type(change[key]) is int and 0 <= change[key] <= limit): raise ValueError("Invalid " + key)
+            if key in change and not integer(change[key], 0, limit): raise ValueError("Invalid " + key)
         if "egg" in change and type(change["egg"]) is not bool: raise ValueError("Invalid egg")
         changes[int(slot)] = change
     return changes
