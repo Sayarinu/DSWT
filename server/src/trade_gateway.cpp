@@ -2,6 +2,7 @@
 
 #include "trade_encoding.h"
 #include "trade.grpc.pb.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <algorithm>
 #include <chrono>
@@ -151,7 +152,7 @@ std::string Envelope(const Frame &frame, const v1::ReplyContext &context, const 
 }
 
 template <typename Reply, typename Encode>
-GatewayReply Finish(const Frame &frame, const grpc::Status &status, const Reply &reply, Encode encode) {
+GatewayReply Finish(const Frame &frame, const grpc::Status &status, const Reply &reply, unsigned &observed, Encode encode) {
   if (!status.ok()) return {};
   Require(reply.ByteSizeLong() <= 4096 && Known(reply) && reply.has_context());
   std::string body;
@@ -161,7 +162,9 @@ GatewayReply Finish(const Frame &frame, const grpc::Status &status, const Reply 
     extra.clear_context();
     Require(extra.ByteSizeLong() == 0);
   }
-  return {GatewayReply::Status::Ok, Envelope(frame, reply.context(), body)};
+  auto packet = Envelope(frame, reply.context(), body);
+  observed = reply.context().result();
+  return {GatewayReply::Status::Ok, std::move(packet)};
 }
 
 std::string Outcome(const Frame &frame, const v1::MutationReply &reply) {
@@ -193,6 +196,12 @@ TradeGateway::~TradeGateway() = default;
 GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext &context) {
   try {
     const auto frame = Decode(packet);
+    unsigned observed = 0;
+    const bool mutation = frame.operation == 1 || frame.operation == 2 || frame.operation == 4 || frame.operation == 6;
+    const auto trade = frame.operation >= 3 && frame.operation <= 6 ? frame.body.substr(0, 16) : std::string_view{};
+    RpcTelemetry trace(static_cast<Operation>(frame.operation), nullptr, [&] { return observed; },
+                       mutation ? std::string_view(frame.request_id) : std::string_view{}, trade, frame.request_id);
+    context.AddMetadata("x-platinumwt-request-id-bin", frame.request_id);
     context.set_deadline(std::min(context.deadline(), std::chrono::system_clock::now() + std::chrono::seconds(4)));
     if (frame.operation == 1) {
       v1::EnrollRequest request;
@@ -202,7 +211,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.set_hints(std::string(frame.body.substr(5)));
       v1::EnrollReply reply;
       const auto status = impl_->identities->Enroll(&context, request, &reply);
-      return Finish(frame, status, reply, [](const auto &value) {
+      return Finish(frame, status, reply, observed, [](const auto &value) {
         Require(detail::NonzeroBytes(value.save_id(), 16));
         return value.save_id();
       });
@@ -215,7 +224,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.mutable_pokemon()->set_sha256(std::string(frame.body.substr(144, 32)));
       v1::MutationReply reply;
       const auto status = impl_->trades->Submit(&context, request, &reply);
-      return Finish(frame, status, reply, [&](const auto &value) { return Outcome(frame, value); });
+      return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
     if (frame.operation == 3) {
       v1::StatusRequest request;
@@ -223,7 +232,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       if (detail::NonzeroBytes(frame.body, 16)) request.set_trade_id(std::string(frame.body));
       v1::StatusReply reply;
       const auto status = impl_->trades->Status(&context, request, &reply);
-      return Finish(frame, status, reply, [&](const auto &value) {
+      return Finish(frame, status, reply, observed, [&](const auto &value) {
         Require(value.has_trade());
         if (detail::NonzeroBytes(frame.body, 16)) Require(value.trade().trade_id() == frame.body);
         return Snapshot(value.trade(), value.context().event_highwater());
@@ -235,7 +244,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.set_trade_id(std::string(frame.body));
       v1::MutationReply reply;
       const auto status = impl_->trades->Cancel(&context, request, &reply);
-      return Finish(frame, status, reply, [&](const auto &value) { return Outcome(frame, value); });
+      return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
     if (frame.operation == 5) {
       v1::CollectRequest request;
@@ -243,7 +252,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.set_trade_id(std::string(frame.body));
       v1::CollectReply reply;
       const auto status = impl_->trades->Collect(&context, request, &reply);
-      return Finish(frame, status, reply, [&](const auto &value) {
+      return Finish(frame, status, reply, observed, [&](const auto &value) {
         Require(value.has_trade() && value.trade().state() >= v1::TRADE_MATCHED && value.has_pokemon() && Known(value.pokemon()) &&
             detail::CanonicalShape(value.pokemon().pk4()) && detail::HashBytes(value.pokemon().pk4()) == value.pokemon().sha256() &&
             value.pokemon().sha256() == value.trade().received_sha256());
@@ -261,7 +270,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.set_applied_generation(Number(frame.body, 96, 8));
       v1::MutationReply reply;
       const auto status = impl_->trades->Acknowledge(&context, request, &reply);
-      return Finish(frame, status, reply, [&](const auto &value) { return Outcome(frame, value); });
+      return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
     v1::ReconcileRequest request;
     *request.mutable_auth() = frame.auth;
@@ -269,7 +278,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
     request.set_limit(Number(frame.body, 8, 1));
     v1::ReconcileReply reply;
     const auto status = impl_->trades->Reconcile(&context, request, &reply);
-    return Finish(frame, status, reply, [&](const auto &value) {
+    return Finish(frame, status, reply, observed, [&](const auto &value) {
       Require(value.events_size() <= static_cast<int>(request.limit()) && value.context().event_highwater() >= request.after_event() &&
           value.events_size() <= value.context().event_highwater() - request.after_event());
       auto sequence = request.after_event();
@@ -283,6 +292,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       return bytes + events;
     });
   } catch (const InvalidFrame &) {
+    Telemetry::Global().Record(Operation::Invalid, 3, std::chrono::microseconds(0));
     return {GatewayReply::Status::Invalid, {}};
   } catch (const std::exception &) {
     return {};

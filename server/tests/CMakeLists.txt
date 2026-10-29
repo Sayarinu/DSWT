@@ -6,8 +6,9 @@ add_executable(platinumwt-unit-tests
     unit/config_test.cpp
     unit/connectivity_service_test.cpp
     unit/http_request_handler_test.cpp)
+target_sources(platinumwt-unit-tests PRIVATE unit/telemetry_test.cpp)
 target_include_directories(platinumwt-unit-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server platinumwt_admission GTest::gtest_main)
+target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server platinumwt_admission platinumwt_telemetry GTest::gtest_main)
 target_compile_options(platinumwt-unit-tests PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(platinumwt-unit-tests TEST_PREFIX "unit." PROPERTIES LABELS "unit")
 
@@ -59,7 +60,7 @@ target_compile_options(platinumwt-gateway-fixture PRIVATE -Wall -Wextra -Wpedant
 # service image does not copy this executable or expose its local test barrier.
 add_executable(platinumwt-device-fixture integration/device_fixture.cpp)
 target_include_directories(platinumwt-device-fixture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-target_link_libraries(platinumwt-device-fixture PRIVATE platinumwt_trading PostgreSQL::PostgreSQL)
+target_link_libraries(platinumwt-device-fixture PRIVATE platinumwt_trading platinumwt_server PostgreSQL::PostgreSQL)
 target_compile_options(platinumwt-device-fixture PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME integration.device_fixture_refuses_unconfigured_start
     COMMAND ${CMAKE_COMMAND} -E env --unset=PLATINUMWT_DISPOSABLE_DEVICE_TEST

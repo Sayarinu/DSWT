@@ -20,6 +20,7 @@ class ServerTestCase(unittest.TestCase):
             WT_GRPC_ADDRESS="127.0.0.1:0",
         )
         env.pop("WT_GRPC_TARGET", None)
+        env.pop("WT_METRICS_PORT", None)
         env.update(overrides)
         process = subprocess.Popen(
             [self.server_binary],

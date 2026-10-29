@@ -43,6 +43,15 @@ std::string Required(const char *name) {
 
 } // namespace
 
+unsigned short LoadMetricsPort() {
+  const auto port = Environment("WT_METRICS_PORT", "0");
+  unsigned value = 0;
+  const auto parsed = std::from_chars(port.data(), port.data() + port.size(), value);
+  if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() || value > 65535)
+    throw std::invalid_argument("WT_METRICS_PORT must be between 0 and 65535");
+  return static_cast<unsigned short>(value);
+}
+
 ServerConfig LoadServerConfig() {
   ServerConfig config{Environment("WT_HTTP_ADDRESS", "0.0.0.0"), HttpPort(),
                       Environment("WT_GRPC_ADDRESS", "127.0.0.1:50051"),
@@ -61,6 +70,7 @@ ServerConfig LoadServerConfig() {
     if (!certificate || !key || !*certificate || !*key) throw std::invalid_argument("both TLS credential files are required");
     config.tls = TlsFiles{certificate, key};
   }
+  config.metrics_port = LoadMetricsPort();
   return config;
 }
 
@@ -69,6 +79,7 @@ BackendConfig LoadBackendConfig() {
       Environment("WT_LEGALITY_TARGET", "127.0.0.1:50052"), Required("WT_LEGALITY_POLICY")};
   PrivateAddress(config.address, true);
   PrivateAddress(config.legality_address, false);
+  config.metrics_port = LoadMetricsPort();
   return config;
 }
 

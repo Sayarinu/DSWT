@@ -3,6 +3,7 @@
 #include "platinumwt/server/legality_client.h"
 #include "platinumwt/server/trade_service.h"
 #include "admission.h"
+#include "platinumwt/server/metrics_server.h"
 
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
@@ -15,6 +16,8 @@ int main() {
   try {
     using namespace platinumwt::server;
     const auto config = LoadBackendConfig();
+    Telemetry::Global().Initialize(TelemetryRole::Backend);
+    MetricsServer metrics(config.metrics_port, config.connection_info);
     LegalityClient legality(config.legality_address, config.legality_policy);
     // No production attestation bypass. Until the independently recoverable
     // prefix provider is integrated, enrollment/operations remain PROCESSING.

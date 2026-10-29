@@ -3,13 +3,16 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import http.client
 import os
 from pathlib import Path
 import shutil
 import struct
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import uuid
 
@@ -221,6 +224,67 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT operation_id::text||'|'||match_id::text FROM platinumwt.matcher_attempts"),
                          f"{identifier(8001)}|{identifier(7001)}")
         self.tool("verify")
+
+    def test_observation_upgrade_preserves_old_images_and_reports_unknown_time(self):
+        previous = self.root / "v2_observation_migrations"
+        previous.mkdir()
+        for name in ("0001_ledger.sql", "0002_matcher.sql"):
+            shutil.copy(self.migrations / name, previous)
+        self.database = f"observed_{self.serial}"
+        self.sql(f"CREATE DATABASE {self.database}", database="postgres")
+        self.tool("migrate", str(previous))
+        self.enroll(); self.submit()
+        images = self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM platinumwt.audit_journal")
+        self.tool("migrate", str(self.migrations))
+        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.audit_journal WHERE recorded_at IS NOT NULL"), "0")
+        self.assertEqual(self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM platinumwt.audit_journal"), images)
+        self.tool("verify")
+        self.cancel()
+        self.assertEqual(self.sql("SELECT recorded_at IS NOT NULL FROM platinumwt.audit_journal WHERE table_name='offers' AND after_image->>'state'='3'"), "t")
+        self.tool("verify")
+
+    def test_private_metrics_observe_real_ledger_counts_without_changing_evidence(self):
+        self.enroll(); self.submit()
+        before = self.tool("verify")
+        with socket.socket() as reserve:
+            reserve.bind(("127.0.0.1", 0))
+            port = reserve.getsockname()[1]
+        env = dict(self.env, PGDATABASE=self.database, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT=str(port),
+                   WT_LEGALITY_POLICY="synthetic-policy", PLATINUMWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}")
+        log = (self.root / f"metrics-{self.serial}.log").open("wb")
+        process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                    try:
+                        connection.request("GET", "/metrics")
+                        response = connection.getresponse()
+                        text = response.read().decode()
+                    finally:
+                        connection.close()
+                    if response.status == 200 and "platinumwt_database_up 1\n" in text:
+                        break
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    self.fail("private ledger metrics did not become ready")
+                time.sleep(0.05)
+            self.assertIn("platinumwt_queued_offers 1\n", text)
+            self.assertIn("platinumwt_pending_deliveries 0\n", text)
+            self.assertIn("platinumwt_unknown_queue_ages 0\n", text)
+            self.assertNotIn("platinumwt_oldest_queue_age_seconds NaN", text)
+            self.assertNotIn(identifier(1), text)
+            self.assertEqual(self.tool("verify"), before)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=5)
+                self.fail("metrics sampler blocked shutdown")
+            log.close()
 
     def test_matcher_attempts_are_immutable_and_replayed(self):
         operation = identifier(9001)

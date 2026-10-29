@@ -197,6 +197,8 @@ class RuntimeTests(unittest.TestCase):
                 config["services"][name]["network_mode"] = "service:gateway"
         config["services"]["database"].update(image="postgres:16.15@sha256:" + "1" * 64,
             command=["postgres", "-c", "listen_addresses=", "-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on"])
+        config["services"]["gateway"]["environment"] = {"WT_METRICS_PORT": "9091"}
+        config["services"]["backend"]["environment"] = {"WT_METRICS_PORT": "9092"}
         self.assertEqual(isolation.compose_evidence(self.local, config)["status"], "pass")
         for change in (lambda d: d["services"]["gateway"]["ports"][0].update(host_ip="0.0.0.0"),
                        lambda d: d["services"]["database"].update(network_mode="host"),
@@ -214,7 +216,7 @@ class RuntimeTests(unittest.TestCase):
     def test_grpc_must_be_loopback_and_database_must_not_listen_on_tcp(self):
         def row(address, port):
             return "0: " + address + ":" + format(port, "04X") + " 00000000:0000 0A 0 0\n"
-        gateway = "".join(row("0100007F", port) for port in (50051, 50052, 50053, 50054)) + row("00000000", 8443)
+        gateway = "".join(row("0100007F", port) for port in (50051, 50052, 50053, 50054, 9091, 9092)) + row("00000000", 8443)
         for shared, database, passes in ((gateway, "", True),
                                          (gateway.replace("0100007F", "0000000000000000FFFF00000100007F"), "", True),
                                          (gateway.replace("0100007F", "00000000"), "", False),

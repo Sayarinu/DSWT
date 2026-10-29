@@ -6,6 +6,8 @@
 #include "admission.h"
 #include "postgres.h"
 #include "device_matcher.h"
+#include "platinumwt/server/config.h"
+#include "platinumwt/server/metrics_server.h"
 
 #include <grpcpp/grpcpp.h>
 
@@ -60,6 +62,8 @@ int main(int argc, char **argv) try {
   if (argc != 1) return 2;
 
   using namespace platinumwt::server;
+  Telemetry::Global().Initialize(TelemetryRole::Backend);
+  MetricsServer metrics(LoadMetricsPort(), kDatabase);
   LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-pwt2");
   // Same-host test data proves local flows only, never off-site recovery.
   RecoveryBarrier localTest = [](auto) { return true; };

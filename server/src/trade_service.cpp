@@ -5,6 +5,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <algorithm>
 #include <limits>
@@ -30,11 +31,14 @@ grpc::Status Guard(grpc::ServerContext *context, Reply &reply, detail::ServiceAd
     return {grpc::StatusCode::CANCELLED, "request cancelled"};
   try {
     auto permit = admission.Acquire(kind);
-    if (!permit)
+    if (!permit) {
+      Telemetry::Global().Refused();
       return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
+    }
     work(*permit);
     return grpc::Status::OK;
   } catch (const BudgetUnavailable &) {
+    Telemetry::Global().Refused();
     reply.Clear();
     return {grpc::StatusCode::RESOURCE_EXHAUSTED, "request budget unavailable"};
   } catch (const std::exception &) {
@@ -120,6 +124,7 @@ public:
         "encode(outcome,'hex') FROM platinumwt.operations WHERE save_id=$1::uuid "
         "AND operation_id=$2::uuid", {HexBytes(auth.save_id()), HexBytes(context.operation_id())});
     if (PQntuples(prior.get()) == 1) {
+      Telemetry::Global().Replay();
       auto code = static_cast<v1::ResultCode>(std::stoi(PQgetvalue(prior.get(), 0, 1)));
       if (PQgetvalue(prior.get(), 0, 0) != HexBytes(hash)) code = v1::RESULT_CONFLICT;
       else if (code == v1::RESULT_OK)
@@ -235,6 +240,7 @@ TradeService::TradeService(std::string connection_info, SubmissionValidator vali
 
 grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::SubmitRequest *request,
                                   v1::MutationReply *reply) {
+  RpcTelemetry trace(Operation::Submit, context, [reply] { return reply->context().result(); }, request->context().operation_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Submission, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context())) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
@@ -278,6 +284,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
           {HexBytes(asset), HexBytes(session.auth.save_id()), HexBytes(trade), sequence});
       const auto snapshot = session.Snapshot(trade);
       session.Record(request->context(), 2, hash, v1::RESULT_OK, v1::EVENT_SUBMITTED, snapshot);
+      trace.Trade(trade);
       reply->set_operation_event(session.highwater + 1);
       *reply->mutable_outcome() = snapshot;
       session.Publish(*reply, v1::RESULT_OK);
@@ -287,6 +294,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
 
 grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::StatusRequest *request,
                                   v1::StatusReply *reply) {
+  RpcTelemetry trace(Operation::Status, context, [reply] { return reply->context().result(); }, {}, request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), 16)) {
@@ -303,6 +311,7 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
 
 grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::CancelRequest *request,
                                   v1::MutationReply *reply) {
+  RpcTelemetry trace(Operation::Cancel, context, [reply] { return reply->context().result(); }, request->context().operation_id(), request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16)) {
@@ -339,6 +348,7 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
 
 grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::CollectRequest *request,
                                    v1::CollectReply *reply) {
+  RpcTelemetry trace(Operation::Collect, context, [reply] { return reply->context().result(); }, {}, request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!detail::NonzeroBytes(request->trade_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
@@ -361,6 +371,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
 
 grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::AcknowledgeRequest *request,
                                        v1::MutationReply *reply) {
+  RpcTelemetry trace(Operation::Acknowledge, context, [reply] { return reply->context().result(); }, request->context().operation_id(), request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16) ||
@@ -400,6 +411,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
 
 grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::ReconcileRequest *request,
                                      v1::ReconcileReply *reply) {
+  RpcTelemetry trace(Operation::Reconcile, context, [reply] { return reply->context().result(); });
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }

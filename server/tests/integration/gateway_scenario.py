@@ -8,12 +8,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 import http.client
+import json
 import os
 import selectors
 import socket
 import ssl
 import struct
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -50,14 +52,19 @@ class GatewayScenario:
         self.context.maximum_version = ssl.TLSVersion.TLSv1_2
         self.context.set_ciphers('ECDHE-ECDSA-CHACHA20-POLY1305')
         self.credentials = []
+        self.payloads = []
+        self.save_ids = []
+        self.first_enrollment = None
+        self.first_submission = None
         self.release = self.directory / 'release-validation'
         self.backend = self.start(test.gateway_fixture, PLATINUMWT_GATEWAY_FIXTURE_RELEASE=str(self.release))
         backend_port = int(self.mark(self.backend, b'TEST_BACKEND ').split()[-1])
         self.gateway, self.port = self.start_gateway(backend_port)
 
     def start(self, binary, **overrides):
+        errors = tempfile.TemporaryFile(dir=self.directory)
         process = subprocess.Popen([str(binary)], env=dict(self.env, **overrides), stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, bufsize=0)
+                                   stderr=errors, bufsize=0)
 
         def stop():
             process.terminate()
@@ -67,8 +74,35 @@ class GatewayScenario:
                 process.kill()
                 out, err = process.communicate()
                 self.test.fail('gateway fixture did not stop within its bound')
+            errors.seek(0)
+            err = errors.read()
+            errors.close()
             for credential in self.credentials:
                 self.test.assertNotIn(credential, out + err)
+                self.test.assertNotIn(credential.hex().encode(), out + err)
+            for payload in self.payloads:
+                self.test.assertNotIn(payload, out + err)
+                self.test.assertNotIn(payload.hex().encode(), out + err)
+            for save_id in self.save_ids:
+                self.test.assertNotIn(save_id.hex().encode(), out + err)
+            records = []
+            for line in err.splitlines():
+                if line.startswith(b'{"event":"trade_request"'):
+                    record = json.loads(line)
+                    records.append(record)
+                    self.test.assertLessEqual(set(record), {'event', 'service', 'timestamp_ms', 'operation', 'result', 'duration_us',
+                                                          'request_id', 'operation_id', 'trade_id'})
+                    self.test.assertIn(record['service'], ('gateway', 'backend'))
+                    self.test.assertGreaterEqual(record['duration_us'], 0)
+                    self.test.assertIsInstance(record['timestamp_ms'], int)
+            if self.first_enrollment and (binary == self.test.gateway_fixture or process is getattr(self, 'gateway', None)):
+                self.test.assertTrue(any(record.get('request_id') == self.first_enrollment
+                                         and record.get('operation_id') == self.first_enrollment for record in records),
+                                     'first enrollment correlation is missing')
+            if binary == self.test.gateway_fixture and self.first_submission:
+                operation, trade = self.first_submission
+                self.test.assertTrue(any(record.get('request_id') == operation and record.get('operation_id') == operation
+                                         and record.get('trade_id') == trade for record in records), 'committed submission correlation is missing')
 
         self.test.addCleanup(stop)
         return process
@@ -129,6 +163,9 @@ class GatewayScenario:
         first = self.post(packet, port=port)
         self.test.assertEqual(first[:3], (1, 1, 1))
         self.test.assertEqual(len(first[3]), 16)
+        self.save_ids.append(first[3])
+        if self.first_enrollment is None:
+            self.first_enrollment = bytes(packet[8:24]).hex()
         self.test.assertEqual(self.post(packet, port=port), first)
         return Client(first[3], credential)
 
@@ -141,8 +178,12 @@ class GatewayScenario:
 
     def submit(self, client, species=1, counter=1):
         data = self.pokemon(species)
+        self.payloads.append(data)
         packet = self.frame(2, struct.pack('<Q', 1) + data + hashlib.sha256(data).digest(), client, counter=counter)
-        return packet, self.post(packet)
+        result = self.post(packet)
+        if self.first_submission is None and result[0] == 1:
+            self.first_submission = (packet[8:24].hex(), SNAPSHOT.unpack_from(result[3], 8)[0].hex())
+        return packet, result
 
     def raw(self, *, source='127.0.0.1'):
         transport = socket.create_connection(('127.0.0.1', self.port), timeout=7, source_address=(source, 0))

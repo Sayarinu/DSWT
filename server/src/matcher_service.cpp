@@ -3,6 +3,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <optional>
 #include <stdexcept>
@@ -115,6 +116,7 @@ MatcherService::MatcherService(std::string connection_info, RecoveryBarrier reco
     : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
 
 grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::MatchRequest *request, v1::MatchReply *reply) {
+  RpcTelemetry trace(Operation::Match, context, [reply] { return reply->result(); }, request->operation_id());
   reply->Clear();
   if (context && context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "request cancelled"};
   if (!detail::NonzeroBytes(request->operation_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return grpc::Status::OK; }
@@ -128,6 +130,7 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
         auto lock = database.Execute("SELECT pg_try_advisory_xact_lock(578892145138)");
         if (std::string(PQgetvalue(lock.get(), 0, 0)) != "t") { Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK; }
         if (Prior(database, request->operation_id())) {
+          Telemetry::Global().Replay();
           transaction.Commit();
           Publish(database, *recovery_, request->operation_id(), *reply);
           return grpc::Status::OK;
@@ -148,6 +151,7 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
         }
         transaction.Commit();
         Publish(database, *recovery_, request->operation_id(), *reply);
+        trace.Trade(reply->first_trade_id());
         return grpc::Status::OK;
       } catch (const SelectionChanged &) {
         if (attempt == 2) { Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK; }

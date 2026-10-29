@@ -1,6 +1,7 @@
 #include "platinumwt/server/http_request_handler.h"
 
 #include "platinumwt/server/connectivity_service.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <algorithm>
 #include <chrono>
@@ -26,6 +27,8 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request) {
 http::response<http::string_body>
 HttpRequestHandler::Handle(const http::request<http::string_body> &request,
                            grpc::ClientContext &context, bool secure) {
+  const auto begin = std::chrono::steady_clock::now();
+  bool exchanged = false;
   http::response<http::string_body> response;
   response.version(request.version());
   response.keep_alive(false);
@@ -53,6 +56,7 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
         !boost::beast::iequals(request[http::field::connection], "close")) response.result(http::status::bad_request);
     else if (!trades_) response.result(http::status::service_unavailable);
     else {
+      exchanged = true;
       auto reply = trades_->Exchange(request.body(), context);
       response.result(reply.status == GatewayReply::Status::Ok ? http::status::ok :
           reply.status == GatewayReply::Status::Invalid ? http::status::bad_request : http::status::service_unavailable);
@@ -84,6 +88,9 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
   }
 
   response.prepare_payload();
+  if (request.target() == "/wt/v1" && !exchanged)
+    Telemetry::Global().Record(Operation::Invalid, response.result() == http::status::service_unavailable ? 11 : 3,
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - begin));
   return response;
 }
 

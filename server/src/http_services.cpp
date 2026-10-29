@@ -1,4 +1,5 @@
 #include "http_services.h"
+#include "platinumwt/server/telemetry.h"
 
 #include <boost/asio/post.hpp>
 
@@ -14,7 +15,7 @@ HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::a
 std::unique_ptr<HttpConnection> HttpServices::Connect(const boost::asio::ip::address &peer) {
   auto network = detail::NetworkKey(peer);
   auto permit = connections_.Acquire(network);
-  if (!permit) return {};
+  if (!permit) { Telemetry::Global().Refused(); return {}; }
   return std::make_unique<HttpConnection>(HttpConnection{std::move(network), std::move(permit)});
 }
 
@@ -25,7 +26,7 @@ bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext
   const bool recovering = secure && request.target() == "/wt/v1" && body.size() >= 80 &&
       body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] >= 3 && body[5] <= 7;
   auto permit = (recovering ? recovery_jobs_ : submission_jobs_).Acquire(network);
-  if (!permit) return false;
+  if (!permit) { Telemetry::Global().Refused(); return false; }
   boost::asio::post(recovering ? recovery_ : submissions_,
       [self = shared_from_this(), request = std::move(request), context = std::move(context), secure,
        permit = std::move(permit), complete = std::move(complete)]() mutable {

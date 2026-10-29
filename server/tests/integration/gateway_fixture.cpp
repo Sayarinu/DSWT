@@ -2,6 +2,7 @@
 // This target is not copied into runtime images and grants no production bypass.
 #include "platinumwt/server/identity_service.h"
 #include "platinumwt/server/trade_service.h"
+#include "platinumwt/server/telemetry.h"
 #include "admission.h"
 
 #include <boost/asio.hpp>
@@ -119,6 +120,7 @@ int Run() {
 } // namespace platinumwt::server
 
 int main(int argc, char **argv) {
+  platinumwt::server::Telemetry::Global().Initialize(platinumwt::server::TelemetryRole::Backend);
   if (argc == 3 && std::string(argv[1]) == "--probe-worker") {
     auto stub = platinumwt::v1::TradeMatcher::NewStub(grpc::CreateChannel(argv[2], grpc::InsecureChannelCredentials()));
     grpc::ClientContext context;

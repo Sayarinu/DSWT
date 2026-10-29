@@ -18,6 +18,7 @@ struct ServerConfig {
   std::optional<std::string> grpc_target;
   std::optional<std::string> trade_target;
   std::optional<TlsFiles> tls;
+  unsigned short metrics_port = 0;
 };
 
 struct BackendConfig {
@@ -25,10 +26,12 @@ struct BackendConfig {
   std::string connection_info;
   std::string legality_address;
   std::string legality_policy;
+  unsigned short metrics_port = 0;
 };
 
 ServerConfig LoadServerConfig();
 BackendConfig LoadBackendConfig();
+unsigned short LoadMetricsPort();
 
 } // namespace platinumwt::server
 

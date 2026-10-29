@@ -90,6 +90,8 @@ def compose_evidence(local, config):
                                     "full_page_writes=on", "-c", "synchronous_commit=on"], "Unexpected PostgreSQL durability/listener settings")
     require(re.fullmatch(r"postgres:16\.[0-9]+@sha256:[0-9a-f]{64}", database["image"]), "Pin the PostgreSQL image")
     validator = services["validator"]
+    require(services["gateway"]["environment"].get("WT_METRICS_PORT") == "9091"
+            and services["backend"]["environment"].get("WT_METRICS_PORT") == "9092", "Unexpected private telemetry ports")
     require(int(validator["mem_limit"]) == 512 * 1024 * 1024 and float(validator["cpus"]) == 2
             and validator["pids_limit"] == 128, "Unexpected validator resource bounds")
     require(len(validator["tmpfs"]) == 1 and validator["tmpfs"][0].startswith("/tmp:"), "Unexpected validator tmpfs mount")
@@ -152,11 +154,11 @@ def listener_evidence(local):
     bound = listeners(output)
     # Linux gRPC may represent 127.0.0.1 in the IPv6-mapped TCP table.
     loopback = {"0100007F", "00000000000000000000000001000000", "0000000000000000FFFF00000100007F"}
-    for port in (50051, 50052, 50053, 50054):
+    for port in (50051, 50052, 50053, 50054, 9091, 9092):
         endpoints = {address for address, number in bound if number == port}
         require(bool(endpoints) and endpoints <= loopback, "Internal gRPC listener is not loopback")
     require(any(port == 8443 for _, port in bound), "HTTPS listener is absent")
-    require(all(port in (8443, 50051, 50052, 50053, 50054) or address == "0B00007F" for address, port in bound),
+    require(all(port in (8443, 50051, 50052, 50053, 50054, 9091, 9092) or address == "0B00007F" for address, port in bound),
             "Unexpected listener in the shared namespace")
     output = local.compose("exec", "-T", "database", "sh", "-c", "cat /proc/net/tcp /proc/net/tcp6", capture=True, timeout=10).stdout
     require(not listeners(output), "Database TCP must be disabled")
