@@ -24,14 +24,21 @@ import stack
 
 
 RECOVERY_LABEL = "studio.nouvellelune.platinumwt.recovery-run"
-CLIENT = ["-h", "/var/run/postgresql", "-U", "platinumwt_local"]
+PSQL_CONNECTION = ["-h", "/var/run/postgresql", "-U", "platinumwt_local"]
 # Tables whose exact rows a restore must reproduce, including the replay journal.
 TABLES = ("save_identities", "payloads", "offers", "ownership", "matches", "receipts", "operations",
           "trade_events", "acknowledgements", "matcher_attempts", "audit_journal")
 # Root only prepares owned volumes, then drops to the image's postgres user.
 CAPABILITIES = ["--cap-drop", "ALL"] + [item for cap in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")
                                          for item in ("--cap-add", cap)]
+ISOLATED = ["--network", "none", *CAPABILITIES, "--security-opt", "no-new-privileges:true"]
 SEGMENT_NAME = re.compile(r"[0-9A-F]{24}")
+LSN = re.compile(r"[0-9A-F]{1,8}/[0-9A-F]{1,8}")
+# The reason each controlled restore must produce; any other outcome fails the rehearsal.
+EXPECTED = {"accepted": "accepted", "missing-wal": "rejected: recovery did not reach its target",
+            "truncated-wal": "rejected: recovery did not reach its target",
+            "stale-base-only": "rejected: recovery did not reach its target",
+            "behind-highwater": "rejected: behind acknowledged client highwater"}
 
 
 def postgres_image():
@@ -53,32 +60,45 @@ def capture(sql):
         tables[table] = {"rows": int(count), "sha256": digest}
     identities = json.loads(sql("SELECT coalesce(json_object_agg(save_id::text, json_build_array("
                                 "next_counter::text, event_highwater::text)), '{}') FROM platinumwt.save_identities"))
-    return {"tables": tables, "identities": {key: [int(value) for value in pair] for key, pair in identities.items()}}
+    acknowledged = json.loads(sql("SELECT coalesce(json_agg(receipt_id::text ORDER BY receipt_id), '[]') "
+                                  "FROM platinumwt.acknowledgements"))
+    return {"tables": tables, "identities": {key: [int(value) for value in pair] for key, pair in identities.items()},
+            "acknowledged": acknowledged}
 
 
 def client_highwater(state):
     """The client's own retained checkpoint, recorded independently of the backup lineage."""
     return {"save_id": str(uuid.UUID(hex=state["save_id"])), "next_counter": state["next_counter"],
-            "event_cursor": state["event_cursor"], "phase": state["phase"], "pending": bool(state["pending_sha256"])}
+            "event_cursor": state["event_cursor"], "phase": state["phase"], "pending": bool(state["pending_sha256"]),
+            "receipt_id": str(uuid.UUID(hex=state["receipt_id"])) if int(state["receipt_id"], 16) else None}
 
 
-def behind(highwater, identities):
-    """List clients whose acknowledged progress the restored identities do not cover."""
+def behind(highwater, restored):
+    """List clients whose acknowledged operations, events or applied receipt the restore does not cover."""
     reasons = []
     for client in highwater:
-        restored = identities.get(client["save_id"])
-        if restored is None:
+        identity = restored["identities"].get(client["save_id"])
+        if identity is None:
             reasons.append(client["save_id"] + ": identity missing")
-        elif restored[0] < client["next_counter"] or restored[1] < client["event_cursor"]:
-            reasons.append(f"{client['save_id']}: restored counter/events {restored} behind client "
+        elif identity[0] < client["next_counter"] or identity[1] < client["event_cursor"]:
+            reasons.append(f"{client['save_id']}: restored counter/events {identity} behind client "
                            f"{[client['next_counter'], client['event_cursor']]}")
+        if client["receipt_id"] and client["receipt_id"] not in restored["acknowledged"]:
+            reasons.append(f"{client['save_id']}: applied receipt {client['receipt_id']} not acknowledged")
     return reasons
+
+
+def matches_clients(highwater, reference):
+    """Once serving pauses, the cluster must equal, not exceed, every settled client's checkpoint."""
+    return all(reference["identities"].get(client["save_id"]) == [client["next_counter"], client["event_cursor"]]
+               for client in highwater)
 
 
 def differences(reference, restored):
     tables = sorted(name for name in reference["tables"] if reference["tables"][name] != restored["tables"].get(name))
-    if reference["identities"] != restored["identities"]:
-        tables.append("identities")
+    for name in ("identities", "acknowledged"):
+        if reference[name] != restored[name]:
+            tables.append(name)
     return tables
 
 
@@ -107,10 +127,11 @@ class Rehearsal:
         self.run_id = directory.name.rsplit("-", 1)[-1]
         self.prefix = f"{local.manifest['project']}-recovery-{self.run_id}"
         # PostgreSQL limits restore point names to 63 bytes.
-        self.slot, self.points = "platinumwt_rehearsal_" + self.run_id, "pwt-" + self.run_id
+        self.slot, self.restore_point = "platinumwt_rehearsal_" + self.run_id, "pwt-" + self.run_id
         self.image = postgres_image()
         self.socket = local.manifest["project"] + "-socket"
         self.created, self.containers = [], []
+        self.highwater = self.reference = None
 
     def docker(self, *arguments, **kwargs):
         return self.local.run(list(arguments), capture=True, **kwargs)
@@ -126,19 +147,18 @@ class Rehearsal:
 
     def tool(self, script, *mounts, timeout=300):
         """Run one PostgreSQL client step with only the named mounts and no network."""
-        arguments = ["run", "--rm", "--network", "none", *CAPABILITIES, "--security-opt", "no-new-privileges:true",
-                     "--entrypoint", "sh"]
+        arguments = ["run", "--rm", *ISOLATED, "--entrypoint", "sh"]
         for mount in mounts:
             arguments += ["--mount", mount]
         return self.docker(*arguments, self.image, "-euc", script, timeout=timeout).stdout
 
     def live(self, query):
-        return self.local.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *CLIENT,
+        return self.local.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *PSQL_CONNECTION,
                                   "-d", "platinumwt_e2e", "-c", query, capture=True, timeout=60).stdout.strip()
 
     def backup(self, base, archive):
         socket = f"type=volume,source={self.socket},target=/var/run/postgresql,readonly"
-        self.tool(f"chown postgres:postgres /backup /archive && gosu postgres pg_basebackup {' '.join(CLIENT)} "
+        self.tool(f"chown postgres:postgres /backup /archive && gosu postgres pg_basebackup {' '.join(PSQL_CONNECTION)} "
                   f"-D /backup/base -X stream -C -S {self.slot} -c fast --manifest-checksums=SHA256 "
                   "&& gosu postgres pg_verifybackup /backup/base",
                   socket, f"type=volume,source={base},target=/backup", f"type=volume,source={archive},target=/archive")
@@ -147,7 +167,7 @@ class Rehearsal:
 
     def fetch_wal(self, archive, endpos):
         socket = f"type=volume,source={self.socket},target=/var/run/postgresql,readonly"
-        self.tool(f"gosu postgres pg_receivewal {' '.join(CLIENT)} -D /archive -S {self.slot} --endpos={endpos} --no-loop",
+        self.tool(f"gosu postgres pg_receivewal {' '.join(PSQL_CONNECTION)} -D /archive -S {self.slot} --endpos={endpos} --no-loop",
                   socket, f"type=volume,source={archive},target=/archive")
         self.drop_slot()
         return segments(self.tool("ls /archive", f"type=volume,source={archive},target=/archive,readonly").split())
@@ -167,8 +187,7 @@ class Rehearsal:
                       f"type=volume,source={archive},target=/archive,readonly", f"type=volume,source={source},target=/copy")
         settings = "\n".join(("restore_command = 'cp /archive/%f %p'", f"recovery_target_name = '{target}'",
                               "recovery_target_action = 'promote'", ""))
-        self.docker("run", "--rm", "--network", "none", *CAPABILITIES, "--security-opt", "no-new-privileges:true",
-                    "--env", "SETTINGS=" + settings, "--mount", f"type=volume,source={base},target=/backup,readonly",
+        self.docker("run", "--rm", *ISOLATED, "--env", "SETTINGS=" + settings, "--mount", f"type=volume,source={base},target=/backup,readonly",
                     "--mount", f"type=volume,source={data},target=/data", "--entrypoint", "sh", self.image, "-euc",
                     "cp -a /backup/base/. /data/ && printf %s \"$SETTINGS\" >> /data/postgresql.auto.conf "
                     "&& touch /data/recovery.signal && chown -R postgres:postgres /data && chmod 0700 /data", timeout=300)
@@ -177,8 +196,7 @@ class Rehearsal:
                   "--mount", f"type=volume,source={socket},target=/var/run/postgresql"]
         if mutate is not None:
             mounts += ["--mount", f"type=volume,source={source},target=/archive,readonly"]
-        self.docker("run", "-d", "--name", container, "--network", "none", *CAPABILITIES,
-                    "--security-opt", "no-new-privileges:true", "--env", "POSTGRES_HOST_AUTH_METHOD=trust",
+        self.docker("run", "-d", "--name", container, *ISOLATED, "--env", "POSTGRES_HOST_AUTH_METHOD=trust",
                     "--label", RECOVERY_LABEL + "=" + self.run_id, *mounts, self.image,
                     "postgres", "-c", "listen_addresses=", "-c", "fsync=on", "-c", "full_page_writes=on")
         self.containers.append(container)
@@ -203,7 +221,7 @@ class Rehearsal:
             state = self.docker("inspect", "--format", "{{.State.Running}}", container).stdout.strip()
             if state != "true":
                 return False
-            ready = self.docker("exec", container, "psql", "-XAt", *CLIENT, "-d", "platinumwt_e2e", "-c",
+            ready = self.docker("exec", container, "psql", "-XAt", *PSQL_CONNECTION, "-d", "platinumwt_e2e", "-c",
                                 "SELECT NOT pg_is_in_recovery()", check=False)
             if ready.returncode == 0 and ready.stdout.strip() == "t":
                 return True
@@ -212,7 +230,7 @@ class Rehearsal:
 
     def verify(self, case, container, socket):
         def sql(query):
-            return self.docker("exec", container, "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *CLIENT,
+            return self.docker("exec", container, "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *PSQL_CONNECTION,
                                "-d", "platinumwt_e2e", "-c", query, timeout=60).stdout.strip()
         before = capture(sql)
         checks = case["checks"]
@@ -228,8 +246,8 @@ class Rehearsal:
             case[name + "_output"] = (result.stdout + result.stderr).strip().splitlines()[-1:]
         restored = capture(sql)
         if restored != before:
-            checks["migrations"] = "fail"
-        checks["behind_highwater"] = behind(self.highwater, restored["identities"])
+            checks["migrations"] = "fail: the restored schema was behind and migrate changed it"
+        checks["behind_highwater"] = behind(self.highwater, restored)
         checks["differences"] = differences(self.reference, restored)
         case["restored"] = restored["tables"]
 
@@ -273,7 +291,7 @@ def rehearse(local, directory):
         rehearsal.live("SELECT pg_switch_wal()")
         c, d = runner.client("c"), runner.client("d", "wild.pk4")
         pair(runner, c, d)
-        behind_lsn = rehearsal.live(f"SELECT pg_create_restore_point('{rehearsal.points}-behind')")
+        behind_lsn = rehearsal.live(f"SELECT pg_create_restore_point('{rehearsal.restore_point}-behind')")
         rehearsal.live("SELECT pg_switch_wal()")
         pair(runner, a, b)  # Retained identities advance only in WAL after the backup.
         e = runner.client("e")
@@ -285,36 +303,36 @@ def rehearse(local, directory):
         acceptance.require(all(item["phase"] == "idle" and not item["pending"] for item in rehearsal.highwater),
                            "workload clients did not settle")
         report["client_highwater"] = rehearsal.highwater
+        paused = True  # Set first: a partially completed stop must still be undone.
         local.compose("stop", *applications, capture=True, timeout=60)
-        paused = True
         rehearsal.reference = capture(rehearsal.live)
-        acceptance.require(not behind(rehearsal.highwater, rehearsal.reference["identities"]), "live cluster is behind its clients")
-        final_lsn = rehearsal.live(f"SELECT pg_create_restore_point('{rehearsal.points}-final')")
+        acceptance.require(matches_clients(rehearsal.highwater, rehearsal.reference)
+                           and not behind(rehearsal.highwater, rehearsal.reference),
+                           "paused cluster does not exactly match its settled clients")
+        final_lsn = rehearsal.live(f"SELECT pg_create_restore_point('{rehearsal.restore_point}-final')")
         rehearsal.live("SELECT pg_switch_wal()")
         endpos = rehearsal.live("SELECT pg_current_wal_lsn()")
+        acceptance.require(all(LSN.fullmatch(lsn) for lsn in (behind_lsn, final_lsn, endpos)), "unexpected WAL position")
         wal = rehearsal.fetch_wal(archive, endpos)
         names = {lsn: rehearsal.live(f"SELECT pg_walfile_name('{lsn}')") for lsn in (behind_lsn, final_lsn)}
-        acceptance.require(names[behind_lsn] in wal and names[final_lsn] in wal and names[behind_lsn] != names[final_lsn],
+        acceptance.require(all(SEGMENT_NAME.fullmatch(name) for name in names.values()) and names[behind_lsn] in wal and names[final_lsn] in wal and names[behind_lsn] != names[final_lsn],
                            "archived WAL does not span both restore points")
         report["wal"] = {"segments": wal, "behind_lsn": behind_lsn, "final_lsn": final_lsn, "end_lsn": endpos}
         report["reference"] = rehearsal.reference["tables"]
-        final, lagging = rehearsal.points + "-final", rehearsal.points + "-behind"
+        final, lagging = rehearsal.restore_point + "-final", rehearsal.restore_point + "-behind"
         cases = [rehearsal.restore("accepted", base, archive, final),
                  rehearsal.restore("missing-wal", base, archive, final, f"rm {names[behind_lsn]}"),
                  rehearsal.restore("truncated-wal", base, archive, final, f"truncate -s 8192 {names[final_lsn]}"),
                  rehearsal.restore("stale-base-only", base, archive, final, None),
                  rehearsal.restore("behind-highwater", base, archive, lagging)]
         report["restores"] = cases
-        expected = {"accepted": "accepted"}
         for case in cases:
-            acceptance.require(case["decision"] == expected.get(case["case"], case["decision"])
-                               and (case["case"] == "accepted") == (case["decision"] == "accepted"),
-                               f"{case['case']} restore decision was {case['decision']}")
+            acceptance.require(case["decision"] == EXPECTED[case["case"]], f"{case['case']} restore decision was {case['decision']}")
         acceptance.require(capture(rehearsal.live) == rehearsal.reference, "active cluster changed during the rehearsal")
         report["active_unchanged"] = True
         local.compose("start", *reversed(applications), capture=True, timeout=60)
+        runner.restart_service("gateway")  # Waits until the HTTPS trading path is ready again.
         paused = False
-        runner.restart_service("gateway")
         local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
         report["active_ledger_replay"] = "pass"
         if local.observability:
@@ -325,13 +343,17 @@ def rehearse(local, directory):
         report.update(status="fail", failure=type(error).__name__ + ": " + str(error))
         raise
     finally:
-        try:
-            rehearsal.drop_slot()
-        except subprocess.SubprocessError as error:
-            print("Drop the retained replication slot manually: " + rehearsal.slot + f" ({error})", file=sys.stderr)
-        rehearsal.cleanup(report["status"] == "pass")
-        if paused:
-            local.compose("start", *reversed(applications), capture=True, timeout=60, check=False)
+        # Resume serving first; each later step reports its own failure without masking the original one.
+        for step, message in ((lambda: paused and local.compose("start", *reversed(applications), capture=True, timeout=60),
+                               "Restart the paused applications manually"),
+                              (rehearsal.drop_slot, "Drop the retained replication slot manually: " + rehearsal.slot),
+                              (lambda: rehearsal.cleanup(report["status"] == "pass"),
+                               "Remove this run's labelled recovery containers/volumes manually")):
+            try:
+                step()
+            except (OSError, subprocess.SubprocessError) as error:
+                report.setdefault("cleanup_failures", []).append(message)
+                print(f"{message} ({error})", file=sys.stderr)
         acceptance.save_json(directory / "report.json", report)
         print("Recovery evidence: " + str(directory / "report.json"), flush=True)
 

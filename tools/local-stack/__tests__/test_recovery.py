@@ -10,11 +10,12 @@ import stack
 
 
 SAVE = "11111111-1111-4111-8111-111111111111"
+RECEIPT = "22222222-2222-4222-8222-222222222222"
 
 
-def snapshot(**identities):
+def snapshot(acknowledged=(RECEIPT,), **identities):
     return {"tables": {name: {"rows": 1, "sha256": "a" * 64} for name in recovery.TABLES},
-            "identities": identities or {SAVE: [3, 4]}}
+            "identities": identities or {SAVE: [3, 4]}, "acknowledged": list(acknowledged)}
 
 
 def case(**checks):
@@ -23,7 +24,7 @@ def case(**checks):
 
 
 class DecisionTests(unittest.TestCase):
-    highwater = [{"save_id": SAVE, "next_counter": 3, "event_cursor": 4}]
+    highwater = [{"save_id": SAVE, "next_counter": 3, "event_cursor": 4, "receipt_id": RECEIPT}]
 
     def test_only_an_exact_replayed_restore_is_accepted(self):
         self.assertEqual(recovery.decide(case()), "accepted")
@@ -33,12 +34,27 @@ class DecisionTests(unittest.TestCase):
             with self.subTest(checks=checks):
                 self.assertIn(reason, recovery.decide(case(**checks)))
 
-    def test_client_highwater_rejects_lagging_or_missing_identities(self):
-        self.assertEqual(recovery.behind(self.highwater, {SAVE: [3, 4]}), [])
-        self.assertEqual(recovery.behind(self.highwater, {SAVE: [4, 9]}), [])
-        for identities in ({SAVE: [2, 4]}, {SAVE: [3, 3]}, {}):
-            with self.subTest(identities=identities):
-                self.assertEqual(len(recovery.behind(self.highwater, identities)), 1)
+    def test_client_highwater_rejects_lagging_identities_or_receipts(self):
+        self.assertEqual(recovery.behind(self.highwater, snapshot()), [])
+        self.assertEqual(recovery.behind(self.highwater, snapshot(**{SAVE: [4, 9]})), [])
+        for restored in (snapshot(**{SAVE: [2, 4]}), snapshot(**{SAVE: [3, 3]}), snapshot(acknowledged=())):
+            with self.subTest(restored=restored):
+                self.assertEqual(len(recovery.behind(self.highwater, restored)), 1)
+        missing = snapshot()
+        missing["identities"] = {}
+        self.assertIn("identity missing", recovery.behind(self.highwater, missing)[0])
+
+    def test_a_paused_cluster_must_equal_its_settled_clients(self):
+        self.assertTrue(recovery.matches_clients(self.highwater, snapshot()))
+        self.assertFalse(recovery.matches_clients(self.highwater, snapshot(**{SAVE: [4, 5]})))
+
+    def test_each_controlled_restore_has_one_expected_reason(self):
+        reasons = {"accepted": case(), "missing-wal": case(promoted=False),
+                   "behind-highwater": case(behind_highwater=["x"], differences=["offers"])}
+        for name, result in reasons.items():
+            self.assertEqual(recovery.decide(result), recovery.EXPECTED[name])
+        # A behind restore rejected only for differing rows means the independent highwater check failed.
+        self.assertNotEqual(recovery.decide(case(differences=["offers"])), recovery.EXPECTED["behind-highwater"])
 
     def test_any_table_or_checkpoint_difference_is_reported(self):
         reference = snapshot()
@@ -47,17 +63,21 @@ class DecisionTests(unittest.TestCase):
         changed["tables"]["receipts"] = {"rows": 1, "sha256": "b" * 64}
         self.assertEqual(recovery.differences(reference, changed), ["receipts"])
         self.assertEqual(recovery.differences(reference, snapshot(**{SAVE: [3, 5]})), ["identities"])
+        self.assertEqual(recovery.differences(reference, snapshot(acknowledged=())), ["acknowledged"])
 
     def test_capture_digests_every_retained_table_and_migrations(self):
         queries = []
 
         def sql(query):
             queries.append(query)
-            return '{"%s": ["3", "4"]}' % SAVE if "json_object_agg" in query else "2 " + "c" * 64
+            if "json_object_agg" in query:
+                return '{"%s": ["3", "4"]}' % SAVE
+            return '["%s"]' % RECEIPT if "acknowledgements" in query and "json_agg" in query else "2 " + "c" * 64
         result = recovery.capture(sql)
         self.assertEqual(set(result["tables"]), set(recovery.TABLES) | {"platinumwt_meta.schema_migrations"})
         self.assertEqual(result["identities"], {SAVE: [3, 4]})
-        self.assertTrue(all("bytea_output = 'hex'" in query for query in queries[:-1]))
+        self.assertEqual(result["acknowledged"], [RECEIPT])
+        self.assertTrue(all("bytea_output = 'hex'" in query for query in queries[:-2]))
 
     def test_only_complete_wal_segment_names_are_listed(self):
         names = ["000000010000000000000003", "000000010000000000000002", "000000010000000000000004.partial",
@@ -91,13 +111,18 @@ class VolumeTests(unittest.TestCase):
             rehearsal.volume("accepted-data")
         self.assertFalse(any(call[:2] == ["volume", "create"] for call in calls))
 
-    def test_the_active_data_volume_is_never_mounted_writable(self):
+    def test_backup_reads_the_active_cluster_only_through_its_read_only_socket(self):
         rehearsal, calls = self.rehearsal("")
-        rehearsal.tool("true", f"type=volume,source={rehearsal.socket},target=/var/run/postgresql,readonly")
-        mounts = [calls[-1][index + 1] for index, item in enumerate(calls[-1]) if item == "--mount"]
-        self.assertEqual(mounts, [f"type=volume,source={rehearsal.socket},target=/var/run/postgresql,readonly"])
-        self.assertNotIn("-data", rehearsal.socket)
-        self.assertIn("none", calls[-1][calls[-1].index("--network") + 1])
+        rehearsal.live = lambda query: ""
+        rehearsal.backup("owned-backup", "owned-archive")
+        rehearsal.fetch_wal("owned-archive", "0/9000000")
+        active = rehearsal.local.manifest["project"] + "-"
+        for call in calls:
+            mounts = [call[index + 1] for index, item in enumerate(call) if item == "--mount"]
+            self.assertEqual(call[call.index("--network") + 1], "none")
+            for mount in mounts:
+                if f"source={active}" in mount:
+                    self.assertEqual(mount, f"type=volume,source={rehearsal.socket},target=/var/run/postgresql,readonly")
 
 
 if __name__ == "__main__":
