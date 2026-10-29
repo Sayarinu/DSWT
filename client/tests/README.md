@@ -110,6 +110,24 @@ record source/image/binary identities and `evidence_layer=native-client`;
 Linux SDK, retail saves/effects and physical power loss remain `not_run`.
 This gate does not establish prevention of arbitrary offline save cloning.
 
+Rehearse PostgreSQL 16 base-backup/WAL recovery the same way:
+
+```sh
+python3.12 tools/local-stack/recovery.py --workspace game/local-e2e
+```
+
+Native clients trade before and after a verified `pg_basebackup`; their journals
+record the acknowledged counter/event highwater. With serving paused, WAL is
+fetched through a temporary replication slot and restored only into new volumes
+owned by the run. A restore is accepted only if it reaches its restore point,
+passes ledger replay and migration checks, covers every client highwater and
+exactly matches the paused cluster. Missing, truncated, base-only and behind
+restores must be rejected. The active volume is never written or replaced, the
+restored cluster is never served, and the production recovery gate stays
+closed. A pass records the backup metric when observability is enabled. The
+verified backup and WAL volumes remain; reports stay under `recovery/`.
+Off-site storage and encryption are not tested.
+
 For local policy and isolation evidence, install the hash-pinned YAML parser in
 a separate Python 3.12–3.14 environment and inspect the existing stack:
 
