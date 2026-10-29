@@ -18,3 +18,7 @@ updates:
       - /validator/tests
     schedule:
       interval: weekly
+  - package-ecosystem: pip
+    directory: /tools/local-stack
+    schedule:
+      interval: weekly

@@ -21,7 +21,7 @@ import uuid
 import stack
 
 
-CASES = ("repeat", "cancel", "storage", "reply-loss", "interruption", "older-copy", "outages", "illegal")
+CASES = ("repeat", "cancel", "storage", "reply-loss", "interruption", "older-copy", "outages", "validator-recovery", "illegal")
 
 
 def require(condition, message):
@@ -146,7 +146,7 @@ class Acceptance:
         output = subprocess.run([str(self.probe), "inspect", str(client)], check=True, capture_output=True, text=True, timeout=10)
         return json.loads(output.stdout)
 
-    def run(self, client, action="reconcile", *, fault=None, checkpoint=None, failure=False):
+    def run(self, client, action="reconcile", *, fault=None, checkpoint=None, failure=False, allow_unavailable=False):
         self.serial += 1
         arguments = [str(self.probe), "run", str(client), str(self.profile["port"]), self.profile["hostname"],
                      self.profile["current_spki_sha256"], self.profile["next_spki_sha256"], action]
@@ -154,7 +154,10 @@ class Acceptance:
             arguments += [fault, checkpoint, "1"]
         log = self.case_directory / (str(self.serial) + "-" + client.name + "-" + action + ".jsonl")
         code, events = supervise(arguments, log, checkpoint=checkpoint, kill=fault == "kill")
-        require((code != 0) == (failure or bool(fault)), "unexpected native exit " + str(code) + "; see " + str(log))
+        require(code in (0, 1) or (fault == "kill" and code == -signal.SIGKILL),
+                "Unexpected probe exit (memory/process failure): " + str(code) + "; see " + str(log))
+        unavailable = allow_unavailable and code == 1 and any(event.get("wire_result") == 11 for event in events)
+        require((code != 0) == (failure or bool(fault)) or unavailable, "unexpected native exit " + str(code) + "; see " + str(log))
         summary = self.inspect(client)
         self.evidence.append({"client": str(client.relative_to(self.directory)), "action": action,
                               "checkpoint": checkpoint, "fault": fault, "exit": code,
@@ -346,19 +349,68 @@ class Acceptance:
                                 or (row.get("transport_stage") == "http" and row.get("result", 0) < 0 and row.get("tls_flags") == 0)
                                 for row in events), "outage did not fail at the authenticated service boundary")
                 finally:
-                    self.local.compose("start", service, capture=True, timeout=45)
-                    deadline = time.monotonic() + 30
-                    while True:
-                        try:
-                            self.local.ready()
-                            break
-                        except (OSError, ValueError, subprocess.SubprocessError):
-                            if time.monotonic() >= deadline:
-                                raise
-                            time.sleep(0.1)
+                    self.restart_service(service)
                 require(self.snapshot(a) == before, "outage consumed mutation counter")
-                self.run(a); self.run(a, "cancel")
+                self.finish_submission(a); self.run(a, "cancel")
                 self.settled(a, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
+
+    def restart_service(self, service):
+        self.local.compose("start", service, capture=True, timeout=45)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                self.local.ready()
+                return
+            except (OSError, ValueError, subprocess.SubprocessError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+
+    def finish_submission(self, client):
+        original, before = self.inspect(client), self.snapshot(client)
+        require(original["phase"] == "submit_ready" and original["pending_sha256"], "Expected an exact pending submission")
+        deadline = time.monotonic() + 30
+        while True:
+            state, events = self.run(client, allow_unavailable=True)
+            if state["phase"] == "queued" and not state["pending_sha256"]:
+                after = self.snapshot(client)
+                require(len(after["operations"]) == len(before["operations"]) + 1
+                        and after["operations"][-1]["request_sha256"] == original["request_sha256"], "Retry committed a different submission")
+                return
+            require(any(event.get("wire_result") == 11 for event in events)
+                    and state["pending_sha256"] == original["pending_sha256"] and state["inventory"] == original["inventory"]
+                    and self.snapshot(client) == before, "Dependency recovery changed pending ownership/request")
+            # A new health-check channel can recover before the backend's channel leaves backoff.
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Backend validation did not recover; exact submission remains pending")
+            time.sleep(0.1)
+
+    def validator_recovery(self):
+        a, b, pending = self.client("a"), self.client("b", "wild.pk4"), self.client("pending")
+        self.run(pending)
+        self.run(a, "submit"); self.run(b, "submit"); self.wait_matched(a, b)
+        original, _ = self.run(pending, "submit", fault="kill", checkpoint="wire.2.send")
+        before = self.snapshot(pending)
+        self.local.compose("stop", "validator", capture=True, timeout=45)
+        try:
+            require(not self.local.compose("ps", "--status", "running", "-q", "validator", capture=True, timeout=10).stdout.strip(),
+                    "validator did not stop")
+            state, events = self.run(pending, failure=True)
+            require(state["pending_sha256"] == original["pending_sha256"] and state["inventory"] == [[], []],
+                    "validator outage changed pending submission or released escrow")
+            require(any(event.get("wire_result") == 11 for event in events), "new submission was not retryable")
+            require(self.snapshot(pending) == before, "unavailable validation consumed a mutation")
+            self.run(a, "collect"); self.run(b, "collect"); self.paired(a, b)
+            self.settled(a, [self.fixture_manifest["sha256"]["wild.pk4"]], [(2, 1), (6, 1)])
+            self.settled(b, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (6, 1)])
+            require(not self.local.compose("ps", "--status", "running", "-q", "validator", capture=True, timeout=10).stdout.strip(),
+                    "collection unexpectedly restarted validator")
+        finally:
+            self.restart_service("validator")
+        require(self.inspect(pending)["pending_sha256"] == original["pending_sha256"], "restart changed exact retry packet")
+        self.finish_submission(pending); self.run(pending, "cancel")
+        final = self.settled(pending, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
+        require(final["operations"][0]["request_sha256"] == original["request_sha256"], "retry accepted a different submission")
 
     def illegal(self):
         a = self.client("a", "illegal-rng.pk4")

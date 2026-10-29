@@ -35,7 +35,10 @@ jobs:
           python3 -m json.tool licensing/migration.json >/dev/null
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
-          python3 -m unittest discover -s tools/local-stack/__tests__
+          python3 -m venv "$RUNNER_TEMP/pwt-policy"
+          "$RUNNER_TEMP/pwt-policy/bin/pip" install --require-hashes -r tools/local-stack/requirements.txt
+          "$RUNNER_TEMP/pwt-policy/bin/python" tools/local-stack/isolation.py policy
+          "$RUNNER_TEMP/pwt-policy/bin/python" -m unittest discover -s tools/local-stack/__tests__
           python3 -m unittest discover -s tools/image-audit/__tests__
 
   connectivity-server:

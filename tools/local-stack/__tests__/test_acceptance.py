@@ -5,6 +5,7 @@ import signal
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 DIRECTORY = Path(__file__).resolve().parents[1]
@@ -31,6 +32,48 @@ class SupervisorTests(unittest.TestCase):
 
 
 class OracleTests(unittest.TestCase):
+    def test_native_run_rejects_allocator_and_signal_failures_even_if_unavailable(self):
+        runner = acceptance.Acceptance.__new__(acceptance.Acceptance)
+        runner.serial, runner.evidence = 0, []
+        runner.probe = Path("/probe")
+        runner.case_directory = runner.directory = Path("/private")
+        runner.profile = {"port": 8443, "hostname": "localhost", "current_spki_sha256": "a", "next_spki_sha256": "b"}
+        runner.inspect = lambda _: {"phase": "submit_ready"}
+        for code in (2, -signal.SIGKILL, -signal.SIGABRT):
+            for options in ({"allow_unavailable": True}, {"failure": True}):
+                with self.subTest(code=code, options=options), patch.object(acceptance, "supervise", return_value=(code, [{"wire_result": 11}])), \
+                        self.assertRaisesRegex(AssertionError, "memory/process failure"):
+                    runner.run(Path("/private/client"), **options)
+        with patch.object(acceptance, "supervise", return_value=(1, [{"wire_result": 11}])):
+            runner.run(Path("/private/client"), allow_unavailable=True)
+
+    def test_transient_validation_retry_preserves_packet_and_authoritative_history(self):
+        runner = acceptance.Acceptance.__new__(acceptance.Acceptance)
+        original = {"phase": "submit_ready", "pending_sha256": "packet", "request_sha256": "request", "inventory": [[], []]}
+        unavailable = (copy.deepcopy(original), [{"wire_result": 11}])
+        queued = ({"phase": "queued", "pending_sha256": ""}, [])
+        replies = iter([unavailable, queued])
+        history = {"operations": []}
+        runner.inspect = lambda _: original
+        runner.snapshot = lambda _: copy.deepcopy(history)
+        def run(*args, **kwargs):
+            state, events = next(replies)
+            if state["phase"] == "queued":
+                history["operations"].append({"request_sha256": "request"})
+            return state, events
+        runner.run = run
+        with patch.object(acceptance.time, "sleep"):
+            runner.finish_submission(Path("/client"))
+        for changed in ({"pending_sha256": "different"}, {"inventory": [["unexpected"], []]}):
+            history["operations"] = []
+            state = dict(original, **changed)
+            runner.run = lambda *args, **kwargs: (state, [{"wire_result": 11}])
+            with self.subTest(changed=changed), self.assertRaisesRegex(AssertionError, "changed pending"):
+                runner.finish_submission(Path("/client"))
+        runner.run = lambda *args, **kwargs: unavailable
+        with patch.object(acceptance.time, "monotonic", side_effect=[0, 31]), self.assertRaises(TimeoutError):
+            runner.finish_submission(Path("/client"))
+
     def test_duplicate_inventory_counter_and_receipt_mutations_fail(self):
         state = {"phase": "idle", "pending_sha256": "", "inventory": [["a", "a"], ["a", "a"]], "next_counter": 3, "event_cursor": 4}
         snapshot = {"identity": [{"next_counter": "3", "event_highwater": "4"}],
