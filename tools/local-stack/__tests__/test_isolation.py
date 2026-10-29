@@ -215,7 +215,9 @@ class RuntimeTests(unittest.TestCase):
             return "0: " + address + ":" + format(port, "04X") + " 00000000:0000 0A 0 0\n"
         gateway = "".join(row("0100007F", port) for port in (50051, 50052, 50053, 50054)) + row("00000000", 8443)
         for shared, database, passes in ((gateway, "", True),
+                                         (gateway.replace("0100007F", "0000000000000000FFFF00000100007F"), "", True),
                                          (gateway.replace("0100007F", "00000000"), "", False),
+                                         (gateway.replace("0100007F", "0000000000000000FFFF00000100000A"), "", False),
                                          (gateway, row("00000000", 5432), False),
                                          (gateway + row("00000000", 12345), "", False)):
             self.local.compose = lambda *args, **kwargs: SimpleNamespace(stdout=shared if "gateway" in args else database)
