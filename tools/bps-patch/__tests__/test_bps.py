@@ -35,7 +35,7 @@ class WalkTests(unittest.TestCase):
 
     def test_metadata_is_reported(self):
         report = bps.walk(assemble(b"", b"x", [target_read(b"x")], metadata=b"meta"))
-        self.assertEqual(report["metadata"], {"size": 4, "sha256": hashlib.sha256(b"meta").hexdigest()})
+        self.assertEqual(report["metadata"], {"offset": 7, "size": 4, "sha256": hashlib.sha256(b"meta").hexdigest()})
 
     def test_rejects_framing_and_checksums(self):
         patch = valid()

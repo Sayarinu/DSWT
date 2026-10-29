@@ -6,5 +6,8 @@
   "sha256": "36e140b6c7fd5438c2cc46013c338b9e579df199cefd5a8f1292a8947ee05d74",
   "size": 44532360,
   "license": "GPL-3.0-or-later",
+  "binaries": {
+    "linux/amd64": {"size": 1079312, "sha256": "694f1e37aa1c15ddc068880b0e02b47d797b3f03c924bba17b58210e6fd012e2"}
+  },
   "notices": ["COPYING", "COPYING.gpl3", "libdivsufsort-2.0.1/COPYING"]
 }

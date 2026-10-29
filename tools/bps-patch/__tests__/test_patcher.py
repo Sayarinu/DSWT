@@ -153,6 +153,22 @@ class CreateTests(Fixture):
         with self.assertRaises(patcher.PatchError):
             self.create()
         self.assertEqual(list(existing.iterdir()), [])
+        existing.rmdir()
+
+        class Racer(FakeFlips):
+            def apply(inner, stage, *arguments):
+                super().apply(stage, *arguments)
+                if stage.path.name.startswith(".bundle.partial") and not existing.exists():
+                    existing.mkdir()
+                    (existing / "other").write_bytes(b"other writer")
+        with self.assertRaisesRegex(patcher.PatchError, "appeared"):
+            self.create(flips=Racer())
+        self.assertEqual([p.name for p in existing.iterdir()], ["other"])
+        shutil.rmtree(existing)
+        with patch.object(patcher, "_renameat_noreplace", return_value=errno.EXDEV), self.assertRaises(patcher.PatchError):
+            self.create()
+        self.assertFalse(existing.exists())
+        self.assertEqual(self.leftovers(self.root / "game"), [])
         self.assertEqual([path.read_bytes() for pair in self.pairs for path in pair],
                          [data for key in BASES for data in (BASES[key], TARGETS[key])])
 
@@ -281,19 +297,79 @@ class ApplyTests(Fixture):
         self.assertEqual([p.name for p in self.out.iterdir()], ["wt.nds"])
         self.assertEqual((self.out / "wt.nds").read_bytes(), b"other writer")
         (self.out / "wt.nds").unlink()
-        with patch("os.link", side_effect=OSError(errno.EXDEV, "cross-device")), self.assertRaises(patcher.PatchError):
+        with patch.object(patcher, "_renameat_noreplace", return_value=errno.EXDEV), self.assertRaises(patcher.PatchError):
             self.apply()
         self.assertEqual(list(self.out.iterdir()), [])
         self.apply(flips=FakeFlips(during_apply=swap_input))
         self.assertEqual((self.out / "wt.nds").read_bytes(), TARGETS["us-rev1"])
 
     def test_cli_interrupt_preserves_inputs(self):
-        with patch.object(patcher, "prepare_flips", side_effect=KeyboardInterrupt), \
+        with patch.object(patcher, "installed_flips", side_effect=KeyboardInterrupt), \
                 patch("sys.stderr"):
             code = patcher.main(["apply", "--manifest", str(self.manifest), "--input", str(self.base),
                                  "--output", str(self.out / "wt.nds")])
         self.assertEqual(code, 130)
         self.assertEqual(list(self.out.iterdir()), [])
+
+
+class AuditTests(Fixture):
+    def test_extracts_private_evidence_without_replacement(self):
+        patch_path = self.write("p.bps", assemble(b"", b"xy", [target_read(b"xy")], metadata=b"meta"))
+        summary = patcher.audit(patch_path, self.root / "game/evidence", root=self.root)
+        self.assertEqual(summary["literals"], {"count": 1, "bytes": 2})
+        evidence = self.root / "game/evidence"
+        self.assertEqual((evidence / "literals.bin").read_bytes(), b"xy")
+        self.assertEqual((evidence / "metadata.bin").read_bytes(), b"meta")
+        with self.assertRaises(patcher.PatchError):
+            patcher.audit(patch_path, evidence, root=self.root)
+        with self.assertRaises(patcher.PatchError):
+            patcher.audit(patch_path, self.root / "inputs/evidence", root=self.root)
+        self.assertEqual(self.leftovers(self.root / "game"), [])
+
+
+class InstalledToolTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.binary, archive, notice = b"pinned binary", b"archive", b"notice"
+        pin = {"sha256": hashlib.sha256(archive).hexdigest(), "size": len(archive),
+               "binaries": {"linux/amd64": {"size": len(self.binary), "sha256": hashlib.sha256(self.binary).hexdigest()}}}
+        self.destination = self.root / "game/tools/flips"
+        (self.destination / "notices").mkdir(parents=True)
+        (self.destination / "notices/COPYING").write_bytes(notice)
+        (self.destination / "source.tar.gz").write_bytes(archive)
+        (self.destination / "flips").write_bytes(self.binary)
+        (self.destination / "provenance.json").write_text(json.dumps({
+            "archive": {"file": "source.tar.gz", "sha256": pin["sha256"]},
+            "notices": {"COPYING": hashlib.sha256(notice).hexdigest()},
+            "build": {"platform": "linux/amd64"}, "binary": pin["binaries"]["linux/amd64"], "image_id": "sha256:x"}))
+        location = patch.object(patcher, "_tool_location",
+                                return_value=(pin, b"", "key", self.destination.parent, self.destination))
+        location.start()
+        self.addCleanup(location.stop)
+
+    def verify(self, image=None):
+        with patch.object(patcher, "_image_binary", return_value=image or self.binary):
+            return patcher.installed_flips(self.root)
+
+    def test_reverifies_every_retained_artifact(self):
+        self.assertEqual(self.verify()["image_id"], "sha256:x")
+        with self.assertRaisesRegex(patcher.PatchError, "image"):
+            self.verify(b"other")
+        for name, data in (("flips", b"tampered"), ("notices/COPYING", b"changed"), ("source.tar.gz", b"swapped")):
+            with self.subTest(name):
+                path = self.destination / name
+                original = path.read_bytes()
+                path.unlink()
+                path.write_bytes(data)
+                with self.assertRaises(patcher.PatchError):
+                    self.verify()
+                path.unlink()
+                path.write_bytes(original)
+        moved = self.destination.with_name("real")
+        self.destination.rename(moved)
+        self.destination.symlink_to(moved)
+        with self.assertRaisesRegex(patcher.PatchError, "not prepared"):
+            self.verify()
 
 
 @unittest.skipUnless(os.environ.get("PLATINUMWT_FLIPS_PROVENANCE"), "set PLATINUMWT_FLIPS_PROVENANCE to a prepared tool")

@@ -53,6 +53,7 @@ def walk(patch):
         raise BPSError("Declared file size is outside the supported range")
     if metadata_size > MAX_METADATA or position + metadata_size > end:
         raise BPSError("Metadata is outside the supported range")
+    metadata_offset = position
     metadata = bytes(data[position:position + metadata_size])
     position += metadata_size
     counts = dict.fromkeys(ACTIONS, 0)
@@ -96,7 +97,8 @@ def walk(patch):
         "source": {"size": source_size, "crc32": f"{source_crc:08x}"},
         "target": {"size": target_size, "crc32": f"{target_crc:08x}"},
         "patch": {"size": len(data), "crc32": f"{patch_crc:08x}", "sha256": hashlib.sha256(data).hexdigest()},
-        "metadata": {"size": metadata_size, "sha256": hashlib.sha256(metadata).hexdigest()},
+        "metadata": {"offset": metadata_offset, "size": metadata_size,
+                     "sha256": hashlib.sha256(metadata).hexdigest()},
         "actions": counts,
         "literals": {"count": len(literals), "bytes": sum(item["length"] for item in literals), "items": literals},
     }
