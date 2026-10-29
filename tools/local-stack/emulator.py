@@ -115,7 +115,8 @@ class Emulator:
             raise stack.subprocess.CalledProcessError(result.returncode, "emulator image source check", result.stdout, result.stderr)
         actual = {line.split()[1].removeprefix("/src/"): line.split()[0] for line in result.stdout.splitlines()}
         expected = {name: digest((stack.ROOT / name).read_bytes()) for name in names}
-        if actual != expected: raise ValueError("Rebuild the emulator image from these checked sources")
+        if actual != expected:
+            raise ValueError("Rebuild the emulator image from these checked sources" + (": " + result.stderr.strip() if result.stderr.strip() else ""))
         return expected
 
     def create(self, source, rom, target, image):
@@ -193,6 +194,7 @@ class Emulator:
             self.write_config(staging)
             stack.save_manifest(staging, {"version": 1, "profile": self.name, "workspace": str(self.local.workspace),
                 **{key: origin[key] for key in ("target", "source_save", "source_sha256", "rom_sha256", "image", "emulator_sha256")},
+            **({"image_source_sha256": origin["image_source_sha256"]} if "image_source_sha256" in origin else {}),
                 "forked_from": {"profile": source.name, "snapshot": snapshot_name, "files": hashes}})
             if self.directory.exists() or self.directory.is_symlink(): raise FileExistsError(self.directory)
             staging.rename(self.directory)

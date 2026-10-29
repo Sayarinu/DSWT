@@ -215,7 +215,7 @@ class EmulatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             for code, output, error in ((0, current, None), (1, missing, ValueError), (125, "", emulator.stack.subprocess.CalledProcessError)):
                 local = SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"},
-                                        run=lambda *args, **kwargs: SimpleNamespace(returncode=code, stdout=output, stderr=""))
+                                        run=lambda *args, code=code, output=output, **kwargs: SimpleNamespace(returncode=code, stdout=output, stderr=""))
                 runner = emulator.Emulator(local, "a")
                 with self.subTest(code=code):
                     if error is None: self.assertEqual(set(runner.image_sources("image")), set(names))
@@ -229,3 +229,10 @@ class EmulatorTests(unittest.TestCase):
             with patch.object(emulator.PROVISION, "provision", lambda data, target: data), self.assertRaisesRegex(ValueError, "Rebuild"):
                 runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
             self.assertFalse(runner.directory.exists())
+            def copy_binary(arguments, **kwargs):  # Stands in for copying melonDS out of the checked image.
+                if arguments[-1] == "/profile/melonDS": (runner.directory / "melonDS").write_bytes(b"emulator")
+            runner.local.run = copy_binary
+            runner.image_sources = lambda image: {"emulator/durable_save.cpp": "checked"}
+            with patch.object(emulator.PROVISION, "provision", lambda data, target: data):
+                runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
+            self.assertEqual(runner.manifest()["image_source_sha256"], {"emulator/durable_save.cpp": "checked"})
