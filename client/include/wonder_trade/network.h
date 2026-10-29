@@ -40,7 +40,7 @@ typedef struct WonderTradeNetwork {
     WtWireReply reply;
     unsigned tradePhase;
     BOOL canLeave;
-    BOOL completed, returned, rejected;
+    BOOL completed, returned, rejected, waiting;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);

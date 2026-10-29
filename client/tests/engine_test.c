@@ -251,6 +251,12 @@ static void RejectionAndErrors(void)
     assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.restored && !fixture.removed);
     Mirrored(&fixture, WT_JOURNAL_IDLE);
     Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0 && fixture.engine.frame[5] == WT_OP_COLLECT);
+    memcpy(before, fixture.banks, sizeof(before));
+    size = Header(&fixture, packet, WT_RESULT_CONFLICT, 2, 2, 0);  /* No partner yet: nothing is imported. */
+    assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && !fixture.engine.blocked && fixture.removed && !fixture.restored);
+    assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && fixture.engine.entry.phase == WT_JOURNAL_QUEUED);
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
     assert(WtEngine_Request(&fixture.engine, WT_OP_STATUS) == 0);
     memcpy(before, fixture.banks, sizeof(before));
     size = Header(&fixture, packet, WT_RESULT_NOT_FOUND, 2, 2, 0);

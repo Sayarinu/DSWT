@@ -395,6 +395,7 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
             else if (app->network.completed) WonderTrade_Show(app, WT_APP_MESSAGE,
                 app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
             else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
+            else if (app->network.waiting) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Waiting);
             else if (app->network.tradePhase == WT_JOURNAL_RECEIVED) WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_NoRoom);
             else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
         }
