@@ -206,3 +206,33 @@ class EmulatorTests(unittest.TestCase):
             (checked / "A").write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "Snapshot changed"): emulator.Emulator(local, "late").fork("a", "checked")
             self.assertEqual(sorted(path.name for path in profiles.iterdir()), ["a", "copy"])
+
+    def test_stale_images_are_refused_before_a_profile_is_provisioned(self):
+        names = ("emulator/durable_save.cpp", "emulator/journal_seed.cpp", "emulator/tests/faults.cpp",
+                 "client/src/wonder_trade/journal.c", "scripts/run-emulator.py")
+        current = "".join(f"{emulator.digest((emulator.stack.ROOT / name).read_bytes())}  /src/{name}\n" for name in names)
+        missing = "".join(current.splitlines(keepends=True)[1:])
+        with tempfile.TemporaryDirectory() as temporary:
+            for code, output, error in ((0, current, None), (1, missing, ValueError), (125, "", emulator.stack.subprocess.CalledProcessError)):
+                local = SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"},
+                                        run=lambda *args, code=code, output=output, **kwargs: SimpleNamespace(returncode=code, stdout=output, stderr=""))
+                runner = emulator.Emulator(local, "a")
+                with self.subTest(code=code):
+                    if error is None: self.assertEqual(set(runner.image_sources("image")), set(names))
+                    else:
+                        with self.assertRaises(error): runner.image_sources("image")
+            save, rom = Path(temporary) / "original.sav", Path(temporary) / "rom.nds"
+            save.write_bytes(bytes(524288)); rom.write_bytes(bytearray(12) + b"CPUE" + bytearray(14) + b"\1" + bytearray(134217728 - 31))
+            runner = emulator.Emulator(SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"}), "fresh")
+            runner.image = lambda name: "sha256:stale"
+            runner.image_sources = lambda image: (_ for _ in ()).throw(ValueError("Rebuild the emulator image from these checked sources"))
+            with patch.object(emulator.PROVISION, "provision", lambda data, target: data), self.assertRaisesRegex(ValueError, "Rebuild"):
+                runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
+            self.assertFalse(runner.directory.exists())
+            def copy_binary(arguments, **kwargs):  # Stands in for copying melonDS out of the checked image.
+                if arguments[-1] == "/profile/melonDS": (runner.directory / "melonDS").write_bytes(b"emulator")
+            runner.local.run = copy_binary
+            runner.image_sources = lambda image: {"emulator/durable_save.cpp": "checked"}
+            with patch.object(emulator.PROVISION, "provision", lambda data, target: data):
+                runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
+            self.assertEqual(runner.manifest()["image_source_sha256"], {"emulator/durable_save.cpp": "checked"})
