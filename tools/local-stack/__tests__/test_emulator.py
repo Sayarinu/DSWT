@@ -1,6 +1,8 @@
 import importlib.util
 import fcntl
 import json
+import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -149,3 +151,37 @@ class EmulatorTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "Unexpected emulator exit"): runner.wait_exit(expected=74)
             log.write_text("Managed save failed; emulator stopped before continuing\n")
             with self.assertRaisesRegex(ValueError, "selected checkpoint"): runner.wait_exit(expected=74)
+
+    def test_fork_copies_only_an_intact_checked_snapshot_into_a_new_profile(self):
+        fixture = emulator.stack.load_module("fork_fixture", emulator.stack.ROOT / "scripts/tests/test_verify_demo_trade.py")
+        self.addCleanup(os.umask, os.umask(0o077))  # As the command-line entry point does.
+        with tempfile.TemporaryDirectory() as temporary:
+            local = SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"})
+            source = emulator.Emulator(local, "a")
+            source.directory.mkdir(parents=True, mode=0o700)
+            source.owned_container = lambda: None
+            for name, data in (("platinum.nds", b"rom"), ("melonDS", b"emulator")):
+                (source.directory / name).write_bytes(data)
+            source.write_config()
+            emulator.stack.save_manifest(source.directory, {"version": 1, "profile": "a", "workspace": str(local.workspace),
+                "target": "us-rev1", "source_save": "original.sav", "source_sha256": "0" * 64, "image": "sha256:image",
+                "rom_sha256": emulator.digest(b"rom"), "emulator_sha256": emulator.digest(b"emulator")})
+            raw = fixture.retail([fixture.pk(10, 1)], fixture.pk(30, 3))
+            fixture.idle(raw, 1)
+            fixture.publication(source.directory / "platinum.sav", raw, 1)
+            checked = source.snapshot("checked")
+            copy = emulator.Emulator(local, "copy")
+            copy.fork("a", "checked")
+            store = copy.directory / "platinum.sav.platinumwt"
+            self.assertEqual({name: emulator.digest((store / name if name != "platinum.sav" else copy.directory / name).read_bytes())
+                              for name in ("platinum.sav", "A", "B", "HEAD")},
+                             json.loads((checked / "manifest.json").read_text())["files"])
+            manifest = copy.manifest()
+            self.assertEqual(manifest["forked_from"]["snapshot"], "checked")
+            self.assertEqual(manifest["rom_sha256"], emulator.digest(b"rom"))
+            mac = lambda profile: re.search(r'MAC = "(.*)"', (profile.directory / "portable/melonDS.toml").read_text()).group(1)
+            self.assertNotEqual(mac(copy), mac(source))
+            with self.assertRaises(FileExistsError): copy.fork("a", "checked")
+            (checked / "A").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "Snapshot changed"): emulator.Emulator(local, "late").fork("a", "checked")
+            self.assertFalse((local.workspace / "emulators/late").exists())
