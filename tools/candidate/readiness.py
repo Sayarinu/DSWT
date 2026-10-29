@@ -86,11 +86,17 @@ def contents(oids, root=ROOT):
             yield oid, body
     finally:
         process.stdin.close()
+        process.stdout.close()
         process.wait()
 
 
-def inventory(root=ROOT, rules=None):
-    rules = rules if rules is not None else json.loads(CLASSIFICATION.read_text())["rules"]
+def policy():
+    return json.loads(CLASSIFICATION.read_text())
+
+
+def inventory(root=ROOT, rules=None, expected=None):
+    rules = rules if rules is not None else policy()["rules"]
+    expected = expected if expected is not None else policy()["expected_markers"]
     refs = [line.split(" ", 1) for line in git("for-each-ref", "--format=%(objectname) %(refname)", root=root).splitlines()]
     entries = blobs(root)
     paths = {}
@@ -107,12 +113,14 @@ def inventory(root=ROOT, rules=None):
         "categories": {name: len(items) for name, items in sorted(categories.items())},
         "forbidden": sorted(categories.get("forbidden", [])),
         "unclassified": sorted(categories.get("unclassified", [])),
-        "private_marker_blobs": [{"blob": oid, "paths": sorted(path for path, ids in paths.items() if oid in ids)}
-                                 for oid in markers],
+        # A reviewed self-reference stays listed but separate; any other marker is a finding.
+        "private_marker_blobs": [{"blob": oid, "paths": found, "expected": set(found) <= set(expected)}
+                                 for oid in markers
+                                 for found in [sorted(path for path, ids in paths.items() if oid in ids)]],
     }
 
 
-def source_archive(commit, output, root=ROOT):
+def source_archive(commit, output, root=ROOT, expected=None):
     """A reproducible tracked-source archive, checked member by member against the commit's tree."""
     prefix = f"platinumwt-src-{commit[:12]}/"
     first = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", f"--prefix={prefix}", commit],
@@ -133,7 +141,8 @@ def source_archive(commit, output, root=ROOT):
             if not info.isreg() or oci.prohibited(name):
                 findings.append({"path": relative, "finding": "not an ordinary allowed file"})
             elif oci.private_marker(archive.extractfile(info).read()):
-                findings.append({"path": relative, "finding": "private marker"})
+                findings.append({"path": relative, "finding": "private marker",
+                                 "expected": relative in (expected if expected is not None else policy()["expected_markers"])})
     output.write_bytes(first)
     return {"file": output.name, "sha256": sha256(first), "size": len(first), "reproducible": first == second,
             "complete": names == set(tree), "members": len(names), "findings": findings}

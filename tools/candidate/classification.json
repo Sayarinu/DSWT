@@ -1,27 +1,96 @@
 {
   "note": "Explicit path rules for inventory review. A category is not a rights decision.",
   "rules": [
-    {"path": "server", "category": "project-source"},
-    {"path": "validator/third-party", "category": "third-party-notice"},
-    {"path": "validator", "category": "project-source"},
-    {"path": "client/UPSTREAM.md", "category": "upstream-notice"},
-    {"path": "client/upstream.json", "category": "upstream-notice"},
-    {"path": "client/pokeplatinum.patch", "category": "upstream-modification"},
-    {"path": "client/res", "category": "project-game-asset"},
-    {"path": "client", "category": "project-source"},
-    {"path": "emulator", "category": "project-source"},
-    {"path": "protocol", "category": "project-source"},
-    {"path": "scripts", "category": "project-source"},
-    {"path": "tools", "category": "project-source"},
-    {"path": "patches", "category": "project-documentation"},
-    {"path": "licensing", "category": "licensing-record"},
-    {"path": ".github", "category": "project-ci"},
-    {"path": "AGENTS.md", "category": "project-documentation"},
-    {"path": "README.md", "category": "project-documentation"},
-    {"path": "LICENSE", "category": "project-license"},
-    {"path": "NOTICE", "category": "project-license"},
-    {"path": ".gitignore", "category": "project-configuration"},
-    {"path": ".gitattributes", "category": "project-configuration"},
-    {"path": ".dockerignore", "category": "project-configuration"}
-  ]
+    {
+      "path": "server",
+      "category": "project-source"
+    },
+    {
+      "path": "validator/third-party",
+      "category": "third-party-notice"
+    },
+    {
+      "path": "validator",
+      "category": "project-source"
+    },
+    {
+      "path": "client/UPSTREAM.md",
+      "category": "upstream-notice"
+    },
+    {
+      "path": "client/upstream.json",
+      "category": "upstream-notice"
+    },
+    {
+      "path": "client/pokeplatinum.patch",
+      "category": "upstream-modification"
+    },
+    {
+      "path": "client/res",
+      "category": "project-game-asset"
+    },
+    {
+      "path": "client",
+      "category": "project-source"
+    },
+    {
+      "path": "emulator",
+      "category": "project-source"
+    },
+    {
+      "path": "protocol",
+      "category": "project-source"
+    },
+    {
+      "path": "scripts",
+      "category": "project-source"
+    },
+    {
+      "path": "tools",
+      "category": "project-source"
+    },
+    {
+      "path": "patches",
+      "category": "project-documentation"
+    },
+    {
+      "path": "licensing",
+      "category": "licensing-record"
+    },
+    {
+      "path": ".github",
+      "category": "project-ci"
+    },
+    {
+      "path": "AGENTS.md",
+      "category": "project-documentation"
+    },
+    {
+      "path": "README.md",
+      "category": "project-documentation"
+    },
+    {
+      "path": "LICENSE",
+      "category": "project-license"
+    },
+    {
+      "path": "NOTICE",
+      "category": "project-license"
+    },
+    {
+      "path": ".gitignore",
+      "category": "project-configuration"
+    },
+    {
+      "path": ".gitattributes",
+      "category": "project-configuration"
+    },
+    {
+      "path": ".dockerignore",
+      "category": "project-configuration"
+    }
+  ],
+  "expected_markers": {
+    "tools/image-audit/oci.py": "defines the private-input sentinel the image audit searches for"
+  }
 }
