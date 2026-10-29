@@ -130,6 +130,10 @@
       "en_US": "The server rejected the offer.\nYour original Pokémon\nhas been restored."
     },
     {
+      "id": "WonderTrade_Text_Superseded",
+      "en_US": "Another copy of this save\ntraded first. Your Pokémon\nhas been restored."
+    },
+    {
       "id": "WonderTrade_Text_Waiting",
       "en_US": "No trade partner yet.\nYour Pokémon is still\nwaiting. Check again later."
     },

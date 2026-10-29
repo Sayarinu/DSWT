@@ -233,7 +233,7 @@ These are emulator/process and syscall tests, not physical host power-loss tests
 that shares the source identity and credential. To test copied saves, fork two
 profiles from one settled snapshot, open both offer prompts, then confirm both in
 the same moment. The server must accept one Submit and return `counter_mismatch`
-to the other, whose escrow stays pending. The original, now behind its identity,
+to the other, which reconciles and restores its escrow. The original, now behind its identity,
 must stop at verification and must not collect or cancel the copy's offer. Use
 `inspect` on both forks and the original to compare journals and inventories.
 `save_variant.py ORIGINAL NEW --edit JSON` derives a blank-journal test save with

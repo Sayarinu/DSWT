@@ -117,7 +117,8 @@ as a successful exchange. Error codes alone do not prove counter consumption:
 operation-ID/body conflict. Before retiring a rejected operation or restoring
 escrow, reconcile its durable `REJECTED` event by operation ID and offered digest
 (zero digest for operations without a Pokémon body). Counter-mismatch and other
-transient/protocol errors leave escrow intact. Headers describe live counter and
+transient/protocol errors leave escrow intact; a Submit's mismatch only starts
+the supersession lookup below. Headers describe live counter and
 highwater values; a retried mutation's outcome/event remain its original result.
 
 | Op | Request body in order | Successful response body |
@@ -175,7 +176,10 @@ the gateway cannot invoke them. Validator RPCs grant no ownership authority.
 | Applied → ACKNOWLEDGED | Send the persisted acknowledgement with receipt, delivered/applied digests and journal generation. Record it idempotently; do not delete replay data. Only its final outcome releases the identity for another deposit. |
 
 Never restore a submitted original from a timeout or `NOT_FOUND` alone. Only a
-recorded rejection for that exact operation or its return receipt permits it.
+recorded rejection for that exact operation, its return receipt, or proof that
+another operation used its counter permits it. That proof is the durable event
+immediately after the client's cursor carrying a different operation ID: every
+counted operation records one event with its ID and counters never repeat.
 A stale response cannot roll back the client's persisted event/counter. A later
 receipt must not be mistaken for an earlier applied one. Server code never trusts
 the applied digest/generation as proof of untampered offline play; it binds the
@@ -263,18 +267,21 @@ separately. Do not treat emulator SRAM readback alone as proof of host durabilit
 | Acknowledgement commits but reply is lost, then server restarts | Replay acknowledgement and reconcile retained receipt/events; never insert a second copy. |
 | Retail loader falls back or loads mixed block copies | Follow the journal's proven transition or pause; do not infer completion from one block or a slot alone. |
 | Copied client or old post-enrollment save reconnects | Same identity/history; fence counters and reconcile before trading. Ambiguous inventory requires recovery. |
+| Copy's Submit loses its counter to another copy | Reconcile; restore its escrow once only if the next durable event is another operation, then stay fenced. Copies sharing a journal seed outside managed sessions may reuse an operation ID: identical Submits share the one offer; differing ones stay blocked. |
 | Database restored behind acknowledged events | Pause writes until the off-site durable watermark is recovered; never blindly requeue or reissue. |
 
 Whole-save deletion, pre-enrollment rollback, out-of-band editing/cloning and
 loss of every local credential/escrow copy are outside automatic recovery. They
 cannot be detected or undone reliably by a DS patch; never promise otherwise.
 Each identity has one operation counter, so copies of an enrolled save cannot
-both mutate with the same counter: the losing copy keeps its escrow and stops at a verification error,
-and an older copy refuses to collect or cancel offers it did not escrow. Copies
-still keep whatever Pokémon they held, and Collect is a recovery read outside
-the fence, so copies taken after submission can each import the same delivery.
-A pre-escrow backup can offer that Pokémon again (payloads are not deduplicated
-by content); a pre-enrollment backup re-enrolls as an unrelated identity.
+both mutate with the same counter. A losing Submit restores its exact escrow
+only after reconciliation shows another operation durably used its counter;
+the restored copy, like any older copy, then stops at verification and never
+collects or cancels offers it did not escrow. Copies still keep whatever Pokémon
+they held, and Collect is a recovery read outside the fence, so copies taken
+after submission can each import the same delivery. A pre-enrollment backup
+re-enrolls as an unrelated identity and can offer its Pokémon again; payloads
+are not deduplicated because distinct legitimate Pokémon may share bytes.
 Savestates and live save imports are refused only in managed emulator sessions.
 Hardware/emulator recovery tests, strict legality, backup rehearsal and capacity
 evidence remain release gates, with no timeout-based deletion of pending assets.
