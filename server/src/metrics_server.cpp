@@ -79,8 +79,9 @@ using Clock = std::chrono::steady_clock;
 // The observer fails unavailable for those configurations; RPC configuration
 // remains unchanged. Explicit hostaddr preserves a TLS verification hostname.
 bool NonblockingAddress(const std::string &database) {
-  std::string host, address, service;
-  if (const auto value = std::getenv("PGSERVICE"); value && *value) return false;
+  std::string host, address;
+  bool service = false;
+  if (std::getenv("PGSERVICE")) return false;
   if (const auto value = std::getenv("PGHOST")) host = value;
   if (const auto value = std::getenv("PGHOSTADDR")) address = value;
   const auto read = [&](const PQconninfoOption *options) {
@@ -89,13 +90,13 @@ bool NonblockingAddress(const std::string &database) {
       const std::string_view key(option->keyword);
       if (key == "host") host = option->val;
       else if (key == "hostaddr") address = option->val;
-      else if (key == "service") service = option->val;
+      else if (key == "service") service = true;
     }
   };
   std::unique_ptr<PQconninfoOption, decltype(&PQconninfoFree)> explicit_options(PQconninfoParse(database.c_str(), nullptr), PQconninfoFree);
   if (!explicit_options) return false;
   read(explicit_options.get());
-  if (!service.empty()) return false;
+  if (service) return false;
   std::string_view remaining(address.empty() ? host : address);
   do {
     const auto comma = remaining.find(',');

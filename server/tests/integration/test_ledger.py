@@ -358,30 +358,33 @@ class LedgerTests(unittest.TestCase):
     def test_metrics_refuse_blocking_service_discovery_before_libpq_defaults(self):
         service_file = self.root / f"service-{self.serial}.conf"
         os.mkfifo(service_file)
-        with socket.socket() as reserve:
-            reserve.bind(("127.0.0.1", 0)); port = reserve.getsockname()[1]
-        env = dict(self.env, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT=str(port), WT_LEGALITY_POLICY="synthetic-policy",
-                   PLATINUMWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}",
-                   PGSERVICE="stalled", PGSERVICEFILE=str(service_file))
-        process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        try:
-            with selectors.DefaultSelector() as selector:
-                selector.register(process.stdout, selectors.EVENT_READ)
-                self.assertTrue(selector.select(5), "backend did not start")
-                self.assertTrue(process.stdout.readline().startswith(b"Trade backend listening on loopback port "))
-            time.sleep(0.05)
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        for setting in ("env", "empty-env", "empty-explicit"):
+            with self.subTest(setting=setting), socket.socket() as reserve:
+                reserve.bind(("127.0.0.1", 0)); port = reserve.getsockname()[1]
+            env = dict(self.env, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT=str(port), WT_LEGALITY_POLICY="synthetic-policy",
+                       PLATINUMWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}",
+                       PGSERVICEFILE=str(service_file))
+            if setting == "empty-explicit": env["PLATINUMWT_DATABASE_URL"] += " service=''"
+            else: env["PGSERVICE"] = "stalled" if setting == "env" else ""
+            process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
-                connection.request("GET", "/metrics")
-                self.assertIn(b"platinumwt_database_up 0\n", connection.getresponse().read())
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ)
+                    self.assertTrue(selector.select(5), "backend did not start")
+                    self.assertTrue(process.stdout.readline().startswith(b"Trade backend listening on loopback port "))
+                time.sleep(0.05)
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                try:
+                    connection.request("GET", "/metrics")
+                    self.assertIn(b"platinumwt_database_up 0\n", connection.getresponse().read())
+                finally:
+                    connection.close()
+                process.terminate(); process.communicate(timeout=2)
+                self.assertEqual(process.returncode, 0)
             finally:
-                connection.close()
-            process.terminate(); process.communicate(timeout=2)
-            self.assertEqual(process.returncode, 0)
-        finally:
-            if process.poll() is None:
-                process.kill(); process.communicate(timeout=5)
-            process.stdout.close(); process.stderr.close()
+                if process.poll() is None:
+                    process.kill(); process.communicate(timeout=5)
+                process.stdout.close(); process.stderr.close()
 
     def test_matcher_attempts_are_immutable_and_replayed(self):
         operation = identifier(9001)
