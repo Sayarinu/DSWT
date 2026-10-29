@@ -186,6 +186,13 @@ SIGKILL. `after` and `error` exercise post-syscall termination and ENOSPC.
 only after exit. Profiles, controls and captures stay private under the existing
 local workspace. Run on Btrfs, ext4 or XFS; a memory-backed `/tmp` is unsupported.
 These are emulator/process and syscall tests, not physical host power-loss tests.
+`fork --source a --snapshot NAME` copies a checked snapshot into a new profile
+that shares the source identity and credential. To test copied saves, fork two
+profiles from one settled snapshot, open both offer prompts, then confirm both in
+the same moment. The server must accept one Submit and return `counter_mismatch`
+to the other, whose escrow stays pending. The original, now behind its identity,
+must stop at verification and must not collect or cancel the copy's offer. Use
+`inspect` on both forks and the original to compare journals and inventories.
 
 With the isolated trade services running, opening Wonder Trade connects and
 reconciles the save identity/history. Confirming a Pokémon persists its escrow

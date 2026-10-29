@@ -1,6 +1,8 @@
 import importlib.util
 import fcntl
 import json
+import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -149,3 +151,58 @@ class EmulatorTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "Unexpected emulator exit"): runner.wait_exit(expected=74)
             log.write_text("Managed save failed; emulator stopped before continuing\n")
             with self.assertRaisesRegex(ValueError, "selected checkpoint"): runner.wait_exit(expected=74)
+
+    def fork_source(self, root):
+        """A stopped source profile with one checked snapshot named "checked"."""
+        fixture = emulator.stack.load_module("fork_fixture", emulator.stack.ROOT / "scripts/tests/test_verify_demo_trade.py")
+        local = SimpleNamespace(workspace=root, manifest={"project": "owned"})
+        source = emulator.Emulator(local, "a")
+        source.directory.mkdir(parents=True, mode=0o700)
+        source.owned_container = lambda: None
+        for name, data in (("platinum.nds", b"rom"), ("melonDS", b"emulator")):
+            emulator.write_private(source.directory / name, data)
+        source.write_config(source.directory)
+        emulator.stack.save_manifest(source.directory, {"version": 1, "profile": "a", "workspace": str(root),
+            "target": "us-rev1", "source_save": "original.sav", "source_sha256": "0" * 64, "image": "sha256:image",
+            "rom_sha256": emulator.digest(b"rom"), "emulator_sha256": emulator.digest(b"emulator")})
+        raw = fixture.retail([fixture.pk(10, 1)], fixture.pk(30, 3))
+        fixture.idle(raw, 1)
+        fixture.publication(source.directory / "platinum.sav", raw, 1)
+        return local, source, source.snapshot("checked")
+
+    def test_fork_publishes_an_exact_copy_with_its_own_adapter(self):
+        self.addCleanup(os.umask, os.umask(0o077))  # As the command-line entry point does.
+        with tempfile.TemporaryDirectory() as temporary:
+            local, source, checked = self.fork_source(Path(temporary).resolve())
+            copy = emulator.Emulator(local, "copy")
+            copy.fork("a", "checked")
+            self.assertEqual({item: emulator.digest(path.read_bytes()) for item, path in emulator.save_files(copy.directory).items()},
+                             json.loads((checked / "manifest.json").read_text())["files"])
+            self.assertEqual(copy.manifest()["forked_from"]["snapshot"], "checked")
+            mac = lambda profile: re.search(r'MAC = "(.*)"', (profile.directory / "portable/melonDS.toml").read_text()).group(1)
+            self.assertNotEqual(mac(copy), mac(source))
+            self.assertEqual(sorted(path.name for path in copy.directory.parent.iterdir()), ["a", "copy"])
+
+    def test_fork_refuses_changed_linked_busy_or_existing_inputs_without_leaving_a_profile(self):
+        self.addCleanup(os.umask, os.umask(0o077))
+        with tempfile.TemporaryDirectory() as temporary:
+            local, source, checked = self.fork_source(Path(temporary).resolve())
+            profiles = source.directory.parent
+            with self.assertRaisesRegex(ValueError, "different profile"): emulator.Emulator(local, "a").fork("a", "checked")
+            with emulator.private_lock(local.workspace / ".emulator-a.lock", fcntl.LOCK_EX), self.assertRaises(BlockingIOError):
+                emulator.Emulator(local, "busy").fork("a", "checked")
+            emulator.Emulator(local, "copy").fork("a", "checked")
+            with self.assertRaises(FileExistsError): emulator.Emulator(local, "copy").fork("a", "checked")
+            original = (source.directory / "melonDS").read_bytes()
+            (source.directory / "melonDS").unlink(); (source.directory / "melonDS").symlink_to(profiles / "copy/melonDS")
+            with self.assertRaises(OSError): emulator.Emulator(local, "linked").fork("a", "checked")
+            (source.directory / "melonDS").unlink(); emulator.write_private(source.directory / "melonDS", original)
+            real = emulator.write_private
+            def fail_on_head(path, data):
+                if path.name == "HEAD": raise OSError("No space left on device")
+                real(path, data)
+            with patch.object(emulator, "write_private", fail_on_head), self.assertRaisesRegex(OSError, "No space"):
+                emulator.Emulator(local, "partial").fork("a", "checked")
+            (checked / "A").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "Snapshot changed"): emulator.Emulator(local, "late").fork("a", "checked")
+            self.assertEqual(sorted(path.name for path in profiles.iterdir()), ["a", "copy"])

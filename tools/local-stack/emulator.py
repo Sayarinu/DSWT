@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
+import stat
 import struct
 import sys
 import tempfile
@@ -27,6 +29,26 @@ KEYS = {"A": 65, "B": 66, "X": 88, "Y": 89, "Start": 16777220, "Select": 1677724
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def save_files(directory):
+    """The raw save and its host recovery store, as a snapshot names them."""
+    return {"platinum.sav": directory / "platinum.sav",
+            **{item: directory / "platinum.sav.platinumwt" / item for item in ("A", "B", "HEAD")}}
+
+
+def read_private(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)  # Never wait on a planted FIFO.
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError("Profile inputs must be private owned files without links")
+        return source.read()
+
+
+def write_private(path, data):
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb") as output:
+        output.write(data); output.flush(); os.fsync(output.fileno())
 
 
 @contextmanager
@@ -101,18 +123,11 @@ class Emulator:
             raise ValueError("Use the matching US Rev 0/1 built ROM")
         provisioned = PROVISION.provision(original, target)
         image = self.image(image)
-        self.directory.parent.mkdir(mode=0o700, exist_ok=True)
-        if self.directory.parent.resolve() != self.directory.parent: raise ValueError("Profiles directory must not be linked")
+        self.profiles_directory()
         self.directory.mkdir(mode=0o700)  # Never reinitialize an enrolled profile.
         for name, content in (("platinum.sav", provisioned), ("platinum.nds", program), ("baseline.sav", original)):
             with (self.directory / name).open("xb") as output: output.write(content)
-        (self.directory / "portable").mkdir(mode=0o700)
-        mac = ":".join(f"{byte:02x}" for byte in b"\x02" + secrets.token_bytes(5))
-        (self.directory / "portable/melonDS.toml").write_text(
-            'LimitFPS = true\nAudioSync = false\nPauseLostFocus = false\n[Emu]\nDirectBoot = true\n'
-            'ExternalBIOSEnable = false\n[Screen]\nUseGL = false\n[3D]\nRenderer = 0\n[JIT]\nEnable = true\n'
-            '[Instance0]\nSaveFilePath = "/profile"\n[Instance0.Firmware]\nMAC = "' + mac + '"\n'
-            '[Instance0.Keyboard]\n' + "".join(f"{key} = {value}\n" for key, value in KEYS.items()))
+        self.write_config(self.directory)
         self.local.run(["run", "--rm", "--network", "none", "--read-only", "--user", f"{os.getuid()}:{os.getgid()}",
                         "--mount", f"type=bind,source={self.directory},target=/profile", image,
                         "cp", "/build/melonDS", "/profile/melonDS"], capture=True, timeout=15)
@@ -120,6 +135,70 @@ class Emulator:
         stack.save_manifest(self.directory, {"version": 1, "profile": self.name, "workspace": str(self.local.workspace),
             "target": target, "source_save": str(source), "source_sha256": digest(original), "rom_sha256": digest(program),
             "image": image, "emulator_sha256": digest((self.directory / "melonDS").read_bytes())})
+
+    def profiles_directory(self):
+        parent = self.directory.parent
+        parent.mkdir(mode=0o700, exist_ok=True)
+        if parent.resolve() != parent: raise ValueError("Profiles directory must not be linked")
+        return parent
+
+    @staticmethod
+    def write_config(directory):
+        (directory / "portable").mkdir(mode=0o700)
+        mac = ":".join(f"{byte:02x}" for byte in b"\x02" + secrets.token_bytes(5))
+        (directory / "portable/melonDS.toml").write_text(
+            'LimitFPS = true\nAudioSync = false\nPauseLostFocus = false\n[Emu]\nDirectBoot = true\n'
+            'ExternalBIOSEnable = false\n[Screen]\nUseGL = false\n[3D]\nRenderer = 0\n[JIT]\nEnable = true\n'
+            '[Instance0]\nSaveFilePath = "/profile"\n[Instance0.Firmware]\nMAC = "' + mac + '"\n'
+            '[Instance0.Keyboard]\n' + "".join(f"{key} = {value}\n" for key, value in KEYS.items()))
+
+    def fork(self, source_name, snapshot_name):
+        """Copy a checked snapshot into a new profile to test copied/older enrolled saves.
+
+        The copy deliberately shares the source identity and credential; the
+        server's counter fence, not this tool, must keep the two apart.
+        """
+        if source_name == self.name: raise ValueError("Fork into a different profile")
+        if self.directory.exists() or self.directory.is_symlink(): raise FileExistsError(self.directory)
+        source = Emulator(self.local, source_name)
+        with private_lock(self.local.workspace / (".emulator-" + source.name + ".lock"), fcntl.LOCK_EX):
+            origin = source.manifest()
+            snapshot = source.directory / "snapshots" / snapshot_name
+            if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", snapshot_name) or snapshot.resolve() != snapshot:
+                raise ValueError("Use a checked snapshot of the source profile")
+            recorded = json.loads(read_private(snapshot / "manifest.json"))
+            if not isinstance(recorded, dict): raise ValueError("Snapshot does not belong to the source profile")
+            hashes, profile = recorded.get("files"), recorded.get("profile")
+            if (recorded.get("version") != 1 or not isinstance(profile, dict) or not isinstance(hashes, dict)
+                    or set(hashes) != set(save_files(snapshot)) or profile.get("profile") != source.name
+                    or any(profile.get(key) != origin[key] for key in ("workspace", "rom_sha256", "emulator_sha256"))):
+                raise ValueError("Snapshot does not belong to the source profile")
+            files = {item: read_private(snapshot / item) for item in hashes}
+            if any(digest(data) != hashes[item] for item, data in files.items()):
+                raise ValueError("Snapshot changed after it was checked; preserve it")
+            binaries = {item: read_private(source.directory / item) for item in ("platinum.nds", "melonDS")}
+            if digest(binaries["platinum.nds"]) != origin["rom_sha256"] or digest(binaries["melonDS"]) != origin["emulator_sha256"]:
+                raise ValueError("Source profile binaries changed; preserve the original run")
+        # Build privately, then publish complete; the caller holds this profile's lock.
+        staging = self.profiles_directory() / (".fork-" + self.name + "-" + secrets.token_hex(8))
+        staging.mkdir(mode=0o700)
+        try:
+            (staging / "platinum.sav.platinumwt").mkdir(mode=0o700)
+            outputs = {**save_files(staging), "platinum.nds": staging / "platinum.nds", "melonDS": staging / "melonDS"}
+            for item, data in {**files, **binaries}.items(): write_private(outputs[item], data)
+            (staging / "melonDS").chmod(0o700)
+            self.write_config(staging)
+            stack.save_manifest(staging, {"version": 1, "profile": self.name, "workspace": str(self.local.workspace),
+                **{key: origin[key] for key in ("target", "source_save", "source_sha256", "rom_sha256", "image", "emulator_sha256")},
+                "forked_from": {"profile": source.name, "snapshot": snapshot_name, "files": hashes}})
+            if self.directory.exists() or self.directory.is_symlink(): raise FileExistsError(self.directory)
+            staging.rename(self.directory)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)  # Only copies of retained, checked inputs.
+            raise
+        descriptor = os.open(self.directory.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
 
     def owned_container(self):
         result = self.local.run(["container", "inspect", self.container], capture=True, timeout=10, check=False)
@@ -325,14 +404,11 @@ class Emulator:
         destination = self.directory / "snapshots" / name
         if destination.resolve() != destination: raise ValueError("Snapshots directory must not be linked")
         destination.mkdir(mode=0o700, parents=True)
-        files = {"platinum.sav": self.directory / "platinum.sav", **{
-            item: self.directory / "platinum.sav.platinumwt" / item for item in ("A", "B", "HEAD")}}
         hashes = {}
-        for item, path in files.items():
+        for item, path in save_files(self.directory).items():
             if path.is_symlink(): raise ValueError("Preserve linked snapshot inputs")
             data = path.read_bytes()
-            with (destination / item).open("xb") as output:
-                output.write(data); output.flush(); os.fsync(output.fileno())
+            write_private(destination / item, data)
             hashes[item] = digest(data)
         stack.save_manifest(destination, {"version": 1, "profile": manifest, "state": status,
                                           "host_generation": generation, "files": hashes})
@@ -348,6 +424,8 @@ def main():
     create.add_argument("--save", type=Path, required=True); create.add_argument("--rom", type=Path, required=True)
     create.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
     create.add_argument("--image", default="platinumwt-emulator-builder")
+    fork = sub.add_parser("fork", help="copy another profile's checked snapshot, sharing its identity")
+    fork.add_argument("--source", required=True); fork.add_argument("--snapshot", required=True)
     start = sub.add_parser("start")
     start.add_argument("--fault-at", type=int, choices=range(1, 21)); start.add_argument("--fault-mode", choices=("before", "after", "error"), default="before")
     start.add_argument("--fault-phase", type=int, choices=range(10)); start.add_argument("--fast", action="store_true")
@@ -366,6 +444,7 @@ def main():
         if args.action not in ("inspect", "logs"):
             locks.enter_context(private_lock(workspace / (".emulator-" + args.profile + ".lock"), fcntl.LOCK_EX))
         if args.action == "create": emulator.create(args.save, args.rom, args.target, args.image)
+        elif args.action == "fork": emulator.fork(args.source, args.snapshot)
         elif args.action == "start":
             if args.fault_phase is not None and args.fault_at is None: parser.error("--fault-phase requires --fault-at")
             emulator.start(fault_at=args.fault_at, fault_mode=args.fault_mode, fault_phase=args.fault_phase, fast=args.fast)
