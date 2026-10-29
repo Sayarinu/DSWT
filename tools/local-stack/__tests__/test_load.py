@@ -38,6 +38,12 @@ class MeasurementTests(unittest.TestCase):
         self.assertFalse(load.conserved(["a", "b"], ["b", "b"]))
         self.assertFalse(load.conserved(["a", "b"], ["a"]))
 
+    def test_each_client_gets_a_distinct_loopback_network(self):
+        addresses = [load.source(index) for index in range(62500)]
+        self.assertEqual(len(set(addresses)), 62500)
+        self.assertTrue(all(address.startswith("127.") for address in addresses))
+        self.assertTrue(all(0 < int(address.rsplit(".", 1)[1]) < 255 for address in addresses))
+
     def test_every_target_must_be_met_without_weakening(self):
         self.assertEqual(load.verdict(report(), TARGETS)["status"], "pass")
         for changed, check in ((report(per_second=9.99), "completed_pairs_per_second"),

@@ -255,6 +255,21 @@ await Test("worker capacity is two with no waiting queue", async () =>
     await ExpectStatus(async () => await second, StatusCode.Unavailable);
 });
 
+await Test("configured worker capacity is bounded and still has no waiting queue", async () =>
+{
+    Require(WorkerRunner.Workers(null) == 2 && WorkerRunner.Workers("") == 2 && WorkerRunner.Workers("4") == 4, "worker count");
+    foreach (var invalid in new[] { "0", "9", "12", "x", " 4" })
+    {
+        try { WorkerRunner.Workers(invalid); Require(false, "accepted worker count " + invalid); }
+        catch (InvalidOperationException) { }
+    }
+    using var runner = new WorkerRunner(() => Shell("exec sleep 20"), TimeSpan.FromMilliseconds(200), 3);
+    var running = Enumerable.Range(0, 3).Select(_ => runner.Run(good, CancellationToken.None)).ToArray();
+    await ExpectStatus(async () => await runner.Run(good, CancellationToken.None), StatusCode.ResourceExhausted);
+    foreach (var item in running)
+        await ExpectStatus(async () => await item, StatusCode.Unavailable);
+});
+
 await Test("worker cancellation crash malformed output and floods are unavailable", async () =>
 {
     foreach (var command in new[] { "exit 2", "exit 0", "printf invalid", "head -c 4096 /dev/zero" })

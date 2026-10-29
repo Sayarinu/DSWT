@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <future>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -97,6 +98,24 @@ TEST(AdmissionTest, CredentialsFenceOwnerBudgetsAndNewTradesCannotUseRecoverySlo
   EXPECT_FALSE(verified(RequestKind::Recovery, std::string(16, 'E'), secret));
   recovery.clear();
   EXPECT_TRUE(verified(RequestKind::Recovery, owner, secret));
+}
+
+TEST(AdmissionTest, ConfiguredSubmissionCapacityKeepsPerIdentityAndRecoveryLimits) {
+  ServiceAdmission admission(6);
+  const std::string secret(32, 'Q');
+  std::vector<std::unique_ptr<Quota::Permit>> held;
+  for (int i = 0; i < 6; ++i) {
+    held.push_back(admission.Acquire(RequestKind::Submission));
+    ASSERT_TRUE(held.back());
+    ASSERT_EQ(admission.Authorize(*held.back(), std::string(16, 'A' + i / 2), secret), true);
+  }
+  EXPECT_FALSE(admission.Acquire(RequestKind::Submission));
+  held.pop_back();
+  auto third = admission.Acquire(RequestKind::Submission);
+  ASSERT_TRUE(third);
+  EXPECT_FALSE(admission.Authorize(*third, std::string(16, 'A'), secret)); // Still two per identity.
+  EXPECT_TRUE(admission.Acquire(RequestKind::Recovery));
+  EXPECT_THROW(ServiceAdmission(0), std::invalid_argument);
 }
 
 TEST(AdmissionTest, UnauthenticatedWorkCannotPopulateTheIdentityCache) {

@@ -78,7 +78,7 @@ int main(int argc, char **argv) try {
   LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-pwt2");
   // Same-host test data proves local flows only, never off-site recovery.
   RecoveryBarrier localTest = [](auto) { return true; };
-  auto admission = std::make_shared<detail::ServiceAdmission>();
+  auto admission = std::make_shared<detail::ServiceAdmission>(LoadSubmissionWorkers());
   IdentityService identities(kDatabase, localTest, admission);
   TradeService trades(kDatabase, [&](const auto &bytes) { return legality.CheckNewSubmission(bytes); }, localTest, admission);
   MatcherService matcher(kDatabase, localTest);

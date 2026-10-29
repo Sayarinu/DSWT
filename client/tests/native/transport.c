@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -49,6 +50,17 @@ static int ReadHttp(void *arg, unsigned char *bytes, size_t size)
     return WtTls_Read(&((Connection *)arg)->tls, bytes, size);
 }
 
+/* Load tests may give each simulated client its own loopback network; unset keeps the kernel's choice. */
+static int BindSource(int fd)
+{
+    const char *source = getenv("WT_PROBE_SOURCE");
+    struct sockaddr_in local = {0};
+    if (!source) return 0;
+    local.sin_family = AF_INET;
+    if (inet_pton(AF_INET, source, &local.sin_addr) != 1 || (ntohl(local.sin_addr.s_addr) >> 24) != 127) return -1;
+    return bind(fd, (struct sockaddr *)&local, sizeof(local));
+}
+
 int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned char pins[2][32])
 {
     Connection connection = {0};
@@ -68,7 +80,8 @@ int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned c
     fd = socket(AF_INET, SOCK_STREAM, 0);
     address.sin_family = AF_INET; address.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) != 1) goto done;
-    if (fd < 0 || connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0 || fcntl(fd, F_SETFL, O_NONBLOCK) != 0) goto done;
+    if (fd < 0 || BindSource(fd) != 0 || connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0
+        || fcntl(fd, F_SETFL, O_NONBLOCK) != 0) goto done;
     clock_gettime(CLOCK_MONOTONIC, &connection.deadline); connection.deadline.tv_sec += 10;
     opened = 1;
     stage = "tls-open";

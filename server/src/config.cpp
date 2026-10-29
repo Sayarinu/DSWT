@@ -52,6 +52,15 @@ unsigned short LoadMetricsPort() {
   return static_cast<unsigned short>(value);
 }
 
+unsigned LoadSubmissionWorkers() {
+  const auto workers = Environment("WT_SUBMISSION_WORKERS", "4");
+  unsigned value = 0;
+  const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), value);
+  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || value < 1 || value > 16)
+    throw std::invalid_argument("WT_SUBMISSION_WORKERS must be between 1 and 16");
+  return value;
+}
+
 ServerConfig LoadServerConfig() {
   ServerConfig config{Environment("WT_HTTP_ADDRESS", "0.0.0.0"), HttpPort(),
                       Environment("WT_GRPC_ADDRESS", "127.0.0.1:50051"),
@@ -71,6 +80,7 @@ ServerConfig LoadServerConfig() {
     config.tls = TlsFiles{certificate, key};
   }
   config.metrics_port = LoadMetricsPort();
+  config.submission_workers = LoadSubmissionWorkers();
   return config;
 }
 
@@ -80,6 +90,7 @@ BackendConfig LoadBackendConfig() {
   PrivateAddress(config.address, true);
   PrivateAddress(config.legality_address, false);
   config.metrics_port = LoadMetricsPort();
+  config.submission_workers = LoadSubmissionWorkers();
   return config;
 }
 

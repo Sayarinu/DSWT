@@ -9,8 +9,9 @@ namespace platinumwt::server {
 
 HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
                            boost::asio::thread_pool &recovery,
-                           std::shared_ptr<boost::asio::ssl::context> tls)
-    : handler_(std::move(handler)), submissions_(submissions), recovery_(recovery), tls_(std::move(tls)) {}
+                           std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers)
+    : handler_(std::move(handler)), submissions_(submissions), recovery_(recovery), tls_(std::move(tls)),
+      submission_jobs_({2 * submission_workers, 8, 64, 32}) {}
 
 std::unique_ptr<HttpConnection> HttpServices::Connect(const boost::asio::ip::address &peer) {
   auto network = detail::NetworkKey(peer);
