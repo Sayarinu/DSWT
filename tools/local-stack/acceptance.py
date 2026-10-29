@@ -346,19 +346,22 @@ class Acceptance:
                                 or (row.get("transport_stage") == "http" and row.get("result", 0) < 0 and row.get("tls_flags") == 0)
                                 for row in events), "outage did not fail at the authenticated service boundary")
                 finally:
-                    self.local.compose("start", service, capture=True, timeout=45)
-                    deadline = time.monotonic() + 30
-                    while True:
-                        try:
-                            self.local.ready()
-                            break
-                        except (OSError, ValueError, subprocess.SubprocessError):
-                            if time.monotonic() >= deadline:
-                                raise
-                            time.sleep(0.1)
+                    self.restart_service(service)
                 require(self.snapshot(a) == before, "outage consumed mutation counter")
                 self.run(a); self.run(a, "cancel")
                 self.settled(a, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
+
+    def restart_service(self, service):
+        self.local.compose("start", service, capture=True, timeout=45)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                self.local.ready()
+                return
+            except (OSError, ValueError, subprocess.SubprocessError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
 
     def validator_recovery(self):
         a, b, pending = self.client("a"), self.client("b", "wild.pk4"), self.client("pending")
@@ -381,16 +384,7 @@ class Acceptance:
             require(not self.local.compose("ps", "--status", "running", "-q", "validator", capture=True, timeout=10).stdout.strip(),
                     "collection unexpectedly restarted validator")
         finally:
-            self.local.compose("start", "validator", capture=True, timeout=45)
-            deadline = time.monotonic() + 30
-            while True:
-                try:
-                    self.local.ready()
-                    break
-                except (OSError, ValueError, subprocess.SubprocessError):
-                    if time.monotonic() >= deadline:
-                        raise
-                    time.sleep(0.1)
+            self.restart_service("validator")
         require(self.inspect(pending)["pending_sha256"] == original["pending_sha256"], "restart changed exact retry packet")
         self.run(pending); self.run(pending, "cancel")
         final = self.settled(pending, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])

@@ -61,7 +61,7 @@ def workflow(data):
     permissions(data.get("permissions"))
     for text in strings(data):
         for expression in re.findall(r"\$\{\{(.*?)\}\}", text, re.S):
-            require(not re.search(r"\bsecrets\s*[.\[]|\bgithub\s*(?:\.\s*(?:token|github_token)\b|\[\s*['\"](?:token|github_token)['\"])", expression, re.I),
+            require(not re.search(r"\bsecrets\b|\bgithub\b(?!\s*\.)|\bgithub\s*\.\s*(?:token|github_token)\b", expression, re.I),
                     "Explicit secret/token expression in contribution CI")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and bool(jobs), "Workflow needs jobs")

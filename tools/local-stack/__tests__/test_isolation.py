@@ -55,6 +55,9 @@ class WorkflowTests(unittest.TestCase):
             lambda d: d.update(env={"TOKEN": "${{ secrets.PRODUCTION_TOKEN }}"}),
             lambda d: d.update(env={"TOKEN": "${{ format('{0}', secrets['PRODUCTION_TOKEN']) }}"}),
             lambda d: d.update(env={"TOKEN": "${{ (github['token']) }}"}),
+            lambda d: d.update(env={"TOKEN": "${{ toJSON(secrets) }}"}),
+            lambda d: d.update(env={"TOKEN": "${{ toJSON(github) }}"}),
+            lambda d: d.update(env={"TOKEN": "${{ github[format('{0}{1}', 'to', 'ken')] }}"}),
             lambda d: d["jobs"]["test"]["steps"][0].update(uses="actions/checkout@v4"),
             lambda d: d["jobs"]["test"]["steps"][0]["with"].update({"persist-credentials": "true"}),
             lambda d: d["jobs"]["test"]["steps"][0].pop("with"),
@@ -138,7 +141,8 @@ class RuntimeTests(unittest.TestCase):
                 "Config": {"User": "1000:1000", "Labels": {"com.docker.compose.project": "platinumwt-local-case", "com.docker.compose.service": name}},
                 "HostConfig": {"Privileged": False, "CapAdd": [], "Devices": [], "PidMode": "", "IpcMode": "private",
                                "PortBindings": {"8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}]} if name == "gateway" else {},
-                               "ReadonlyRootfs": name != "database", "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"], "Tmpfs": {"/tmp": "rw"},
+                               "ReadonlyRootfs": name != "database", "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"],
+                               "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=64m" if name == "validator" else "rw"},
                                "NetworkMode": "none" if name == "database" else "platinumwt-local-case_default" if name == "gateway" else "container:" + gateway,
                                "Memory": 512 * 1024 * 1024, "NanoCpus": 2_000_000_000, "PidsLimit": 128}}
 
@@ -157,8 +161,11 @@ class RuntimeTests(unittest.TestCase):
             lambda d: d["validator"]["HostConfig"].update(PidsLimit=0),
             lambda d: d["validator"]["HostConfig"].update(NanoCpus=0),
             lambda d: d["validator"]["HostConfig"].update(Memory=0),
+            lambda d: d["validator"]["HostConfig"].update(Tmpfs={"/tmp": "rw,exec,suid,dev,size=4g"}),
+            lambda d: d["validator"]["HostConfig"].update(Tmpfs={"/tmp": "rw,noexec,nosuid,nodev,size=4g"}),
             lambda d: d["backend"]["Config"].update(User="root"),
             lambda d: d["backend"]["Config"].update(User="root:1000"),
+            lambda d: d["backend"]["Config"].update(User="0000:1000"),
             lambda d: d["backend"].update(Image="different-image"),
             lambda d: d["backend"]["Config"]["Labels"].update({"com.docker.compose.project": "foreign"}),
         ]
@@ -177,7 +184,8 @@ class RuntimeTests(unittest.TestCase):
                 volumes.append({"target": target, "type": kind, "source": source.rsplit("-", 1)[-1] if kind == "volume" else source, "read_only": not rw})
             config["services"][name] = {
                 "volumes": volumes, "ports": [{"host_ip": "127.0.0.1", "published": "8443", "target": 8443}] if name == "gateway" else [],
-                "read_only": name != "database", "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"], "tmpfs": ["/tmp"],
+                "read_only": name != "database", "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"],
+                "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=64m"] if name == "validator" else ["/tmp"],
                 "mem_limit": 512 * 1024 * 1024, "cpus": 2, "pids_limit": 128}
             if name in ("database", "migrate"):
                 config["services"][name]["network_mode"] = "none"
@@ -192,7 +200,8 @@ class RuntimeTests(unittest.TestCase):
                        lambda d: d["services"]["gateway"]["volumes"][0].update(source="/var/run/docker.sock"),
                        lambda d: d["volumes"]["data"].update(name="foreign-data"),
                        lambda d: d["services"]["database"]["command"].append("listen_addresses=*"),
-                       lambda d: d["services"]["validator"].update(mem_limit=0)):
+                       lambda d: d["services"]["validator"].update(mem_limit=0),
+                       lambda d: d["services"]["validator"].update(tmpfs=["/tmp:rw,exec,suid,dev,size=4g"])):
             mutated = copy.deepcopy(config)
             change(mutated)
             with self.subTest(change=change), self.assertRaises(ValueError):

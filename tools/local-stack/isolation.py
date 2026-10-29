@@ -42,6 +42,18 @@ def mounts(actual, expected):
     require(actual == expected, "Unexpected mount, access mode or volume identity")
 
 
+def validator_tmpfs(options):
+    require(isinstance(options, str), "Invalid validator tmpfs options")
+    flags = options.lower().split(",")
+    require({"noexec", "nosuid", "nodev"} <= set(flags) and not {"exec", "suid", "dev"} & set(flags),
+            "Validator tmpfs must prohibit execution, devices and setuid")
+    sizes = [flag[5:] for flag in flags if flag.startswith("size=")]
+    require(len(sizes) == 1, "Validator tmpfs needs one size bound")
+    match = re.fullmatch(r"([0-9]+)([kmg])?", sizes[0])
+    require(match is not None and int(match[1]) * {None: 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[match[2]] == 64 * 1024 * 1024,
+            "Validator tmpfs must be bounded to 64 MiB")
+
+
 def compose_evidence(local, config):
     services = config["services"]
     require(set(services) == {*stack.SERVICES, "migrate"}, "Unexpected local service set")
@@ -80,6 +92,8 @@ def compose_evidence(local, config):
     validator = services["validator"]
     require(int(validator["mem_limit"]) == 512 * 1024 * 1024 and float(validator["cpus"]) == 2
             and validator["pids_limit"] == 128, "Unexpected validator resource bounds")
+    require(len(validator["tmpfs"]) == 1 and validator["tmpfs"][0].startswith("/tmp:"), "Unexpected validator tmpfs mount")
+    validator_tmpfs(validator["tmpfs"][0].split(":", 1)[1])
     return {"status": "pass", "sha256": hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest(),
             "services": sorted(services)}
 
@@ -113,11 +127,12 @@ def runtime_evidence(local, containers):
             require(mode == local.manifest["project"] + "_default", "Unexpected gateway network")
         if name != "database":
             require(host["ReadonlyRootfs"] and host["CapDrop"] == ["ALL"]
-                    and "no-new-privileges:true" in host["SecurityOpt"] and "/tmp" in host["Tmpfs"], "Missing runtime restrictions")
-            require(config["User"].split(":")[0] not in ("", "0", "root"), "Application must run unprivileged")
+                    and "no-new-privileges:true" in host["SecurityOpt"] and set(host["Tmpfs"]) == {"/tmp"}, "Missing runtime restrictions")
+            require(re.fullmatch(r"[1-9][0-9]*(?::[0-9]+)?", config["User"]), "Application must use a nonzero numeric UID")
         if name == "validator":
             require(host["Memory"] == 512 * 1024 * 1024 and host["NanoCpus"] == 2_000_000_000
                     and host["PidsLimit"] == 128, "Unexpected runtime validator limits")
+            validator_tmpfs(host["Tmpfs"]["/tmp"])
         report[name] = {"container": item["Id"], "image": item["Image"], "network_mode": mode, "status": "pass"}
     return report
 
@@ -156,6 +171,7 @@ def production_files(archive):
         require(not re.match(r"^(build|src|test)(/|$)", path)
                 and not re.search(r"(^|/)(platinumwt-device-fixture|platinumwt-gateway-fixture|platinumwt-.*tests?)(/|$)", path),
                 "Production image contains project tests/build inputs")
+        require(not path.startswith("usr/local/bin/") or path in required, "Unexpected production executable")
         count += 1
         if path in required:
             require(member.isfile(), "Production executable/notice must be an ordinary file")
@@ -232,6 +248,16 @@ def main():
                 report["listeners"] = listener_evidence(local)
                 report["database_system_id"] = local.manifest["database_system_id"]
                 report["production"] = production_evidence(local, args.production_image, directory)
+                binaries = local.compose("exec", "-T", "gateway", "sha256sum", "/build/platinumwt-server", "/build/platinumwt-backend", "/build/platinumwt-ledger",
+                                         capture=True, timeout=30).stdout
+                compiled = {}
+                for line in binaries.splitlines():
+                    checksum, filename = line.split()
+                    require(re.fullmatch(r"[0-9a-f]{64}", checksum) and filename.startswith("/build/"), "Invalid compiled program digest")
+                    compiled["usr/local/bin/" + filename.removeprefix("/build/")] = checksum
+                expected = {path: checksum for path, checksum in report["production"]["files"].items() if path.startswith("usr/local/bin/")}
+                require(compiled == expected, "Final production programs differ from the tested build image")
+                report["compiled_programs"] = compiled
                 local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
                 report["ledger_replay"] = "pass"
         report["status"] = github_status(report["github"]) if args.github else "pass"
