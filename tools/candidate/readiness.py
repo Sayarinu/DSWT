@@ -10,13 +10,13 @@ Automated inventory does not establish rights; publication stays blocked.
 """
 
 import argparse
-import hashlib
+import functools
 import io
 import json
-import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -45,8 +45,8 @@ UNRESOLVED = [
 ]
 
 
-def sha256(data):
-    return hashlib.sha256(data).hexdigest()
+sha256 = candidate.sha256
+MAX_BLOB = 256 * 1024 * 1024
 
 
 def git(*arguments, root=ROOT, text=True):
@@ -81,7 +81,10 @@ def contents(oids, root=ROOT):
             process.stdin.write(oid.encode() + b"\n")
             process.stdin.flush()
             header = process.stdout.readline().split()
-            body = process.stdout.read(int(header[2]))
+            candidate.require(len(header) == 3 and header[0] == oid.encode() and header[1] == b"blob", f"cannot read blob {oid}")
+            size = int(header[2])
+            candidate.require(size <= MAX_BLOB, f"blob {oid} exceeds {MAX_BLOB} bytes; review it manually")
+            body = process.stdout.read(size)
             process.stdout.read(1)
             yield oid, body
     finally:
@@ -90,8 +93,14 @@ def contents(oids, root=ROOT):
         process.wait()
 
 
+@functools.cache
 def policy():
     return json.loads(CLASSIFICATION.read_text())
+
+
+def expected_marker(path, body, expected):
+    """Only the reviewed sentinel definition is expected; encoded key material never is."""
+    return path in expected and not oci.KEY_PREFIX.search(body)
 
 
 def inventory(root=ROOT, rules=None, expected=None):
@@ -102,7 +111,8 @@ def inventory(root=ROOT, rules=None, expected=None):
     paths = {}
     for oid, path, size in entries:
         paths.setdefault(path, set()).add(oid)
-    markers = sorted({oid for oid, body in contents(sorted({oid for oid, _, _ in entries}), root) if oci.private_marker(body)})
+    bodies = dict(contents(sorted({oid for oid, _, _ in entries}), root))
+    markers = sorted(oid for oid, body in bodies.items() if oci.private_marker(body))
     categories = {}
     for path in paths:
         categories.setdefault(classify(path, rules), []).append(path)
@@ -114,7 +124,8 @@ def inventory(root=ROOT, rules=None, expected=None):
         "forbidden": sorted(categories.get("forbidden", [])),
         "unclassified": sorted(categories.get("unclassified", [])),
         # A reviewed self-reference stays listed but separate; any other marker is a finding.
-        "private_marker_blobs": [{"blob": oid, "paths": found, "expected": set(found) <= set(expected)}
+        "private_marker_blobs": [{"blob": oid, "paths": found,
+                                  "expected": all(expected_marker(path, bodies[oid], expected) for path in found)}
                                  for oid in markers
                                  for found in [sorted(path for path, ids in paths.items() if oid in ids)]],
     }
@@ -127,8 +138,12 @@ def source_archive(commit, output, root=ROOT, expected=None):
                            check=True, capture_output=True).stdout
     second = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", f"--prefix={prefix}", commit],
                             check=True, capture_output=True).stdout
-    tree = {line.split("\t", 1)[1]: line.split()[2] for line in git("ls-tree", "-r", "--full-tree", commit, root=root).splitlines()}
-    findings, names = [], set()
+    tree = {}
+    for item in git("ls-tree", "-r", "-z", "--full-tree", commit, root=root).split("\0"):
+        if item:
+            meta, path = item.split("\t", 1)
+            tree[path] = meta.split()[2]
+    findings, archived = [], {}
     with tarfile.open(fileobj=io.BytesIO(first)) as archive:
         for info in archive:
             if info.type == tarfile.XGLTYPE:
@@ -137,34 +152,45 @@ def source_archive(commit, output, root=ROOT, expected=None):
             if info.isdir():
                 continue
             relative = name[len(prefix):]
-            names.add(relative)
+            body = archive.extractfile(info).read() if info.isreg() else b""
+            # Member bytes must hash to the commit's blob, not merely share its name.
+            archived[relative] = subprocess.run(["git", "hash-object", "--stdin"], input=body, capture_output=True,
+                                                check=True).stdout.decode().strip() if info.isreg() else None
             if not info.isreg() or oci.prohibited(name):
                 findings.append({"path": relative, "finding": "not an ordinary allowed file"})
-            elif oci.private_marker(archive.extractfile(info).read()):
-                findings.append({"path": relative, "finding": "private marker",
-                                 "expected": relative in (expected if expected is not None else policy()["expected_markers"])})
+            elif oci.private_marker(body):
+                findings.append({"path": relative, "finding": "private marker", "expected": expected_marker(
+                    relative, body, expected if expected is not None else policy()["expected_markers"])})
     output.write_bytes(first)
     return {"file": output.name, "sha256": sha256(first), "size": len(first), "reproducible": first == second,
-            "complete": names == set(tree), "members": len(names), "findings": findings}
+            "complete": archived == tree, "members": len(archived), "findings": findings}
 
 
 def scanner(tools, workflow=WORKFLOW):
     """Install the exact gitleaks release pinned by the repository's CI secret scan."""
-    url, version, digest = SCANNER.search(workflow.read_text()).groups()
+    match = SCANNER.search(workflow.read_text())
+    candidate.require(match is not None, "the CI workflow no longer pins a gitleaks release")
+    url, version, digest = match.groups()
     directory = tools / f"gitleaks-{version}"
-    binary = directory / "gitleaks"
-    if not binary.exists():
+    if not directory.exists():
+        tools.mkdir(parents=True, exist_ok=True)
         with urllib.request.urlopen(url, timeout=120) as response:
             archive = response.read(64 * 1024 * 1024)
         candidate.require(sha256(archive) == digest, "gitleaks archive does not match the CI pin")
-        directory.mkdir(parents=True, mode=0o700)
         with tarfile.open(fileobj=io.BytesIO(archive)) as source:
             member = source.getmember("gitleaks")
-            candidate.require(member.isreg(), "unexpected gitleaks archive")
-            binary.write_bytes(source.extractfile(member).read())
-        binary.chmod(0o700)
-        (directory / "archive.sha256").write_text(digest + "\n")
-    candidate.require((directory / "archive.sha256").read_text().strip() == digest, "installed gitleaks is not the CI pin")
+            candidate.require(member.type == tarfile.REGTYPE, "unexpected gitleaks archive")
+            binary = source.extractfile(member).read()
+        # Install the whole directory by one no-replace rename; an interrupted install leaves nothing.
+        with candidate.patcher.Stage(tools, f"gitleaks-{version}.partial") as stage:
+            stage.write_tree("install", {"gitleaks": (binary, 0o700), "archive.sha256": (digest.encode() + b"\n", 0o600),
+                                         "binary.sha256": (sha256(binary).encode() + b"\n", 0o600)})
+            stage.publish("install", directory.name)
+    binary = directory / "gitleaks"
+    data = candidate.patcher.read_private(binary, 256 * 1024 * 1024, "gitleaks")[0]
+    candidate.require((directory / "archive.sha256").read_text().strip() == digest
+                      and (directory / "binary.sha256").read_text().strip() == sha256(data),
+                      "installed gitleaks does not match the CI pin")
     return binary, version, digest
 
 
@@ -173,69 +199,129 @@ def secrets(binary, directory, root=ROOT):
     config, ignore = directory / "gitleaks.toml", directory / "empty-ignore"
     config.write_text("[extend]\nuseDefault = true\n")
     ignore.touch()
+    # A mirror clone copies every ref (refs/*), including other branches and remote-tracking refs.
     mirror = directory / "history.git"
     subprocess.run(["git", "clone", "--quiet", "--mirror", "--no-local", str(root), str(mirror)], check=True)
-    # Include local branches and remote-tracking refs that a mirror of the clone would otherwise omit.
-    for line in git("for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes", root=root).splitlines():
-        oid, name = line.split(" ", 1)
-        subprocess.run(["git", "-C", str(mirror), "update-ref", name, oid], check=True)
-    results = {}
-    for mode, target in (("git", mirror),):
-        report = directory / f"gitleaks-{mode}.json"
-        process = subprocess.run([str(binary), mode, "--log-opts=--all", "--redact", "--no-banner", "--ignore-gitleaks-allow",
-                                  "--config", str(config), "--gitleaks-ignore-path", str(ignore), "--report-format", "json",
-                                  "--report-path", str(report), str(target)], capture_output=True, text=True)
-        candidate.require(process.returncode in (0, 1), f"gitleaks {mode} scan failed to run")
-        findings = json.loads(report.read_text() or "[]")
-        results[mode] = {"exit": process.returncode, "findings": len(findings),
-                         "rules": sorted({item.get("RuleID") for item in findings})}
+    candidate.require(git("for-each-ref", "--format=%(objectname) %(refname)", root=mirror)
+                      == git("for-each-ref", "--format=%(objectname) %(refname)", root=root), "mirror omitted refs")
+    report = directory / "gitleaks-git.json"
+    process = subprocess.run([str(binary), "git", "--log-opts=--all", "--redact", "--no-banner", "--ignore-gitleaks-allow",
+                              "--config", str(config), "--gitleaks-ignore-path", str(ignore), "--report-format", "json",
+                              "--report-path", str(report), str(mirror)], capture_output=True, text=True)
     shutil.rmtree(mirror)
-    return results
+    # Exit 1 means findings only when the fresh report lists them; otherwise the scan itself failed.
+    candidate.require(process.returncode in (0, 1) and report.exists(), "gitleaks scan failed to run")
+    findings = json.loads(report.read_text() or "[]")
+    candidate.require((process.returncode == 1) == bool(findings), "gitleaks exit status and report disagree")
+    return {"git": {"exit": process.returncode, "findings": len(findings),
+                    "rules": sorted({item.get("RuleID") for item in findings})}}
 
 
 def audit_source(output, root=ROOT):
     commit = git("rev-parse", "HEAD", root=root).strip()
     candidate.require(not git("status", "--porcelain", root=root).strip(), "Audit only a clean, committed tree")
-    output.mkdir(mode=0o700)
+    parent, name = candidate.patcher._new_output(output, root)
     binary, version, digest = scanner(root / "game/tools")
-    report = {"version": 1, "kind": "platinumwt-source-audit", "source_commit": commit, "audited_at": int(time.time()),
-              "inventory": inventory(root), "source_archive": source_archive(commit, output / f"source-{commit[:12]}.tar", root),
-              "secret_scanner": {"tool": "gitleaks", "version": version, "archive_sha256": digest,
-                                 "policy": "CI default rules; allow comments and ignore files disabled"},
-              "secrets": secrets(binary, output, root),
-              "rights": "Inventory and classification do not establish rights or clear redistribution.",
-              "publication_permitted": False}
-    (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    with candidate.patcher.Stage(parent, f"{name}.partial") as stage:
+        work = stage.path / "audit"
+        work.mkdir(mode=0o700)
+        report = {"version": 1, "kind": "platinumwt-source-audit", "source_commit": commit, "source_dirty": False,
+                  "audited_at": int(time.time()), "inventory": inventory(root),
+                  "source_archive": source_archive(commit, work / f"source-{commit[:12]}.tar", root),
+                  "secret_scanner": {"tool": "gitleaks", "version": version, "archive_sha256": digest,
+                                     "policy": "CI default rules; allow comments and ignore files disabled"},
+                  "secrets": secrets(binary, work, root),
+                  "rights": "Inventory and classification do not establish rights or clear redistribution.",
+                  "publication_permitted": False}
+        (work / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        stage.publish("audit", name)
     return report
 
 
+# Each required kind and the statuses its tool writes on success.
+REQUIRED = {"observability": ("pass",), "recovery": ("pass",), "load": ("pass",), "isolation": ("pass",),
+            "image-audit": ("complete",), "source-audit": (None,)}
+OPTIONAL = {"rehearsal": ("pass",)}
+STACK_SERVICES = ("database", "gateway", "backend", "validator")
+
+
+def check_stack(report, expected, reasons):
+    """Stack-bound evidence must come from the reference workspace, database and every service image."""
+    stack = report.get("stack") or {}
+    images = report.get("images") or stack.get("images")
+    for key in ("project", "workspace", "database_system_id"):
+        value = stack.get(key, report.get(key))
+        if value is not None and value != expected["stack"][key]:
+            reasons.append(f"{key} differs from the reference stack")
+    if not isinstance(images, dict):
+        reasons.append("records no service image identities")
+        return
+    for service in STACK_SERVICES:
+        if images.get(service) != expected["stack"]["images"].get(service):
+            reasons.append(f"{service} image differs from or is missing in the reference stack")
+
+
 def evidence_binding(name, report, expected):
-    """Classify a report as applicable only when its source and service images equal the candidate's."""
-    commit = report.get("source_commit")
-    images = report.get("images") or (report.get("stack") or {}).get("images") or {}
+    """Applicable only when every recorded identity equals the candidate's; anything missing is stale."""
+    kind = name.split(":", 1)[0]
+    accepted = REQUIRED.get(kind) or OPTIONAL.get(kind)
     reasons = []
-    if report.get("source_dirty"):
+    if accepted is None:
+        reasons.append("unknown evidence kind")
+        accepted = ()
+    status = report.get("status")
+    if status not in accepted or (report.get("verdict") or {}).get("status", "pass") != "pass":
+        reasons.append(f"report status {status!r} is not a pass for {kind}")
+    if report.get("source_commit") != expected["source_commit"]:
+        reasons.append(f"source {report.get('source_commit')} differs from candidate source {expected['source_commit']}")
+    if report.get("source_dirty", False) is not False:
         reasons.append("generated from a dirty tree")
-    if commit != expected["source_commit"]:
-        reasons.append(f"source {commit} differs from candidate source {expected['source_commit']}")
-    for service, image in sorted(images.items()):
-        if service in expected["images"] and image != expected["images"][service]:
-            reasons.append(f"{service} image {image} differs from the candidate stack")
-    if report.get("status") not in ("pass", None) or (report.get("verdict") or {}).get("status", "pass") != "pass":
-        reasons.append("the report did not pass")
-    return {"evidence": name, "status": "applicable" if not reasons else "stale", "reasons": reasons,
-            "source_commit": commit, "report_status": report.get("status")}
+    notes = []
+    if kind in ("observability", "recovery", "load"):
+        check_stack(report, expected, reasons)
+    elif kind == "isolation":
+        if report.get("database_system_id") != expected["stack"]["database_system_id"]:
+            reasons.append("database identity differs from the reference stack")
+        notes.append("isolation records no image IDs; it binds by source commit and database identity")
+    elif kind == "image-audit":
+        audited = report.get("images") or {}
+        if set(audited) != {"server", "validator"}:
+            reasons.append("does not cover both service images")
+        notes.append("audited OCI images are rebuilt by the owned builder from the same source; "
+                     "their digests are not the compose stack's image IDs")
+    elif kind == "source-audit":
+        inventory, archive = report.get("inventory") or {}, report.get("source_archive") or {}
+        if (report.get("kind") != "platinumwt-source-audit" or inventory.get("forbidden") or inventory.get("unclassified")
+                or any(not item.get("expected") for item in inventory.get("private_marker_blobs", []))
+                or not archive.get("reproducible") or not archive.get("complete")
+                or any(not item.get("expected") for item in archive.get("findings", []))
+                or any(scan.get("findings") for scan in (report.get("secrets") or {}).values())):
+            reasons.append("has forbidden, unclassified, marker or secret findings, or an irreproducible archive")
+    elif kind == "rehearsal" and report.get("candidate_sha256") != expected["candidate_sha256"]:
+        reasons.append("does not name this exact candidate archive")
+    return {"evidence": name, "status": "applicable" if not reasons else "stale", "reasons": reasons, "notes": notes,
+            "source_commit": report.get("source_commit"), "report_status": status}
 
 
-def readiness(archive, evidence, stack_manifest, extra_gates=()):
-    verified = candidate.verify(archive)
+def readiness(archive, evidence, stack_manifest, extra_gates=(), root=ROOT, contents=candidate.CONTENTS):
+    verified = candidate.verify(archive, contents, root)
     record = verified["manifest"]
+    commit = record["source"]["commit"]
     stack = json.loads(Path(stack_manifest).read_text())
-    expected = {"source_commit": record["source"]["commit"], "images": stack.get("images", {})}
+    expected = {"source_commit": commit, "stack": stack, "candidate_sha256": verified["sha256"]}
+    upstream = json.loads(git("show", f"{commit}:client/upstream.json", root=root))
+    profile = sha256((Path(stack["workspace"]) / stack["profile"]).read_bytes())
+    identity = {
+        "upstream": {"repository": upstream["repository"], "revision": upstream["revision"]} == record["upstream"],
+        "connection_profile": profile == record["connection_profile_sha256"],
+        "reference_stack_source": stack.get("source_commit") == commit and stack.get("source_dirty") is False,
+    }
     bindings = [evidence_binding(name, json.loads(Path(path).read_text()), expected) for name, path in evidence]
-    if stack.get("source_commit") != expected["source_commit"] or stack.get("source_dirty"):
-        bindings.append({"evidence": "stack", "status": "stale",
-                         "reasons": ["the reference stack was built from a different or dirty source"]})
+    provided = {item["evidence"].split(":", 1)[0] for item in bindings}
+    missing = sorted(set(REQUIRED) - provided)
+    gates = list(UNRESOLVED) + list(extra_gates)
+    if "rehearsal" not in provided:
+        gates.insert(0, "No exact-candidate rehearsal report has been supplied")
     return {
         "version": 1, "kind": "platinumwt-private-readiness",
         "candidate": {"file": Path(archive).name, "sha256": verified["sha256"], "size": verified["size"],
@@ -243,12 +329,22 @@ def readiness(archive, evidence, stack_manifest, extra_gates=()):
         "source": record["source"], "upstream": record["upstream"],
         "connection_profile_sha256": record["connection_profile_sha256"],
         "bundle_manifest_sha256": record["bundle_manifest_sha256"],
-        "service_images": expected["images"], "evidence": bindings,
-        "all_evidence_applicable": all(item["status"] == "applicable" for item in bindings),
-        "unresolved_gates": UNRESOLVED + list(extra_gates),
+        "identity_checks": identity, "service_images": {name: stack["images"].get(name) for name in STACK_SERVICES},
+        "evidence": bindings, "missing_evidence": missing,
+        "all_evidence_applicable": all(identity.values()) and not missing
+                                   and all(item["status"] == "applicable" for item in bindings),
+        "unresolved_gates": gates,
         "publication_permitted": False, "distribution_blocked": True,
         "rights": "Automated inventory and audits grant no rights.",
     }
+
+
+def publish(output, report):
+    """Stage and rename the sidecar without replacing anything, like the candidate archive."""
+    parent, name = candidate.patcher._new_output(output, ROOT)
+    with candidate.patcher.Stage(parent, f"{name}.partial") as stage:
+        stage.write("report.json", (json.dumps(report, indent=2, sort_keys=True) + "\n").encode(), 0o600)
+        stage.publish("report.json", name)
 
 
 def main(argv=None):
@@ -259,14 +355,14 @@ def main(argv=None):
     bind = commands.add_parser("report", help="write a readiness sidecar for a frozen candidate")
     bind.add_argument("--candidate", type=Path, required=True)
     bind.add_argument("--stack-manifest", type=Path, required=True, help="the reference stack's manifest.json")
-    bind.add_argument("--evidence", nargs=2, action="append", default=[], metavar=("NAME", "REPORT"))
+    bind.add_argument("--evidence", nargs=2, action="append", default=[], metavar=("KIND[:LABEL]", "REPORT"),
+                      help="kinds: " + ", ".join([*REQUIRED, *OPTIONAL]))
     bind.add_argument("--gate", action="append", default=[], help="an additional unresolved gate")
     bind.add_argument("--output", type=Path, required=True, help="new readiness JSON below game/")
     args = parser.parse_args(argv)
+    signal.signal(signal.SIGTERM, candidate._terminate)
     try:
-        output = args.output.absolute()
-        candidate.require(output.is_relative_to(ROOT / "game") and not os.path.lexists(output),
-                          "Write a new output below the ignored game/ directory")
+        output = args.output
         if args.command == "source":
             report = audit_source(output)
             print(json.dumps({key: report[key] for key in ("source_commit", "secrets")} |
@@ -274,11 +370,15 @@ def main(argv=None):
                               "archive_sha256": report["source_archive"]["sha256"]}, indent=2))
         else:
             report = readiness(args.candidate, args.evidence, args.stack_manifest, args.gate)
-            output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            publish(output, report)
             print(f"Readiness {output}: candidate {report['candidate']['sha256']}, "
                   f"all evidence applicable={report['all_evidence_applicable']}, publication_permitted=false")
         return 0
-    except (candidate.CandidateError, ValueError, OSError, subprocess.CalledProcessError) as error:
+    except KeyboardInterrupt:
+        print("Interrupted; no partial output was published", file=sys.stderr)
+        return 130
+    except (candidate.CandidateError, candidate.patcher.PatchError, ValueError, KeyError, OSError,
+            subprocess.CalledProcessError) as error:
         print(f"Readiness refused: {error}", file=sys.stderr)
         return 1
 

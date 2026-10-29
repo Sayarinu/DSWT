@@ -62,14 +62,16 @@ def member_name(prefix, relative):
 
 
 def tracked(path, root=ROOT):
-    """Read a committed, unmodified regular file from the repository."""
+    """Read a committed regular file's blob from HEAD itself, so the working tree cannot race the check."""
     relative = oci.safe_path(path)
-    listed = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--stage", "--", relative],
-                            capture_output=True, text=True)
-    require(listed.returncode == 0 and listed.stdout.startswith("100644 "), f"{relative} must be a tracked regular file")
-    changed = subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", relative])
-    require(changed.returncode == 0, f"{relative} differs from the committed source")
-    return patcher.read_private(root / relative, MAX_DOCUMENT, relative)[0]
+    listed = subprocess.run(["git", "-C", str(root), "ls-tree", "-z", "HEAD", "--", relative], capture_output=True)
+    fields = listed.stdout.rstrip(b"\0").split(b"\t", 1)
+    require(listed.returncode == 0 and len(fields) == 2 and fields[1] == relative.encode()
+            and fields[0].split()[:2] == [b"100644", b"blob"], f"{relative} must be a tracked regular file")
+    oid = fields[0].split()[2].decode()
+    size = int(subprocess.run(["git", "-C", str(root), "cat-file", "-s", oid], capture_output=True, text=True, check=True).stdout)
+    require(size <= MAX_DOCUMENT, f"{relative} exceeds {MAX_DOCUMENT} bytes")
+    return subprocess.run(["git", "-C", str(root), "cat-file", "blob", oid], capture_output=True, check=True).stdout
 
 
 def render(members):
@@ -137,12 +139,21 @@ def assemble(bundle, output, contents=CONTENTS, root=ROOT):
 
 def verify(path, contents=CONTENTS, root=ROOT):
     """Reject any non-canonical, extra, missing, unsafe, tampered or publication-enabled candidate."""
+    try:
+        return _verify(path, contents, root)
+    except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as error:
+        raise CandidateError(f"Malformed candidate manifest: {type(error).__name__}") from None
+
+
+def _verify(path, contents, root):
     data = patcher.read_private(path, MAX_ARCHIVE, "Candidate archive")[0]
     members = {}
     try:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
             for info in archive:
-                require(info.isreg() and info.name not in members, "Candidate members must be unique regular files")
+                # Plain ustar files only: sparse or PAX members could expand far beyond the archive.
+                require(info.type == tarfile.REGTYPE and not info.pax_headers and info.size <= len(data)
+                        and info.name not in members, "Candidate members must be unique plain regular files")
                 members[info.name] = archive.extractfile(info).read()
     except tarfile.TarError as error:
         raise CandidateError(f"Unreadable candidate archive: {error}") from None
@@ -158,6 +169,7 @@ def verify(path, contents=CONTENTS, root=ROOT):
     require(record.get("publication_permitted") is False and record.get("distribution_blocked") is True,
             "A private candidate must stay blocked from publication and distribution")
     listed = {item["path"]: item for item in record["files"]}
+    require(len(listed) == len(record["files"]), "Candidate file list repeats a path")
     require(set(listed) == {name[len(prefix) + 1:] for name in members} - {MANIFEST}, "Candidate file list differs")
     for relative, item in listed.items():
         body = members[f"{prefix}/{relative}"]
@@ -167,16 +179,17 @@ def verify(path, contents=CONTENTS, root=ROOT):
     bundle = patcher.load_manifest(members[f"{prefix}/bundle/manifest.json"])
     require(sha256(members[f"{prefix}/bundle/manifest.json"]) == record["bundle_manifest_sha256"]
             and bundle["source"] == record["source"] and bundle["version"] == record["version"]
-            and bundle["connection_profile_sha256"] == record["connection_profile_sha256"], "Bundle binding differs")
+            and bundle["connection_profile_sha256"] == record["connection_profile_sha256"]
+            and bundle["upstream"] == record["upstream"] and bundle["supported_subset"] == record["supported_subset"]
+            and record["distribution_blockers"] == BLOCKERS, "Bundle binding differs")
     expected = {"bundle/manifest.json"} | {"bundle/" + entry["patch"]["file"] for entry in bundle["entries"]}
     require({path for path in listed if path.startswith("bundle/")} == expected, "Bundle members differ from its manifest")
     for entry in bundle["entries"]:
         check_patch(entry, members[f"{prefix}/bundle/{entry['patch']['file']}"])
-    allowed = json.loads((Path(contents)).read_text()) if contents else None
-    if allowed:
-        documents = {f"{role}/{path}" for role in ("instructions", "notices") for path in allowed[role]}
-        require({path for path in listed if not path.startswith("bundle/")} == documents,
-                "Candidate documents differ from the reviewed allowlist")
+    allowed = json.loads(tracked(Path(contents).relative_to(root).as_posix(), root))
+    documents = {f"{role}/{path}" for role in ("instructions", "notices") for path in allowed[role]}
+    require({path for path in listed if not path.startswith("bundle/")} == documents,
+            "Candidate documents differ from the committed allowlist")
     return {"sha256": sha256(data), "size": len(data), "manifest": record}
 
 
@@ -205,7 +218,8 @@ def main(argv=None):
     except KeyboardInterrupt:
         print("Interrupted; no partial candidate was published", file=sys.stderr)
         return 130
-    except (CandidateError, patcher.PatchError, ValueError, OSError) as error:
+    except (CandidateError, patcher.PatchError, ValueError, KeyError, TypeError, OSError,
+            subprocess.CalledProcessError) as error:
         print(f"Candidate refused: {error}", file=sys.stderr)
         return 1
 

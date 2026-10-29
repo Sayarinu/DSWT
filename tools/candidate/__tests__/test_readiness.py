@@ -11,7 +11,6 @@ import readiness
 
 RULES = [{"path": "server", "category": "project-source"}, {"path": "LICENSE", "category": "project-license"}]
 COMMIT = "c" * 40
-IMAGES = {"gateway": "sha256:" + "1" * 64, "backend": "sha256:" + "2" * 64}
 
 
 class RepositoryFixture(unittest.TestCase):
@@ -70,29 +69,66 @@ class InventoryTests(RepositoryFixture):
         self.assertIsNotNone(real, "the repository CI must keep a pinned gitleaks download")
 
 
-class BindingTests(unittest.TestCase):
-    expected = {"source_commit": COMMIT, "images": IMAGES}
+IMAGES = {name: "sha256:" + str(index) * 64 for index, name in enumerate(("database", "gateway", "backend", "validator"), 1)}
+STACK = {"project": "platinumwt-local-" + "0" * 32, "workspace": "/w", "database_system_id": "7", "images": IMAGES}
 
-    def test_only_same_source_and_image_evidence_applies(self):
-        applicable = {"status": "pass", "source_commit": COMMIT, "source_dirty": False, "stack": {"images": IMAGES}}
-        self.assertEqual(readiness.evidence_binding("load", applicable, self.expected)["status"], "applicable")
+
+class BindingTests(unittest.TestCase):
+    expected = {"source_commit": COMMIT, "stack": STACK, "candidate_sha256": "e" * 64}
+
+    def bind(self, name, report):
+        return readiness.evidence_binding(name, report, self.expected)
+
+    def test_only_same_source_stack_and_image_evidence_applies(self):
+        load = {"status": "pass", "verdict": {"status": "pass"}, "source_commit": COMMIT, "source_dirty": False,
+                "images": IMAGES, "stack": dict(STACK)}
+        self.assertEqual(self.bind("load", load)["status"], "applicable")
         cases = {
-            "dirty tree": dict(applicable, source_dirty=True),
-            "differs from candidate source": dict(applicable, source_commit="d" * 40),
-            "gateway image": dict(applicable, stack={"images": dict(IMAGES, gateway="sha256:" + "9" * 64)}),
-            "did not pass": dict(applicable, status="fail"),
-            "did not pass ": dict(applicable, verdict={"status": "fail"}),
+            "dirty tree": dict(load, source_dirty=True),
+            "differs from candidate source": dict(load, source_commit="d" * 40),
+            "gateway image": dict(load, images=dict(IMAGES, gateway="sha256:" + "9" * 64)),
+            "validator image": dict(load, images={k: v for k, v in IMAGES.items() if k != "validator"}),
+            "no service image": dict(load, images=None, stack={}),
+            "database_system_id": dict(load, stack=dict(STACK, database_system_id="8")),
+            "is not a pass": dict(load, verdict={"status": "fail"}),
+            "None": {key: value for key, value in load.items() if key != "status"},
         }
         for reason, report in cases.items():
             with self.subTest(reason=reason):
-                result = readiness.evidence_binding("load", report, self.expected)
+                result = self.bind("load", report)
                 self.assertEqual(result["status"], "stale")
-                self.assertTrue(any(reason.strip() in item for item in result["reasons"]), result["reasons"])
+                self.assertTrue(any(reason in item for item in result["reasons"]), result["reasons"])
+        self.assertEqual(self.bind("unknown", load)["status"], "stale")
+
+    def test_each_tool_report_shape_is_checked(self):
+        audit = {"status": "complete", "source_commit": COMMIT, "source_dirty": False,
+                 "images": {"server": {"config_digest": "x"}, "validator": {"config_digest": "y"}}}
+        result = self.bind("image-audit", audit)
+        self.assertEqual(result["status"], "applicable")
+        self.assertTrue(result["notes"])
+        self.assertEqual(self.bind("image-audit", dict(audit, images={"server": {}}))["status"], "stale")
+        isolation = {"status": "pass", "source_commit": COMMIT, "source_dirty": False, "database_system_id": "7"}
+        self.assertEqual(self.bind("isolation", isolation)["status"], "applicable")
+        self.assertEqual(self.bind("isolation", dict(isolation, database_system_id="8"))["status"], "stale")
+        source = {"kind": "platinumwt-source-audit", "source_commit": COMMIT, "source_dirty": False,
+                  "inventory": {"forbidden": [], "unclassified": [], "private_marker_blobs": [{"expected": True}]},
+                  "source_archive": {"reproducible": True, "complete": True, "findings": []},
+                  "secrets": {"git": {"findings": 0}}}
+        self.assertEqual(self.bind("source-audit", source)["status"], "applicable")
+        for changed in (dict(source, secrets={"git": {"findings": 1}}),
+                        dict(source, inventory=dict(source["inventory"], unclassified=["x"])),
+                        dict(source, inventory=dict(source["inventory"], private_marker_blobs=[{"expected": False}])),
+                        dict(source, source_archive=dict(source["source_archive"], complete=False))):
+            self.assertEqual(self.bind("source-audit", changed)["status"], "stale")
+        rehearsal = {"status": "pass", "source_commit": COMMIT, "source_dirty": False, "candidate_sha256": "e" * 64}
+        self.assertEqual(self.bind("rehearsal", rehearsal)["status"], "applicable")
+        self.assertEqual(self.bind("rehearsal", dict(rehearsal, candidate_sha256="f" * 64))["status"], "stale")
 
     def test_every_report_keeps_unresolved_gates_and_blocks_publication(self):
         self.assertTrue(any("LUNE-323" in gate for gate in readiness.UNRESOLVED))
         self.assertTrue(any("rights" in gate for gate in readiness.UNRESOLVED))
         self.assertTrue(any("Publication" in gate for gate in readiness.UNRESOLVED))
+        self.assertEqual(set(readiness.REQUIRED), {"observability", "recovery", "load", "isolation", "image-audit", "source-audit"})
 
 
 if __name__ == "__main__":

@@ -40,5 +40,5 @@ the tree. It then runs the gitleaks release pinned in CI with the same policy.
 The inventory is a review aid and grants no rights. `report` binds the
 candidate and the reference stack's image IDs to each evidence report. A report
 from a different source, a dirty tree or different images is marked `stale`,
-never treated as applicable. The open publication, rights, hardware, hosted
+never treated as applicable; missing kinds keep the report incomplete. The open publication, rights, hardware, hosted
 and rehearsal gates are always listed.

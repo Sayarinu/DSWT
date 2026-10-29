@@ -151,6 +151,24 @@ class TamperTests(CandidateFixture):
         self.rejected(dict(self.original, **{patch_name: bytes(corrupt),
                                              self.prefix + "CANDIDATE.json": candidate.canonical_json(record)}), "invalid")
 
+    def test_rebinding_repeats_and_pax_members_are_rejected(self):
+        record = json.loads(self.original[self.prefix + "CANDIDATE.json"])
+        self.rejected(dict(self.original, **{self.prefix + "CANDIDATE.json": candidate.canonical_json(
+            dict(record, upstream={"repository": "other", "revision": "f" * 40}))}), "Bundle binding")
+        self.rejected(dict(self.original, **{self.prefix + "CANDIDATE.json": candidate.canonical_json(
+            dict(record, files=record["files"] + record["files"][:1]))}), "repeats")
+        self.rejected(dict(self.original, **{self.prefix + "CANDIDATE.json": b'{"schema_version": 1}'}), "Unsupported|Malformed")
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            info = tarfile.TarInfo(self.prefix + "notices/LICENSE")
+            info.size, info.pax_headers = 4, {"comment": "x"}
+            archive.addfile(info, io.BytesIO(b"MIT\n"))
+        path = self.root / "game/pax.tar"
+        path.write_bytes(output.getvalue())
+        path.chmod(0o600)
+        with self.assertRaisesRegex(candidate.CandidateError, "plain regular"):
+            self.verify(path)
+
     def test_non_canonical_links_and_traversal_are_rejected(self):
         data = bytearray(self.archive.read_bytes())
         data[136:148] = b"00000000001\x00"  # The first member's mtime field.
@@ -171,6 +189,27 @@ class TamperTests(CandidateFixture):
             path.chmod(0o600)
             with self.assertRaises((candidate.CandidateError, ValueError)):
                 self.verify(path)
+
+
+class ReadinessTests(CandidateFixture):
+    def test_readiness_requires_every_kind_and_checks_upstream_and_profile(self):
+        sys.path.insert(0, str(HERE.parents[1]))
+        import readiness
+        archive = self.assemble()["archive"]
+        commit = self.git("rev-parse", "HEAD").strip()
+        stack = {"workspace": str(self.root / "game/inputs"), "profile": "profile.json", "source_commit": commit,
+                 "source_dirty": False, "project": "p", "database_system_id": "1",
+                 "images": {name: "sha256:" + name for name in readiness.STACK_SERVICES}}
+        manifest = self.root / "game/stack.json"
+        manifest.write_text(json.dumps(stack))
+        report = readiness.readiness(archive, [], manifest, root=self.root, contents=self.root / "contents.json")
+        self.assertTrue(all(report["identity_checks"].values()))
+        self.assertEqual(report["missing_evidence"], sorted(readiness.REQUIRED))
+        self.assertFalse(report["all_evidence_applicable"])
+        self.assertIs(report["publication_permitted"], False)
+        self.assertIn("No exact-candidate rehearsal", report["unresolved_gates"][0])
+        (self.root / "game/inputs/profile.json").write_text("{}")
+        self.assertFalse(readiness.readiness(archive, [], manifest, root=self.root, contents=self.root / "contents.json")["identity_checks"]["connection_profile"])
 
 
 if __name__ == "__main__":
