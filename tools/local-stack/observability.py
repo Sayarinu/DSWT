@@ -81,8 +81,13 @@ class Observer:
     def configuration(self):
         flags = json.loads(self.internal("http://127.0.0.1:9090/api/v1/status/flags"))["data"]
         require(flags["storage.tsdb.retention.time"] == "15d", "Prometheus must retain metrics for 15 days")
-        targets = json.loads(self.internal("http://127.0.0.1:9090/api/v1/targets"))["data"]["activeTargets"]
-        health = {(t["labels"]["job"], t["labels"]["instance"]): t["health"] for t in targets}
+        deadline = time.monotonic() + 60  # a freshly started stack has not completed its first scrapes
+        while True:
+            targets = json.loads(self.internal("http://127.0.0.1:9090/api/v1/targets"))["data"]["activeTargets"]
+            health = {(t["labels"]["job"], t["labels"]["instance"]): t["health"] for t in targets}
+            if all(value == "up" for value in health.values()) or time.monotonic() >= deadline:
+                break
+            time.sleep(2)
         require({job for job, _ in health} == {"gateway", "backend", "host", "collectors"}
                 and all(value == "up" for value in health.values()), "Every scrape target must be up")
         loki = self.internal("http://127.0.0.1:3100/config")
