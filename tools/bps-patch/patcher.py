@@ -295,15 +295,16 @@ def _tool_location(root):
 def installed_flips(root=ROOT):
     """Return the prepared tool's provenance after re-verifying its source, notices, binary and image."""
     pin, _, _, tools, destination = _tool_location(root)
-    if destination.is_symlink() or not destination.is_dir():
+    if any(path.is_symlink() for path in (root / "game", tools, destination)) or not destination.is_dir():
         raise PatchError("Pinned Flips is not prepared; run: python3 tools/bps-patch/patcher.py prepare")
     try:
         record = json.loads(read_private(destination / "provenance.json", MAX_MANIFEST, "Flips provenance")[0])
         expected = pin["binaries"].get(record["build"]["platform"])
         archive_name, notices, image_id = record["archive"]["file"], record["notices"], record["image_id"]
+        binary_record = record["binary"]
     except (ValueError, KeyError, TypeError, AttributeError):
         raise PatchError(f"Flips provenance in {destination} is malformed; move it aside and rerun prepare") from None
-    if not isinstance(archive_name, str) or "/" in archive_name or not isinstance(notices, dict) or set(notices) != set(pin["notices"]):
+    if not isinstance(archive_name, str) or "/" in archive_name or notices != pin["notices"]:
         raise PatchError("Flips provenance does not cover the pinned archive and notices")
     archive = read_private(destination / archive_name, pin["size"], "Flips source archive")[0]
     if sha256(archive) != pin["sha256"]:
@@ -312,7 +313,7 @@ def installed_flips(root=ROOT):
         if sha256(read_private(destination / "notices" / name, MAX_MANIFEST, "Flips notice")[0]) != digest:
             raise PatchError(f"Retained Flips notice {name} changed")
     binary = read_private(destination / "flips", 16 * 1024 * 1024, "Flips binary")[0]
-    if expected is None or record["binary"] != expected or sha256(binary) != expected["sha256"]:
+    if expected is None or binary_record != expected or sha256(binary) != expected["sha256"]:
         raise PatchError("Retained Flips binary does not match its pin")
     with tempfile.TemporaryDirectory(prefix=".flips-check-", dir=tools) as temporary:
         if sha256(_image_binary(image_id, Path(temporary))) != expected["sha256"]:
@@ -360,16 +361,18 @@ def prepare_flips(root=ROOT, archive=None):
         binary = _image_binary(image_id, stage)
         if sha256(binary) != pin["binaries"][platform]["sha256"]:
             raise PatchError(f"Built Flips binary {sha256(binary)} does not match the {platform} pin")
-        for name in pin["notices"]:
+        for name, digest in pin["notices"].items():
             target = stage / "notices" / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(context / "source" / name, target)
+            if sha256(target.read_bytes()) != digest:
+                raise PatchError(f"Flips notice {name} does not match its pin")
         shutil.rmtree(context)
         record = {
             "tool": "flips", "version": pin["version"], "revision": pin["revision"],
             "archive": {"url": pin["url"], "size": pin["size"], "sha256": pin["sha256"], "file": downloaded.name},
             "license": pin["license"],
-            "notices": {name: sha256((stage / "notices" / name).read_bytes()) for name in pin["notices"]},
+            "notices": pin["notices"],
             "build": {"dockerfile_sha256": sha256(dockerfile), "command": "make TARGET=cli CFLAGS=\"-O2 -ffile-prefix-map=/src=.\" LFLAGS=-static",
                       "toolchain": (stage / "toolchain.txt").read_text().split(), "platform": platform},
             "binary": {"size": len(binary), "sha256": sha256(binary)},

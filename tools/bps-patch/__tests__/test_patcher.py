@@ -331,7 +331,7 @@ class InstalledToolTests(Fixture):
     def setUp(self):
         super().setUp()
         self.binary, archive, notice = b"pinned binary", b"archive", b"notice"
-        pin = {"sha256": hashlib.sha256(archive).hexdigest(), "size": len(archive), "notices": ["COPYING"],
+        pin = {"sha256": hashlib.sha256(archive).hexdigest(), "size": len(archive), "notices": {"COPYING": hashlib.sha256(notice).hexdigest()},
                "binaries": {"linux/amd64": {"size": len(self.binary), "sha256": hashlib.sha256(self.binary).hexdigest()}}}
         self.destination = self.root / "game/tools/flips"
         (self.destination / "notices").mkdir(parents=True)
@@ -370,6 +370,8 @@ class InstalledToolTests(Fixture):
         for name, change in (("notice dropped", lambda r: r.update(notices={})),
                              ("unpinned platform", lambda r: r["build"].update(platform="linux/riscv64")),
                              ("missing field", lambda r: r.pop("archive")),
+                             ("missing binary", lambda r: r.pop("binary")),
+                             ("notice digest", lambda r: r["notices"].update(COPYING="0" * 64)),
                              ("archive outside", lambda r: r["archive"].update(file="../source.tar.gz"))):
             with self.subTest(name):
                 record = json.loads(original)

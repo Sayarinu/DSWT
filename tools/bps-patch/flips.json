@@ -9,5 +9,9 @@
   "binaries": {
     "linux/amd64": {"size": 1079312, "sha256": "694f1e37aa1c15ddc068880b0e02b47d797b3f03c924bba17b58210e6fd012e2"}
   },
-  "notices": ["COPYING", "COPYING.gpl3", "libdivsufsort-2.0.1/COPYING"]
+  "notices": {
+    "COPYING": "759de06c3329988ac8cbc16b7991426659a893e8b36b5ebb0aafb9009ebf5af9",
+    "COPYING.gpl3": "0b383d5a63da644f628d99c33976ea6487ed89aaa59f0b3257992deac1171e6b",
+    "libdivsufsort-2.0.1/COPYING": "a025003cb0d491d21288f797e07fe21ee1ddde50bb48d2a63a76b03307e94437"
+  }
 }
