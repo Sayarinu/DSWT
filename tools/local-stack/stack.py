@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import ssl
 import stat
 import subprocess
@@ -19,8 +20,14 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = Path(__file__).with_name("compose.yaml")
+OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
+OBSERVABILITY_CONFIG = Path(__file__).with_name("observability")
 LABEL = "studio.nouvellelune.platinumwt.local-workspace"
 SERVICES = ("database", "gateway", "validator", "backend")
+OBSERVABILITY_SERVICES = ("prometheus", "alertmanager", "loki", "alloy", "grafana", "capture")
+DEFAULT_PORT = 8443
+# Owned retained volumes; the tmpfs probe is a bounded filesystem for resource-pressure alert tests.
+OBSERVABILITY_VOLUMES = ("prometheus", "alertmanager", "loki", "pressure")
 
 
 def load_module(name, path):
@@ -68,20 +75,49 @@ def save_manifest(workspace, manifest):
         temporary.unlink(missing_ok=True)
 
 
-def initialize(workspace):
+def valid_port(value):
+    return type(value) is int and 1024 <= value <= 65535
+
+
+def valid_ports(port, observability):
+    if observability is not None and (not isinstance(observability, dict) or set(observability) != {"grafana_port", "log_port"}):
+        return False
+    ports = [port, *(observability or {}).values()]
+    return all(valid_port(item) for item in ports) and len(set(ports)) == len(ports)
+
+
+def initialize(workspace, port=DEFAULT_PORT, observability=None):
+    if not valid_ports(port, observability):
+        raise ValueError("Use distinct host ports between 1024 and 65535")
     workspace.parent.mkdir(parents=True, exist_ok=True)
     workspace.mkdir(mode=0o700)  # Exclusive: an existing run is never reinitialized.
     (workspace / "control").mkdir(mode=0o700)
     # Docker cannot create a nested socket mount below the read-only control bind.
     (workspace / "control/run").mkdir(mode=0o700)
     peer = load_module("local_stack_tls_peer", ROOT / "scripts/tls-test-server.py")
-    peer.prepare(workspace / "tls", "10.64.0.1", "localhost", 8443)
-    save_manifest(workspace, {
+    peer.prepare(workspace / "tls", "10.64.0.1", "localhost", port)
+    manifest = {
         "version": 1, "project": "platinumwt-local-" + uuid.uuid4().hex,
         "workspace": str(workspace), "profile": "tls/connection.json",
-        "host_endpoint": "https://localhost:8443/wt/v1", "volumes_created": False,
+        "host_endpoint": f"https://localhost:{port}/wt/v1", "volumes_created": False,
         "database_system_id": None, "source_commit": None, "source_dirty": None, "images": {},
-    })
+    }
+    if port != DEFAULT_PORT:
+        manifest["https_port"] = port
+    if observability:
+        observe = workspace / "observability"
+        observe.mkdir(mode=0o700)
+        for child in ("alerts", "textfile"):
+            (observe / child).mkdir(mode=0o700)
+        secret = os.open(observe / "grafana-admin-password", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(secret, "w") as output:
+            output.write(secrets.token_hex(32))
+        manifest["observability"] = dict(observability)
+    save_manifest(workspace, manifest)
+
+
+def https_port(manifest):
+    return manifest.get("https_port", DEFAULT_PORT)
 
 
 def read_manifest(workspace):
@@ -96,7 +132,10 @@ def read_manifest(workspace):
             or not re.fullmatch(r"platinumwt-local-[0-9a-f]{32}", manifest["project"])
             or type(manifest.get("volumes_created")) is not bool
             or manifest.get("profile") != "tls/connection.json"
-            or manifest.get("host_endpoint") != "https://localhost:8443/wt/v1"
+            or ("https_port" in manifest and (not valid_port(manifest["https_port"]) or manifest["https_port"] == DEFAULT_PORT))
+            or manifest.get("host_endpoint") != f"https://localhost:{https_port(manifest)}/wt/v1"
+            or ("observability" in manifest and manifest["observability"] is None)
+            or not valid_ports(https_port(manifest), manifest.get("observability"))
             or (manifest.get("database_system_id") is not None
                 and (not isinstance(manifest["database_system_id"], str)
                      or not re.fullmatch(r"[0-9]+", manifest["database_system_id"])))):
@@ -106,6 +145,11 @@ def read_manifest(workspace):
             raise ValueError("Workspace directories must not be replaced or linked")
     for name in ("current", "next", "untrusted"):
         private_file(workspace / "tls" / (name + ".key"))
+    if "observability" in manifest:
+        for child in ("observability", "observability/alerts", "observability/textfile"):
+            if (workspace / child).is_symlink() or not (workspace / child).is_dir():
+                raise ValueError("Workspace directories must not be replaced or linked")
+        private_file(workspace / "observability/grafana-admin-password")
     return manifest
 
 
@@ -140,24 +184,34 @@ class Stack:
             raise ValueError("Use a local Linux Docker engine on arm64 or amd64")
         self.env.update(PWT_LOCAL_WORKSPACE=str(workspace), PWT_LOCAL_PROJECT=manifest["project"],
                         PWT_LOCAL_UID=str(os.getuid()), PWT_LOCAL_GID=str(os.getgid()),
-                        PWT_LOCAL_PLATFORM=platforms[architecture])
+                        PWT_LOCAL_PLATFORM=platforms[architecture], PWT_LOCAL_HTTPS_PORT=str(https_port(manifest)))
+        self.observability = manifest.get("observability")
+        if self.observability:
+            self.env.update(PWT_OBS_GRAFANA_PORT=str(self.observability["grafana_port"]),
+                            PWT_OBS_LOG_PORT=str(self.observability["log_port"]))
+        self.services = SERVICES + (OBSERVABILITY_SERVICES if self.observability else ())
 
     def run(self, arguments, **kwargs):
         return command(self.docker + arguments, env=self.env, **kwargs)
 
     def compose(self, *arguments, **kwargs):
+        files = ["--file", str(COMPOSE)] + (["--file", str(OBSERVABILITY)] if self.observability else [])
         return self.run(["compose", "--env-file", os.devnull, "--project-directory", str(COMPOSE.parent),
-                         "--file", str(COMPOSE), "--project-name", self.manifest["project"], *arguments], **kwargs)
+                         *files, "--project-name", self.manifest["project"], *arguments], **kwargs)
 
     def volumes(self, create=False):
         listing = self.run(["volume", "ls", "--format", "{{json .}}"], capture=True).stdout
         existing = {json.loads(line)["Name"] for line in listing.splitlines()}
-        for suffix in ("data", "socket"):
+        for suffix in ("data", "socket") + (OBSERVABILITY_VOLUMES if self.observability else ()):
             name = self.manifest["project"] + "-" + suffix
             if name not in existing:
                 if not create or self.manifest["volumes_created"]:
                     raise ValueError("Retained local volume is missing; refusing to create a replacement: " + name)
-                self.run(["volume", "create", "--label", LABEL + "=" + self.manifest["project"], name], capture=True)
+                options = []
+                if suffix == "pressure":
+                    options = ["--opt", "type=tmpfs", "--opt", "device=tmpfs",
+                               "--opt", f"o=size=16m,uid={os.getuid()},gid={os.getgid()},mode=0700"]
+                self.run(["volume", "create", "--label", LABEL + "=" + self.manifest["project"], *options, name], capture=True)
             info = json.loads(self.run(["volume", "inspect", name], capture=True).stdout)[0]
             if (info.get("Labels") or {}).get(LABEL) != self.manifest["project"]:
                 raise ValueError("Local volume ownership does not match this workspace")
@@ -179,14 +233,14 @@ class Stack:
             self.manifest["database_system_id"] = identity
             save_manifest(self.workspace, self.manifest)
 
-    def ready(self):
+    def ready(self, request_id=b"\x01" * 16):
         self.compose("exec", "-T", "backend", "/build/tests/platinumwt-device-fixture", "--check",
                      capture=True, timeout=10)
         context = ssl.create_default_context(cafile=str(self.workspace / "tls/current.pem"))
         context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE-ECDSA-CHACHA20-POLY1305")
-        request = wire.Request(wire.Operation.STATUS, b"\x01" * 16, b"\x02" * 16, b"\x03" * 32, 0, bytes(16))
-        connection = http.client.HTTPSConnection("localhost", 8443, context=context, timeout=5)
+        request = wire.Request(wire.Operation.STATUS, request_id, b"\x02" * 16, b"\x03" * 32, 0, bytes(16))
+        connection = http.client.HTTPSConnection("localhost", https_port(self.manifest), context=context, timeout=5)
         try:
             connection.request("POST", "/wt/v1", wire.encode_request(request),
                                {"Content-Type": "application/octet-stream", "Connection": "close"})
@@ -204,11 +258,12 @@ class Stack:
     def up(self):
         self.volumes(create=True)
         self.compose("build", "gateway", "validator")
-        self.compose("stop", "backend", "validator", "gateway")
+        applications = [service for service in self.services if service != "database"]
+        self.compose("stop", *reversed(applications))
         self.compose("up", "-d", "--wait", "--wait-timeout", "90", "database")
         self.database_identity()
         self.compose("run", "--rm", "--no-deps", "migrate")
-        self.compose("up", "-d", "--force-recreate", "gateway", "validator", "backend")
+        self.compose("up", "-d", "--force-recreate", *applications)
         deadline = time.monotonic() + 60
         while True:
             try:
@@ -221,11 +276,14 @@ class Stack:
         self.manifest["source_commit"] = command(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture=True).stdout.strip()
         self.manifest["source_dirty"] = bool(command(["git", "-C", str(ROOT), "status", "--porcelain"], capture=True).stdout.strip())
         self.manifest["images"] = {}
-        for service in SERVICES:
+        for service in self.services:
             container = self.compose("ps", "-q", service, capture=True).stdout.strip()
             self.manifest["images"][service] = self.run(["inspect", "--format", "{{.Image}}", container], capture=True).stdout.strip()
         save_manifest(self.workspace, self.manifest)
-        print("Local stack ready: https://localhost:8443/wt/v1; ROM profile:", self.workspace / self.manifest["profile"])
+        print("Local stack ready:", self.manifest["host_endpoint"] + "; ROM profile:", self.workspace / self.manifest["profile"])
+        if self.observability:
+            print(f"Private Grafana: http://127.0.0.1:{self.observability['grafana_port']}/ (admin password in "
+                  f"{self.workspace / 'observability/grafana-admin-password'})")
 
     def verify(self):
         self.volumes()
@@ -239,11 +297,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=ROOT / "game/local-e2e")
     parser.add_argument("action", choices=("init", "up", "down", "status", "verify"))
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init: host loopback HTTPS port")
+    parser.add_argument("--observability", nargs=2, type=int, metavar=("GRAFANA_PORT", "LOG_PORT"),
+                        help="init: enable the private local observability profile on these loopback ports")
     args = parser.parse_args()
     try:
         workspace = workspace_path(args.workspace)
         if args.action == "init":
-            initialize(workspace)
+            initialize(workspace, args.port, args.observability and
+                       {"grafana_port": args.observability[0], "log_port": args.observability[1]})
             print("Initialized private local workspace:", workspace)
             return 0
         read_manifest(workspace)

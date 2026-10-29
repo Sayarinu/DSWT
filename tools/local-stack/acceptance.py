@@ -90,7 +90,8 @@ class Acceptance:
     def __init__(self, local, directory):
         self.local, self.directory = local, directory
         self.profile = json.loads((local.workspace / local.manifest["profile"]).read_text())
-        require(self.profile["hostname"] == "localhost" and self.profile["port"] == 8443, "unexpected local profile")
+        require(self.profile["hostname"] == "localhost" and self.profile["port"] == stack.https_port(local.manifest),
+                "unexpected local profile")
         self.probe = local.workspace / "native-build/trade_probe"
         require(not self.probe.parent.is_symlink(), "native build directory must not be linked")
         self.fixtures = directory / "fixtures"

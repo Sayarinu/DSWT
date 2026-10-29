@@ -1,0 +1,12 @@
+# Only the local capture receiver exists: no email, chat, paging or other external notification.
+route:
+  receiver: local-capture
+  group_by: [alertname, job, mountpoint]
+  group_wait: 2s
+  group_interval: 5s
+  repeat_interval: 12h
+receivers:
+  - name: local-capture
+    webhook_configs:
+      - url: http://127.0.0.1:9099/alerts
+        send_resolved: true

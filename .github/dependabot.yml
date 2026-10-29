@@ -12,6 +12,10 @@ updates:
       - /tools/rom-builder
     schedule:
       interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /tools/local-stack
+    schedule:
+      interval: weekly
   - package-ecosystem: nuget
     directories:
       - /validator
