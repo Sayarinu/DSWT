@@ -17,8 +17,9 @@ Every emulated flash write publishes two checked snapshots, a monotonic head and
 the raw save using file/directory fsync before the DS can continue. I/O failure
 stops the emulator. Restart repairs an interrupted publication or truncated raw
 save; foreign owners, stale snapshot pairs, unknown formats and ambiguous files
-fail closed. The game checks a virtual read-only capability before transport;
-the normal save's capability address remains untouched. Managed sessions require
+fail closed. This build is optional: the game also trades on stock emulators and
+hardware, where a crash before the host saves can roll back behind the server.
+It exposes a virtual read-only page; the normal save's address remains untouched. Managed sessions require
 ext4, Btrfs or XFS; RAM/network/unknown filesystems are refused. Storage must honor fsync;
 these process/syscall fault tests do not physically power-cycle a host.
 

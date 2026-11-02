@@ -226,8 +226,8 @@ python3 scripts/run-emulator.py --save game/device-test/a.sav --target us-rev1 -
 
 The launcher locks the save, repairs checked host snapshots and commits fresh
 entropy before starting the emulator. Its synchronous host store makes subsequent
-flash writes durable before the DS continues. The game refuses transport without
-that emulator capability. Native launch refresh preserves checked active journals;
+flash writes durable before the DS continues. Stock emulators can also trade, but a
+crash before they write the save file can roll back behind the server. Native launch refresh preserves checked active journals;
 unknown evidence enters the recovery gate. Launch both clients separately
 through this wrapper, then exercise enrollment, deposit, reconnect, match/collect,
 unmatched cancellation, reconciliation and restart behavior. Savestate/rewind

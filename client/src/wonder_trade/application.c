@@ -292,13 +292,9 @@ static void WonderTrade_BootWorker(void *arg)
 {
     WonderTradeBootWorker *worker = arg;
     WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
-    /* Ordinary play remains available on stock emulators for checked blank
-     * or EMPTY journals. Only active recovery requires durable capability. */
-    worker->flash.requireDurability = FALSE;
     worker->game.save = SaveData_Ptr(); worker->game.heapID = HEAP_ID_WONDER_TRADE;
     worker->result = WtRecovery_Check(io);
     if (worker->result != 0) {
-        worker->flash.requireDurability = TRUE;
         worker->result = WtGameSave_Boot(&worker->game, io);
     }
 }
