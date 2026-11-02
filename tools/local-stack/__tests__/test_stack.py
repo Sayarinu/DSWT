@@ -143,6 +143,7 @@ class StackTests(StackFixture):
         self.assertEqual(arguments[-1], "down")
         self.assertNotIn("--volumes", arguments)
         self.assertEqual(options["env"]["PWT_LOCAL_PLATFORM"], "linux/arm64")
+        self.assertEqual(options["env"]["BUILDX_NO_DEFAULT_ATTESTATIONS"], "1")
         for key in inherited:
             self.assertNotIn(key, options["env"])
 
