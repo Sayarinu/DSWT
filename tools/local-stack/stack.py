@@ -184,7 +184,9 @@ class Stack:
             raise ValueError("Use a local Linux Docker engine on arm64 or amd64")
         self.env.update(PWT_LOCAL_WORKSPACE=str(workspace), PWT_LOCAL_PROJECT=manifest["project"],
                         PWT_LOCAL_UID=str(os.getuid()), PWT_LOCAL_GID=str(os.getgid()),
-                        PWT_LOCAL_PLATFORM=platforms[architecture], PWT_LOCAL_HTTPS_PORT=str(https_port(manifest)))
+                        PWT_LOCAL_PLATFORM=platforms[architecture], PWT_LOCAL_HTTPS_PORT=str(https_port(manifest)),
+                        # Default attestations give every rebuild a new image ID; evidence binds to stable IDs.
+                        BUILDX_NO_DEFAULT_ATTESTATIONS="1")
         self.observability = manifest.get("observability")
         if self.observability:
             self.env.update(PWT_OBS_GRAFANA_PORT=str(self.observability["grafana_port"]),

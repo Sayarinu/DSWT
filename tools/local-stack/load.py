@@ -446,7 +446,7 @@ def run(local, directory, args):
               "source_dirty": bool(stack.command(git + ["status", "--porcelain"], capture=True).stdout.strip()),
               "host": {"system": platform.system(), "release": platform.release(), "machine": platform.machine(),
                        "cpus": os.cpu_count(), "python": platform.python_version()},
-              "stack": local.manifest, "excluded": ["matchmaking wait between polls", "WiFi/DS radio", "hosted network"],
+              "stack": None, "excluded": ["matchmaking wait between polls", "WiFi/DS radio", "hosted network"],
               "client_networks": "one loopback /32 per client inside the gateway namespace",
               "targets": {"duration_seconds": SPEC["duration"], "active_clients": SPEC["clients"],
                           "completed_pairs_per_second": SPEC["pairs"], "api_p95_ms_below": SPEC["p95_ms"]},
@@ -462,6 +462,8 @@ def run(local, directory, args):
         report["native_sha256"] = acceptance.sha(probe)
         report["fixtures"], report["fixture_image"] = load.runner.fixture_manifest, load.runner.fixture_image
         load.configure(args)
+        # Snapshot the measured stack; restore() later rewrites the live manifest.
+        report["stack"] = json.loads(json.dumps(local.manifest))
         report["images"] = {service: local.run(["inspect", "--format", "{{.Image}}", load.container_id(service)],
                                                capture=True).stdout.strip() for service in ("database", *APPLICATIONS)}
         report["limits"] = load.limits()
