@@ -7,8 +7,10 @@ updates:
       interval: weekly
   - package-ecosystem: docker
     directories:
+      - /emulator
       - /server
       - /validator
+      - /tools/bps-patch
       - /tools/rom-builder
     schedule:
       interval: weekly
