@@ -65,10 +65,11 @@ void RunServer(const ServerConfig &config) {
 
   auto channel = Channel(config.grpc_target.value_or("127.0.0.1:" + std::to_string(grpc_port)));
   auto trade_channel = config.trade_target ? Channel(*config.trade_target) : nullptr;
-  asio::thread_pool submissions(4), recovery(4);
+  asio::thread_pool submissions(config.submission_workers), recovery(4);
   asio::io_context io;
   auto services = std::make_shared<HttpServices>(
-      std::make_shared<HttpRequestHandler>(std::move(channel), std::move(trade_channel)), submissions, recovery, std::move(tls));
+      std::make_shared<HttpRequestHandler>(std::move(channel), std::move(trade_channel)), submissions, recovery, std::move(tls),
+      config.submission_workers);
   asio::signal_set signals(io, SIGINT, SIGTERM);
   signals.async_wait([&](boost::system::error_code, int) { io.stop(); });
   std::make_shared<HttpListener>(

@@ -128,6 +128,24 @@ closed. A pass records the backup metric when observability is enabled. The
 verified backup and WAL volumes remain; reports stay under `recovery/`.
 Off-site storage and encryption are not tested.
 
+Measure local load after `up` (about 75 minutes by default):
+
+```sh
+python3.12 tools/local-stack/load.py --workspace game/local-e2e
+```
+
+It drives 1,000 native clients plus 10 strict-illegal clients for one hour,
+pacing 1.1× the 10 completed-pairs/second target. Clients run in a short-lived
+container in the gateway namespace, each from its own loopback /32, so
+per-network admission still applies. The run recreates the stack with six
+Submit workers, each with one validator worker and CPU (`WT_SUBMISSION_WORKERS`,
+`WT_VALIDATOR_WORKERS`; defaults stay 4 and 2), and four matcher workers. It
+restarts the backend, validator and database, and restores defaults afterwards.
+The report separates accepted offers from pairs where both sides ACKed. It
+records client-observed and service latencies, and verifies conservation,
+receipt immutability and ledger replay. Results are local measurements, not
+hosted capacity.
+
 For local policy and isolation evidence, install the hash-pinned YAML parser in
 a separate Python 3.12–3.14 environment and inspect the existing stack:
 

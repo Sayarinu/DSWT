@@ -39,10 +39,10 @@ protected:
   }
 
 private:
-  const std::array<const char *, 12> names_{"WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
+  const std::array<const char *, 13> names_{"WT_SUBMISSION_WORKERS", "WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
       "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "PLATINUMWT_DATABASE_URL",
       "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY", "WT_METRICS_PORT"};
-  std::array<std::optional<std::string>, 12> saved_;
+  std::array<std::optional<std::string>, 13> saved_;
 };
 
 TEST_F(ConfigTest, LoadsDefaults) {
@@ -52,6 +52,17 @@ TEST_F(ConfigTest, LoadsDefaults) {
   EXPECT_EQ(config.grpc_address, "127.0.0.1:50051");
   EXPECT_FALSE(config.grpc_target.has_value());
   EXPECT_EQ(config.metrics_port, 0);
+}
+
+TEST_F(ConfigTest, SubmissionWorkersDefaultToFourWithinBounds) {
+  EXPECT_EQ(LoadServerConfig().submission_workers, 4u);
+  Set("WT_SUBMISSION_WORKERS", "8");
+  EXPECT_EQ(LoadSubmissionWorkers(), 8u);
+  EXPECT_EQ(LoadServerConfig().submission_workers, 8u);
+  for (const char *workers : {"", "0", "17", "-1", "+4", "4x"}) {
+    Set("WT_SUBMISSION_WORKERS", workers);
+    EXPECT_THROW(LoadSubmissionWorkers(), std::invalid_argument) << workers;
+  }
 }
 
 TEST_F(ConfigTest, MetricsAreOptInWithBoundedPorts) {

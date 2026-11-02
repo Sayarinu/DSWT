@@ -21,7 +21,7 @@ int main() {
     LegalityClient legality(config.legality_address, config.legality_policy);
     // No production attestation bypass. Until the independently recoverable
     // prefix provider is integrated, enrollment/operations remain PROCESSING.
-    auto admission = std::make_shared<detail::ServiceAdmission>();
+    auto admission = std::make_shared<detail::ServiceAdmission>(config.submission_workers);
     IdentityService identities(config.connection_info, {}, admission);
     TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); }, {}, admission);
     grpc::ServerBuilder builder;

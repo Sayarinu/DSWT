@@ -10,16 +10,25 @@ namespace PlatinumWT.Validator;
 // Keep its lifetime, pipe buffers and admission bound inside this module.
 public sealed class WorkerRunner : IDisposable
 {
-    private readonly SemaphoreSlim slots = new(2);
+    private readonly SemaphoreSlim slots;
     private readonly Func<ProcessStartInfo> command;
     private readonly TimeSpan budget;
 
-    public WorkerRunner() : this(Command, TimeSpan.FromSeconds(1)) { }
-    public WorkerRunner(Func<ProcessStartInfo> command, TimeSpan budget)
+    public WorkerRunner() : this(Command, TimeSpan.FromSeconds(1), Workers(Environment.GetEnvironmentVariable("WT_VALIDATOR_WORKERS"))) { }
+    public WorkerRunner(Func<ProcessStartInfo> command, TimeSpan budget, int workers = 2)
     {
         this.command = command;
         this.budget = budget;
+        slots = new(workers);
     }
+
+    // Two isolated workers by default; deployments sized for more CPU may allow up to eight.
+    public static int Workers(string? value) => value switch
+    {
+        null or "" => 2,
+        [>= '1' and <= '8'] => value[0] - '0',
+        _ => throw new InvalidOperationException("WT_VALIDATOR_WORKERS must be 1-8"),
+    };
 
     private static ProcessStartInfo Command()
     {

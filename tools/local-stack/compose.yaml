@@ -54,6 +54,7 @@ services:
     environment:
       WT_HTTP_PORT: "8443"
       WT_METRICS_PORT: "9091"
+      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
       WT_TRADE_TARGET: 127.0.0.1:50053
       WT_TLS_CERTIFICATE: /tls/current.pem
       WT_TLS_PRIVATE_KEY: /tls/current.key
@@ -71,6 +72,8 @@ services:
       context: ../..
       dockerfile: validator/Dockerfile
     network_mode: service:gateway
+    environment:
+      WT_VALIDATOR_WORKERS: ${PWT_LOCAL_VALIDATOR_WORKERS:-2}
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
     cap_drop: [ALL]
@@ -89,7 +92,9 @@ services:
     environment:
       <<: *database-client
       PLATINUMWT_DISPOSABLE_DEVICE_TEST: "1"
+      PLATINUMWT_DEVICE_MATCHERS: ${PWT_LOCAL_MATCHERS:-1}
       WT_METRICS_PORT: "9092"
+      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
     volumes:
       - type: bind
         source: ${PWT_LOCAL_WORKSPACE}/control

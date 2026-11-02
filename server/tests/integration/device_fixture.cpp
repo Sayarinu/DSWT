@@ -11,15 +11,20 @@
 
 #include <grpcpp/grpcpp.h>
 
+#include <atomic>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace {
-volatile std::sig_atomic_t stopping = 0;
-void Stop(int) { stopping = 1; }
+// Read by every matcher thread; lock-free so the signal handler may set it.
+std::atomic<bool> stopping{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+void Stop(int) { stopping = true; }
 
 bool Configured() {
   const auto equals = [](const char *name, const char *expected) {
@@ -35,6 +40,15 @@ bool Configured() {
 }
 
 constexpr auto kDatabase = "host=/test/run port=5432 dbname=platinumwt_e2e";
+
+// Load rehearsals may run several independent matcher workers; acceptance keeps one.
+int MatcherWorkers() {
+  const char *value = std::getenv("PLATINUMWT_DEVICE_MATCHERS");
+  if (!value || !*value) return 1;
+  const std::string text(value);
+  if (text.size() != 1 || text[0] < '1' || text[0] > '8') throw std::invalid_argument("matcher workers must be 1-8");
+  return text[0] - '0';
+}
 
 int Check() {
   using namespace platinumwt::server;
@@ -67,7 +81,7 @@ int main(int argc, char **argv) try {
   LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-pwt2");
   // Same-host test data proves local flows only, never off-site recovery.
   RecoveryBarrier localTest = [](auto) { return true; };
-  auto admission = std::make_shared<detail::ServiceAdmission>();
+  auto admission = std::make_shared<detail::ServiceAdmission>(LoadSubmissionWorkers());
   IdentityService identities(kDatabase, localTest, admission);
   TradeService trades(kDatabase, [&](const auto &bytes) { return legality.CheckNewSubmission(bytes); }, localTest, admission);
   MatcherService matcher(kDatabase, localTest);
@@ -90,19 +104,35 @@ int main(int argc, char **argv) try {
   auto matcherServer = matcherBuilder.BuildAndStart();
   if (!backend || !matcherServer) return 1;
 
-  DeviceMatcher worker("127.0.0.1:50054");
   std::signal(SIGINT, Stop);
   std::signal(SIGTERM, Stop);
+  std::vector<std::thread> workers;
+  std::atomic<bool> failed{false};
+  for (int index = MatcherWorkers(); index > 0; --index)
+    workers.emplace_back([&failed] {
+      try {
+        DeviceMatcher worker("127.0.0.1:50054");
+        while (!stopping) {
+          if (std::filesystem::exists("/test/matcher-hold")) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+          }
+          std::this_thread::sleep_for(worker.Poll());
+        }
+      } catch (const std::exception &) {
+        // A failed worker stops the whole fixture rather than silently reducing matching capacity.
+        failed = true;
+        stopping = true;
+      }
+    });
   std::cout << "Disposable real-ledger backend ready; no production/off-site claim" << std::endl;
-  while (!stopping) {
-    if (std::filesystem::exists("/test/matcher-hold")) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      continue;
-    }
-    std::this_thread::sleep_for(worker.Poll());
-  }
+  for (auto &worker : workers) worker.join();
   backend->Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(2));
   matcherServer->Shutdown();
+  if (failed) {
+    std::cerr << "Local matcher worker failed" << std::endl;
+    return 1;
+  }
 } catch (const std::exception &) {
   std::cerr << "Local acceptance service unavailable" << std::endl;
   return 1;

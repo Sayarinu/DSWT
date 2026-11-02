@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platinumwt/server/config.h"
+
 #include <boost/asio/ip/address.hpp>
 
 #include <chrono>
@@ -46,12 +48,13 @@ enum class RequestKind { Enrollment, Submission, Recovery };
 // out of the cache; a forged credential cannot consume the owner's key budget.
 class ServiceAdmission {
 public:
+  explicit ServiceAdmission(unsigned submissions = kDefaultSubmissionWorkers) : submissions_({submissions, 2, 16, 4}) {}
   std::unique_ptr<Quota::Permit> Acquire(RequestKind);
   // Call only after verifying the credential. One permit spans all transaction
   // phases/retries, so binding it again does not spend another identity token.
   bool Authorize(Quota::Permit &, std::string_view identity, std::string_view credential);
 private:
-  Quota submissions_{{4, 2, 16, 4}};
+  Quota submissions_;
   Quota recovery_{{8, 2, 64, 16}};
 };
 
