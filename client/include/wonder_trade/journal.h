@@ -26,6 +26,7 @@ enum WtJournalPhase {
 };
 
 enum WtJournalError {
+    WT_JOURNAL_NEEDS_SEED = 1,
     WT_JOURNAL_ERROR_UNKNOWN = -37,
     WT_JOURNAL_ERROR_CONFLICT = -38,
     WT_JOURNAL_ERROR_READ = -39,
@@ -91,6 +92,10 @@ int WtJournal_Decode(const unsigned char *, WtJournalHash, WtJournalEntry *);
 int WtJournal_Open(WtJournal *, WtJournalIO);
 /* Legacy connectivity must refuse active journals, including torn ones. */
 int WtJournal_OpenEmpty(WtJournal *, WtJournalIO);
+/* Initialize only two freshly verified blank banks, with the existing format.
+ * NULL seed is read-only classification and returns NEEDS_SEED for blank data.
+ * Existing/torn/unknown records are never replaced. Serialize the whole call. */
+int WtJournal_Initialize(WtJournal *, WtJournalIO, const unsigned char *seed);
 int WtJournal_Read(const WtJournal *, WtJournalEntry *);
 int WtJournal_Repair(WtJournal *);
 /* Compare-and-commit against the exact opened generation. A failed write

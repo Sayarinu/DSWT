@@ -44,20 +44,22 @@ diff --git a/meson.options b/meson.options
 diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 --- a/platinum.us/main.lsf.in
 +++ b/platinum.us/main.lsf.in
-@@ -179,0 +180,12 @@
+@@ -179,0 +180,14 @@
 +	Object src/wonder_trade/application.c
 +	Object src/wonder_trade/network.c
 +	Object src/wonder_trade/tls.c
 +	Object src/wonder_trade/http.c
 +	Object src/wonder_trade/wire.c
 +	Object src/wonder_trade/seed.c
++	Object src/wonder_trade/entropy.c
++	Object src/wonder_trade/entropy_game.c
 +	Object src/wonder_trade/journal.c
 +	Object src/wonder_trade/engine.c
 +	Object src/wonder_trade/pokemon_codec.c
 +	Object src/wonder_trade/game_save.c
 +	Object src/wonder_trade/recovery.c
 +	Object src/wonder_trade/flash.c
-@@ -372,0 +384 @@
+@@ -372,0 +386 @@
 +	Library libwonder_trade_tls.a
 diff --git a/res/text/start_menu.json b/res/text/start_menu.json
 --- a/res/text/start_menu.json
@@ -70,10 +72,15 @@ diff --git a/res/text/start_menu.json b/res/text/start_menu.json
 diff --git a/src/main.c b/src/main.c
 --- a/src/main.c
 +++ b/src/main.c
-@@ -1,0 +2,2 @@
+@@ -1,0 +2,3 @@
 +#include "wonder_trade/application.h"
 +#include "wonder_trade/recovery.h"
-@@ -179,8 +181,13 @@
++#include "wonder_trade/entropy_game.h"
+@@ -115,0 +119 @@
++    WonderTradeEntropy_Init();
+@@ -124,0 +129 @@
++        WonderTradeEntropy_Frame();
+@@ -179,8 +184,13 @@
 -        if (sApplication.nextOverlayID != FS_OVERLAY_ID_NONE) {
 -            Overlay_LoadByID(sApplication.nextOverlayID, OVERLAY_LOAD_NORMAL);
 -        }

@@ -17,6 +17,8 @@
 #include "wonder_trade/http.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/seed.h"
+#include "wonder_trade/entropy.h"
+#include "wonder_trade/entropy_game.h"
 #include "wonder_trade/game_save.h"
 #include "wonder_trade/recovery.h"
 #include "wonder_trade/tls.h"
@@ -42,7 +44,7 @@ typedef struct WonderTradeTransport {
     BOOL trading;
     int slot;
     unsigned action;
-    BOOL completed, returned, rejected, waiting, superseded;
+    BOOL completed, returned, rejected, waiting, superseded, needsEntropy;
     unsigned tradePhase;
     BOOL canLeave;
     WtFlashAccess flash;
@@ -94,7 +96,9 @@ static void WonderTradeNetwork_AccessPointFree(u32 type, void *pointer, s32 size
 
 static int WonderTradeNetwork_ReadSeed(unsigned char *seed, size_t size)
 {
-    return WtSeed_Read(sTransport->trading ? &sTransport->engine.journal : &sTransport->seed, seed, size);
+    int result = WtSeed_Read(sTransport->trading ? &sTransport->engine.journal : &sTransport->seed, seed, size);
+    if (result > 0 && WonderTradeEntropy_Mix(seed, size) != 0) return -1;
+    return result;
 }
 
 static int WonderTradeNetwork_WriteSeed(unsigned char *seed, size_t size)
@@ -247,6 +251,20 @@ done:
     return result;
 }
 
+static int WonderTradeNetwork_PrepareJournal(WonderTradeTransport *transport, WtJournalIO journal)
+{
+    unsigned char seed[32];
+    int entropy, result = WtJournal_Open(&transport->seed, journal);
+    if (result == WT_JOURNAL_ERROR_UNKNOWN && !transport->flash.error) {
+        entropy = WonderTradeEntropy_Seed(seed);
+        if (entropy < 0) result = -1;
+        else result = WtJournal_Initialize(&transport->seed, journal, entropy == WT_ENTROPY_WAIT ? NULL : seed);
+        mbedtls_platform_zeroize(seed, sizeof(seed));
+    }
+    WtJournal_Close(&transport->seed);
+    return result;
+}
+
 static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
 {
     WtJournalIO journal = { &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
@@ -254,7 +272,13 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     WtEngine *engine = &transport->engine;
     unsigned count, operation, wireResult;
     int result = -1;
-    if (WtEngine_Open(engine, journal, inventory) != 0) {
+    int prepared = WonderTradeNetwork_PrepareJournal(transport, journal);
+    if (prepared == WT_JOURNAL_NEEDS_SEED) {
+        /* Only fresh proof of two blank banks reaches this local wait state. */
+        transport->needsEntropy = TRUE; transport->canLeave = TRUE;
+        return 0;
+    }
+    if (prepared != 0 || WtEngine_Open(engine, journal, inventory) != 0) {
         /* Re-read both banks: only verified pre-enrollment data may leave. */
         transport->canLeave = WtRecovery_Check(journal) == 0;
         return -30;
@@ -385,6 +409,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
         network->waiting = transport->waiting; network->superseded = transport->superseded;
+        network->needsEntropy = transport->needsEntropy;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }
@@ -452,6 +477,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
     network->deadline = network->lastUpdate + OS_SecondsToTicks(save ? 180 : 30);
     network->requestStarted = FALSE;
     network->timedOut = FALSE;
+    network->needsEntropy = FALSE;
     network->maxFrameMs = 0;
     network->state = size || save ? WT_NET_EXCHANGING : WT_NET_PINGING;
     stackTop = (void *)(((u32)transport->stack + WT_STACK_SIZE) & ~7);

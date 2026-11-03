@@ -375,6 +375,39 @@ failed:
 int WtJournal_Open(WtJournal *store, WtJournalIO io) { return Open(store, io, 0); }
 int WtJournal_OpenEmpty(WtJournal *store, WtJournalIO io) { return Open(store, io, 1); }
 
+int WtJournal_Initialize(WtJournal *store, WtJournalIO io, const unsigned char *seed)
+{
+    unsigned char other[4096], digest[32];
+    WtJournalEntry entry;
+    int bank, result = WT_JOURNAL_ERROR_UNKNOWN;
+    if (!store) return -1;
+    WtJournal_Close(store);
+    memset(&entry, 0, sizeof(entry));
+    if (!io.read || !io.write || !io.hash || io.hash((const unsigned char *)"abc", 3, digest) != 0
+        || memcmp(digest, kHashABC, 32) != 0) { result = WT_JOURNAL_ERROR_SELF_TEST; goto done; }
+    if (io.read(io.arg, 0, store->record) != 0 || io.read(io.arg, 1, other) != 0) {
+        result = WT_JOURNAL_ERROR_READ; goto done;
+    }
+    if (!Blank(store->record) || !Blank(other)) goto done;
+    if (!seed) { result = WT_JOURNAL_NEEDS_SEED; goto done; }
+    entry.generation = 1;
+    memcpy(entry.seed, seed, 32);
+    if (WtJournal_Encode(&entry, io.hash, store->record) != 0) goto done;
+    for (bank = 0; bank < 2; bank++) {
+        /* Refuse a bank that changed before its first write. The backend owns
+         * tag-last persistence; verify the complete committed image as well. */
+        if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
+        if (!Blank(other) || io.write(io.arg, bank, store->record) != 0) goto done;
+        if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
+        if (memcmp(other, store->record, 4096) != 0) goto done;
+    }
+    result = 0;
+done:
+    WtJournal_Close(store);
+    Clear(&entry, sizeof(entry)); Clear(other, sizeof(other)); Clear(digest, sizeof(digest));
+    return result == 0 ? WtJournal_OpenEmpty(store, io) : result;
+}
+
 int WtJournal_Read(const WtJournal *store, WtJournalEntry *entry)
 {
     if (!entry) return -1;

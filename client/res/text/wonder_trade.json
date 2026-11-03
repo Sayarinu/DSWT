@@ -140,6 +140,10 @@
     {
       "id": "WonderTrade_Text_NoRoom",
       "en_US": "Your result is kept pending.\nMake space in your party\nor PC, then collect again."
+    },
+    {
+      "id": "WonderTrade_Text_KeepPlaying",
+      "en_US": "A little more play is needed\nto prepare Wonder Trade.\nKeep playing, then try again."
     }
   ]
 }

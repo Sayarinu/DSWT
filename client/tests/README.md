@@ -282,8 +282,24 @@ private save evidence locally.
 
 ## Seed durability and host checks
 
+Players initialize a blank Wonder Trade journal in-game. A per-frame SHA-256
+chain mixes the SDK's low-entropy device samples with input, touch and frame
+state; boot device data is mixed once too. Initialization needs 128 new-button
+or meaningful touch changes, credited at most once per four sampled frames.
+Clocks, releases, held inputs and small touch jitter earn no credit. Until then,
+the game asks the player to keep playing and permits return to the field.
+This is a conservative readiness heuristic, not an entropy guarantee: an exact
+replay of all device/input samples can reproduce the seed. Each game NV-seed
+read also mixes the current live pool without changing the journal format.
+
+Only freshly verified blank banks can receive the generation-1 EMPTY record;
+tag-last writes and complete readback precede enrollment. Existing provisioned
+and active journals retain their seeds, identities and exact pending packets.
+Unknown/torn data remains blocked. The host provisioner remains available for
+isolated test fixtures; players do not need it.
+
 The transport section at offset 1440 has format u16=1, length u16=32 and a
-32-byte host CSPRNG seed, with remaining bytes zero. The ping-only seed API
+32-byte seed, with remaining bytes zero. The ping-only seed API
 accepts only EMPTY journals. Trade requests use the checked active-journal seed
 path and must match the journal's identity and phase; enrollment and mutation
 packets must match the recorded bytes.
