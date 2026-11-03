@@ -254,7 +254,11 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     WtEngine *engine = &transport->engine;
     unsigned count, operation, wireResult;
     int result = -1;
-    if (WtEngine_Open(engine, journal, inventory) != 0) return -30;
+    if (WtEngine_Open(engine, journal, inventory) != 0) {
+        /* Re-read both banks: only verified pre-enrollment data may leave. */
+        transport->canLeave = WtRecovery_Check(journal) == 0;
+        return -30;
+    }
     WtRecovery_Block();
     for (count = 0; count < 24 && !transport->cancel; ++count) {
         /* TLS teardown releases PSA; initialize it before the next nonce.

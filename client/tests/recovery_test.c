@@ -5,6 +5,8 @@
 #include <string.h>
 #include <psa/crypto.h>
 
+#include "journal_fixture.h"
+
 static unsigned char banks[2][4096], saved[2][4096], empty[4096];
 static int reads, writes, readFailure;
 
@@ -70,6 +72,14 @@ int main(void)
         assert(Hash(banks[1], 4060, banks[1] + 4060) == 0); Check(0);
         memset(banks[1] + 4092, 0, 4); Check(0);
     }
+    /* A fresh post-failure check must not release even a valid active journal. */
+    for (phase = WT_JOURNAL_ENROLLING; phase <= WT_JOURNAL_RECOVERY_REQUIRED; phase++) {
+        assert(WtTest_JournalEntry(phase, Hash, &entry) == 0);
+        assert(WtJournal_Encode(&entry, Hash, banks[0]) == 0);
+        memcpy(banks[1], banks[0], 4096);
+        WtRecovery_Block(); Check(0);
+    }
+    memcpy(banks[0], empty, 4096);
     for (i = 0; i < sizeof(malformed) / sizeof(malformed[0]); i++) {
         memcpy(banks[1], empty, 4096); banks[1][malformed[i]] ^= 128;
         /* A recognized torn digest/tag is safe with the other EMPTY mirror. */
