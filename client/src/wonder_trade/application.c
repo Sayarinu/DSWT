@@ -391,7 +391,8 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
             WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
         } else if (app->network.state == WT_NET_RESPONSE) {
             app->selectedSlot = -1;
-            if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
+            if (app->network.needsEntropy) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_KeepPlaying);
+            else if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
             else if (app->network.completed) WonderTrade_Show(app, WT_APP_MESSAGE,
                 app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
             else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
@@ -426,7 +427,8 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
 
     if (app->state == WT_APP_MESSAGE) {
         if (JOY_NEW(PAD_BUTTON_A | PAD_BUTTON_B)) {
-            WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
+            if (app->network.needsEntropy) WonderTrade_Close(app);
+            else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
         } else if (JOY_NEW(PAD_BUTTON_X)) {
             WonderTrade_Close(app);
         }
