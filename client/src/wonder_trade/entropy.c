@@ -41,7 +41,7 @@ int WtEntropy_Frame(WtEntropyPool *pool, const WtEntropySample *sample)
     static const unsigned char domain[] = "PWT.entropy.frame.v1";
     unsigned char material[sizeof(domain) + 85], digest[32], *p = material;
     uint64_t frame;
-    unsigned keys, x, y, changed;
+    unsigned keys, x, y, touchChanged, changed;
     int result;
     if (!pool || !pool->valid || !sample || pool->frames == UINT64_MAX) return Fail(pool);
     frame = pool->frames + 1;
@@ -60,16 +60,18 @@ int WtEntropy_Frame(WtEntropyPool *pool, const WtEntropySample *sample)
     memcpy(pool->digest, digest, 32);
     mbedtls_platform_zeroize(digest, sizeof(digest));
     keys = sample->keys & 0x0fff;
-    x = sample->x >> 3; y = sample->y >> 3;
-    changed = (keys & ~pool->keys) != 0
-        || (sample->touching && (!pool->touching || x != pool->x || y != pool->y));
+    x = sample->x > pool->x ? sample->x - pool->x : pool->x - sample->x;
+    y = sample->y > pool->y ? sample->y - pool->y : pool->y - sample->y;
+    touchChanged = sample->touching && (!pool->touching || x >= 8 || y >= 8);
+    changed = (keys & ~pool->keys) != 0 || touchChanged;
     /* Do not credit clocks, held keys, releases or sub-eight-pixel touch jitter.
      * At most one change counts, spaced by at least four sampled frames. */
     if (changed && frame - pool->lastCreditFrame >= 4 && pool->credit < WT_ENTROPY_REQUIRED_CHANGES) {
         pool->credit++;
         pool->lastCreditFrame = frame;
+        if (touchChanged) { pool->x = sample->x; pool->y = sample->y; }
     }
-    pool->frames = frame; pool->keys = keys; pool->x = (uint16_t)x; pool->y = (uint16_t)y;
+    pool->frames = frame; pool->keys = keys;
     pool->touching = sample->touching != 0;
     return 0;
 }

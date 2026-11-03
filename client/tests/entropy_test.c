@@ -56,6 +56,20 @@ int main(void)
     sample.x = 48; assert(WtEntropy_Frame(&pool, &sample) == 0 && pool.credit == 3);
     sample.touching = 0; assert(WtEntropy_Frame(&pool, &sample) == 0 && pool.credit == 3);
 
+    /* One-pixel jitter across a former cell boundary must not unlock readiness. */
+    assert(WtEntropy_Init(&pool, boot) == 0);
+    memset(&sample, 0, sizeof(sample));
+    for (frame = 0; frame < 4; frame++) assert(WtEntropy_Frame(&pool, &sample) == 0);
+    sample.touching = 1; sample.x = 7;
+    assert(WtEntropy_Frame(&pool, &sample) == 0 && pool.credit == 1);
+    for (frame = 0; frame < 512; frame++) {
+        sample.x = 7 + frame % 2;
+        assert(WtEntropy_Frame(&pool, &sample) == 0);
+    }
+    assert(pool.credit == 1 && WtEntropy_Seed(&pool, first) == WT_ENTROPY_WAIT);
+    sample.x = 15;
+    assert(WtEntropy_Frame(&pool, &sample) == 0 && pool.credit == 2);
+
     assert(WtEntropy_Init(&pool, boot) == 0); Ready(&pool);
     assert(WtEntropy_Init(&replay, boot) == 0); Ready(&replay);
     assert(WtEntropy_Seed(&pool, first) == 0 && WtEntropy_Seed(&replay, second) == 0);
