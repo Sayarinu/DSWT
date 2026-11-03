@@ -348,7 +348,6 @@ static void WonderTradeNetwork_Worker(void *arg)
     transport->socket = -1;
     mbedtls_memory_buffer_alloc_init(transport->arena, sizeof(transport->arena));
     mbedtls_platform_set_nv_seed(WonderTradeNetwork_ReadSeed, WonderTradeNetwork_WriteSeed);
-    transport->flash.requireDurability = TRUE;
     if (transport->trading) {
         result = WonderTradeNetwork_RunTrade(transport);
     } else {
