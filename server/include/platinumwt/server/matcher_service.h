@@ -17,6 +17,9 @@ class MatcherService final : public v1::TradeMatcher::Service {
 public:
   explicit MatcherService(std::string connection_info, RecoveryBarrier recovery = {});
   grpc::Status MatchNext(grpc::ServerContext *, const v1::MatchRequest *, v1::MatchReply *) override;
+  // Whether two owners have queued offers. This writes nothing, unlike MatchNext,
+  // which retains every attempt. Failures read as false.
+  bool PairAvailable() const;
 
 private:
   std::string connection_info_;

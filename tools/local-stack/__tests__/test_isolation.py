@@ -309,7 +309,8 @@ class ProductionTests(unittest.TestCase):
     def archive(self, extra=None, omit=None):
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode="w") as archive:
-            for name in ("usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-ledger",
+            for name in ("usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-matcher",
+                         "usr/local/bin/platinumwt-ledger",
                          "usr/share/platinumwt/LICENSE", "usr/share/platinumwt/NOTICE", extra):
                 if name and name != omit:
                     info = tarfile.TarInfo(name)

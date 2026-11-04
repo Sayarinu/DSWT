@@ -95,4 +95,14 @@ BackendConfig LoadBackendConfig() {
   return config;
 }
 
+MatcherConfig LoadMatcherConfig() {
+  MatcherConfig config{Required("PLATINUMWT_DATABASE_URL")};
+  config.metrics_port = LoadMetricsPort();
+  const auto workers = Environment("WT_MATCHER_WORKERS", "1");
+  const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), config.workers);
+  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || config.workers < 1 || config.workers > 8)
+    throw std::invalid_argument("WT_MATCHER_WORKERS must be between 1 and 8");
+  return config;
+}
+
 } // namespace platinumwt::server

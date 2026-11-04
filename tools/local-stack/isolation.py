@@ -210,7 +210,8 @@ def listener_evidence(local):
 
 
 def production_files(archive):
-    required = {"usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-ledger",
+    required = {"usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-matcher",
+                "usr/local/bin/platinumwt-ledger",
                 "usr/share/platinumwt/LICENSE", "usr/share/platinumwt/NOTICE"}
     found, count = {}, 0
     for member in archive:

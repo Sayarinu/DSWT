@@ -13,7 +13,7 @@
 
 namespace platinumwt::server {
 
-enum class TelemetryRole { Gateway, Backend };
+enum class TelemetryRole { Gateway, Backend, Matcher };
 enum class Operation : unsigned { Invalid, Enroll, Submit, Status, Cancel, Collect, Acknowledge, Reconcile, Match, Legality, Count };
 
 struct LedgerMetrics {

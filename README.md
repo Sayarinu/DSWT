@@ -68,6 +68,11 @@ armed, so the barrier cannot open without a restorable start. The backend's data
 on `pg_switch_wal()`. It forces WAL out only while a request waits on the open
 segment, with no backlog and no archive failure. Its database URL must use a
 socket path or IP address, because a hostname keeps the barrier closed.
+
+`platinumwt-matcher` pairs queued offers, using the same database URL rules and
+barrier. It opens no matcher port. `WT_MATCHER_WORKERS` sets 1 to 8 workers
+(default 1), and replicas are safe because a database lock serializes each pair.
+
 For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
 `WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
 `POST /wt/v1` is refused. Keep every internal service in the same private network

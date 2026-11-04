@@ -17,6 +17,7 @@
 !server/include/platinumwt/server/identity_store.h
 !server/include/platinumwt/server/ledger_store.h
 !server/include/platinumwt/server/legality_client.h
+!server/include/platinumwt/server/match_worker.h
 !server/include/platinumwt/server/matcher_service.h
 !server/include/platinumwt/server/metrics_server.h
 !server/include/platinumwt/server/recovery_barrier.h
@@ -49,6 +50,8 @@
 !server/src/ledger_store.cpp
 !server/src/legality_client.cpp
 !server/src/main.cpp
+!server/src/match_worker.cpp
+!server/src/matcher_main.cpp
 !server/src/matcher_service.cpp
 !server/src/metrics_server.cpp
 !server/src/postgres.cpp
@@ -78,6 +81,7 @@
 !server/tests/integration/test_http_gateway.py
 !server/tests/integration/test_ledger.py
 !server/tests/integration/test_malformed_requests.py
+!server/tests/integration/test_matcher_process.py
 !server/tests/integration/test_wal_archive_barrier.py
 !server/tests/integration/trade_test.cpp
 !server/tests/unit/admission_test.cpp

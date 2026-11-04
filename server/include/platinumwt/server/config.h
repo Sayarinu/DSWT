@@ -34,8 +34,15 @@ struct BackendConfig {
   unsigned submission_workers = kDefaultSubmissionWorkers;
 };
 
+struct MatcherConfig {
+  std::string connection_info;
+  unsigned short metrics_port = 0;
+  unsigned workers = 1;
+};
+
 ServerConfig LoadServerConfig();
 BackendConfig LoadBackendConfig();
+MatcherConfig LoadMatcherConfig();
 unsigned short LoadMetricsPort();
 // Concurrent Submit handlers per process (WT_SUBMISSION_WORKERS, 1-16). Size it to the legality
 // validator's isolated workers (WT_VALIDATOR_WORKERS, 1-8); the gateway queues at most twice this many.

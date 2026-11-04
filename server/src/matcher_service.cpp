@@ -115,6 +115,14 @@ bool Retry(const detail::DatabaseError &error) {
 MatcherService::MatcherService(std::string connection_info, RecoveryBarrier recovery)
     : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
 
+bool MatcherService::PairAvailable() const {
+  try {
+    Database database(connection_info_);
+    auto row = database.Execute("SELECT count(*) >= 2 FROM platinumwt.offers WHERE state=1");
+    return std::string(PQgetvalue(row.get(), 0, 0)) == "t";
+  } catch (const std::exception &) { return false; }
+}
+
 grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::MatchRequest *request, v1::MatchReply *reply) {
   RpcTelemetry trace(Operation::Match, context, [reply] { return reply->result(); }, request->operation_id());
   reply->Clear();
