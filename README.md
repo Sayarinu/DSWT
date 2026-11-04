@@ -54,12 +54,20 @@ Run migrations as the database owner. They are transactional, ordered and
 checksum-verified. Replay uses a consistent snapshot and temporary row images;
 it checks live state without repairing it. Audit evidence includes private
 verifiers and payloads and stays in the database/backups; the tool prints counts
-and SQLSTATE errors. Local WAL durability does not satisfy the separate off-site
-recovery barrier required before final trade responses are enabled.
+and SQLSTATE errors. Local WAL durability does not satisfy the off-site recovery
+barrier required before final trade responses.
 
 `platinumwt-backend` serves enrollment/trading on loopback with
 `PLATINUMWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
-defaults to `127.0.0.1:50052`. Its recovery provider currently stays closed.
+defaults to `127.0.0.1:50052`. Operations stay `PROCESSING` until their WAL is
+archived, read from `pg_stat_archiver`. That is only sound with
+[`server/wal-archive.sh`](server/wal-archive.sh) as `archive_command`: it refuses
+gaps, so the archive stays a contiguous prefix on independently recoverable
+storage. Nothing ships until its `init` and a base backup are done and it is
+armed, so the barrier cannot open without a restorable start. The backend's database role needs `EXECUTE`
+on `pg_switch_wal()`. It forces WAL out only while a request waits on the open
+segment, with no backlog and no archive failure. Its database URL must use a
+socket path or IP address, because a hostname keeps the barrier closed.
 For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
 `WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
 `POST /wt/v1` is refused. Keep every internal service in the same private network

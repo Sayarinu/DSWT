@@ -2,6 +2,7 @@
 #include "platinumwt/server/identity_service.h"
 #include "platinumwt/server/legality_client.h"
 #include "platinumwt/server/trade_service.h"
+#include "platinumwt/server/wal_archive_barrier.h"
 #include "admission.h"
 #include "platinumwt/server/metrics_server.h"
 
@@ -19,11 +20,12 @@ int main() {
     Telemetry::Global().Initialize(TelemetryRole::Backend);
     MetricsServer metrics(config.metrics_port, config.connection_info);
     LegalityClient legality(config.legality_address, config.legality_policy);
-    // No production attestation bypass. Until the independently recoverable
-    // prefix provider is integrated, enrollment/operations remain PROCESSING.
+    // No attestation bypass: enrollment/operations stay PROCESSING until the
+    // cluster's WAL archive covers them.
+    WalArchiveBarrier recovery(config.connection_info);
     auto admission = std::make_shared<detail::ServiceAdmission>(config.submission_workers);
-    IdentityService identities(config.connection_info, {}, admission);
-    TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); }, {}, admission);
+    IdentityService identities(config.connection_info, recovery.Barrier(), admission);
+    TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); }, recovery.Barrier(), admission);
     grpc::ServerBuilder builder;
     int port = 0;
     builder.AddListeningPort(config.address, grpc::InsecureServerCredentials(), &port);
