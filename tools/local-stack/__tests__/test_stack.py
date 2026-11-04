@@ -192,6 +192,12 @@ class StackTests(StackFixture):
 
 
 class PortAndObservabilityTests(StackFixture):
+    def test_production_excludes_observability_and_adds_its_overlay(self):
+        with self.assertRaisesRegex(ValueError, "production"):
+            stack.initialize(self.root / "game/rejected", 18443, {"grafana_port": 13000, "log_port": 24224}, True)
+        self.assertFalse((self.root / "game/rejected").exists())
+        self.assertTrue(stack.PRODUCTION.is_file())
+
     def test_default_manifest_is_unchanged_and_custom_port_reaches_profile_and_compose(self):
         self.assertNotIn("https_port", self.manifest)
         self.assertNotIn("observability", self.manifest)

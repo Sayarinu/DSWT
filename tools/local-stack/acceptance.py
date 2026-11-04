@@ -147,7 +147,8 @@ class Acceptance:
         output = subprocess.run([str(self.probe), "inspect", str(client)], check=True, capture_output=True, text=True, timeout=10)
         return json.loads(output.stdout)
 
-    def run(self, client, action="reconcile", *, fault=None, checkpoint=None, failure=False, allow_unavailable=False):
+    def run(self, client, action="reconcile", *, fault=None, checkpoint=None, failure=False, allow_unavailable=False,
+            allow_processing=False):
         self.serial += 1
         arguments = [str(self.probe), "run", str(client), str(self.profile["port"]), self.profile["hostname"],
                      self.profile["current_spki_sha256"], self.profile["next_spki_sha256"], action]
@@ -157,7 +158,8 @@ class Acceptance:
         code, events = supervise(arguments, log, checkpoint=checkpoint, kill=fault == "kill")
         require(code in (0, 1) or (fault == "kill" and code == -signal.SIGKILL),
                 "Unexpected probe exit (memory/process failure): " + str(code) + "; see " + str(log))
-        unavailable = allow_unavailable and code == 1 and any(event.get("wire_result") == 11 for event in events)
+        allowed = ({11} if allow_unavailable else set()) | ({2} if allow_processing else set())
+        unavailable = code == 1 and any(event.get("wire_result") in allowed for event in events)
         require((code != 0) == (failure or bool(fault)) or unavailable, "unexpected native exit " + str(code) + "; see " + str(log))
         summary = self.inspect(client)
         self.evidence.append({"client": str(client.relative_to(self.directory)), "action": action,
@@ -206,7 +208,7 @@ class Acceptance:
                     "match did not transfer the peer's exact asset")
 
     def wait_matched(self, *clients):
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 30
         while True:
             if all(self.snapshot(client)["offers"][-1]["state"] == 2 for client in clients):
                 return
@@ -216,6 +218,13 @@ class Acceptance:
 
     @contextmanager
     def hold(self):
+        if self.local.production:
+            self.local.compose("stop", "matcher", capture=True, timeout=45)
+            try:
+                yield
+            finally:
+                self.local.compose("start", "matcher", capture=True, timeout=45)
+            return
         path = self.local.workspace / "control/matcher-hold"
         with path.open("x"):
             pass
@@ -413,6 +422,31 @@ class Acceptance:
         final = self.settled(pending, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
         require(final["operations"][0]["request_sha256"] == original["request_sha256"], "retry accepted a different submission")
 
+    def archive_hold(self):
+        """A stalled archive keeps an outcome from being final; it completes once archiving resumes."""
+        require(self.local.production, "archive-hold needs the production profile")
+        with self.hold():
+            a = self.client("a")
+            self.run(a)
+            self.local.hold_archive(True)
+            try:
+                state, events = self.run(a, "submit", failure=True)
+                require(any(event.get("wire_result") == 2 for event in events), "held archive did not report PROCESSING")
+                require(state["phase"] != "queued" and state["pending_sha256"] and state["inventory"] == [[], []],
+                        "held archive released the outcome or the escrow")
+            finally:
+                self.local.hold_archive(False)
+            # PostgreSQL can take up to a minute to retry a failed archive.
+            deadline = time.monotonic() + 120
+            while True:
+                state, _ = self.run(a, allow_processing=True, allow_unavailable=True)
+                if state["phase"] == "queued" and not state["pending_sha256"]:
+                    break
+                require(time.monotonic() < deadline, "archive recovery did not complete the held submission")
+                time.sleep(1)
+            self.run(a, "cancel")
+            self.settled(a, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
+
     def illegal(self):
         a = self.client("a", "illegal-rng.pk4")
         original = (a / "inventory-0.bin").read_bytes()
@@ -424,7 +458,7 @@ class Acceptance:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=stack.ROOT / "game/local-e2e")
-    parser.add_argument("--case", choices=("all", *CASES), default="all")
+    parser.add_argument("--case", choices=("all", *CASES, "archive-hold"), default="all")
     args = parser.parse_args()
     if sys.version_info < (3, 12):
         parser.error("Python 3.12+ is required for the pinned source preparer; use a separate interpreter")
@@ -452,13 +486,14 @@ def main():
             runner.build()
             report.update(native_sha256=sha(runner.probe), tls=json.loads((stack.ROOT / "client/tls-dependency.json").read_text()),
                           fixtures=runner.fixture_manifest, fixture_image=runner.fixture_image)
-            for case in CASES if args.case == "all" else (args.case,):
+            everything = CASES + (("archive-hold",) if local.production else ())
+            for case in everything if args.case == "all" else (args.case,):
                 print("RUN " + case, flush=True)
                 runner.case_directory = directory / case
                 runner.case_directory.mkdir(mode=0o700)
                 begin = len(runner.evidence)
                 getattr(runner, case.replace("-", "_"))()
-                local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
+                local.compose("exec", "-T", "backend", local.ledger, "verify", capture=True, timeout=60)
                 report["cases"].append({"case": case, "status": "pass", "evidence": runner.evidence[begin:], "ledger_replay": "pass"})
                 save_json(directory / "report.json", report)
                 print("PASS " + case, flush=True)

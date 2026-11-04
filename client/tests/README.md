@@ -88,6 +88,12 @@ Docker after `up` succeeds:
 python3.12 tools/local-stack/acceptance.py --workspace game/local-e2e --case all
 ```
 
+For the final local gate, create the workspace with `stack.py init --production`.
+It runs the final image and production entrypoints as an unprivileged database
+role, with a real WAL archive and base backup, and `--case all` adds the
+`archive-hold` case. A stalled archive must hold trades at `PROCESSING` until it
+resumes. This proves nothing about off-site recovery: its archive is a local volume.
+
 The runner builds `trade_probe` with the production C engine, journal, seed,
 wire, Pokemon codec, HTTP and TLS. Only its POSIX I/O and persisted synthetic
 inventory are test adapters. The pinned validator test image generates fresh

@@ -103,7 +103,8 @@ int Exchange(Probe *probe, unsigned port, const char *hostname, const unsigned c
         (long long)(finished.tv_sec - started.tv_sec) * 1000000 + (finished.tv_nsec - started.tv_nsec) / 1000);
     /* The supervisor can discard a validated, committed response before application. */
     snprintf(checkpoint, sizeof(checkpoint), "wire.%u.reply", operation);
-    if (Checkpoint(probe, checkpoint) != 0) { result = -1; goto done; }
+    /* PROCESSING is not an outcome yet: tests of a lost reply mean the final one. */
+    if (reply.result != WT_RESULT_PROCESSING && Checkpoint(probe, checkpoint) != 0) { result = -1; goto done; }
     stage = "engine-reply";
     result = WtEngine_Reply(&probe->engine, http.body, http.bodySize);
     if (result >= 0 && reply.result != WT_RESULT_OK && reply.result != WT_RESULT_ILLEGAL_POKEMON
