@@ -270,7 +270,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     WtJournalIO journal = { &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
     WtEngineIO inventory = { transport, WonderTradeNetwork_Random, WonderTradeNetwork_Inventory };
     WtEngine *engine = &transport->engine;
-    unsigned count, operation, wireResult;
+    unsigned count, operation, wireResult, processing = 0, tick;
     int result = -1;
     int prepared = WonderTradeNetwork_PrepareJournal(transport, journal);
     if (prepared == WT_JOURNAL_NEEDS_SEED) {
@@ -317,6 +317,13 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
         wireResult = transport->reply.result;
+        if (wireResult == WT_RESULT_PROCESSING && processing < WT_ENGINE_PROCESSING_RETRIES) {
+            /* The server keeps this request's outcome until its backup covers it. Nothing
+             * changed here, so resending the saved request cannot add an operation. */
+            ++processing; --count;
+            for (tick = 0; tick < WT_ENGINE_PROCESSING_WAIT_MS / 50 && !transport->cancel; ++tick) OS_Sleep(50);
+            continue;
+        }
         if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
         if (operation == WT_OP_SUBMIT && wireResult == WT_RESULT_COUNTER_MISMATCH && !engine->blocked) {
             transport->superseded = TRUE; continue;

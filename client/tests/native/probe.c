@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <mbedtls/memory_buffer_alloc.h>
 #include <mbedtls/platform.h>
 #include <psa/crypto.h>
@@ -47,7 +48,7 @@ static int Run(unsigned port, const char *hostname, const unsigned char pins[2][
     WtJournalIO journal = {&probe, ReadBank, WriteBank, Hash};
     WtEngineIO inventory = {&probe, Random, Inventory};
     unsigned char entropy[32];
-    unsigned count, operation, requested = 0;
+    unsigned count, operation, requested = 0, processing = 0;
     int slot = -1, result = -1;
     if (strcmp(action, "submit") == 0) slot = 0;
     else if (strcmp(action, "collect") == 0) requested = WT_OP_COLLECT;
@@ -74,6 +75,12 @@ static int Run(unsigned port, const char *hostname, const unsigned char pins[2][
         if (result != 0) return result < 0 ? -1 : 0;
         operation = engine->frame[5];
         result = Exchange(&probe, port, hostname, pins);
+        if (result == -100 - WT_RESULT_PROCESSING && processing < WT_ENGINE_PROCESSING_RETRIES) {
+            /* Mirrors the game's bounded wait for the server's backup to cover an outcome. */
+            ++processing; --count;
+            nanosleep(&(struct timespec){WT_ENGINE_PROCESSING_WAIT_MS / 1000, 0}, NULL);
+            continue;
+        }
         if (result < 0) return result;
         if (operation == WT_OP_STATUS) return 0;
     }

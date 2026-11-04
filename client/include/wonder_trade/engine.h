@@ -4,6 +4,11 @@
 #include "wonder_trade/journal.h"
 #include "wonder_trade/wire.h"
 
+/* How long a client resends a request while the server waits for its backup to
+ * cover the outcome, before giving up to the normal retry screen. */
+#define WT_ENGINE_PROCESSING_RETRIES 30
+#define WT_ENGINE_PROCESSING_WAIT_MS 1000
+
 enum WtInventoryStep {
     WT_INVENTORY_PREPARE_REMOVE, WT_INVENTORY_REMOVE, WT_INVENTORY_VERIFY_REMOVED,
     WT_INVENTORY_PREPARE_RECEIVE, WT_INVENTORY_RECEIVE, WT_INVENTORY_VERIFY_RECEIVED,
