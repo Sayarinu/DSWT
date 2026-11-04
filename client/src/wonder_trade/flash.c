@@ -5,19 +5,11 @@
 #include <mbedtls/private/sha256.h>
 
 #include "system.h"
-#include "wonder_trade/persistence.h"
 
 enum {
     LOCK_FAILED = -20, UNSUPPORTED_FLASH = -21, READ_FAILED = -22,
-    FOREIGN_SECTOR = -23, UNSAFE_STORAGE = -24
+    FOREIGN_SECTOR = -23
 };
-
-static int Capability(void)
-{
-    unsigned char descriptor[WT_PERSISTENCE_SIZE];
-    return CARD_ReadFlash(WT_PERSISTENCE_ADDRESS, descriptor, sizeof(descriptor))
-        && memcmp(descriptor, WT_PERSISTENCE_DESCRIPTOR, sizeof(descriptor)) == 0;
-}
 
 int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
 {
@@ -35,7 +27,6 @@ int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
         access->error = UNSUPPORTED_FLASH;
         goto done;
     }
-    if (access->requireDurability && !Capability()) { access->error = UNSAFE_STORAGE; goto done; }
     if (!CARD_ReadFlash(address, record, 4096)) { access->error = READ_FAILED; goto done; }
     for (offset = 4096; offset < 0x10000; offset += sizeof(page)) {
         u32 i;
@@ -67,7 +58,6 @@ int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[4096])
     SleepLock(SLEEP_TYPE_SAVE_DATA);
     CARD_LockBackup(lockID);
     if (CARD_GetCurrentBackupType() != CARD_BACKUP_TYPE_FLASH_4MBITS) { access->error = UNSUPPORTED_FLASH; goto done; }
-    if (!Capability()) { access->error = UNSAFE_STORAGE; goto done; }
     if (!CARD_WriteAndVerifyFlash(address + 4092, uncommitted, sizeof(uncommitted))
         || !CARD_WriteAndVerifyFlash(address, record, 4092)
         || !CARD_WriteAndVerifyFlash(address + 4092, record + 4092, 4)) goto done;
@@ -97,7 +87,7 @@ int WtFlash_ReadRange(unsigned address, unsigned char *bytes, size_t length)
     if (lockID == OS_LOCK_ID_ERROR) return -1;
     CARD_LockBackup(lockID);
     if (CARD_GetCurrentBackupType() == CARD_BACKUP_TYPE_FLASH_4MBITS
-        && Capability() && CARD_ReadFlash(address, bytes, length)) result = 0;
+        && CARD_ReadFlash(address, bytes, length)) result = 0;
     CARD_UnlockBackup(lockID);
     OS_ReleaseLockID(lockID);
     return result;

@@ -5,11 +5,10 @@
 
 typedef struct WtFlashAccess {
     int error;
-    int requireDurability;
 } WtFlashAccess;
 
-/* Read-only inspection can see ordinary saves on an unsupported emulator.
- * Every write independently requires the checked host-persistence capability. */
+/* Journal banks use ordinary save flash on hardware and any emulator. A host
+ * that delays its save file can roll back behind the server after a crash. */
 int WtFlash_ReadBank(void *, int, unsigned char[4096]);
 int WtFlash_WriteBank(void *, int, const unsigned char[4096]);
 int WtFlash_Hash(const unsigned char *, size_t, unsigned char[32]);
