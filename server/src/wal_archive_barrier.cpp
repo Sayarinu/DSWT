@@ -95,7 +95,9 @@ struct WalArchiveBarrier::Impl {
       observed.force.flushed = std::stoull(PQgetvalue(row.get(), 0, 3));
       observed.force.archive_failing = std::string_view(PQgetvalue(row.get(), 0, 4)) == "t";
       observed.coverage = NextWalCoverage(coverage, last, PQgetvalue(row.get(), 0, 1), observed.force.segment_size);
-      observed.force.covered = observed.coverage.end;
+      // A history file can hide a segment archived since the last poll, so coverage may be
+      // stale. Treating it as unknown still gets a waiter out of an otherwise idle segment.
+      observed.force.covered = last && ParseSegment(*last) ? observed.coverage.end : 0;
       return observed;
     } catch (const std::exception &) { return {}; }
   }

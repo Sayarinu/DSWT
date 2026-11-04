@@ -34,10 +34,19 @@ class ArchiveScriptTests(unittest.TestCase):
 
     def init(self, first="000000010000000000000003"):
         self.assertEqual(self.run_script("init", self.archive, self.SYSTEM, first).returncode, 0)
+        self.assertEqual(self.run_script("arm", self.archive).returncode, 0)
 
     def test_nothing_ships_before_init(self):
         self.assertEqual(self.ship("000000010000000000000003").returncode, 1)
         self.assertEqual(list(self.archive.iterdir()), [])
+
+    def test_nothing_ships_until_armed(self):
+        self.assertEqual(self.run_script("arm", self.archive).returncode, 1)
+        self.assertEqual(self.run_script("init", self.archive, self.SYSTEM, "000000010000000000000003").returncode, 0)
+        self.assertEqual(self.ship("000000010000000000000003").returncode, 1)
+        self.assertFalse((self.archive / "000000010000000000000003").exists())
+        self.assertEqual(self.run_script("arm", self.archive).returncode, 0)
+        self.assertEqual(self.ship("000000010000000000000003").returncode, 0)
 
     def test_init_cannot_replace_a_chain(self):
         self.init()
@@ -52,20 +61,22 @@ class ArchiveScriptTests(unittest.TestCase):
         self.assertEqual(self.ship("000000010000000000000004").returncode, 0)
         self.assertEqual(self.ship("000000010000000000000005").returncode, 0)
 
-    def test_segments_before_the_chain_start_are_refused(self):
+    def test_segments_before_the_chain_start_are_skipped_without_shipping(self):
         self.init()
-        self.assertEqual(self.ship("000000010000000000000002").returncode, 1)
+        for name in ("000000010000000000000002", "000000000000000000000009"):
+            self.assertEqual(self.ship(name).returncode, 0)
+            self.assertFalse((self.archive / name).exists())
 
     def test_predecessor_crosses_logical_files_by_segment_size(self):
         # A 64-byte fixture stands in for its size: 2^32 / 64 segments per logical file.
-        self.assertEqual(self.run_script("init", self.archive, self.SYSTEM, "000000010000000003FFFFFF").returncode, 0)
+        self.init("000000010000000003FFFFFF")
         self.assertEqual(self.ship("000000010000000003FFFFFF").returncode, 0)
         self.assertEqual(self.ship("000000010000000100000000").returncode, 0)
 
     def test_other_clusters_and_timelines_are_refused(self):
         self.init()
         self.assertEqual(self.ship("000000010000000000000003", system=self.SYSTEM + 1).returncode, 1)
-        self.assertEqual(self.ship("000000020000000000000003").returncode, 1)
+        self.assertEqual(self.ship("000000020000000000000004").returncode, 1)
 
     def test_repeating_a_file_succeeds_only_with_identical_contents(self):
         self.init()
@@ -107,6 +118,7 @@ class WalArchiveBarrierTests(unittest.TestCase):
         subprocess.run([str(cls.script), "init", str(cls.archive),
                         cls.sql("SELECT system_identifier FROM pg_control_system()"),
                         cls.sql("SELECT pg_walfile_name(pg_current_wal_insert_lsn())")], check=True, capture_output=True)
+        subprocess.run([str(cls.script), "arm", str(cls.archive)], check=True, capture_output=True)
         cls.sql("CREATE TABLE activity(value int)")
 
     @classmethod
@@ -227,6 +239,22 @@ class WalArchiveBarrierTests(unittest.TestCase):
         self.sql("SELECT pg_stat_reset_shared('archiver')")
         position = self.sql("SELECT (pg_current_wal_flush_lsn() - '0/0'::pg_lsn)::text")
         self.assertEqual(self.probe(position, 20000), 0)
+
+    def test_a_base_backup_does_not_strand_a_running_barrier(self):
+        # A .backup name can hide a segment archived between polls (the order is not fixed); a waiter must still progress.
+        self.assertEqual(self.probe(self.write(), 20000), 0)
+        target = int(self.sql("SELECT (pg_current_wal_flush_lsn() - '0/0'::pg_lsn)::text")) + 4000000
+        waiter = subprocess.Popen([str(self.probe_binary), str(target), "30000"], env=self.env, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(1)
+            subprocess.run([str(self.pg_bin / "pg_basebackup"), "-D", str(self.root / "backup"), "-X", "none", "-c", "fast"],
+                           check=True, capture_output=True, env=self.env, timeout=30)
+            self.sql("INSERT INTO activity SELECT generate_series(1, 200000)")
+            self.assertEqual(waiter.wait(timeout=40), 0)
+        finally:
+            if waiter.poll() is None:
+                waiter.kill(); waiter.wait()
 
     def test_no_chain_start_ships_nothing(self):
         data, empty = self.root / "unchained", self.root / "unchained-archive"
