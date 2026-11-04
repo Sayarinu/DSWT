@@ -9,7 +9,7 @@
 
 int main(int argc, char **argv) {
   if (argc != 3) return 2;
-  platinumwt::server::WalArchiveBarrier archive("", std::chrono::milliseconds(50), std::chrono::milliseconds(200));
+  platinumwt::server::WalArchiveBarrier archive("", std::chrono::milliseconds(50), std::chrono::milliseconds(200), std::chrono::milliseconds(500));
   const auto barrier = archive.Barrier();
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::stoul(argv[2]));
   const std::uint64_t position = std::stoull(argv[1]);

@@ -7,6 +7,7 @@
 !server/Dockerfile
 !server/Dockerfile.dockerignore
 !server/ubuntu.sources
+!server/wal-archive.sh
 !server/include/platinumwt/server/config.h
 !server/include/platinumwt/server/connectivity_service.h
 !server/include/platinumwt/server/http_listener.h

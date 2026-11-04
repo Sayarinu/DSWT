@@ -38,7 +38,11 @@ std::uint64_t SegmentEnd(const Segment &segment, std::uint64_t size) {
 }
 
 constexpr auto kQuery = "SELECT a.last_archived_wal, pg_walfile_name(pg_current_wal_flush_lsn()), "
-                        "pg_size_bytes(current_setting('wal_segment_size')) FROM pg_stat_archiver a";
+                        "pg_size_bytes(current_setting('wal_segment_size')), "
+                        "(pg_current_wal_flush_lsn() - '0/0'::pg_lsn)::text, "
+                        "a.last_failed_time IS NOT NULL AND "
+                        "(a.last_archived_time IS NULL OR a.last_failed_time > a.last_archived_time) "
+                        "FROM pg_stat_archiver a";
 
 } // namespace
 
@@ -56,6 +60,14 @@ WalCoverage NextWalCoverage(WalCoverage prior, const std::optional<std::string> 
   return {current->timeline, std::max(prior.end, end)};
 }
 
+WalForce NextWalForce(const WalForceInput &in) {
+  if (in.wanted == 0 || in.wanted <= in.covered || in.wanted > in.flushed || in.archive_failing ||
+      in.segment_size == 0) return WalForce::None;
+  if (in.covered == 0) return WalForce::RecordAndSwitch;
+  const auto open_segment = in.flushed - in.flushed % in.segment_size;
+  return in.wanted > open_segment && in.covered >= open_segment ? WalForce::Switch : WalForce::None;
+}
+
 struct WalArchiveBarrier::Impl {
   struct Shared {
     std::atomic<std::uint64_t> covered{0}, wanted{0};
@@ -66,37 +78,58 @@ struct WalArchiveBarrier::Impl {
   std::condition_variable changed;
   std::thread poller;
 
-  WalCoverage Observe(const std::string &database, WalCoverage coverage) const {
+  struct Observation {
+    WalCoverage coverage;
+    WalForceInput force;
+  };
+
+  Observation Observe(const std::string &database, WalCoverage coverage) const {
     const auto row = detail::BoundedQuery(database, kQuery, "platinumwt-recovery", stopped);
-    if (!row || PQntuples(row.get()) != 1 || PQgetisnull(row.get(), 0, 1) || PQgetisnull(row.get(), 0, 2)) return {};
+    if (!row || PQntuples(row.get()) != 1) return {};
+    for (const int column : {1, 2, 3, 4}) if (PQgetisnull(row.get(), 0, column)) return {};
     std::optional<std::string> last;
     if (!PQgetisnull(row.get(), 0, 0)) last = PQgetvalue(row.get(), 0, 0);
     try {
-      return NextWalCoverage(coverage, last, PQgetvalue(row.get(), 0, 1), std::stoull(PQgetvalue(row.get(), 0, 2)));
+      Observation observed;
+      observed.force.segment_size = std::stoull(PQgetvalue(row.get(), 0, 2));
+      observed.force.flushed = std::stoull(PQgetvalue(row.get(), 0, 3));
+      observed.force.archive_failing = std::string_view(PQgetvalue(row.get(), 0, 4)) == "t";
+      observed.coverage = NextWalCoverage(coverage, last, PQgetvalue(row.get(), 0, 1), observed.force.segment_size);
+      observed.force.covered = observed.coverage.end;
+      return observed;
     } catch (const std::exception &) { return {}; }
   }
 
-  void Run(const std::string &database, std::chrono::milliseconds interval, std::chrono::milliseconds switch_interval) {
+  bool Execute(const std::string &database, const char *sql) const {
+    return static_cast<bool>(detail::BoundedQuery(database, sql, "platinumwt-recovery", stopped));
+  }
+
+  void Run(const std::string &database, std::chrono::milliseconds interval, std::chrono::milliseconds switch_interval,
+           std::chrono::milliseconds unknown_interval) {
     WalCoverage coverage;
-    auto last_switch = std::chrono::steady_clock::time_point{};
-    bool can_switch = true;
+    auto last_force = std::chrono::steady_clock::time_point{};
+    bool can_force = true;
     std::unique_lock<std::mutex> lock(mutex);
     while (!stopped) {
       lock.unlock();
-      const auto next = Observe(database, coverage);
-      if ((next.end == 0) != (coverage.end == 0))
-        std::cerr << (next.end ? "recovery barrier: WAL archive coverage available\n"
-                               : "recovery barrier: no WAL archive coverage\n");
-      coverage = next;
+      auto observed = Observe(database, coverage);
+      if ((observed.coverage.end == 0) != (coverage.end == 0))
+        std::cerr << (observed.coverage.end ? "recovery barrier: WAL archive coverage available\n"
+                                            : "recovery barrier: no WAL archive coverage\n");
+      coverage = observed.coverage;
       shared->covered.store(coverage.end);
-      // Only a waiting request forces a segment out, so an idle service archives nothing.
+      // Only a waiting request forces WAL out, so an idle service archives nothing.
+      observed.force.wanted = shared->wanted.load();
+      const auto force = NextWalForce(observed.force);
       const auto now = std::chrono::steady_clock::now();
-      if (shared->wanted.load() > coverage.end && now - last_switch >= switch_interval) {
-        last_switch = now;
-        const bool switched = static_cast<bool>(
-            detail::BoundedQuery(database, "SELECT pg_switch_wal()", "platinumwt-recovery", stopped));
-        if (can_switch && !switched && !stopped) std::cerr << "recovery barrier: cannot switch WAL segments\n";
-        can_switch = switched;
+      if (force != WalForce::None &&
+          now - last_force >= (force == WalForce::Switch ? switch_interval : unknown_interval)) {
+        last_force = now;
+        const bool forced =
+            (force == WalForce::Switch || Execute(database, "SELECT pg_logical_emit_message(false,'platinumwt','')")) &&
+            Execute(database, "SELECT pg_switch_wal()");
+        if (can_force && !forced && !stopped) std::cerr << "recovery barrier: cannot force WAL out\n";
+        can_force = forced;
       }
       lock.lock();
       changed.wait_for(lock, interval, [this] { return stopped.load(); });
@@ -106,10 +139,11 @@ struct WalArchiveBarrier::Impl {
 };
 
 WalArchiveBarrier::WalArchiveBarrier(std::string connection_info, std::chrono::milliseconds interval,
-                                     std::chrono::milliseconds switch_interval)
+                                     std::chrono::milliseconds switch_interval,
+                                     std::chrono::milliseconds unknown_interval)
     : impl_(std::make_unique<Impl>()) {
-  impl_->poller = std::thread([impl = impl_.get(), database = std::move(connection_info), interval, switch_interval] {
-    impl->Run(database, interval, switch_interval);
+  impl_->poller = std::thread([impl = impl_.get(), database = std::move(connection_info), interval, switch_interval, unknown_interval] {
+    impl->Run(database, interval, switch_interval, unknown_interval);
   });
 }
 

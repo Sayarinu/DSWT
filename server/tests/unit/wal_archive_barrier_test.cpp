@@ -60,6 +60,40 @@ TEST(WalCoverageTest, MalformedObservationsCoverNothing) {
   EXPECT_EQ(NextWalCoverage({}, "00000001000000000000000a", "000000010000000000000010", kSegment).end, 0U);
 }
 
+TEST(WalForceTest, SwitchesOnlyForAPositionInTheOpenSegmentWithNoBacklog) {
+  const auto open = 5 * kSegment;
+  WalForceInput in{open + 10, open, open + 100, kSegment, false};
+  EXPECT_EQ(NextWalForce(in), WalForce::Switch);
+}
+
+TEST(WalForceTest, ClosedSegmentsAwaitTheArchiverInsteadOfAddingBacklog) {
+  const auto open = 5 * kSegment;
+  EXPECT_EQ(NextWalForce({open + 10, open - kSegment, open + 100, kSegment, false}), WalForce::None);
+  EXPECT_EQ(NextWalForce({open - 10, open - kSegment, open + 100, kSegment, false}), WalForce::None);
+  EXPECT_EQ(NextWalForce({open, open - kSegment, open + 100, kSegment, false}), WalForce::None);
+}
+
+TEST(WalForceTest, FailingArchiveForcesNothing) {
+  const auto open = 5 * kSegment;
+  EXPECT_EQ(NextWalForce({open + 10, open, open + 100, kSegment, true}), WalForce::None);
+  EXPECT_EQ(NextWalForce({open + 10, 0, open + 100, kSegment, true}), WalForce::None);
+}
+
+TEST(WalForceTest, NothingWaitingForcesNothing) {
+  const auto open = 5 * kSegment;
+  EXPECT_EQ(NextWalForce({0, open, open + 100, kSegment, false}), WalForce::None);
+  EXPECT_EQ(NextWalForce({open, open, open + 100, kSegment, false}), WalForce::None);
+}
+
+TEST(WalForceTest, PositionPastTheFlushIsStaleAndForcesNothing) {
+  const auto open = 5 * kSegment;
+  EXPECT_EQ(NextWalForce({open + 200, open, open + 100, kSegment, false}), WalForce::None);
+}
+
+TEST(WalForceTest, UnknownCoverageWritesARecordSoASwitchCanProgress) {
+  EXPECT_EQ(NextWalForce({5 * kSegment, 0, 5 * kSegment, kSegment, false}), WalForce::RecordAndSwitch);
+}
+
 TEST(WalArchiveBarrierTest, UnreachableDatabaseStaysClosedAndStopsPromptly) {
   RecoveryBarrier barrier;
   {

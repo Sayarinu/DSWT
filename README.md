@@ -59,12 +59,15 @@ barrier required before final trade responses.
 
 `platinumwt-backend` serves enrollment/trading on loopback with
 `PLATINUMWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
-defaults to `127.0.0.1:50052`. Operations stay `PROCESSING` until PostgreSQL has
-archived their WAL, read from `pg_stat_archiver`, so `archive_command` must ship
-to independently recoverable storage. The backend's database role needs
-`EXECUTE` on `pg_switch_wal()`, which it calls at most once a second and only
-while a request waits. Its database URL must use a socket path or IP address,
-because a hostname keeps the barrier closed.
+defaults to `127.0.0.1:50052`. Operations stay `PROCESSING` until their WAL is
+archived, read from `pg_stat_archiver`. That is only sound with
+[`server/wal-archive.sh`](server/wal-archive.sh) as `archive_command`: it refuses
+gaps, so the archive stays a contiguous prefix on independently recoverable
+storage. Nothing ships until its `init` records the chain start, and a base
+backup must follow before serving. The backend's database role needs `EXECUTE`
+on `pg_switch_wal()`. It forces WAL out only while a request waits on the open
+segment, with no backlog and no archive failure. Its database URL must use a
+socket path or IP address, because a hostname keeps the barrier closed.
 For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
 `WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
 `POST /wt/v1` is refused. Keep every internal service in the same private network

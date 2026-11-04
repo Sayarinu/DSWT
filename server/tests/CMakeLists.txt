@@ -47,8 +47,8 @@ target_link_libraries(platinumwt-barrier-probe PRIVATE platinumwt_server Postgre
 target_compile_options(platinumwt-barrier-probe PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME integration.wal_archive_barrier
     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_wal_archive_barrier.py"
-        $<TARGET_FILE:platinumwt-barrier-probe>)
-set_tests_properties(integration.wal_archive_barrier PROPERTIES TIMEOUT 120 LABELS "integration")
+        $<TARGET_FILE:platinumwt-barrier-probe> "${CMAKE_CURRENT_SOURCE_DIR}/../wal-archive.sh")
+set_tests_properties(integration.wal_archive_barrier PROPERTIES TIMEOUT 240 LABELS "integration")
 
 add_executable(platinumwt-trade-tests integration/trade_test.cpp)
 target_include_directories(platinumwt-trade-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
