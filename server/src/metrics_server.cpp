@@ -1,13 +1,11 @@
 #include "platinumwt/server/metrics_server.h"
 
+#include "bounded_query.h"
+
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
-#include <libpq-fe.h>
 
 #include <condition_variable>
-#include <cerrno>
-#include <cstdlib>
-#include <poll.h>
 #include <thread>
 
 namespace platinumwt::server {
@@ -75,72 +73,9 @@ private:
 };
 using Clock = std::chrono::steady_clock;
 
-// libpq's asynchronous connector can still block in DNS/service discovery.
-// The observer fails unavailable for those configurations; RPC configuration
-// remains unchanged. Explicit hostaddr preserves a TLS verification hostname.
-bool NonblockingAddress(const std::string &database) {
-  std::string host, address;
-  bool service = false;
-  if (std::getenv("PGSERVICE")) return false;
-  if (const auto value = std::getenv("PGHOST")) host = value;
-  if (const auto value = std::getenv("PGHOSTADDR")) address = value;
-  const auto read = [&](const PQconninfoOption *options) {
-    for (auto option = options; option && option->keyword; ++option) {
-      if (!option->val) continue;
-      const std::string_view key(option->keyword);
-      if (key == "host") host = option->val;
-      else if (key == "hostaddr") address = option->val;
-      else if (key == "service") service = true;
-    }
-  };
-  std::unique_ptr<PQconninfoOption, decltype(&PQconninfoFree)> explicit_options(PQconninfoParse(database.c_str(), nullptr), PQconninfoFree);
-  if (!explicit_options) return false;
-  read(explicit_options.get());
-  if (service) return false;
-  std::string_view remaining(address.empty() ? host : address);
-  do {
-    const auto comma = remaining.find(',');
-    const auto value = remaining.substr(0, comma);
-    if (!(address.empty() && (value.empty() || value.front() == '/' || value.front() == '@'))) {
-      boost::system::error_code error;
-      asio::ip::make_address(std::string(value), error);
-      if (error) return false;
-    }
-    if (comma == std::string_view::npos) break;
-    remaining.remove_prefix(comma + 1);
-  } while (true);
-  return true;
-}
-
-bool WaitSocket(PGconn *connection, short events, Clock::time_point deadline, const std::atomic<bool> &stopped) {
-  while (!stopped.load() && Clock::now() < deadline) {
-    pollfd descriptor{PQsocket(connection), events, 0};
-    if (descriptor.fd < 0) return false;
-    const auto ready = poll(&descriptor, 1, 25);
-    if (ready > 0) return !(descriptor.revents & (POLLERR | POLLNVAL));
-    if (ready < 0 && errno != EINTR) return false;
-  }
-  return false;
-}
-
 LedgerMetrics SampleLedgerMetrics(const std::string &database, const std::atomic<bool> &stopped) {
   LedgerMetrics metrics;
-  if (!NonblockingAddress(database)) return metrics;
-  const char *keys[] = {"dbname", "connect_timeout", "options", "application_name", nullptr};
-  const char *values[] = {database.c_str(), "1", "-c statement_timeout=250 -c lock_timeout=100 -c default_transaction_read_only=on", "platinumwt-metrics", nullptr};
-  std::unique_ptr<PGconn, decltype(&PQfinish)> connection(PQconnectStartParams(keys, values, 1), PQfinish);
-  if (!connection || PQstatus(connection.get()) == CONNECTION_BAD) return metrics;
-  const auto connect_deadline = Clock::now() + std::chrono::seconds(1);
-  auto state = PGRES_POLLING_WRITING;
-  while (state != PGRES_POLLING_OK) {
-    if (state == PGRES_POLLING_FAILED || !WaitSocket(connection.get(),
-        state == PGRES_POLLING_WRITING ? POLLOUT : POLLIN, connect_deadline, stopped)) return metrics;
-    state = PQconnectPoll(connection.get());
-  }
-  if (PQsetnonblocking(connection.get(), 1) != 0) return metrics;
-  PQsetNoticeProcessor(connection.get(), [](void *, const char *) {}, nullptr);
-  const auto query_deadline = Clock::now() + std::chrono::milliseconds(500);
-  if (!PQsendQuery(connection.get(),
+  auto row = detail::BoundedQuery(database,
       "SELECT count(*) FILTER (WHERE o.state=1), count(*) FILTER (WHERE o.state IN (2,3)), "
       "coalesce(max(greatest(extract(epoch FROM clock_timestamp()-a.recorded_at),0)) FILTER (WHERE o.state=1),0), "
       "coalesce(max(greatest(extract(epoch FROM clock_timestamp()-a.recorded_at),0)) FILTER (WHERE o.state IN (2,3)),0), "
@@ -153,17 +88,9 @@ LedgerMetrics SampleLedgerMetrics(const std::string &database, const std::atomic
       "(NOT pg_is_in_recovery() AND current_setting('fsync')='on' AND current_setting('full_page_writes')='on') "
       "FROM platinumwt.offers o LEFT JOIN platinumwt.audit_journal a ON a.table_name='offers' "
       "AND a.row_key->>'trade_id'=o.trade_id::text AND (a.after_image->>'last_event')::numeric=o.last_event "
-      "WHERE o.state IN (1,2,3)")) return metrics;
-  while (true) {
-    const auto flushed = PQflush(connection.get());
-    if (flushed == 0) break;
-    if (flushed < 0 || !WaitSocket(connection.get(), POLLOUT, query_deadline, stopped)) return metrics;
-  }
-  while (PQisBusy(connection.get())) {
-    if (!WaitSocket(connection.get(), POLLIN, query_deadline, stopped) || !PQconsumeInput(connection.get())) return metrics;
-  }
-  std::unique_ptr<PGresult, decltype(&PQclear)> row(PQgetResult(connection.get()), PQclear);
-  if (!row || PQresultStatus(row.get()) != PGRES_TUPLES_OK || PQntuples(row.get()) != 1) return metrics;
+      "WHERE o.state IN (1,2,3)",
+      "platinumwt-metrics", stopped);
+  if (!row || PQntuples(row.get()) != 1) return metrics;
   try {
     metrics.queued = std::stoull(PQgetvalue(row.get(), 0, 0));
     metrics.pending = std::stoull(PQgetvalue(row.get(), 0, 1));

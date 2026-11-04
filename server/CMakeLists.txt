@@ -49,7 +49,7 @@ add_library(platinumwt_server STATIC
     src/http_session.cpp
     src/http_listener.cpp
     src/server.cpp)
-target_sources(platinumwt_server PRIVATE src/metrics_server.cpp)
+target_sources(platinumwt_server PRIVATE src/bounded_query.cpp src/metrics_server.cpp src/wal_archive_barrier.cpp)
 target_include_directories(platinumwt_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(platinumwt_server PUBLIC platinumwt_protocol Boost::system Threads::Threads)
 target_link_libraries(platinumwt_server PRIVATE platinumwt_encoding platinumwt_admission platinumwt_telemetry OpenSSL::SSL PostgreSQL::PostgreSQL)

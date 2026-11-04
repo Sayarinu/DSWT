@@ -22,6 +22,7 @@
 !server/include/platinumwt/server/server.h
 !server/include/platinumwt/server/trade_gateway.h
 !server/include/platinumwt/server/trade_service.h
+!server/include/platinumwt/server/wal_archive_barrier.h
 !server/include/platinumwt/server/telemetry.h
 !server/migrations/0001_ledger.sql
 !server/migrations/0002_matcher.sql
@@ -31,6 +32,8 @@
 !server/src/admission.cpp
 !server/src/admission.h
 !server/src/backend_main.cpp
+!server/src/bounded_query.cpp
+!server/src/bounded_query.h
 !server/src/config.cpp
 !server/src/connectivity_service.cpp
 !server/src/http_listener.cpp
@@ -57,7 +60,9 @@
 !server/src/trade_gateway.cpp
 !server/src/trade_service.cpp
 !server/src/telemetry.cpp
+!server/src/wal_archive_barrier.cpp
 !server/tests/CMakeLists.txt
+!server/tests/integration/barrier_probe.cpp
 !server/tests/integration/device_fixture.cpp
 !server/tests/integration/device_matcher.h
 !server/tests/integration/device_matcher_test.cpp
@@ -72,6 +77,7 @@
 !server/tests/integration/test_http_gateway.py
 !server/tests/integration/test_ledger.py
 !server/tests/integration/test_malformed_requests.py
+!server/tests/integration/test_wal_archive_barrier.py
 !server/tests/integration/trade_test.cpp
 !server/tests/unit/admission_test.cpp
 !server/tests/unit/config_test.cpp
@@ -79,3 +85,4 @@
 !server/tests/unit/http_request_handler_test.cpp
 !server/tests/unit/legality_client_test.cpp
 !server/tests/unit/telemetry_test.cpp
+!server/tests/unit/wal_archive_barrier_test.cpp

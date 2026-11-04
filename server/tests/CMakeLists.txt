@@ -5,7 +5,8 @@ add_executable(platinumwt-unit-tests
     unit/admission_test.cpp
     unit/config_test.cpp
     unit/connectivity_service_test.cpp
-    unit/http_request_handler_test.cpp)
+    unit/http_request_handler_test.cpp
+    unit/wal_archive_barrier_test.cpp)
 target_sources(platinumwt-unit-tests PRIVATE unit/telemetry_test.cpp)
 target_include_directories(platinumwt-unit-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 target_link_libraries(platinumwt-unit-tests PRIVATE platinumwt_server platinumwt_admission platinumwt_telemetry GTest::gtest_main)
@@ -40,6 +41,14 @@ add_test(NAME integration.ledger
         $<TARGET_FILE:platinumwt-backend>
         $<TARGET_FILE:platinumwt-gateway-fixture>)
 set_tests_properties(integration.ledger PROPERTIES TIMEOUT 180 LABELS "integration")
+
+add_executable(platinumwt-barrier-probe integration/barrier_probe.cpp)
+target_link_libraries(platinumwt-barrier-probe PRIVATE platinumwt_server PostgreSQL::PostgreSQL)
+target_compile_options(platinumwt-barrier-probe PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME integration.wal_archive_barrier
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_wal_archive_barrier.py"
+        $<TARGET_FILE:platinumwt-barrier-probe>)
+set_tests_properties(integration.wal_archive_barrier PROPERTIES TIMEOUT 120 LABELS "integration")
 
 add_executable(platinumwt-trade-tests integration/trade_test.cpp)
 target_include_directories(platinumwt-trade-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
