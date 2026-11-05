@@ -121,6 +121,7 @@ class GatewayScenario:
 
     def start_gateway(self, backend_port, *, tls=True):
         settings = dict(WT_HTTP_ADDRESS='127.0.0.1', WT_HTTP_PORT='0', WT_GRPC_ADDRESS='127.0.0.1:0',
+                        WT_ENROLLMENTS_PER_NETWORK='1000',
                         WT_TRADE_TARGET=f'127.0.0.1:{backend_port}')
         if tls:
             settings.update(WT_TLS_CERTIFICATE=str(self.certificate), WT_TLS_PRIVATE_KEY=str(self.key))

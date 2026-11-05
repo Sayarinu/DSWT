@@ -6,7 +6,10 @@
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -40,6 +43,24 @@ public:
   std::unique_ptr<Permit> Acquire(std::string_view key);
 private:
   std::shared_ptr<State> state_;
+};
+
+// Enrollment writes a permanent ledger row and can force WAL out, so the per-second budgets
+// above do not bound its cost. This counts distinct requests per network per day and overall
+// per hour. Repeating a request, as a client waiting on PROCESSING does, costs nothing more.
+class EnrollmentBudget {
+public:
+  struct Limits { unsigned per_network_daily, hourly; };
+  explicit EnrollmentBudget(Limits, Quota::Now now = Quota::Clock::now);
+  bool Allow(const std::string &network, std::string_view request);
+private:
+  struct Network { std::chrono::steady_clock::time_point started; std::set<std::string> seen; };
+  Limits limits_;
+  Quota::Now now_;
+  std::mutex mutex_;
+  std::map<std::string, Network, std::less<>> networks_;
+  Quota::Clock::time_point hour_started_;
+  unsigned hour_count_ = 0;
 };
 
 enum class RequestKind { Enrollment, Submission, Recovery };

@@ -51,8 +51,17 @@ groups:
       - alert: MemoryPressure
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
         for: 5m
-        labels: {severity: warning}
+        labels: {severity: critical}
         annotations: {summary: Host memory available is below 5%}
+      - alert: RequestsBeingRefused
+        expr: rate(dswt_admission_rejections_total[5m]) > 1
+        for: 10m
+        labels: {severity: critical}
+        annotations: {summary: "{{ $labels.service }} is refusing requests over its limits; possible flood"}
+      - alert: EnrollmentSurge
+        expr: sum(increase(dswt_requests_total{service="gateway",operation="enroll",result="ok"}[1h])) > 150
+        labels: {severity: critical}
+        annotations: {summary: Enrollments are near the hourly limit; check they are real players}
       - alert: LogsDropped
         expr: increase(dswt_dropped_logs_total[5m]) > 0
         labels: {severity: warning}

@@ -9,9 +9,12 @@ namespace dswt::server {
 
 HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
                            boost::asio::thread_pool &recovery,
-                           std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers)
+                           std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers,
+                           unsigned enrollments_per_hour, unsigned enrollments_per_network)
     : handler_(std::move(handler)), submissions_(submissions), recovery_(recovery), tls_(std::move(tls)),
-      submission_jobs_({2 * submission_workers, 8, 64, 32}) {}
+      // One network can hold half of the jobs, so it cannot starve everyone else.
+      submission_jobs_({2 * submission_workers, submission_workers, 64, 32}),
+      enrollments_({enrollments_per_network, enrollments_per_hour}) {}
 
 std::unique_ptr<HttpConnection> HttpServices::Connect(const boost::asio::ip::address &peer) {
   auto network = detail::NetworkKey(peer);
@@ -26,6 +29,9 @@ bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext
   // Classification reserves workers, never grants authentication or ownership.
   const bool recovering = secure && request.target() == "/wt/v1" && body.size() >= 80 &&
       body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] >= 3 && body[5] <= 7;
+  const bool enrolling = secure && request.target() == "/wt/v1" && body.size() >= 6 &&
+      body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] == 1;
+  if (enrolling && !enrollments_.Allow(std::string(network), body)) { Telemetry::Global().Refused(); return false; }
   auto permit = (recovering ? recovery_jobs_ : submission_jobs_).Acquire(network);
   if (!permit) { Telemetry::Global().Refused(); return false; }
   boost::asio::post(recovering ? recovery_ : submissions_,

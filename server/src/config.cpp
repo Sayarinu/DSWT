@@ -52,6 +52,17 @@ unsigned short LoadMetricsPort() {
   return static_cast<unsigned short>(value);
 }
 
+static unsigned EnrollmentLimit(const char *name, unsigned fallback) {
+  const char *text = std::getenv(name);
+  if (!text) return fallback;
+  const std::string_view view(text);
+  unsigned value = 0;
+  const auto parsed = std::from_chars(view.data(), view.data() + view.size(), value);
+  if (parsed.ec != std::errc{} || parsed.ptr != view.data() + view.size() || value < 1 || value > 1000000)
+    throw std::invalid_argument(std::string(name) + " must be between 1 and 1000000");
+  return value;
+}
+
 unsigned LoadSubmissionWorkers() {
   const auto workers = Environment("WT_SUBMISSION_WORKERS", "");
   if (workers.empty() && !std::getenv("WT_SUBMISSION_WORKERS")) return kDefaultSubmissionWorkers;
@@ -76,6 +87,8 @@ ServerConfig LoadServerConfig() {
   }
   const char *certificate = std::getenv("WT_TLS_CERTIFICATE");
   const char *key = std::getenv("WT_TLS_PRIVATE_KEY");
+  config.enrollments_per_hour = EnrollmentLimit("WT_ENROLLMENTS_PER_HOUR", kDefaultEnrollmentsPerHour);
+  config.enrollments_per_network = EnrollmentLimit("WT_ENROLLMENTS_PER_NETWORK", kDefaultEnrollmentsPerNetwork);
   if (certificate || key) {
     if (!certificate || !key || !*certificate || !*key) throw std::invalid_argument("both TLS credential files are required");
     config.tls = TlsFiles{certificate, key};

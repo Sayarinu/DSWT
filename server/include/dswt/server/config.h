@@ -8,6 +8,11 @@ namespace dswt::server {
 
 // Concurrent Submit handlers when WT_SUBMISSION_WORKERS is unset.
 inline constexpr unsigned kDefaultSubmissionWorkers = 4;
+// New saves one network may enroll per day when WT_ENROLLMENTS_PER_NETWORK is unset.
+inline constexpr unsigned kDefaultEnrollmentsPerNetwork = 16;
+// New saves overall per hour when WT_ENROLLMENTS_PER_HOUR is unset. Each can force a
+// 1 MB WAL file out, so this also bounds how fast fake enrollments can use disk.
+inline constexpr unsigned kDefaultEnrollmentsPerHour = 200;
 
 struct TlsFiles {
   std::string certificate;
@@ -23,6 +28,8 @@ struct ServerConfig {
   std::optional<TlsFiles> tls;
   unsigned short metrics_port = 0;
   unsigned submission_workers = kDefaultSubmissionWorkers;
+  unsigned enrollments_per_hour = kDefaultEnrollmentsPerHour;
+  unsigned enrollments_per_network = kDefaultEnrollmentsPerNetwork;
 };
 
 struct BackendConfig {

@@ -54,6 +54,9 @@ services:
     environment:
       WT_HTTP_PORT: "8443"
       WT_METRICS_PORT: "9091"
+      # Load tests enroll many saves through one published port.
+      WT_ENROLLMENTS_PER_HOUR: "1000000"
+      WT_ENROLLMENTS_PER_NETWORK: "1000000"
       WT_SUBMISSION_WORKERS: ${DSWT_LOCAL_SUBMISSION_WORKERS:-4}
       WT_TRADE_TARGET: 127.0.0.1:50053
       WT_TLS_CERTIFICATE: /tls/current.pem
