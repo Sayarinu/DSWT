@@ -68,6 +68,16 @@ def create_keys(hostname, ipv4):
     print("Save tls/next.key somewhere safe outside this machine. It never goes on the server.")
 
 
+def local_secret(name):
+    """A value from the checkout's ignored .env. Pass it on by stdin only: arguments appear in process lists."""
+    env = LOCAL.parents[1] / ".env"
+    for line in env.read_text().splitlines() if env.exists() else ():
+        key, _, value = line.partition("=")
+        if key.strip() == name and value.strip():
+            return value.strip()
+    return None
+
+
 class Target:
     def __init__(self, ssh_key):
         self.profile = json.loads((LOCAL / "tls/connection.json").read_text())
@@ -98,6 +108,12 @@ class Target:
         if save.wait() or compress.wait() or load.returncode:
             raise RuntimeError("Could not transfer the images")
 
+    def install_secret(self, filename, value):
+        """Replace a secret readable only by this user and its group, which a service can join."""
+        path = f"{REMOTE}/secrets/{filename}"
+        subprocess.run([*self.ssh, self.address, f"umask 027; cat > {path}.new && mv {path}.new {path}"],
+                       input=value, text=True, check=True)
+
     def sync(self, version):
         transport = " ".join(shlex.quote(part) for part in self.ssh)
         self.run(f"install -d -m 0700 {REMOTE}/tls {REMOTE}/secrets && install -d -m 0755 {REMOTE}/observability")
@@ -117,6 +133,11 @@ class Target:
             raise RuntimeError("The server's certificate does not match the ROM profile")
         self.run(f"test -e {REMOTE}/secrets/grafana-admin-password || "
                  f"(umask 077; openssl rand -hex 32 > {REMOTE}/secrets/grafana-admin-password)")
+        webhook = local_secret("DISCORD_WEBHOOK_URL")
+        if webhook:
+            self.install_secret("discord-webhook", webhook)
+        elif self.run(f"test -s {REMOTE}/secrets/discord-webhook", check=False).returncode:
+            raise ValueError("Set DISCORD_WEBHOOK_URL in the ignored .env: alerts have nowhere to go")
         self.run(f"printf 'DSWT_VERSION={version}\\nDSWT_UID=%s\\nDSWT_GID=%s\\n' \"$(id -u)\" \"$(id -g)\""
                  f" > {REMOTE}/.env.new && mv {REMOTE}/.env.new {REMOTE}/.env")
         for volume in VOLUMES:

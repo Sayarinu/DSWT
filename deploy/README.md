@@ -56,11 +56,13 @@ Then open `http://localhost:3000` and log in as `admin`, with the password from
 `/opt/dswt/secrets/grafana-admin-password`. Read logs with
 `docker compose -p dswt logs SERVICE` in `/opt/dswt`.
 
+Alerts go to Discord. `deploy` installs `DISCORD_WEBHOOK_URL` from the ignored `.env` into
+`/opt/dswt/secrets/`. To rotate it, change `.env` and deploy. Nothing alerts if the server
+or Prometheus itself is down, so use an outside uptime check before public launch.
+
 ## Before public launch
 
 - Ship the WAL archive off the server. It is on the same disk as the database, so a
   lost server loses both.
-- Choose an alert channel in `observability/alertmanager.yml`. Until then, alerts only
-  show in Grafana and Alertmanager.
 - The WAL archive grows until the next `deploy` or `tidy`. `DiskPressure` warns at 15%
-  free, so it needs that alert channel.
+  free.

@@ -11,6 +11,29 @@ groups:
         for: 1m
         labels: {severity: critical}
         annotations: {summary: Backend ledger sampler cannot reach PostgreSQL}
+      - alert: LedgerSamplerStale
+        expr: time() - dswt_ledger_sample_success_timestamp_seconds > 300
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: The backend has not sampled the ledger for 5 minutes}
+      # Two waiting offers should match quickly. One alone is normal: it needs a partner.
+      - alert: MatcherStalled
+        expr: dswt_queued_offers >= 2 and dswt_oldest_queue_age_seconds > 600
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Offers have waited over 10 minutes with a partner available"}
+      # Operations wait here while their WAL is unarchived, so this also catches a stuck archive.
+      - alert: TradesStuckProcessing
+        expr: >-
+          sum(increase(dswt_requests_total{service="backend",result="processing"}[10m])) > 0
+          and sum(increase(dswt_requests_total{service="backend",result="ok",operation!="status"}[10m])) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: Requests keep waiting and none are completing; check the WAL archive}
+      - alert: ValidatorUnavailable
+        expr: increase(dswt_requests_total{operation="legality",result=~"unavailable|transport_error"}[5m]) > 0
+        labels: {severity: critical}
+        annotations: {summary: The legality validator is failing or unreachable}
       # The WAL archive grows with trades, and trades stop if it cannot ship.
       - alert: DiskPressure
         expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.15

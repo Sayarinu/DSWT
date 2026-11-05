@@ -164,6 +164,8 @@ services:
     image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
     user: "65534:65534"
     tmpfs: [/tmp]
+    # Reads the webhook secret through its group; the file is not world-readable.
+    group_add: ["${DSWT_GID}"]
     mem_limit: 64m
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -173,6 +175,7 @@ services:
     volumes:
       - alertmanager:/alertmanager
       - {type: bind, source: ./observability/alertmanager.yml, target: /etc/alertmanager/alertmanager.yml, read_only: true}
+      - {type: bind, source: ./secrets/discord-webhook, target: /run/dswt/discord-webhook, read_only: true}
 
   node-exporter:
     <<: [*hardened, *private-network]
