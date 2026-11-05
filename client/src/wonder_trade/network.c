@@ -44,7 +44,8 @@ typedef struct WonderTradeTransport {
     BOOL trading;
     int slot;
     unsigned action;
-    BOOL completed, returned, rejected, waiting, superseded, needsEntropy;
+    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived;
+    WtReceivedPokemon received;
     unsigned tradePhase;
     BOOL canLeave;
     WtFlashAccess flash;
@@ -313,7 +314,11 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         transport->requestSize = engine->frameSize;
         memcpy(transport->request, engine->frame, engine->frameSize);
         operation = transport->request[5];
-        if (operation == WT_OP_ACKNOWLEDGE) transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
+        if (operation == WT_OP_ACKNOWLEDGE) {
+            transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
+            /* The ACK retires this journal entry, so read what was saved first. */
+            transport->hasReceived = WtGameSave_Received(&engine->entry, &transport->received) == 0;
+        }
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
         wireResult = transport->reply.result;
@@ -321,14 +326,21 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
             /* The server keeps this request's outcome until its backup covers it. Nothing
              * changed here, so resending the saved request cannot add an operation. */
             ++processing; --count;
+            /* This phase also refreshes the main thread's deadline, as a save does. */
+            transport->phase = WT_TRANSPORT_SAVING;
             for (tick = 0; tick < WT_ENGINE_PROCESSING_WAIT_MS / 50 && !transport->cancel; ++tick) OS_Sleep(50);
+            transport->phase = WT_TRANSPORT_CONNECTING;
             continue;
         }
         if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
         if (operation == WT_OP_SUBMIT && wireResult == WT_RESULT_COUNTER_MISMATCH && !engine->blocked) {
             transport->superseded = TRUE; continue;
         }
-        if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) transport->completed = TRUE;
+        if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) {
+            transport->completed = TRUE;
+            /* Finish here: a failure on any follow-up must not hide what was just received. */
+            if (transport->slot < 0 && engine->entry.phase == WT_JOURNAL_IDLE) { result = 0; break; }
+        }
         /* Collect reports CONFLICT only while the offer is still queued; the journal stays QUEUED. */
         if (operation == WT_OP_COLLECT && wireResult == WT_RESULT_CONFLICT) { transport->waiting = TRUE; result = 0; break; }
         if (wireResult != WT_RESULT_OK && wireResult != WT_RESULT_ILLEGAL_POKEMON
@@ -416,6 +428,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
         network->waiting = transport->waiting; network->superseded = transport->superseded;
         network->needsEntropy = transport->needsEntropy;
+        network->hasReceived = transport->hasReceived; network->received = transport->received;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);
         else WtRecovery_Block();
     }
