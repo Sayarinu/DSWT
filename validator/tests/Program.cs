@@ -8,8 +8,8 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using PKHeX.Core;
-using PlatinumWT.Validator;
-using Platinumwt.V1;
+using DSWT.Validator;
+using Dswt.V1;
 
 if (args.Length == 2 && args[0] == "--audit-image")
 {

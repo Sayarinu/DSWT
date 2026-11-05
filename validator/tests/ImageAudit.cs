@@ -8,7 +8,7 @@ static class ImageAudit
 {
     public static void Run(string root)
     {
-        var source = Path.Combine(root, "usr/share/platinumwt-validator/source/validator");
+        var source = Path.Combine(root, "usr/share/dswt-validator/source/validator");
         var resources = Path.Combine(source, ".deps/pkhex/PKHeX.Core/Resources");
         var assemblyPath = Path.GetFullPath(Path.Combine(root, "app/PKHeX.Core.dll"));
         var assembly = Assembly.LoadFile(assemblyPath);

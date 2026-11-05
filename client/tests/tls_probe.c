@@ -178,8 +178,8 @@ int main(int argc, char **argv)
             result = WtWire_Decode(request, requestSize, exchange.body, exchange.bodySize, hash, &reply);
             if (result == 0) printf("wire_result=%u\n", (unsigned)reply.result);
         } else if (result == 0) {
-            result = exchange.bodySize == sizeof("PLATINUMWT_ACK_V1\n") - 1
-                && memcmp(exchange.body, "PLATINUMWT_ACK_V1\n", sizeof("PLATINUMWT_ACK_V1\n") - 1) == 0 ? 0 : -1;
+            result = exchange.bodySize == sizeof("DSWT_ACK_V1\n") - 1
+                && memcmp(exchange.body, "DSWT_ACK_V1\n", sizeof("DSWT_ACK_V1\n") - 1) == 0 ? 0 : -1;
         }
     }
     mbedtls_platform_zeroize(request, sizeof(request));

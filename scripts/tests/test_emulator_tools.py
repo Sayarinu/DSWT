@@ -41,7 +41,7 @@ class EmulatorSourceTests(unittest.TestCase):
     def test_pinned_patch_copies_and_reuses_only_verified_inputs(self):
         installed = prepare.prepare(self.root, self.archive)
         self.assertEqual((installed / 'file').read_text(), 'after\n')
-        self.assertEqual((installed / 'platinumwt-MIT-LICENSE').read_text(), 'synthetic project input\n')
+        self.assertEqual((installed / 'dswt-MIT-LICENSE').read_text(), 'synthetic project input\n')
         self.assertEqual(prepare.prepare(self.root, self.archive), installed)
 
     def test_modified_cached_source_is_preserved_and_rejected(self):
@@ -56,7 +56,7 @@ class EmulatorSourceTests(unittest.TestCase):
         (self.root / 'emulator/durable_save.cpp').write_text('changed project input\n')
         second = prepare.prepare(self.root, self.archive)
         self.assertNotEqual(first, second)
-        self.assertEqual((first / 'src/frontend/qt_sdl/platinumwt/durable_save.cpp').read_text(), 'synthetic project input\n')
+        self.assertEqual((first / 'src/frontend/qt_sdl/dswt/durable_save.cpp').read_text(), 'synthetic project input\n')
 
     def test_archive_hash_revision_and_path_escape_are_refused(self):
         self.pin['sha256'] = '0' * 64

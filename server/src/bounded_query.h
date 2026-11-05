@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 using QueryResult = std::unique_ptr<PGresult, decltype(&PQclear)>;
 
@@ -16,4 +16,4 @@ using QueryResult = std::unique_ptr<PGresult, decltype(&PQclear)>;
 QueryResult BoundedQuery(const std::string &database, const char *sql, const char *application_name,
                          const std::atomic<bool> &stopped);
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

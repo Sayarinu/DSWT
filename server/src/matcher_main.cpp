@@ -1,9 +1,9 @@
-#include "platinumwt/server/config.h"
-#include "platinumwt/server/match_worker.h"
-#include "platinumwt/server/matcher_service.h"
-#include "platinumwt/server/metrics_server.h"
-#include "platinumwt/server/telemetry.h"
-#include "platinumwt/server/wal_archive_barrier.h"
+#include "dswt/server/config.h"
+#include "dswt/server/match_worker.h"
+#include "dswt/server/matcher_service.h"
+#include "dswt/server/metrics_server.h"
+#include "dswt/server/telemetry.h"
+#include "dswt/server/wal_archive_barrier.h"
 
 #include <boost/asio.hpp>
 
@@ -22,7 +22,7 @@ constexpr std::chrono::milliseconds kIdleDelay{500};
 // service directly, so nothing on the network can reach matching.
 int main() {
   try {
-    using namespace platinumwt::server;
+    using namespace dswt::server;
     const auto config = LoadMatcherConfig();
     Telemetry::Global().Initialize(TelemetryRole::Matcher);
     MetricsServer metrics(config.metrics_port);

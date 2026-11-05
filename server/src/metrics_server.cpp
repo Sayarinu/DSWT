@@ -1,4 +1,4 @@
-#include "platinumwt/server/metrics_server.h"
+#include "dswt/server/metrics_server.h"
 
 #include "bounded_query.h"
 
@@ -8,7 +8,7 @@
 #include <condition_variable>
 #include <thread>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -81,15 +81,15 @@ LedgerMetrics SampleLedgerMetrics(const std::string &database, const std::atomic
       "coalesce(max(greatest(extract(epoch FROM clock_timestamp()-a.recorded_at),0)) FILTER (WHERE o.state IN (2,3)),0), "
       "count(*) FILTER (WHERE o.state=1 AND a.recorded_at IS NULL), "
       "count(*) FILTER (WHERE o.state IN (2,3) AND a.recorded_at IS NULL), "
-      "(SELECT count(*) FROM platinumwt.matches), "
-      "(SELECT count(*) FROM platinumwt.matches m JOIN platinumwt.offers x ON x.trade_id=m.first_trade_id "
-      "JOIN platinumwt.offers y ON y.trade_id=m.second_trade_id WHERE x.state=4 AND y.state=4), "
-      "(SELECT count(*) FROM platinumwt.offers WHERE state=4), "
+      "(SELECT count(*) FROM dswt.matches), "
+      "(SELECT count(*) FROM dswt.matches m JOIN dswt.offers x ON x.trade_id=m.first_trade_id "
+      "JOIN dswt.offers y ON y.trade_id=m.second_trade_id WHERE x.state=4 AND y.state=4), "
+      "(SELECT count(*) FROM dswt.offers WHERE state=4), "
       "(NOT pg_is_in_recovery() AND current_setting('fsync')='on' AND current_setting('full_page_writes')='on') "
-      "FROM platinumwt.offers o LEFT JOIN platinumwt.audit_journal a ON a.table_name='offers' "
+      "FROM dswt.offers o LEFT JOIN dswt.audit_journal a ON a.table_name='offers' "
       "AND a.row_key->>'trade_id'=o.trade_id::text AND (a.after_image->>'last_event')::numeric=o.last_event "
       "WHERE o.state IN (1,2,3)",
-      "platinumwt-metrics", stopped);
+      "dswt-metrics", stopped);
   if (!row || PQntuples(row.get()) != 1) return metrics;
   try {
     metrics.queued = std::stoull(PQgetvalue(row.get(), 0, 0));
@@ -145,4 +145,4 @@ MetricsServer::MetricsServer(unsigned short port, std::string database) {
 }
 MetricsServer::~MetricsServer() = default;
 
-} // namespace platinumwt::server
+} // namespace dswt::server

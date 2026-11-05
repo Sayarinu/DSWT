@@ -42,7 +42,7 @@ extracted TargetRead literals for private review.
 ```sh
 python3 tools/bps-patch/patcher.py apply \
   --manifest game/bundles/0.1.0-rc1/manifest.json \
-  --input /path/to/platinum.nds --output /path/to/platinum-wonder-trade.nds
+  --input /path/to/platinum.nds --output /path/to/dswt.nds
 ```
 
 The input selects exactly one entry by size and SHA-256. The patch digest, the
@@ -53,7 +53,7 @@ outputs, symlinks, hard-linked inputs, unmatched or modified inputs and malforme
 bundles are rejected; the input is never written. `audit PATCH [--evidence
 game/DIR]` walks any patch and can extract its literals and metadata privately.
 
-Patching changes only the ROM. Keep each save with its `.platinumwt` recovery
+Patching changes only the ROM. Keep each save with its `.dswt` recovery
 directory and lock, and never restore an older copy. A new endpoint or profile
 needs a newly generated patch. Emulator and physical DS behavior of the patched
 ROM is validated separately; this tool proves only byte-exact target reproduction.
@@ -62,5 +62,5 @@ ROM is validated separately; this tool proves only byte-exact target reproductio
 python3 -m unittest discover -s tools/bps-patch/__tests__
 ```
 
-Set `PLATINUMWT_FLIPS_PROVENANCE=game/tools/flips-v198-*/provenance.json` to
+Set `DSWT_FLIPS_PROVENANCE=game/tools/flips-v198-*/provenance.json` to
 also exercise the real pinned container.

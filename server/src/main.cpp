@@ -1,4 +1,4 @@
-#include "platinumwt/server/server.h"
+#include "dswt/server/server.h"
 
 #include <cstdlib>
 #include <exception>
@@ -6,7 +6,7 @@
 
 int main() {
   try {
-    platinumwt::server::RunServer(platinumwt::server::LoadServerConfig());
+    dswt::server::RunServer(dswt::server::LoadServerConfig());
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return EXIT_FAILURE;

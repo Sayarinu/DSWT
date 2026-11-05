@@ -31,7 +31,7 @@ def overlay_files(root, workspace):
         raise RuntimeError("Integration patch must name unique upstream files")
 
     base = {name: git(workspace, "show", f"HEAD:{name}") for name in paths}
-    with tempfile.TemporaryDirectory(prefix="platinumwt-overlay-") as temp:
+    with tempfile.TemporaryDirectory(prefix="dswt-overlay-") as temp:
         stage = Path(temp)
         for name, content in base.items():
             dest = stage / name
@@ -74,7 +74,7 @@ def configure(root, workspace, pin, pristine):
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
 
     base, desired = ({}, {}) if pristine else overlay_files(root, workspace)
-    marker = workspace / ".git/platinumwt-overlays.json"
+    marker = workspace / ".git/dswt-overlays.json"
     if marker.is_symlink():
         raise RuntimeError("Overlay ownership record must not be a symlink")
     previous = json.loads(marker.read_text()) if marker.exists() else []

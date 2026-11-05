@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 namespace {
 
 TEST(AdmissionTest, RatesAndParallelLimitsHaveIndependentRecoveryBudgets) {
@@ -137,4 +137,4 @@ TEST(AdmissionTest, NetworksNormalizeMappedAddressesAndGroupIpv6PrivacyAddresses
 }
 
 } // namespace
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

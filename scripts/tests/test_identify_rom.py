@@ -16,7 +16,7 @@ spec.loader.exec_module(identify_rom)
 
 class IdentifyRomTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="platinumwt-rom-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="dswt-rom-test-")
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "arbitrary-name.nds"
         self.payload = b"synthetic input, no game data\n"
@@ -69,7 +69,7 @@ class IdentifyRomTests(unittest.TestCase):
             self.assertEqual(row["size"], 134217728)
             for key, length in (("sha256", 64), ("sha1", 40), ("crc32", 8)):
                 self.assertRegex(row[key], f"^[0-9a-f]{{{length}}}$")
-            self.assertRegex(row["planned_patch"], r"^platinum-wonder-trade-[a-z0-9-]+\.bps$")
+            self.assertRegex(row["planned_patch"], r"^dswt-[a-z0-9-]+\.bps$")
         pin = json.loads((SCRIPT.parent.parent / "client/upstream.json").read_text())
         built = [row for row in variants if row["pristine_verified"]]
         self.assertEqual({row["build_revision"] for row in built}, {0, 1})

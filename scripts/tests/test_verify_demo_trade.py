@@ -48,7 +48,7 @@ def retail(party, box):
 
 def idle(raw, identity, counter=3, cursor=4, generation=12, receipt=None):
     journal = bytearray(4096)
-    journal[:6] = b'PWTJ\1\0'
+    journal[:6] = b'DSWJ\1\0'
     struct.pack_into('<HI', journal, 6, 2, 4096)
     struct.pack_into('<Q', journal, 16, generation)
     journal[32:48] = bytes([identity])*16
@@ -77,13 +77,13 @@ def reseal(raw, offset, value):
 
 def publication(path, raw, lineage):
     path.write_bytes(raw)
-    Path(str(path)+'.platinumwt.lock').touch()
-    store = Path(str(path)+'.platinumwt')
+    Path(str(path)+'.dswt.lock').touch()
+    store = Path(str(path)+'.dswt')
     store.mkdir(exist_ok=True)
     fields = struct.pack('<Q', 8)+bytes([lineage])*16+verify.sha(raw)
-    snapshot = b'PWTHS001'+fields+raw
+    snapshot = b'DSWHS001'+fields+raw
     snapshot += verify.sha(snapshot)
-    head = b'PWTHD001'+fields+bytes(32)
+    head = b'DSWHD001'+fields+bytes(32)
     head += verify.sha(head)
     for name, data in [('A', snapshot), ('B', snapshot), ('HEAD', head)]:
         (store/name).write_bytes(data)
@@ -140,7 +140,7 @@ class DemoTradeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Journal mirrors'):
             verify.verify(self.before, self.after, [0, 1])
         idle(raw, 1); self.after[0].write_bytes(raw)
-        store = Path(str(self.after[0])+'.platinumwt')
+        store = Path(str(self.after[0])+'.dswt')
         (store/'B').write_bytes(bytes(verify.SIZE+96))
         with self.assertRaisesRegex(ValueError, 'host snapshots'):
             verify.verify(self.before, self.after, [0, 1])
@@ -149,7 +149,7 @@ class DemoTradeTests(unittest.TestCase):
         raw = bytearray(self.after[1].read_bytes()); idle(raw, 1); publication(self.after[1], raw, 2)
         with self.assertRaisesRegex(ValueError, 'not independent'):
             verify.verify(self.before, self.after, [0, 1])
-        with Path(str(self.after[0])+'.platinumwt.lock').open('rb') as lock:
+        with Path(str(self.after[0])+'.dswt.lock').open('rb') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(BlockingIOError):
                 verify.verify(self.before, self.after, [0, 1])

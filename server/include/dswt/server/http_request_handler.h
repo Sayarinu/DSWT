@@ -1,14 +1,14 @@
-#ifndef PLATINUMWT_SERVER_HTTP_REQUEST_HANDLER_H
-#define PLATINUMWT_SERVER_HTTP_REQUEST_HANDLER_H
+#ifndef DSWT_SERVER_HTTP_REQUEST_HANDLER_H
+#define DSWT_SERVER_HTTP_REQUEST_HANDLER_H
 
 #include "connectivity.grpc.pb.h"
-#include "platinumwt/server/trade_gateway.h"
+#include "dswt/server/trade_gateway.h"
 
 #include <boost/beast/http.hpp>
 #include <grpcpp/grpcpp.h>
 #include <memory>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 class HttpRequestHandler {
 public:
@@ -28,6 +28,6 @@ private:
   std::unique_ptr<TradeGateway> trades_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 #endif

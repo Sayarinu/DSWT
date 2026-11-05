@@ -66,7 +66,7 @@ Log ingest is unauthenticated, so local processes could add lines. The Grafana
 `admin` password is in `observability/grafana-admin-password`. Alerts go only to
 a local capture file (`observability/alerts/received.jsonl`); no external
 receiver exists. Backup tooling must record
-`platinumwt_backup_last_success_timestamp_seconds` in `observability/textfile/`;
+`dswt_backup_last_success_timestamp_seconds` in `observability/textfile/`;
 until a backup is recorded, the backup alert fires. With Python 3.12+:
 
 ```sh
@@ -159,8 +159,8 @@ a separate Python 3.12–3.14 environment and inspect the existing stack:
 python3 -m venv game/policy-env
 game/policy-env/bin/pip install --require-hashes -r tools/local-stack/requirements.txt
 game/policy-env/bin/python tools/local-stack/isolation.py policy --github
-docker build -f server/Dockerfile -t platinumwt-local-production .
-game/policy-env/bin/python tools/local-stack/isolation.py audit --github --workspace game/local-e2e --production-image platinumwt-local-production
+docker build -f server/Dockerfile -t dswt-local-production .
+game/policy-env/bin/python tools/local-stack/isolation.py audit --github --workspace game/local-e2e --production-image dswt-local-production
 ```
 
 `--github` uses read-only `gh api` requests with your existing GitHub CLI access.
@@ -190,20 +190,20 @@ separate; provision a new copy for each client because restoring or cloning an
 older seeded save can repeat random state.
 
 Build the strict-legality ROM test backend with
-`docker build -f server/Dockerfile --target build -t platinumwt-local-tests .`. The executable is
-`/build/tests/platinumwt-device-fixture`; it exists only in the test/build stage,
+`docker build -f server/Dockerfile --target build -t dswt-local-tests .`. The executable is
+`/build/tests/dswt-device-fixture`; it exists only in the test/build stage,
 not the final service image. It refuses startup unless
-`PLATINUMWT_DISPOSABLE_DEVICE_TEST=1`, `PGDATABASE=platinumwt_e2e` and
+`DSWT_DISPOSABLE_DEVICE_TEST=1`, `PGDATABASE=dswt_e2e` and
 `PGHOST=/test/run`. Mount a **new disposable** test directory at `/test`, create a
 PostgreSQL cluster with its Unix socket in `/test/run`, create that database and
-run `/build/platinumwt-ledger migrate /src/migrations`. Use the cluster owner's
+run `/build/dswt-ledger migrate /src/migrations`. Use the cluster owner's
 unprivileged UID for these commands. Keep every existing acceptance dataset
 separate.
 
 Run the pinned validator on `127.0.0.1:50052` in that same container network
 namespace, then start the fixture. It serves enrollment/trading on loopback
 50053 and a matcher on loopback 50054; `/test/matcher-hold` pauses new matches
-for queue/cancel scenarios. Start `/build/platinumwt-server` with
+for queue/cancel scenarios. Start `/build/dswt-server` with
 `WT_TRADE_TARGET=127.0.0.1:50053`, `WT_HTTP_PORT` and both TLS file paths, and
 expose only that HTTPS port to the ROM. This fixture's same-host barrier proves
 local flow only. Production's backend still requires an independently
@@ -227,7 +227,7 @@ For melonDS on Linux, build the [durable emulator](../../emulator/README.md),
 configure each instance to load its own save path and launch through:
 
 ```sh
-python3 scripts/run-emulator.py --save game/device-test/a.sav --target us-rev1 --store-tool game/save-store-build/platinumwt-save-store -- /path/to/built/melonDS game/pokeplatinum/build/pokeplatinum.us.nds
+python3 scripts/run-emulator.py --save game/device-test/a.sav --target us-rev1 --store-tool game/save-store-build/dswt-save-store -- /path/to/built/melonDS game/pokeplatinum/build/pokeplatinum.us.nds
 ```
 
 The launcher locks the save, repairs checked host snapshots and commits fresh
@@ -240,7 +240,7 @@ unmatched cancellation, reconciliation and restart behavior. Savestate/rewind
 restoration and loading a different save inside a running emulator are
 unsupported; exit and relaunch the intended save through this tool.
 
-For repeatable GUI fault tests, build `platinumwt-emulator-builder` from
+For repeatable GUI fault tests, build `dswt-emulator-builder` from
 `emulator/Dockerfile` and use `tools/local-stack/emulator.py --help`. `create`
 exclusively provisions a named profile from a blank-journal original and a built
 US ROM. `start` runs the pinned image with only that profile writable, sharing

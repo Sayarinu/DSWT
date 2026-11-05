@@ -99,11 +99,11 @@ class GithubTests(unittest.TestCase):
             self.assertEqual(arguments[:2], ["gh", "api"])
             self.assertEqual(arguments[2:4], ["--hostname", "github.com"])
             self.assertEqual(len(arguments), 5)
-            suffix = arguments[4].removeprefix("repos/Sayarinu/PlatinumWonderTrade")
+            suffix = arguments[4].removeprefix("repos/Sayarinu/DSWT")
             if errors and suffix in errors:
                 return SimpleNamespace(returncode=1, stdout="", stderr="gh: access (HTTP " + str(errors[suffix]) + ")")
             return SimpleNamespace(returncode=0, stdout=json.dumps(responses[suffix]), stderr="")
-        return policy.github(SETTINGS, "Sayarinu/PlatinumWonderTrade", run)
+        return policy.github(SETTINGS, "Sayarinu/DSWT", run)
 
     def test_private_public_fork_policy_is_explicitly_not_applicable(self):
         evidence = self.run_with(self.responses())
@@ -124,7 +124,7 @@ class GithubTests(unittest.TestCase):
         for error in (FileNotFoundError(), subprocess.TimeoutExpired("gh", 30)):
             def fail(*args, **kwargs):
                 raise error
-            evidence = policy.github(SETTINGS, "Sayarinu/PlatinumWonderTrade", fail)
+            evidence = policy.github(SETTINGS, "Sayarinu/DSWT", fail)
             self.assertTrue(all(value["status"] == "unavailable" for value in evidence.values()))
 
 
@@ -132,7 +132,7 @@ class RuntimeTests(unittest.TestCase):
     observability = None
 
     def setUp(self):
-        manifest = {"project": "platinumwt-local-case", "images": {}}
+        manifest = {"project": "dswt-local-case", "images": {}}
         if self.observability:
             manifest.update(https_port=18443, observability=self.observability)
         services = isolation.stack.SERVICES + (isolation.stack.OBSERVABILITY_SERVICES if self.observability else ())
@@ -150,12 +150,12 @@ class RuntimeTests(unittest.TestCase):
             self.containers[name] = {
                 "Id": gateway if name == "gateway" else str(index) * 64, "Image": image, "Mounts": mounts,
                 "State": {"Running": True},
-                "Config": {"User": "1000:1000", "Labels": {"com.docker.compose.project": "platinumwt-local-case", "com.docker.compose.service": name}},
+                "Config": {"User": "1000:1000", "Labels": {"com.docker.compose.project": "dswt-local-case", "com.docker.compose.service": name}},
                 "HostConfig": {"Privileged": False, "CapAdd": [], "Devices": [], "PidMode": "", "IpcMode": "private",
                                "PortBindings": copy.deepcopy(bindings) if name == "gateway" else {},
                                "ReadonlyRootfs": name != "database", "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"],
                                "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=64m" if name == "validator" else "rw"},
-                               "NetworkMode": "none" if name == "database" else "platinumwt-local-case_default" if name == "gateway" else "container:" + gateway,
+                               "NetworkMode": "none" if name == "database" else "dswt-local-case_default" if name == "gateway" else "container:" + gateway,
                                "Memory": 512 * 1024 * 1024, "NanoCpus": 2_000_000_000, "PidsLimit": 128}}
 
     def test_runtime_is_bound_to_owned_images_network_mounts_and_limits(self):
@@ -190,7 +190,7 @@ class RuntimeTests(unittest.TestCase):
 
     def compose(self):
         volumes = ("data", "socket") + (isolation.stack.OBSERVABILITY_VOLUMES if self.observability else ())
-        config = {"services": {}, "volumes": {key: {"name": "platinumwt-local-case-" + key, "external": True} for key in volumes}}
+        config = {"services": {}, "volumes": {key: {"name": "dswt-local-case-" + key, "external": True} for key in volumes}}
         ports = [{"host_ip": address, "published": port, "target": target} for address, port, target in sorted(isolation.published(self.local))]
         for name in (*self.local.services, "migrate"):
             volumes = []
@@ -309,9 +309,9 @@ class ProductionTests(unittest.TestCase):
     def archive(self, extra=None, omit=None):
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode="w") as archive:
-            for name in ("usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-matcher",
-                         "usr/local/bin/platinumwt-ledger",
-                         "usr/share/platinumwt/LICENSE", "usr/share/platinumwt/NOTICE", extra):
+            for name in ("usr/local/bin/dswt-server", "usr/local/bin/dswt-backend", "usr/local/bin/dswt-matcher",
+                         "usr/local/bin/dswt-ledger",
+                         "usr/share/dswt/LICENSE", "usr/share/dswt/NOTICE", extra):
                 if name and name != omit:
                     info = tarfile.TarInfo(name)
                     info.size = 1
@@ -322,11 +322,11 @@ class ProductionTests(unittest.TestCase):
     def test_production_inspection_rejects_build_trees_fixtures_and_missing_binaries(self):
         with self.archive() as archive:
             self.assertEqual(isolation.production_files(archive)["status"], "pass")
-        for extra in ("build/test", "src/server.cpp", "test/run", "usr/local/bin/platinumwt-device-fixture",
-                      "usr/local/bin/platinumwt-gateway-fixture", "usr/local/bin/platinumwt-unit-tests", "../unsafe"):
+        for extra in ("build/test", "src/server.cpp", "test/run", "usr/local/bin/dswt-device-fixture",
+                      "usr/local/bin/dswt-gateway-fixture", "usr/local/bin/dswt-unit-tests", "../unsafe"):
             with self.subTest(extra=extra), self.archive(extra) as archive, self.assertRaises(ValueError):
                 isolation.production_files(archive)
-        with self.archive(omit="usr/local/bin/platinumwt-backend") as archive, self.assertRaises(ValueError):
+        with self.archive(omit="usr/local/bin/dswt-backend") as archive, self.assertRaises(ValueError):
             isolation.production_files(archive)
 
 

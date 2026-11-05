@@ -16,7 +16,7 @@ spec.loader.exec_module(prepare_game)
 
 class PrepareGameTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="platinumwt-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="dswt-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "project"
         self.upstream = Path(self.temp.name) / "upstream"

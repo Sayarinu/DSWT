@@ -60,7 +60,7 @@ static int LayoutKnown(const unsigned char *record)
 {
     /* Check future formats even when their digest/tag is torn. All these
      * reserved bytes are zero in every supported phase. */
-    return memcmp(record, "PWTJ\1\0", 6) == 0
+    return memcmp(record, "DSWJ\1\0", 6) == 0
         && Get(record + 6, 2) <= WT_JOURNAL_RECOVERY_REQUIRED
         && (Get(record + 6, 2) != WT_JOURNAL_EMPTY || (Zero(record + 32, 1408) && Zero(record + 1952, 264)))
         && Get(record + 8, 4) == 4096 && Zero(record + 12, 4) && Zero(record + 24, 8)
@@ -149,7 +149,7 @@ int WtJournal_Encode(const WtJournalEntry *entry, WtJournalHash hash, unsigned c
 {
     if (!entry || !hash || !record || !EntryValid(entry, hash)) return -1;
     memset(record, 0, 4096);
-    memcpy(record, "PWTJ\1\0", 6); Put(record + 6, entry->phase, 2);
+    memcpy(record, "DSWJ\1\0", 6); Put(record + 6, entry->phase, 2);
     Put(record + 8, 4096, 4); Put(record + 16, entry->generation, 8);
     memcpy(record + 32, entry->saveID, 16); memcpy(record + 48, entry->credential, 32);
     memcpy(record + 80, entry->enrollmentID, 16);

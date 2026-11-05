@@ -24,7 +24,7 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
-namespace platinumwt {
+namespace dswt {
 namespace {
 constexpr std::size_t kSaveSize = 524288;
 using Bytes = std::vector<std::uint8_t>;
@@ -97,7 +97,7 @@ Lineage Random() {
 
 std::string Temporary() {
     const auto random = Random();
-    std::string result = ".platinumwt-pending-";
+    std::string result = ".dswt-pending-";
     constexpr char digits[] = "0123456789abcdef";
     for (auto byte : random) { result += digits[byte >> 4]; result += digits[byte & 15]; }
     return result;
@@ -163,7 +163,7 @@ Bytes EncodeHead(const Head &head) {
     return bytes;
 }
 Head DecodeHead(const Bytes &bytes) {
-    Require(bytes.size() == 128 && Magic(bytes, "PWTHD001") && Sealed(bytes));
+    Require(bytes.size() == 128 && Magic(bytes, "DSWHD001") && Sealed(bytes));
     return {Generation(bytes), Field<16>(bytes, 16), Field<32>(bytes, 32), Field<32>(bytes, 64)};
 }
 Bytes Snapshot(const Head &head, const Bytes &data) {
@@ -178,7 +178,7 @@ std::optional<Bytes> LoadSnapshot(int directory, const char *name, const Head &h
     try { bytes = Read(directory, name, kSaveSize + 96); }
     catch (const std::system_error &error) { if (error.code().value() == ENOENT) return {}; throw; }
     // A future format is evidence, not permission for an older build to repair it.
-    Require(std::equal(bytes.begin(), bytes.begin() + std::min<std::size_t>(bytes.size(), 8), "PWTHS001"));
+    Require(std::equal(bytes.begin(), bytes.begin() + std::min<std::size_t>(bytes.size(), 8), "DSWHS001"));
     if (bytes.size() != kSaveSize + 96) { partial = std::move(bytes); return {}; }
     Require(Sealed(bytes));
     Require(Field<16>(bytes, 16) == head.lineage);
@@ -205,13 +205,13 @@ struct DurableSave::Impl {
 
     Impl(const std::string &path, Mode mode)
         : parent(::open(std::filesystem::path(path).parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)),
-          lock(::open((path + ".platinumwt.lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600)),
-          name(std::filesystem::path(path).filename().string()), store_name(name + ".platinumwt") {
+          lock(::open((path + ".dswt.lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600)),
+          name(std::filesystem::path(path).filename().string()), store_name(name + ".dswt") {
         Info(parent.Get(), true); Info(lock.Get(), false);
         Require(!name.empty() && name != "." && name != "..");
         // The launcher passes its held lock to the emulator. The preparation
         // utility acquires it independently and releases it before launch.
-        const auto *inherited = std::getenv("PLATINUMWT_SAVE_LOCK_FD");
+        const auto *inherited = std::getenv("DSWT_SAVE_LOCK_FD");
         if (inherited) {
             std::size_t end = 0;
             const auto fd = std::stoi(inherited, &end);
@@ -312,4 +312,4 @@ bool DurableSave::SupportsHostDurability() const {
         type == static_cast<unsigned long>(BTRFS_SUPER_MAGIC) || type == static_cast<unsigned long>(XFS_SUPER_MAGIC);
 }
 
-} // namespace platinumwt
+} // namespace dswt

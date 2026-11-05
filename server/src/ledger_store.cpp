@@ -1,4 +1,4 @@
-#include "platinumwt/server/ledger_store.h"
+#include "dswt/server/ledger_store.h"
 
 #include "postgres.h"
 
@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 using detail::Transaction;
@@ -71,14 +71,14 @@ void LedgerStore::Migrate(const std::filesystem::path &directory) {
   Transaction transaction(impl_->database);
   impl_->database.Execute("SELECT pg_advisory_xact_lock(578892145137)");
   impl_->database.Execute(
-      "CREATE SCHEMA IF NOT EXISTS platinumwt_meta; "
-      "REVOKE ALL ON SCHEMA platinumwt_meta FROM PUBLIC; "
-      "CREATE TABLE IF NOT EXISTS platinumwt_meta.schema_migrations "
+      "CREATE SCHEMA IF NOT EXISTS dswt_meta; "
+      "REVOKE ALL ON SCHEMA dswt_meta FROM PUBLIC; "
+      "CREATE TABLE IF NOT EXISTS dswt_meta.schema_migrations "
       "(version integer PRIMARY KEY CHECK (version > 0), sha256 "
       "bytea NOT NULL CHECK (octet_length(sha256) = 32)); "
-      "REVOKE ALL ON platinumwt_meta.schema_migrations FROM PUBLIC");
+      "REVOKE ALL ON dswt_meta.schema_migrations FROM PUBLIC");
   auto installed = impl_->database.Execute(
-      "SELECT version FROM platinumwt_meta.schema_migrations ORDER BY version");
+      "SELECT version FROM dswt_meta.schema_migrations ORDER BY version");
   const auto count = static_cast<std::size_t>(PQntuples(installed.get()));
   if (count > migrations.size())
     throw std::runtime_error(
@@ -88,7 +88,7 @@ void LedgerStore::Migrate(const std::filesystem::path &directory) {
     if (index < count) {
       auto matches = impl_->database.Parameters(
           "SELECT sha256 = pg_catalog.sha256(convert_to($2, 'UTF8')) "
-          "FROM platinumwt_meta.schema_migrations WHERE version = $1::integer",
+          "FROM dswt_meta.schema_migrations WHERE version = $1::integer",
           {migration.version, migration.body});
       if (PQntuples(matches.get()) != 1 ||
           std::string(PQgetvalue(matches.get(), 0, 0)) != "t") {
@@ -98,7 +98,7 @@ void LedgerStore::Migrate(const std::filesystem::path &directory) {
     } else {
       impl_->database.Execute(migration.body.c_str());
       impl_->database.Parameters(
-          "INSERT INTO platinumwt_meta.schema_migrations VALUES "
+          "INSERT INTO dswt_meta.schema_migrations VALUES "
           "($1::integer, pg_catalog.sha256(convert_to($2, 'UTF8')))",
           {migration.version, migration.body});
     }
@@ -110,10 +110,10 @@ std::uint64_t LedgerStore::VerifyReplay() {
   Transaction transaction(impl_->database,
                           "BEGIN ISOLATION LEVEL REPEATABLE READ");
   impl_->database.Execute("SET LOCAL statement_timeout = '10min'");
-  auto result = impl_->database.Execute("SELECT platinumwt.verify_replay()");
+  auto result = impl_->database.Execute("SELECT dswt.verify_replay()");
   const auto count = std::stoull(PQgetvalue(result.get(), 0, 0));
   transaction.Commit();
   return count;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

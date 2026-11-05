@@ -51,7 +51,7 @@ class ContributionTests(unittest.TestCase):
 
     def test_files_deleted_before_pr_head_are_still_checked(self):
         for renamed in (False, True):
-            with self.subTest(renamed=renamed), tempfile.TemporaryDirectory(prefix="platinumwt-policy-") as temp:
+            with self.subTest(renamed=renamed), tempfile.TemporaryDirectory(prefix="dswt-policy-") as temp:
                 root = Path(temp)
                 def git(*args):
                     subprocess.check_call([

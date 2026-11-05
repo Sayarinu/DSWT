@@ -19,7 +19,7 @@ if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
     echo "ROM_BUILD_JOBS must be a positive integer without leading zeros" >&2
     exit 2
 fi
-image="platinumwt-rom-builder"
+image="dswt-rom-builder"
 if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
     echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see client/tests/README.md)" >&2
     exit 2
@@ -32,10 +32,10 @@ if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
 fi
 
 workspace="$("$python" "$repo_root/scripts/prepare-game.py" "$@")"
-docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "PLATINUMWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
+docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "DSWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
 if [[ "$build_mode" == modified ]]; then
     tls_workspace="$("$python" "$repo_root/scripts/prepare-tls.py")"
-    "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/platinumwt-connection.h"
+    "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/dswt-connection.h"
     docker_args+=(-v "$tls_workspace:/tls:ro")
 fi
 docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile" -t "$image" "$repo_root/tools/rom-builder"
@@ -43,7 +43,7 @@ docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile"
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
     # Make exports NINJA; clear its command-with-flags before Meson regeneration.
-    if [[ "$PLATINUMWT_BUILD_MODE" == pristine ]]; then
+    if [[ "$DSWT_BUILD_MODE" == pristine ]]; then
         make configure
         python3 subprojects/meson-1.12.0/meson.py configure build -Drevision="$ROM_REVISION"
         make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
@@ -58,12 +58,12 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
                 --cross-file=meson/cross_unix.ini \
                 -Drevision="$ROM_REVISION" \
                 -Dwonder_trade_tls_dir=/tls \
-                -Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h
+                -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h
         fi
         python3 subprojects/meson-1.12.0/meson.py configure build \
             -Drevision="$ROM_REVISION" \
             -Dwonder_trade_tls_dir=/tls \
-            -Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h
+            -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h
         make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
     fi
 '

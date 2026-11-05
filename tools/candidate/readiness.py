@@ -133,7 +133,7 @@ def inventory(root=ROOT, rules=None, expected=None):
 
 def source_archive(commit, output, root=ROOT, expected=None):
     """A reproducible tracked-source archive, checked member by member against the commit's tree."""
-    prefix = f"platinumwt-src-{commit[:12]}/"
+    prefix = f"dswt-src-{commit[:12]}/"
     first = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", f"--prefix={prefix}", commit],
                            check=True, capture_output=True).stdout
     second = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", f"--prefix={prefix}", commit],
@@ -225,7 +225,7 @@ def audit_source(output, root=ROOT):
     with candidate.patcher.Stage(parent, f"{name}.partial") as stage:
         work = stage.path / "audit"
         work.mkdir(mode=0o700)
-        report = {"version": 1, "kind": "platinumwt-source-audit", "source_commit": commit, "source_dirty": False,
+        report = {"version": 1, "kind": "dswt-source-audit", "source_commit": commit, "source_dirty": False,
                   "audited_at": int(time.time()), "inventory": inventory(root),
                   "source_archive": source_archive(commit, work / f"source-{commit[:12]}.tar", root),
                   "secret_scanner": {"tool": "gitleaks", "version": version, "archive_sha256": digest,
@@ -291,7 +291,7 @@ def evidence_binding(name, report, expected):
                      "their digests are not the compose stack's image IDs")
     elif kind == "source-audit":
         inventory, archive = report.get("inventory") or {}, report.get("source_archive") or {}
-        if (report.get("kind") != "platinumwt-source-audit" or inventory.get("forbidden") or inventory.get("unclassified")
+        if (report.get("kind") != "dswt-source-audit" or inventory.get("forbidden") or inventory.get("unclassified")
                 or any(not item.get("expected") for item in inventory.get("private_marker_blobs", []))
                 or not archive.get("reproducible") or not archive.get("complete")
                 or any(not item.get("expected") for item in archive.get("findings", []))
@@ -323,7 +323,7 @@ def readiness(archive, evidence, stack_manifest, extra_gates=(), root=ROOT, cont
     if "rehearsal" not in provided:
         gates.insert(0, "No exact-candidate rehearsal report has been supplied")
     return {
-        "version": 1, "kind": "platinumwt-private-readiness",
+        "version": 1, "kind": "dswt-private-readiness",
         "candidate": {"file": Path(archive).name, "sha256": verified["sha256"], "size": verified["size"],
                       "version": record["version"], "files": record["files"]},
         "source": record["source"], "upstream": record["upstream"],

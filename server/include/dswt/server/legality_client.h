@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 enum class LegalityVerdict { Legal, Illegal, Unavailable };
 
@@ -32,4 +32,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

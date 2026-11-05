@@ -1,15 +1,15 @@
-#include "platinumwt/server/trade_gateway.h"
+#include "dswt/server/trade_gateway.h"
 
 #include "trade_encoding.h"
 #include "trade.grpc.pb.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <algorithm>
 #include <chrono>
 #include <limits>
 #include <stdexcept>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 class InvalidFrame : public std::runtime_error {
@@ -201,7 +201,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
     const auto trade = frame.operation >= 3 && frame.operation <= 6 ? frame.body.substr(0, 16) : std::string_view{};
     RpcTelemetry trace(static_cast<Operation>(frame.operation), nullptr, [&] { return observed; },
                        mutation ? std::string_view(frame.request_id) : std::string_view{}, trade, frame.request_id);
-    context.AddMetadata("x-platinumwt-request-id-bin", frame.request_id);
+    context.AddMetadata("x-dswt-request-id-bin", frame.request_id);
     context.set_deadline(std::min(context.deadline(), std::chrono::system_clock::now() + std::chrono::seconds(4)));
     if (frame.operation == 1) {
       v1::EnrollRequest request;
@@ -299,4 +299,4 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
   }
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

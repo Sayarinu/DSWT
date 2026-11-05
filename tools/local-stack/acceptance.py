@@ -101,7 +101,7 @@ class Acceptance:
 
     def sql(self, query):
         result = self.local.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1",
-                                    "-U", "platinumwt_local", "-d", "platinumwt_e2e", "-c", query,
+                                    "-U", "dswt_local", "-d", "dswt_e2e", "-c", query,
                                     capture=True, timeout=30)
         return result.stdout.strip()
 
@@ -112,7 +112,7 @@ class Acceptance:
         self.local.volumes()
         self.local.database_identity()
         self.local.ready()
-        require(self.sql("SELECT count(*) FROM platinumwt.offers WHERE state <> 4") == "0",
+        require(self.sql("SELECT count(*) FROM dswt.offers WHERE state <> 4") == "0",
                 "retained pending offers exist; recover their original clients before starting another run")
         require(not (self.local.workspace / "control/matcher-hold").exists(), "matcher is already held by another test")
         with (self.directory / "native-build.log").open("x") as log:
@@ -124,7 +124,7 @@ class Acceptance:
         self.fixtures.mkdir(mode=0o700)
         image = self.local.manifest["project"] + "-fixtures"
         with (self.directory / "fixtures-build.log").open("x") as log:
-            subprocess.run(self.local.docker + ["build", "--platform", self.local.env["PWT_LOCAL_PLATFORM"], "--target", "validator-tests",
+            subprocess.run(self.local.docker + ["build", "--platform", self.local.env["DSWT_LOCAL_PLATFORM"], "--target", "validator-tests",
                             "--file", str(stack.ROOT / "validator/Dockerfile"), "--tag", image, str(stack.ROOT)],
                            env=self.local.env, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=900)
             subprocess.run(self.local.docker + ["run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
@@ -173,10 +173,10 @@ class Acceptance:
         require(save != str(uuid.UUID(int=0)), "client is not enrolled")
         where = " WHERE save_id='" + save + "'"
         return {
-            "identity": self.rows("SELECT save_id::text,next_counter::text,event_highwater::text FROM platinumwt.save_identities" + where),
-            "operations": self.rows("SELECT operation_id::text,counter::text,opcode,result,encode(request_sha256,'hex') AS request_sha256 FROM platinumwt.operations" + where + " ORDER BY counter"),
-            "offers": self.rows("SELECT t.trade_id::text,t.offered_asset_id::text,t.state,encode(p.sha256,'hex') AS offered_sha256 FROM platinumwt.offers t JOIN platinumwt.payloads p ON p.asset_id=t.offered_asset_id WHERE t.save_id='" + save + "' ORDER BY t.last_event"),
-            "receipts": self.rows("SELECT r.receipt_id::text,r.trade_id::text,r.asset_id::text,r.delivery_kind,o.location,encode(p.sha256,'hex') AS delivered_sha256,encode(a.applied_sha256,'hex') AS applied_sha256 FROM platinumwt.receipts r JOIN platinumwt.ownership o USING(asset_id,save_id,trade_id) JOIN platinumwt.payloads p USING(asset_id) LEFT JOIN platinumwt.acknowledgements a USING(receipt_id,save_id) WHERE r.save_id='" + save + "' ORDER BY r.receipt_id"),
+            "identity": self.rows("SELECT save_id::text,next_counter::text,event_highwater::text FROM dswt.save_identities" + where),
+            "operations": self.rows("SELECT operation_id::text,counter::text,opcode,result,encode(request_sha256,'hex') AS request_sha256 FROM dswt.operations" + where + " ORDER BY counter"),
+            "offers": self.rows("SELECT t.trade_id::text,t.offered_asset_id::text,t.state,encode(p.sha256,'hex') AS offered_sha256 FROM dswt.offers t JOIN dswt.payloads p ON p.asset_id=t.offered_asset_id WHERE t.save_id='" + save + "' ORDER BY t.last_event"),
+            "receipts": self.rows("SELECT r.receipt_id::text,r.trade_id::text,r.asset_id::text,r.delivery_kind,o.location,encode(p.sha256,'hex') AS delivered_sha256,encode(a.applied_sha256,'hex') AS applied_sha256 FROM dswt.receipts r JOIN dswt.ownership o USING(asset_id,save_id,trade_id) JOIN dswt.payloads p USING(asset_id) LEFT JOIN dswt.acknowledgements a USING(receipt_id,save_id) WHERE r.save_id='" + save + "' ORDER BY r.receipt_id"),
         }
 
     def settled(self, client, expected, operations):
@@ -287,10 +287,10 @@ class Acceptance:
             state, events = self.run(a, fault="kill", checkpoint="wire.1.reply")
             require(any(row.get("wire_operation") == 1 and row["wire_result"] == 1 for row in events), "enrollment did not commit")
             enrollment = str(uuid.UUID(hex=state["operation_id"]))
-            require(self.sql("SELECT count(*) FROM platinumwt.save_identities WHERE enrollment_id='" + enrollment + "'") == "1", "enrollment missing")
+            require(self.sql("SELECT count(*) FROM dswt.save_identities WHERE enrollment_id='" + enrollment + "'") == "1", "enrollment missing")
             self.assert_retry(a, "reconcile", 1)
             self.run(a)
-            require(self.sql("SELECT save_id::text FROM platinumwt.save_identities WHERE enrollment_id='" + enrollment + "'")
+            require(self.sql("SELECT save_id::text FROM dswt.save_identities WHERE enrollment_id='" + enrollment + "'")
                     == str(uuid.UUID(hex=self.inspect(a)["save_id"])), "enrollment retry created a replacement identity")
             self.run(a, "submit", fault="kill", checkpoint="wire.2.reply")
             self.assert_retry(a, "reconcile", 2)

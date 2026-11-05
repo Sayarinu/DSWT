@@ -23,8 +23,8 @@ import policy
 import stack
 
 
-RECOVERY_LABEL = "studio.nouvellelune.platinumwt.recovery-run"
-PSQL_CONNECTION = ["-h", "/var/run/postgresql", "-U", "platinumwt_local"]
+RECOVERY_LABEL = "studio.nouvellelune.dswt.recovery-run"
+PSQL_CONNECTION = ["-h", "/var/run/postgresql", "-U", "dswt_local"]
 # Tables whose exact rows a restore must reproduce, including the replay journal.
 TABLES = ("save_identities", "payloads", "offers", "ownership", "matches", "receipts", "operations",
           "trade_events", "acknowledgements", "matcher_attempts", "audit_journal")
@@ -54,15 +54,15 @@ def digest_sql(table):
 def capture(sql):
     """Digest every retained row, the applied migrations and each identity checkpoint."""
     tables = {}
-    for table in TABLES + ("platinumwt_meta.schema_migrations",):
-        name = table if "." in table else "platinumwt." + table
+    for table in TABLES + ("dswt_meta.schema_migrations",):
+        name = table if "." in table else "dswt." + table
         count, digest = sql("SET bytea_output = 'hex'; SET timezone = 'UTC'; " + digest_sql(name)).split()[-2:]
         tables[table] = {"rows": int(count), "sha256": digest}
     identities = json.loads(sql("SELECT coalesce(json_object_agg(save_id::text, json_build_array("
-                                "next_counter::text, event_highwater::text)), '{}') FROM platinumwt.save_identities"))
+                                "next_counter::text, event_highwater::text)), '{}') FROM dswt.save_identities"))
     applied = json.loads(sql("SELECT coalesce(json_object_agg(save_id, digests), '{}') FROM (SELECT o.save_id::text, "
-                             "json_agg(DISTINCT encode(p.sha256, 'hex')) AS digests FROM platinumwt.ownership o "
-                             "JOIN platinumwt.payloads p USING (asset_id) WHERE o.location = 3 GROUP BY o.save_id) held"))
+                             "json_agg(DISTINCT encode(p.sha256, 'hex')) AS digests FROM dswt.ownership o "
+                             "JOIN dswt.payloads p USING (asset_id) WHERE o.location = 3 GROUP BY o.save_id) held"))
     return {"tables": tables, "identities": {key: [int(value) for value in pair] for key, pair in identities.items()},
             "applied": {key: sorted(value) for key, value in applied.items()}}
 
@@ -130,7 +130,7 @@ class Rehearsal:
         self.run_id = directory.name.rsplit("-", 1)[-1]
         self.prefix = f"{local.manifest['project']}-recovery-{self.run_id}"
         # PostgreSQL limits restore point names to 63 bytes.
-        self.slot, self.restore_point = "platinumwt_rehearsal_" + self.run_id, "pwt-" + self.run_id
+        self.slot, self.restore_point = "dswt_rehearsal_" + self.run_id, "dswt-" + self.run_id
         self.image = postgres_image()
         self.socket = local.manifest["project"] + "-socket"
         self.created, self.containers = [], []
@@ -157,7 +157,7 @@ class Rehearsal:
 
     def live(self, query):
         return self.local.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *PSQL_CONNECTION,
-                                  "-d", "platinumwt_e2e", "-c", query, capture=True, timeout=60).stdout.strip()
+                                  "-d", "dswt_e2e", "-c", query, capture=True, timeout=60).stdout.strip()
 
     def backup(self, base, archive):
         socket = f"type=volume,source={self.socket},target=/var/run/postgresql,readonly"
@@ -224,7 +224,7 @@ class Rehearsal:
             state = self.docker("inspect", "--format", "{{.State.Running}}", container).stdout.strip()
             if state != "true":
                 return False
-            ready = self.docker("exec", container, "psql", "-XAt", *PSQL_CONNECTION, "-d", "platinumwt_e2e", "-c",
+            ready = self.docker("exec", container, "psql", "-XAt", *PSQL_CONNECTION, "-d", "dswt_e2e", "-c",
                                 "SELECT NOT pg_is_in_recovery()", check=False)
             if ready.returncode == 0 and ready.stdout.strip() == "t":
                 return True
@@ -234,15 +234,15 @@ class Rehearsal:
     def verify(self, case, container, socket):
         def sql(query):
             return self.docker("exec", container, "psql", "-XAt", "-v", "ON_ERROR_STOP=1", *PSQL_CONNECTION,
-                               "-d", "platinumwt_e2e", "-c", query, timeout=60).stdout.strip()
+                               "-d", "dswt_e2e", "-c", query, timeout=60).stdout.strip()
         before = capture(sql)
         checks = case["checks"]
-        for name, arguments in (("ledger_replay", ["/build/platinumwt-ledger", "verify"]),
-                                ("migrations", ["/build/platinumwt-ledger", "migrate", "/src/migrations"])):
+        for name, arguments in (("ledger_replay", ["/build/dswt-ledger", "verify"]),
+                                ("migrations", ["/build/dswt-ledger", "migrate", "/src/migrations"])):
             result = self.docker("run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
                                  "--security-opt", "no-new-privileges:true",
                                  "--user", f"{os.getuid()}:{os.getgid()}", "--env", "PGHOST=/test/run",
-                                 "--env", "PGDATABASE=platinumwt_e2e", "--env", "PGUSER=platinumwt_local",
+                                 "--env", "PGDATABASE=dswt_e2e", "--env", "PGUSER=dswt_local",
                                  "--mount", f"type=volume,source={socket},target=/test/run",
                                  self.local.manifest["project"] + "-server", *arguments, check=False, timeout=120)
             checks[name] = "pass" if result.returncode == 0 else "fail"
@@ -336,7 +336,7 @@ def rehearse(local, directory):
         local.compose("start", *reversed(applications), capture=True, timeout=60)
         runner.restart_service("gateway")  # Waits until the HTTPS trading path is ready again.
         paused = False
-        local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
+        local.compose("exec", "-T", "backend", "/build/dswt-ledger", "verify", capture=True, timeout=60)
         report["active_ledger_replay"] = "pass"
         if local.observability:
             observability.write_backup_timestamp(local.workspace, time.time())

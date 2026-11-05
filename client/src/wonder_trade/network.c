@@ -24,7 +24,7 @@
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
 
-#define WT_ACK "PLATINUMWT_ACK_V1\n"
+#define WT_ACK "DSWT_ACK_V1\n"
 #define WT_NETWORK_HEAP_SIZE 0x20000
 #define WT_STACK_SIZE 0x8000
 

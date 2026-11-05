@@ -74,7 +74,7 @@ class DecisionTests(unittest.TestCase):
                 return '{"%s": ["%s"]}' % (SAVE, DIGEST)
             return '{"%s": ["3", "4"]}' % SAVE if "json_object_agg" in query else "2 " + "c" * 64
         result = recovery.capture(sql)
-        self.assertEqual(set(result["tables"]), set(recovery.TABLES) | {"platinumwt_meta.schema_migrations"})
+        self.assertEqual(set(result["tables"]), set(recovery.TABLES) | {"dswt_meta.schema_migrations"})
         self.assertEqual(result["identities"], {SAVE: [3, 4]})
         self.assertEqual(result["applied"], {SAVE: [DIGEST]})
         self.assertTrue(all("bytea_output = 'hex'" in query for query in queries[:-2]))
@@ -92,21 +92,21 @@ class VolumeTests(unittest.TestCase):
         def run(arguments, **kwargs):
             calls.append(arguments)
             return subprocess.CompletedProcess(arguments, 0, existing if arguments[:2] == ["volume", "ls"] else "", "")
-        local = SimpleNamespace(manifest={"project": "platinumwt-local-" + "0" * 32}, run=run)
+        local = SimpleNamespace(manifest={"project": "dswt-local-" + "0" * 32}, run=run)
         rehearsal = recovery.Rehearsal(local, Path("/workspace/recovery/20261029T000000-abcd1234"))
         return rehearsal, calls
 
     def test_restore_volumes_are_new_and_owned(self):
         rehearsal, calls = self.rehearsal("")
         name = rehearsal.volume("accepted-data")
-        self.assertEqual(name, "platinumwt-local-" + "0" * 32 + "-recovery-abcd1234-accepted-data")
-        self.assertIn(stack.LABEL + "=platinumwt-local-" + "0" * 32, calls[-1])
+        self.assertEqual(name, "dswt-local-" + "0" * 32 + "-recovery-abcd1234-accepted-data")
+        self.assertIn(stack.LABEL + "=dswt-local-" + "0" * 32, calls[-1])
         self.assertIn(recovery.RECOVERY_LABEL + "=abcd1234", calls[-1])
         rehearsal.cleanup(True)
         self.assertEqual(calls[-1], ["volume", "rm", name])
 
     def test_an_existing_volume_is_never_reused(self):
-        rehearsal, calls = self.rehearsal("platinumwt-local-x-data\n")
+        rehearsal, calls = self.rehearsal("dswt-local-x-data\n")
         with self.assertRaises(AssertionError):
             rehearsal.volume("accepted-data")
         self.assertFalse(any(call[:2] == ["volume", "create"] for call in calls))

@@ -10,8 +10,8 @@ import shutil
 import tarfile
 
 
-PRIVATE_SENTINEL = b"PLATINUMWT_PRIVATE_INPUT_SENTINEL"
-SOURCE = "usr/share/platinumwt-validator/source/"
+PRIVATE_SENTINEL = b"DSWT_PRIVATE_INPUT_SENTINEL"
+SOURCE = "usr/share/dswt-validator/source/"
 KEY_LABEL = rb"(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY"
 KEY_PREFIX = re.compile(rb"-----BEGIN " + KEY_LABEL + rb"-----\s*"
                         rb"(?:(?:Proc-Type:|DEK-Info:)[^\r\n]*\r?\n\s*)*(?:[A-Za-z0-9+/=]\s*){32}")
@@ -106,8 +106,8 @@ class Image:
                     entry.update(type="hardlink", target=safe_path(member.linkname))
                 elif member.isfile():
                     public = self.public_policy["libraries"].get(path)
-                    capture = (path.startswith(SOURCE) or path.startswith("usr/share/platinumwt/")
-                               or path.startswith("usr/local/share/platinumwt/migrations/")
+                    capture = (path.startswith(SOURCE) or path.startswith("usr/share/dswt/")
+                               or path.startswith("usr/local/share/dswt/migrations/")
                                or path in ("app/PKHeX.Core.dll", "var/lib/dpkg/status") or public is not None)
                     chunks, tail, size, content_hash = [], b"", 0, hashlib.sha256()
                     source = archive.extractfile(member)

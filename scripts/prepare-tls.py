@@ -19,7 +19,7 @@ def inventory(directory):
             result[path.relative_to(directory).as_posix()] = "link:" + str(path.readlink())
         elif not (path.is_dir() or path.is_file()):
             raise ValueError("TLS source contains a special file")
-        elif path.is_file() and path != directory / ".platinumwt-files.json":
+        elif path.is_file() and path != directory / ".dswt-files.json":
             result[path.relative_to(directory).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
 
@@ -32,7 +32,7 @@ def prepare(root):
     parent.mkdir(exist_ok=True)
     destination = parent / f"mbedtls-{pin['version']}"
     if destination.exists() or destination.is_symlink():
-        manifest = destination / ".platinumwt-files.json"
+        manifest = destination / ".dswt-files.json"
         if destination.is_symlink() or manifest.is_symlink() or not manifest.is_file():
             raise ValueError("Existing TLS source is unmanaged; keep it aside")
         recorded = json.loads(manifest.read_text())
@@ -55,7 +55,7 @@ def prepare(root):
             source.extractall(stage, filter="data")
         extracted = stage / destination.name
         files = inventory(extracted)
-        (extracted / ".platinumwt-files.json").write_text(json.dumps({"archive_sha256": pin["sha256"], "files": files}) + "\n")
+        (extracted / ".dswt-files.json").write_text(json.dumps({"archive_sha256": pin["sha256"], "files": files}) + "\n")
         extracted.rename(destination)
     return destination
 

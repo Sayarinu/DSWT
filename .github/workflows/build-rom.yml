@@ -35,15 +35,15 @@ jobs:
           python3 -m json.tool licensing/migration.json >/dev/null
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
-          python3 -m venv "$RUNNER_TEMP/pwt-policy"
-          "$RUNNER_TEMP/pwt-policy/bin/pip" install --require-hashes -r tools/local-stack/requirements.txt
-          "$RUNNER_TEMP/pwt-policy/bin/python" tools/local-stack/isolation.py policy
-          "$RUNNER_TEMP/pwt-policy/bin/python" -m unittest discover -s tools/local-stack/__tests__
+          python3 -m venv "$RUNNER_TEMP/dswt-policy"
+          "$RUNNER_TEMP/dswt-policy/bin/pip" install --require-hashes -r tools/local-stack/requirements.txt
+          "$RUNNER_TEMP/dswt-policy/bin/python" tools/local-stack/isolation.py policy
+          "$RUNNER_TEMP/dswt-policy/bin/python" -m unittest discover -s tools/local-stack/__tests__
           python3 -m unittest discover -s tools/image-audit/__tests__
           python3 tools/bps-patch/patcher.py prepare
           provenance=(game/tools/flips-v198-*/provenance.json)
           test "${#provenance[@]}" -eq 1 && test -f "${provenance[0]}"
-          PLATINUMWT_FLIPS_PROVENANCE="$PWD/${provenance[0]}" python3 -m unittest discover -s tools/bps-patch/__tests__
+          DSWT_FLIPS_PROVENANCE="$PWD/${provenance[0]}" python3 -m unittest discover -s tools/bps-patch/__tests__
           python3 -m unittest discover -s tools/candidate/__tests__
 
   connectivity-server:
@@ -56,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build server and run integration tests
-        run: docker build -f server/Dockerfile -t platinumwt-server .
+        run: docker build -f server/Dockerfile -t dswt-server .
 
   tls-transport:
     name: Test bounded TLS transport
@@ -86,13 +86,13 @@ jobs:
           persist-credentials: false
       - name: Build pinned core and run worker and gRPC conformance tests
         run: |
-          docker build -f validator/Dockerfile --target validator-tests -t platinumwt-validator-tests .
+          docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-tests .
           docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \
             --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-            platinumwt-validator-tests
-          docker build -f validator/Dockerfile -t platinumwt-validator .
-          docker run --rm --entrypoint sh platinumwt-validator -c \
-            'test -s /usr/share/platinumwt-validator/source/LICENSE && test -s /usr/share/platinumwt-validator/source/validator/LICENSE'
+            dswt-validator-tests
+          docker build -f validator/Dockerfile -t dswt-validator .
+          docker run --rm --entrypoint sh dswt-validator -c \
+            'test -s /usr/share/dswt-validator/source/LICENSE && test -s /usr/share/dswt-validator/source/validator/LICENSE'
 
   emulator-persistence:
     name: Test durable emulator persistence
@@ -104,4 +104,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Test host persistence faults and build pinned emulator integration
-        run: docker build -f emulator/Dockerfile -t platinumwt-emulator-builder .
+        run: docker build -f emulator/Dockerfile -t dswt-emulator-builder .

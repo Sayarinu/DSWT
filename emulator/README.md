@@ -3,13 +3,13 @@
 Use a pinned melonDS 1.1 build with checked host persistence. Install the Linux
 build dependencies listed in `Dockerfile`, then run `bash scripts/build-emulator.sh`.
 The source preparer verifies the archive/revision and preserves local edits.
-`docker build -f emulator/Dockerfile -t platinumwt-emulator-builder .` also builds
+`docker build -f emulator/Dockerfile -t dswt-emulator-builder .` also builds
 the integration and runs the synthetic fault suite without ROMs or saves.
 
 Launch a separately provisioned save through `scripts/run-emulator.py`, adding
-`--store-tool game/save-store-build/platinumwt-save-store` before `--` and using
+`--store-tool game/save-store-build/dswt-save-store` before `--` and using
 the built emulator path. Its configured save filename must match `--save`.
-Each save owns its private `.platinumwt` recovery directory and lock; keep these
+Each save owns its private `.dswt` recovery directory and lock; keep these
 with the save. Do not mix snapshots or restore an older installation directory.
 Savestates and live save imports are refused in managed sessions.
 

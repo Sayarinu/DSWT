@@ -1,12 +1,12 @@
-#include "platinumwt/server/http_listener.h"
+#include "dswt/server/http_listener.h"
 
-#include "platinumwt/server/http_session.h"
+#include "dswt/server/http_session.h"
 #include "http_services.h"
 
 #include <iostream>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 
@@ -39,4 +39,4 @@ void HttpListener::Accept() {
   });
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

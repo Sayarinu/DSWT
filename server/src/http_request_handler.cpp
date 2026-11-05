@@ -1,7 +1,7 @@
-#include "platinumwt/server/http_request_handler.h"
+#include "dswt/server/http_request_handler.h"
 
-#include "platinumwt/server/connectivity_service.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/connectivity_service.h"
+#include "dswt/server/telemetry.h"
 
 #include <algorithm>
 #include <chrono>
@@ -9,7 +9,7 @@
 #include <iostream>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace http = boost::beast::http;
 
 HttpRequestHandler::HttpRequestHandler(std::shared_ptr<grpc::Channel> channel,
@@ -94,4 +94,4 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
   return response;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

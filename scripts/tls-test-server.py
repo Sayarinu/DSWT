@@ -64,7 +64,7 @@ def handle_peer(raw, context, args):
             if args.stall:
                 time.sleep(8)
             response = (b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-                        b"Content-Length: 18\r\nConnection: close\r\n\r\nPLATINUMWT_ACK_V1\n")
+                        b"Content-Length: 18\r\nConnection: close\r\n\r\nDSWT_ACK_V1\n")
             peer.sendall(response[:-1] if args.truncate else response)
             print("Authenticated ping handled", flush=True)
     except (OSError, ssl.SSLError):

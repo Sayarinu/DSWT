@@ -15,7 +15,7 @@ class ArchiveScriptTests(unittest.TestCase):
     SYSTEM = 7300000000000000001
 
     def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix="platinumwt-archive-script-", dir="/tmp")
+        directory = tempfile.TemporaryDirectory(prefix="dswt-archive-script-", dir="/tmp")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.archive = self.root / "archive"
@@ -98,7 +98,7 @@ class ArchiveScriptTests(unittest.TestCase):
 class WalArchiveBarrierTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.directory = tempfile.TemporaryDirectory(prefix="platinumwt-barrier-", dir="/tmp")
+        cls.directory = tempfile.TemporaryDirectory(prefix="dswt-barrier-", dir="/tmp")
         cls.root = Path(cls.directory.name)
         cls.data = cls.root / "data"
         cls.archive = cls.root / "archive"

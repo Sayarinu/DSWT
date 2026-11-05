@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 struct GatewayReply {
   enum class Status { Ok, Invalid, Unavailable };
@@ -27,4 +27,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

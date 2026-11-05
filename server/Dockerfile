@@ -24,13 +24,13 @@ FROM base AS production
 RUN apt-get -o APT::Update::Error-Mode=any update && apt-get install -y --no-install-recommends \
     ca-certificates libgrpc++1.51t64 libprotobuf32t64 libboost-system1.83.0 libpq5 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /build/platinumwt-server /usr/local/bin/platinumwt-server
-COPY --from=build /build/platinumwt-backend /usr/local/bin/platinumwt-backend
-COPY --from=build /build/platinumwt-matcher /usr/local/bin/platinumwt-matcher
-COPY --from=build /build/platinumwt-ledger /usr/local/bin/platinumwt-ledger
-COPY server/migrations /usr/local/share/platinumwt/migrations
-COPY LICENSE NOTICE /usr/share/platinumwt/
+COPY --from=build /build/dswt-server /usr/local/bin/dswt-server
+COPY --from=build /build/dswt-backend /usr/local/bin/dswt-backend
+COPY --from=build /build/dswt-matcher /usr/local/bin/dswt-matcher
+COPY --from=build /build/dswt-ledger /usr/local/bin/dswt-ledger
+COPY server/migrations /usr/local/share/dswt/migrations
+COPY LICENSE NOTICE /usr/share/dswt/
 LABEL org.opencontainers.image.licenses="MIT"
 USER 65532:65532
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/platinumwt-server"]
+ENTRYPOINT ["/usr/local/bin/dswt-server"]

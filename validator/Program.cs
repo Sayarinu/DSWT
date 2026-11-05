@@ -1,5 +1,5 @@
 using Google.Protobuf;
-using PlatinumWT.Validator;
+using DSWT.Validator;
 
 if (args.SequenceEqual(new[] { "--worker" }))
 {

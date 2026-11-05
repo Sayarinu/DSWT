@@ -1,12 +1,12 @@
 #pragma once
 
-#include "platinumwt/server/recovery_barrier.h"
+#include "dswt/server/recovery_barrier.h"
 
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 class Database;
 
@@ -23,4 +23,4 @@ private:
   std::unordered_map<std::string, std::pair<std::uint64_t, std::uint64_t>> entries_;
 };
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

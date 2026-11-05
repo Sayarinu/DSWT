@@ -1,9 +1,9 @@
-#include "platinumwt/server/server.h"
+#include "dswt/server/server.h"
 
-#include "platinumwt/server/connectivity_service.h"
-#include "platinumwt/server/http_listener.h"
+#include "dswt/server/connectivity_service.h"
+#include "dswt/server/http_listener.h"
 #include "http_services.h"
-#include "platinumwt/server/metrics_server.h"
+#include "dswt/server/metrics_server.h"
 
 #include <boost/asio/ssl/context.hpp>
 #include <openssl/ssl.h>
@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace asio = boost::asio;
 
 namespace {
@@ -84,4 +84,4 @@ void RunServer(const ServerConfig &config) {
   server->Shutdown();
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

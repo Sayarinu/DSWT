@@ -22,7 +22,7 @@ import stack
 
 PROVISION = stack.load_module("emulator_provision", stack.ROOT / "scripts/provision-save.py")
 VERIFY = stack.load_module("emulator_verify", stack.ROOT / "scripts/verify-demo-trade.py")
-OWNER_LABEL = "studio.nouvellelune.platinumwt.emulator-profile"
+OWNER_LABEL = "studio.nouvellelune.dswt.emulator-profile"
 KEYS = {"A": 65, "B": 66, "X": 88, "Y": 89, "Start": 16777220, "Select": 16777248,
         "Up": 16777235, "Down": 16777237, "Left": 16777234, "Right": 16777236}
 
@@ -34,7 +34,7 @@ def digest(data):
 def save_files(directory):
     """The raw save and its host recovery store, as a snapshot names them."""
     return {"platinum.sav": directory / "platinum.sav",
-            **{item: directory / "platinum.sav.platinumwt" / item for item in ("A", "B", "HEAD")}}
+            **{item: directory / "platinum.sav.dswt" / item for item in ("A", "B", "HEAD")}}
 
 
 def read_private(path):
@@ -74,7 +74,7 @@ def journal(data):
     if len(data) != 524288:
         raise ValueError("Save is incomplete; run checked host recovery first")
     records = [data[offset:offset + 4096] for offset in (0x30000, 0x70000)]
-    valid = [record for record in records if record[:6] == b"PWTJ\1\0" and record[-4:] == b"CMIT"
+    valid = [record for record in records if record[:6] == b"DSWJ\1\0" and record[-4:] == b"CMIT"
              and hashlib.sha256(record[:4060]).digest() == record[4060:4092]]
     if not valid:
         raise ValueError("No known committed journal; preserve the profile")
@@ -187,7 +187,7 @@ class Emulator:
         staging = self.profiles_directory() / (".fork-" + self.name + "-" + secrets.token_hex(8))
         staging.mkdir(mode=0o700)
         try:
-            (staging / "platinum.sav.platinumwt").mkdir(mode=0o700)
+            (staging / "platinum.sav.dswt").mkdir(mode=0o700)
             outputs = {**save_files(staging), "platinum.nds": staging / "platinum.nds", "melonDS": staging / "melonDS"}
             for item, data in {**files, **binaries}.items(): write_private(outputs[item], data)
             (staging / "melonDS").chmod(0o700)
@@ -284,9 +284,9 @@ class Emulator:
         gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
         child = {"LD_PRELOAD": "/support/qt-control.so"}
         if fault_at:
-            child.update(LD_PRELOAD="/support/qt-control.so:/checks/libpersistence-faults.so", PWT_FAULT_ARMED="1",
-                         PWT_FAULT_SAVE="/profile/platinum.sav", PWT_FAULT_AT=str(fault_at), PWT_FAULT_MODE=fault_mode)
-            if fault_phase is not None: child["PWT_FAULT_JOURNAL_PHASE"] = str(fault_phase)
+            child.update(LD_PRELOAD="/support/qt-control.so:/checks/libpersistence-faults.so", DSWT_FAULT_ARMED="1",
+                         DSWT_FAULT_SAVE="/profile/platinum.sav", DSWT_FAULT_AT=str(fault_at), DSWT_FAULT_MODE=fault_mode)
+            if fault_phase is not None: child["DSWT_FAULT_JOURNAL_PHASE"] = str(fault_phase)
         script = "import json,os,sys; os.umask(0o077); os.environ.update(json.loads(sys.argv[1])); os.execv('/profile/melonDS',['/profile/melonDS','/profile/platinum.nds'])"
         arguments = ["run", "-d", "--name", self.container, "--label", stack.LABEL + "=" + self.local.manifest["project"],
                      "--label", OWNER_LABEL + "=" + self.name, "--network", "container:" + gateway, "--read-only", "--cap-drop", "ALL",
@@ -297,7 +297,7 @@ class Emulator:
                      "--env", "QT_QPA_PLATFORM=offscreen", "--env", "SDL_AUDIODRIVER=dummy", "--env", "WT_CONTROL=/profile/control.json",
                      "--env", "XDG_CONFIG_HOME=/profile/config", "--env", "XDG_CACHE_HOME=/profile/cache", manifest["image"],
                      "python3", "/src/scripts/run-emulator.py", "--save", "/profile/platinum.sav", "--target", manifest["target"],
-                     "--store-tool", "/checks/platinumwt-save-store", "--", "python3", "-c", script, json.dumps(child)]
+                     "--store-tool", "/checks/dswt-save-store", "--", "python3", "-c", script, json.dumps(child)]
         container = self.local.run(arguments, capture=True, timeout=20).stdout.strip()
         manifest["last_start"] = {"source_commit": stack.command(["git", "-C", str(stack.ROOT), "rev-parse", "HEAD"], capture=True).stdout.strip(),
                                   "source_dirty": bool(stack.command(["git", "-C", str(stack.ROOT), "status", "--porcelain"], capture=True).stdout.strip()),
@@ -396,7 +396,7 @@ class Emulator:
 
     def snapshot(self, name):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name): raise ValueError("Invalid snapshot name")
-        with private_lock(Path(str(self.directory / "platinum.sav") + ".platinumwt.lock"), fcntl.LOCK_SH, create=False):
+        with private_lock(Path(str(self.directory / "platinum.sav") + ".dswt.lock"), fcntl.LOCK_SH, create=False):
             return self._snapshot(name)
 
     def _snapshot(self, name):
@@ -428,7 +428,7 @@ def main():
     create = sub.add_parser("create")
     create.add_argument("--save", type=Path, required=True); create.add_argument("--rom", type=Path, required=True)
     create.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
-    create.add_argument("--image", default="platinumwt-emulator-builder")
+    create.add_argument("--image", default="dswt-emulator-builder")
     fork = sub.add_parser("fork", help="copy another profile's checked snapshot, sharing its identity")
     fork.add_argument("--source", required=True); fork.add_argument("--snapshot", required=True)
     start = sub.add_parser("start")

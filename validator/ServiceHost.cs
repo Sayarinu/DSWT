@@ -1,7 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
-namespace PlatinumWT.Validator;
+namespace DSWT.Validator;
 
 public static class ServiceHost
 {

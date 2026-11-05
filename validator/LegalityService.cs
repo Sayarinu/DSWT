@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using Grpc.Core;
-using Platinumwt.V1;
+using Dswt.V1;
 
-namespace PlatinumWT.Validator;
+namespace DSWT.Validator;
 
 public sealed class LegalityService(WorkerRunner worker) : PokemonLegality.PokemonLegalityBase
 {

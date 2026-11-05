@@ -1,18 +1,18 @@
-#include "platinumwt/server/trade_service.h"
+#include "dswt/server/trade_service.h"
 
 #include "identity_auth.h"
 #include "admission.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 namespace {
 using detail::Database;
@@ -75,7 +75,7 @@ public:
     // Authenticate before acquiring a write lock: knowing a SaveID alone must
     // not let a forged credential queue behind or contend with its owner.
     auto row = database.Parameters("SELECT encode(credential_verifier,'hex') "
-        "FROM platinumwt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
+        "FROM dswt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
     const bool found = PQntuples(row.get()) == 1;
     const bool matches = detail::CredentialMatches(auth.save_id(), auth.credential(),
         found ? PQgetvalue(row.get(), 0, 0) : "");
@@ -83,8 +83,8 @@ public:
     if (authenticated) {
       if (!admission.Authorize(permit, auth.save_id(), auth.credential())) throw BudgetUnavailable();
       auto progress = database.Parameters(write ?
-          "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
-          "SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",
+          "SELECT next_counter::text,event_highwater::text FROM dswt.save_identities WHERE save_id=$1::uuid FOR UPDATE" :
+          "SELECT next_counter::text,event_highwater::text FROM dswt.save_identities WHERE save_id=$1::uuid",
           {HexBytes(auth.save_id())});
       if (PQntuples(progress.get()) != 1) throw std::runtime_error("identity disappeared");
       next = Unsigned(PQgetvalue(progress.get(), 0, 0));
@@ -101,7 +101,7 @@ public:
     // After a write commit these reads also cover any newer committed progress.
     // For reads they remain in the same repeatable-read snapshot.
     auto row = database.Parameters("SELECT next_counter::text,event_highwater::text "
-        "FROM platinumwt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
+        "FROM dswt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
     if (PQntuples(row.get()) != 1) throw std::runtime_error("identity disappeared");
     if (!Covered(Unsigned(PQgetvalue(row.get(), 0, 1)))) {
       Result(reply, v1::RESULT_PROCESSING);
@@ -121,7 +121,7 @@ public:
       return false;
     }
     auto prior = database.Parameters("SELECT encode(request_sha256,'hex'),result,"
-        "encode(outcome,'hex') FROM platinumwt.operations WHERE save_id=$1::uuid "
+        "encode(outcome,'hex') FROM dswt.operations WHERE save_id=$1::uuid "
         "AND operation_id=$2::uuid", {HexBytes(auth.save_id()), HexBytes(context.operation_id())});
     if (PQntuples(prior.get()) == 1) {
       Telemetry::Global().Replay();
@@ -152,10 +152,10 @@ public:
         "SELECT replace(o.trade_id::text,'-',''),o.state,replace(p.asset_id::text,'-',''),"
         "encode(p.sha256,'hex'),coalesce(replace(r.asset_id::text,'-',''),''),"
         "coalesce(encode(q.sha256,'hex'),''),coalesce(replace(r.receipt_id::text,'-',''),''),"
-        "o.last_event::text,coalesce(r.delivery_kind,0) FROM platinumwt.offers o "
-        "JOIN platinumwt.payloads p ON p.asset_id=o.offered_asset_id "
-        "LEFT JOIN platinumwt.receipts r ON r.receipt_id=o.receipt_id "
-        "LEFT JOIN platinumwt.payloads q ON q.asset_id=r.asset_id "
+        "o.last_event::text,coalesce(r.delivery_kind,0) FROM dswt.offers o "
+        "JOIN dswt.payloads p ON p.asset_id=o.offered_asset_id "
+        "LEFT JOIN dswt.receipts r ON r.receipt_id=o.receipt_id "
+        "LEFT JOIN dswt.payloads q ON q.asset_id=r.asset_id "
         "WHERE o.save_id=$1::uuid AND (($2='' AND o.state<>4) OR o.trade_id=nullif($2,'')::uuid)",
         {HexBytes(auth.save_id()), HexBytes(trade)});
     v1::TradeSnapshot snapshot;
@@ -180,12 +180,12 @@ public:
     const bool success = code == v1::RESULT_OK;
     const auto asset = kind == v1::EVENT_SUBMITTED ? snapshot.offered_asset_id() : snapshot.received_asset_id();
     const auto digest = kind == v1::EVENT_SUBMITTED ? snapshot.offered_sha256() : snapshot.received_sha256();
-    database.Parameters("INSERT INTO platinumwt.operations VALUES ($1::uuid,$2::uuid,$3::numeric,"
+    database.Parameters("INSERT INTO dswt.operations VALUES ($1::uuid,$2::uuid,$3::numeric,"
         "$4::smallint,decode($5,'hex'),$6::smallint,$7::numeric,decode($8,'hex'))",
         {HexBytes(auth.save_id()), HexBytes(context.operation_id()), std::to_string(context.counter()),
          std::to_string(opcode), HexBytes(hash), std::to_string(code), sequence,
          success ? HexBytes(detail::EncodeOutcome(highwater + 1, snapshot)) : ""});
-    database.Parameters("INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,"
+    database.Parameters("INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,"
         "asset_id,payload_sha256,receipt_id,state) VALUES ($1::uuid,$2::numeric,$3::smallint,"
         "nullif($4,'')::uuid,$5::uuid,nullif($6,'')::uuid,CASE WHEN $7='' THEN NULL ELSE decode($7,'hex') END,"
         "nullif($8,'')::uuid,$9::smallint)",
@@ -275,12 +275,12 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       }
       const auto asset = detail::RandomIdentifier(), trade = detail::RandomIdentifier();
       const auto sequence = std::to_string(session.highwater + 1);
-      session.database.Parameters("INSERT INTO platinumwt.payloads VALUES ($1::uuid,decode($2,'hex'),decode($3,'hex'))",
+      session.database.Parameters("INSERT INTO dswt.payloads VALUES ($1::uuid,decode($2,'hex'),decode($3,'hex'))",
           {HexBytes(asset), HexBytes(request->pokemon().pk4()), HexBytes(request->pokemon().sha256())});
-      session.database.Parameters("INSERT INTO platinumwt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
+      session.database.Parameters("INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
           "VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(trade), HexBytes(session.auth.save_id()), HexBytes(asset), sequence});
-      session.database.Parameters("INSERT INTO platinumwt.ownership VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
+      session.database.Parameters("INSERT INTO dswt.ownership VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(asset), HexBytes(session.auth.save_id()), HexBytes(trade), sequence});
       const auto snapshot = session.Snapshot(trade);
       session.Record(request->context(), 2, hash, v1::RESULT_OK, v1::EVENT_SUBMITTED, snapshot);
@@ -328,13 +328,13 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
       }
       const auto receipt = detail::RandomIdentifier();
       const auto sequence = std::to_string(session.highwater + 1);
-      session.database.Parameters("INSERT INTO platinumwt.receipts(receipt_id,trade_id,save_id,asset_id,delivery_kind) "
+      session.database.Parameters("INSERT INTO dswt.receipts(receipt_id,trade_id,save_id,asset_id,delivery_kind) "
           "VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,2)",
           {HexBytes(receipt), HexBytes(request->trade_id()), HexBytes(session.auth.save_id()), HexBytes(snapshot.offered_asset_id())});
-      session.database.Parameters("UPDATE platinumwt.offers SET state=3,receipt_id=$3::uuid,last_event=$4::numeric "
+      session.database.Parameters("UPDATE dswt.offers SET state=3,receipt_id=$3::uuid,last_event=$4::numeric "
           "WHERE trade_id=$1::uuid AND save_id=$2::uuid",
           {HexBytes(request->trade_id()), HexBytes(session.auth.save_id()), HexBytes(receipt), sequence});
-      session.database.Parameters("UPDATE platinumwt.ownership SET location=2,last_event=$4::numeric "
+      session.database.Parameters("UPDATE dswt.ownership SET location=2,last_event=$4::numeric "
           "WHERE asset_id=$1::uuid AND save_id=$2::uuid AND trade_id=$3::uuid",
           {HexBytes(snapshot.offered_asset_id()), HexBytes(session.auth.save_id()), HexBytes(request->trade_id()), sequence});
       snapshot = session.Snapshot(request->trade_id());
@@ -359,7 +359,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
       session.Publish(*reply, snapshot.state() == v1::TRADE_NONE ? v1::RESULT_NOT_FOUND : v1::RESULT_CONFLICT); return;
     }
     auto row = session.database.Parameters("SELECT encode(pk4,'hex'),encode(sha256,'hex') "
-        "FROM platinumwt.payloads WHERE asset_id=$1::uuid", {HexBytes(snapshot.received_asset_id())});
+        "FROM dswt.payloads WHERE asset_id=$1::uuid", {HexBytes(snapshot.received_asset_id())});
     if (PQntuples(row.get()) != 1) throw std::runtime_error("delivery payload missing");
     *reply->mutable_trade() = snapshot;
     reply->mutable_pokemon()->set_pk4(UnhexBytes(PQgetvalue(row.get(), 0, 0)));
@@ -391,14 +391,14 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
           v1::RESULT_NOT_FOUND : v1::RESULT_CONFLICT, *reply, snapshot); return;
     }
     const auto sequence = std::to_string(session.highwater + 1);
-    session.database.Parameters("INSERT INTO platinumwt.acknowledgements VALUES "
+    session.database.Parameters("INSERT INTO dswt.acknowledgements VALUES "
         "($1::uuid,$2::uuid,$3::uuid,decode($4,'hex'),$5::numeric)",
         {HexBytes(request->receipt_id()), HexBytes(session.auth.save_id()), HexBytes(request->context().operation_id()),
          HexBytes(request->applied_sha256()), std::to_string(request->applied_generation())});
-    session.database.Parameters("UPDATE platinumwt.offers SET state=4,last_event=$3::numeric "
+    session.database.Parameters("UPDATE dswt.offers SET state=4,last_event=$3::numeric "
         "WHERE trade_id=$1::uuid AND save_id=$2::uuid",
         {HexBytes(request->trade_id()), HexBytes(session.auth.save_id()), sequence});
-    session.database.Parameters("UPDATE platinumwt.ownership SET location=3,last_event=$4::numeric "
+    session.database.Parameters("UPDATE dswt.ownership SET location=3,last_event=$4::numeric "
         "WHERE asset_id=$1::uuid AND save_id=$2::uuid AND trade_id=$3::uuid",
         {HexBytes(snapshot.received_asset_id()), HexBytes(session.auth.save_id()), HexBytes(request->trade_id()), sequence});
     snapshot = session.Snapshot(request->trade_id());
@@ -421,7 +421,7 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
     auto rows = session.database.Parameters("SELECT sequence::text,kind,coalesce(replace(trade_id::text,'-',''),''),"
         "coalesce(replace(operation_id::text,'-',''),''),coalesce(replace(asset_id::text,'-',''),''),"
         "coalesce(encode(payload_sha256,'hex'),''),coalesce(replace(receipt_id::text,'-',''),''),state "
-        "FROM platinumwt.trade_events AS events WHERE save_id=$1::uuid AND sequence>$2::numeric "
+        "FROM dswt.trade_events AS events WHERE save_id=$1::uuid AND sequence>$2::numeric "
         "ORDER BY events.sequence LIMIT $3::integer",
         {HexBytes(session.auth.save_id()), std::to_string(request->after_event()), std::to_string(request->limit() + 1)});
     const auto expected = std::min<std::uint64_t>(request->limit() + 1, session.highwater - request->after_event());
@@ -449,4 +449,4 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
   });
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

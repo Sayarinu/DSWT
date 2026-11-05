@@ -10,4 +10,4 @@ cmake --build "$emulator_build" --parallel 2
 cmake -S "$repo_root/emulator" -B "$repo_root/game/save-store-build" -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build "$repo_root/game/save-store-build" --parallel 2
 ctest --test-dir "$repo_root/game/save-store-build" --output-on-failure
-printf 'Emulator: %s/melonDS\nSave tool: %s/game/save-store-build/platinumwt-save-store\n' "$emulator_build" "$repo_root"
+printf 'Emulator: %s/melonDS\nSave tool: %s/game/save-store-build/dswt-save-store\n' "$emulator_build" "$repo_root"

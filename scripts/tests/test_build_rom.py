@@ -148,17 +148,17 @@ def record(tool, args):
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '--platform', 'linux/amd64', '-f',
                                 str(self.root / 'tools/rom-builder/Dockerfile'), '-t',
-                                'platinumwt-rom-builder', str(self.root / 'tools/rom-builder')])
+                                'dswt-rom-builder', str(self.root / 'tools/rom-builder')])
         self.assertEqual(run[:3], ['run', '--platform', 'linux/amd64'])
         self.assertIn('ROM_REVISION=' + revision, run)
         self.assertIn('ROM_BUILD_JOBS=' + jobs, run)
-        self.assertIn('PLATINUMWT_BUILD_MODE=' + mode, run)
+        self.assertIn('DSWT_BUILD_MODE=' + mode, run)
         self.assertEqual(run[run.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         mounts = [run[i + 1] for i, arg in enumerate(run) if arg == '-v']
         self.assertEqual(mounts, [str(self.workspace) + ':/workspace'] +
                          ([str(self.tls) + ':/tls:ro'] if mode == 'modified' else []))
         self.assertEqual(run[run.index('-w') + 1], '/workspace')
-        self.assertEqual(run[-4:-1], ['platinumwt-rom-builder', 'bash', '-c'])
+        self.assertEqual(run[-4:-1], ['dswt-rom-builder', 'bash', '-c'])
 
     def test_modified_fresh_and_incremental_builds_both_revisions(self):
         for revision in ('0', '1'):
@@ -172,14 +172,14 @@ def record(tool, args):
                     self.assertEqual(self.calls_for('prepare'), [[]])
                     self.assertEqual(self.calls_for('tls'), [[]])
                     self.assertEqual(self.calls_for('profile'), [[str(self.profile),
-                                     str(self.workspace / '.git/platinumwt-connection.h')]])
+                                     str(self.workspace / '.git/dswt-connection.h')]])
                     self.assertEqual(len(self.calls_for('python')), 4)
                     meson = self.calls_for('meson')
                     self.assertEqual([call[0] for call in meson], ['setup', 'configure'] if fresh else ['configure'])
                     for call in meson:
                         self.assertIn('-Drevision=' + revision, call)
                         self.assertIn('-Dwonder_trade_tls_dir=/tls', call)
-                        self.assertIn('-Dwonder_trade_profile_header=/workspace/.git/platinumwt-connection.h', call)
+                        self.assertIn('-Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h', call)
                     if fresh:
                         self.assertIn('--native-file=meson/native.ini', meson[0])
                         self.assertIn('--cross-file=meson/cross_unix.ini', meson[0])
@@ -240,7 +240,7 @@ def record(tool, args):
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIn('ROM_BUILD_JOBS', result.stderr)
                     self.assertEqual(self.calls, [])
-                    self.assertFalse((self.workspace / '.git/platinumwt-connection.h').exists())
+                    self.assertFalse((self.workspace / '.git/dswt-connection.h').exists())
 
     def test_release_failure_stops_before_checks_without_retry(self):
         for mode in ('modified', 'pristine'):
@@ -261,7 +261,7 @@ def record(tool, args):
                 self.assertIn('Python 3.12', result.stderr)
                 self.assertIn('PYTHON=', result.stderr)
                 self.assertFalse(self.calls_for('prepare') or self.calls_for('docker'))
-                self.assertFalse((self.workspace / '.git/platinumwt-connection.h').exists())
+                self.assertFalse((self.workspace / '.git/dswt-connection.h').exists())
 
     def test_preparation_failure_preserves_inputs_and_stops_build(self):
         result = self.run_build(env=dict(self.env, TEST_PREPARE_FAIL='1'))

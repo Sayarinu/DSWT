@@ -1,6 +1,6 @@
 # Project Goal
 
-Pokemon Platinum Patch is a project to modify Pokémon Platinum so that it can
+DSWT is a project to modify Pokémon Platinum so that it can
 participate in Wonder Trade. The long-term goal is to pair the game patch with
 a custom Wonder Trade server operated by this project.
 

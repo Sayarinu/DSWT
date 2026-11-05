@@ -4,8 +4,8 @@
 x-service-database: &service-database
   PGHOST: /test/run
   PGPORT: "5432"
-  PGDATABASE: platinumwt_e2e
-  PGUSER: platinumwt_service
+  PGDATABASE: dswt_e2e
+  PGUSER: dswt_service
 
 services:
   database:
@@ -39,34 +39,34 @@ services:
 
   migrate:
     environment: *service-database
-    entrypoint: [/usr/local/bin/platinumwt-ledger]
-    command: [migrate, /usr/local/share/platinumwt/migrations]
+    entrypoint: [/usr/local/bin/dswt-ledger]
+    command: [migrate, /usr/local/share/dswt/migrations]
 
   gateway:
     build:
       context: ../..
       dockerfile: server/Dockerfile
       target: production
-    entrypoint: [/usr/local/bin/platinumwt-server]
+    entrypoint: [/usr/local/bin/dswt-server]
     command: !reset null
 
   backend:
     environment:
       <<: *service-database
-      PLATINUMWT_DATABASE_URL: host=/test/run port=5432 dbname=platinumwt_e2e user=platinumwt_service
-      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-pwt2
+      DSWT_DATABASE_URL: host=/test/run port=5432 dbname=dswt_e2e user=dswt_service
+      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-dswt2
       WT_METRICS_PORT: "9092"
-      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
-      PLATINUMWT_DISPOSABLE_DEVICE_TEST: !reset null
-      PLATINUMWT_DEVICE_MATCHERS: !reset null
-    entrypoint: [/usr/local/bin/platinumwt-backend]
+      WT_SUBMISSION_WORKERS: ${DSWT_LOCAL_SUBMISSION_WORKERS:-4}
+      DSWT_DISPOSABLE_DEVICE_TEST: !reset null
+      DSWT_DEVICE_MATCHERS: !reset null
+    entrypoint: [/usr/local/bin/dswt-backend]
     command: !reset null
 
   # No network at all: it only needs the database socket.
   matcher:
-    image: ${PWT_LOCAL_PROJECT}-server
-    platform: ${PWT_LOCAL_PLATFORM}
-    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    image: ${DSWT_LOCAL_PROJECT}-server
+    platform: ${DSWT_LOCAL_PLATFORM}
+    user: ${DSWT_LOCAL_UID}:${DSWT_LOCAL_GID}
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -77,12 +77,12 @@ services:
       database: {condition: service_healthy}
     environment:
       <<: *service-database
-      PLATINUMWT_DATABASE_URL: host=/test/run port=5432 dbname=platinumwt_e2e user=platinumwt_service
-      WT_MATCHER_WORKERS: ${PWT_LOCAL_MATCHERS:-1}
+      DSWT_DATABASE_URL: host=/test/run port=5432 dbname=dswt_e2e user=dswt_service
+      WT_MATCHER_WORKERS: ${DSWT_LOCAL_MATCHERS:-1}
     volumes: [socket:/test/run]
-    entrypoint: [/usr/local/bin/platinumwt-matcher]
+    entrypoint: [/usr/local/bin/dswt-matcher]
 
 volumes:
   archive:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-archive
+    name: ${DSWT_LOCAL_PROJECT}-archive

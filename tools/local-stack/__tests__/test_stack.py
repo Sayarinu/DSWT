@@ -132,7 +132,7 @@ class StackTests(StackFixture):
     def test_explicit_context_compose_platform_and_environment(self):
         inherited = {"COMPOSE_FILE": "/wrong.yaml", "COMPOSE_PROJECT_NAME": "production", "COMPOSE_PROFILES": "all",
                      "PGHOST": "remote.invalid", "PGSERVICE": "production", "DATABASE_URL": "private",
-                     "PLATINUMWT_DATABASE_URL": "private", "DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
+                     "DSWT_DATABASE_URL": "private", "DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
         with patch.dict(os.environ, inherited, clear=True), patch.object(stack, "command", side_effect=self.fake_command):
             local = self.make_stack()
             local.compose("down")
@@ -142,7 +142,7 @@ class StackTests(StackFixture):
         self.assertEqual(arguments[arguments.index("--file") + 1], str(stack.COMPOSE))
         self.assertEqual(arguments[-1], "down")
         self.assertNotIn("--volumes", arguments)
-        self.assertEqual(options["env"]["PWT_LOCAL_PLATFORM"], "linux/arm64")
+        self.assertEqual(options["env"]["DSWT_LOCAL_PLATFORM"], "linux/arm64")
         self.assertEqual(options["env"]["BUILDX_NO_DEFAULT_ATTESTATIONS"], "1")
         for key in inherited:
             self.assertNotIn(key, options["env"])
@@ -216,14 +216,14 @@ class PortAndObservabilityTests(StackFixture):
         arguments, options = self.calls[-1]
         files = [arguments[i + 1] for i, value in enumerate(arguments) if value == "--file"]
         self.assertEqual(files, [str(stack.COMPOSE), str(stack.OBSERVABILITY)])
-        self.assertEqual((options["env"]["PWT_LOCAL_HTTPS_PORT"], options["env"]["PWT_OBS_GRAFANA_PORT"],
-                          options["env"]["PWT_OBS_LOG_PORT"]), ("18443", "13000", "24224"))
+        self.assertEqual((options["env"]["DSWT_LOCAL_HTTPS_PORT"], options["env"]["DSWT_OBS_GRAFANA_PORT"],
+                          options["env"]["DSWT_OBS_LOG_PORT"]), ("18443", "13000", "24224"))
         with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=self.fake_command):
             self.make_stack().compose("ps")
         arguments, options = self.calls[-1]
         self.assertEqual(arguments.count("--file"), 1)
-        self.assertEqual(options["env"]["PWT_LOCAL_HTTPS_PORT"], "8443")
-        self.assertNotIn("PWT_OBS_LOG_PORT", options["env"])
+        self.assertEqual(options["env"]["DSWT_LOCAL_HTTPS_PORT"], "8443")
+        self.assertNotIn("DSWT_OBS_LOG_PORT", options["env"])
 
     def test_invalid_or_tampered_ports_are_refused(self):
         for port, observability in ((80, None), (70000, None), (18443, {"grafana_port": 18443, "log_port": 24224}),

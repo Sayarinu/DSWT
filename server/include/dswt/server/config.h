@@ -1,10 +1,10 @@
-#ifndef PLATINUMWT_SERVER_CONFIG_H
-#define PLATINUMWT_SERVER_CONFIG_H
+#ifndef DSWT_SERVER_CONFIG_H
+#define DSWT_SERVER_CONFIG_H
 
 #include <optional>
 #include <string>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 // Concurrent Submit handlers when WT_SUBMISSION_WORKERS is unset.
 inline constexpr unsigned kDefaultSubmissionWorkers = 4;
@@ -48,6 +48,6 @@ unsigned short LoadMetricsPort();
 // validator's isolated workers (WT_VALIDATOR_WORKERS, 1-8); the gateway queues at most twice this many.
 unsigned LoadSubmissionWorkers();
 
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 #endif

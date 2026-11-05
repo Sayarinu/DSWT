@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package platinumwt.v1;
+package dswt.v1;
 
 import "google/protobuf/empty.proto";
 

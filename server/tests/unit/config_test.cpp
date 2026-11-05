@@ -1,4 +1,4 @@
-#include "platinumwt/server/config.h"
+#include "dswt/server/config.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 class ConfigTest : public testing::Test {
@@ -40,7 +40,7 @@ protected:
 
 private:
   const std::array<const char *, 13> names_{"WT_SUBMISSION_WORKERS", "WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
-      "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "PLATINUMWT_DATABASE_URL",
+      "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "DSWT_DATABASE_URL",
       "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY", "WT_METRICS_PORT"};
   std::array<std::optional<std::string>, 13> saved_;
 };
@@ -129,7 +129,7 @@ TEST_F(ConfigTest, RequiresCompleteTlsConfigurationAndPrivateTradeTargets) {
 
 TEST_F(ConfigTest, KeepsBackendAndValidatorListenersPrivate) {
   EXPECT_THROW(LoadBackendConfig(), std::invalid_argument);
-  Set("PLATINUMWT_DATABASE_URL", "dbname=synthetic");
+  Set("DSWT_DATABASE_URL", "dbname=synthetic");
   Set("WT_LEGALITY_POLICY", "synthetic-policy");
   EXPECT_EQ(LoadBackendConfig().address, "127.0.0.1:50053");
   Set("WT_BACKEND_ADDRESS", "0.0.0.0:50053");
@@ -142,4 +142,4 @@ TEST_F(ConfigTest, KeepsBackendAndValidatorListenersPrivate) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

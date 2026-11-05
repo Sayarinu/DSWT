@@ -19,7 +19,7 @@ def seed_record(seed, generation):
     if len(seed) != 32 or not any(seed) or not 0 <= generation < 2**64:
         raise ValueError("Invalid seed or journal generation")
     record = bytearray(4096)
-    struct.pack_into("<4sHHIIQ", record, 0, b"PWTJ", 1, 0, 4096, 0, generation)
+    struct.pack_into("<4sHHIIQ", record, 0, b"DSWJ", 1, 0, 4096, 0, generation)
     struct.pack_into("<HH", record, 1440, 1, 32)
     record[1444:1476] = seed
     record[4060:4092] = hashlib.sha256(record[:4060]).digest()

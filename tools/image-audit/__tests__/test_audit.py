@@ -127,17 +127,17 @@ class EvidenceTests(unittest.TestCase):
         image = oci.Image()
         for name in ("LICENSE", "NOTICE"):
             (self.context / name).write_bytes(name.encode())
-            image.files["usr/share/platinumwt/" + name] = {"type": "file", "data": name.encode()}
+            image.files["usr/share/dswt/" + name] = {"type": "file", "data": name.encode()}
         (self.context / "server/migrations").mkdir(parents=True)
         for i in range(20):
             image.files[f"usr/share/doc/package{i}/copyright"] = {"type": "file", "sha256": "1" * 64}
         image.files["var/lib/dpkg/status"] = {"type": "file", "data": b"Package: libc6\nStatus: install ok installed\nVersion: 1\n\n"}
         image.files["usr/share/doc/libc6/copyright"] = {"type": "file", "sha256": "2" * 64}
         self.assertEqual(audit.audit_sources(image, self.context, "server")["verified_source_files"], 2)
-        image.files["usr/share/platinumwt/NOTICE"]["data"] = b"different notice"
+        image.files["usr/share/dswt/NOTICE"]["data"] = b"different notice"
         with self.assertRaisesRegex(ValueError, "changed packaged"):
             audit.audit_sources(image, self.context, "server")
-        del image.files["usr/share/platinumwt/NOTICE"]
+        del image.files["usr/share/dswt/NOTICE"]
         with self.assertRaisesRegex(ValueError, "Missing required"):
             audit.audit_sources(image, self.context, "server")
 
@@ -186,7 +186,7 @@ class EvidenceTests(unittest.TestCase):
         image = oci.Image()
         for name in ("LICENSE", "NOTICE"):
             (self.context / name).write_bytes(name.encode())
-            image.files["usr/share/platinumwt/" + name] = {"type": "file", "data": name.encode()}
+            image.files["usr/share/dswt/" + name] = {"type": "file", "data": name.encode()}
         (self.context / "server/migrations").mkdir(parents=True)
         image.files["var/lib/dpkg/status"] = {"type": "file", "data": b"Package: libc6\nStatus: install ok installed\nVersion: 1\n\nPackage: libpq5\nStatus: install ok installed\nVersion: 16\n\n"}
         for name in ["libc6", "postgresql-16"] + ["unrelated" + str(i) for i in range(25)]:

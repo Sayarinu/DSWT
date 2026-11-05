@@ -21,7 +21,7 @@ static int Fail(WtEntropyPool *pool)
 
 int WtEntropy_Init(WtEntropyPool *pool, const unsigned char boot[64])
 {
-    static const unsigned char domain[] = "PWT.entropy.boot.v1";
+    static const unsigned char domain[] = "DSWT.entropy.boot.v1";
     unsigned char material[sizeof(domain) + 64];
     int result;
     if (!pool) return -1;
@@ -38,7 +38,7 @@ int WtEntropy_Init(WtEntropyPool *pool, const unsigned char boot[64])
 
 int WtEntropy_Frame(WtEntropyPool *pool, const WtEntropySample *sample)
 {
-    static const unsigned char domain[] = "PWT.entropy.frame.v1";
+    static const unsigned char domain[] = "DSWT.entropy.frame.v1";
     unsigned char material[sizeof(domain) + 85], digest[32], *p = material;
     uint64_t frame;
     unsigned keys, x, y, touchChanged, changed;
@@ -78,8 +78,8 @@ int WtEntropy_Frame(WtEntropyPool *pool, const WtEntropySample *sample)
 
 static int Derive(const WtEntropyPool *pool, const unsigned char *stored, unsigned char output[32])
 {
-    static const unsigned char seedDomain[] = "PWT.entropy.seed.v1";
-    static const unsigned char mixDomain[] = "PWT.entropy.mix.v1";
+    static const unsigned char seedDomain[] = "DSWT.entropy.seed.v1";
+    static const unsigned char mixDomain[] = "DSWT.entropy.mix.v1";
     unsigned char material[sizeof(seedDomain) + 72], *p = material;
     const unsigned char *domain = stored ? mixDomain : seedDomain;
     size_t domainSize = stored ? sizeof(mixDomain) : sizeof(seedDomain);

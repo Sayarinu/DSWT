@@ -7,7 +7,7 @@
 
 #include "trade.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 // One polling worker for MatchNext. An uncertain outcome reuses its operation ID,
 // so a retry can only return that attempt's result; only a final outcome advances.
@@ -25,4 +25,4 @@ private:
   v1::MatchRequest request_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

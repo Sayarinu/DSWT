@@ -1,11 +1,11 @@
-#ifndef PLATINUMWT_SERVER_HTTP_LISTENER_H
-#define PLATINUMWT_SERVER_HTTP_LISTENER_H
+#ifndef DSWT_SERVER_HTTP_LISTENER_H
+#define DSWT_SERVER_HTTP_LISTENER_H
 
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
 #include <memory>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 class HttpServices;
 
@@ -23,6 +23,6 @@ private:
   std::shared_ptr<HttpServices> services_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 #endif

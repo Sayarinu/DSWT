@@ -16,7 +16,7 @@ from test_wire import messages, wire
 
 
 PROBE = Path(sys.argv.pop(1)).resolve()
-ACK = b"PLATINUMWT_ACK_V1\n"
+ACK = b"DSWT_ACK_V1\n"
 RESPONSE = (
     b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
     b"Content-Length: 18\r\nConnection: close\r\n\r\n" + ACK
@@ -29,7 +29,7 @@ def http_response(body):
 
 def initial_record():
     record = bytearray(4096)
-    struct.pack_into("<4sHHIIQ", record, 0, b"PWTJ", 1, 0, 4096, 0, 1)
+    struct.pack_into("<4sHHIIQ", record, 0, b"DSWJ", 1, 0, 4096, 0, 1)
     struct.pack_into("<HH", record, 1440, 1, 32)
     record[1444:1476] = os.urandom(32)
     record[4060:4092] = hashlib.sha256(record[:4060]).digest()

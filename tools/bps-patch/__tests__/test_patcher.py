@@ -76,10 +76,10 @@ class Fixture(unittest.TestCase):
         self.inputs.mkdir()
         self.catalog = {"variants": [
             {"id": key, "name": key, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-             "pristine_verified": True, "planned_patch": f"platinum-wonder-trade-{key}.bps"}
+             "pristine_verified": True, "planned_patch": f"dswt-{key}.bps"}
             for key, data in BASES.items()] + [
             {"id": "europe", "name": "Europe", "size": 4096, "sha256": hashlib.sha256(rom(9)).hexdigest(),
-             "pristine_verified": False, "planned_patch": "platinum-wonder-trade-europe.bps"}]}
+             "pristine_verified": False, "planned_patch": "dswt-europe.bps"}]}
         self.source = {"commit": "a" * 40, "dirty": False, "upstream_repository": "upstream", "upstream_revision": "b" * 40}
         self.profile = self.write("profile.json", json.dumps(PROFILE).encode())
         self.pairs = [(self.write(f"{key}.nds", BASES[key]), self.write(f"{key}-wt.nds", TARGETS[key])) for key in BASES]
@@ -118,7 +118,7 @@ class CreateTests(Fixture):
             self.assertEqual((bundle / f"audit/{entry['variant']}.literals.bin").read_bytes(), TARGETS[entry["variant"]])
         self.assertEqual(self.leftovers(self.root / "game"), [])
         self.create(output=self.root / "game/again")
-        for name in ("manifest.json", "platinum-wonder-trade-us-rev1.bps"):
+        for name in ("manifest.json", "dswt-us-rev1.bps"):
             self.assertEqual((bundle / name).read_bytes(), (self.root / "game/again" / name).read_bytes())
 
     def test_rejections_publish_nothing(self):
@@ -232,7 +232,7 @@ class ApplyTests(Fixture):
         modified = self.write("modified.nds", BASES["us-rev1"][:-1] + b"\1")
         self.assert_rejected(source=modified)
         self.assert_rejected(source=self.pairs[1][1])
-        patch_path = self.bundle / "platinum-wonder-trade-us-rev1.bps"
+        patch_path = self.bundle / "dswt-us-rev1.bps"
         original = patch_path.read_bytes()
         def replace(data, rehash):
             patch_path.unlink()
@@ -252,7 +252,7 @@ class ApplyTests(Fixture):
 
     def test_rejects_malformed_manifests(self):
         cases = {
-            "traversal": lambda m: m["entries"][1]["patch"].update(file="../platinum-wonder-trade-us-rev1.bps"),
+            "traversal": lambda m: m["entries"][1]["patch"].update(file="../dswt-us-rev1.bps"),
             "duplicate input": lambda m: m["entries"][0].update(input=m["entries"][1]["input"]),
             "duplicate file": lambda m: m["entries"][0]["patch"].update(file=m["entries"][1]["patch"]["file"]),
             "publication": lambda m: m.update(publication_permitted=True),
@@ -390,7 +390,7 @@ class InstalledToolTests(Fixture):
             self.verify()
 
 
-@unittest.skipUnless(os.environ.get("PLATINUMWT_FLIPS_PROVENANCE"), "set PLATINUMWT_FLIPS_PROVENANCE to a prepared tool")
+@unittest.skipUnless(os.environ.get("DSWT_FLIPS_PROVENANCE"), "set DSWT_FLIPS_PROVENANCE to a prepared tool")
 class PinnedFlipsTests(Fixture):
     """Exercise the real pinned container on small synthetic ROM-shaped files."""
 
@@ -398,7 +398,7 @@ class PinnedFlipsTests(Fixture):
     temp_parent = Path(__file__).resolve().parents[3] / "game"
 
     def test_generates_twice_roundtrips_and_applies(self):
-        flips = patcher.Flips(json.loads(Path(os.environ["PLATINUMWT_FLIPS_PROVENANCE"]).read_text()))
+        flips = patcher.Flips(json.loads(Path(os.environ["DSWT_FLIPS_PROVENANCE"]).read_text()))
         manifest = self.create(flips=flips)
         self.assertEqual(self.leftovers(self.root / "game"), [])
         out = self.root / "out.nds"

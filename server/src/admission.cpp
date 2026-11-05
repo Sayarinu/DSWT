@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 struct Quota::State {
   struct Bucket {
@@ -117,4 +117,4 @@ std::string NetworkKey(const boost::asio::ip::address &address) {
       std::string(reinterpret_cast<const char *>(bytes.data() + (mapped ? 12 : 0)), mapped ? 4 : 8);
 }
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

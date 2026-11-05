@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace platinumwt {
+namespace dswt {
 namespace {
 constexpr std::size_t kSize = 524288, kBankSize = 65536;
 constexpr std::array<std::size_t, 2> kBanks{0x30000, 0x70000};

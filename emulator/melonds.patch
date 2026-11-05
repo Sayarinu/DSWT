@@ -4,7 +4,7 @@
  #include "NDS.h"
  #include "DSi.h"
  #include "NDSCart.h"
-+#include "PlatinumWTPersistence.h"
++#include "DSWTPersistence.h"
  #include "CRC32.h"
  #include "Platform.h"
  #include "ROMList.h"
@@ -41,7 +41,7 @@
  add_compile_definitions(ARCHIVE_SUPPORT_ENABLED)
  
 -add_executable(melonDS ${SOURCES_QT_SDL})
-+add_executable(melonDS ${SOURCES_QT_SDL} platinumwt/durable_save.cpp)
++add_executable(melonDS ${SOURCES_QT_SDL} dswt/durable_save.cpp)
 +find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 +target_link_libraries(melonDS PRIVATE OpenSSL::Crypto)
  
@@ -53,7 +53,7 @@
  
  bool EmuInstance::loadState(const std::string& filename)
  {
-+    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return false;
++    if (std::getenv("DSWT_DURABLE_SAVE")) return false;
      Platform::FileHandle* file = Platform::OpenFile(filename, Platform::FileMode::Read);
      if (file == nullptr)
      { // If we couldn't open the state file...
@@ -61,7 +61,7 @@
  
  bool EmuInstance::saveState(const std::string& filename)
  {
-+    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return false;
++    if (std::getenv("DSWT_DURABLE_SAVE")) return false;
      Platform::FileHandle* file = Platform::OpenFile(filename, Platform::FileMode::Write);
  
      if (file == nullptr)
@@ -69,7 +69,7 @@
  
  void EmuInstance::undoStateLoad()
  {
-+    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return;
++    if (std::getenv("DSWT_DURABLE_SAVE")) return;
      if (!savestateLoaded || !backupState) return;
  
      // Rewind the backup state and put it in load mode
@@ -77,7 +77,7 @@
  
  bool EmuInstance::loadROM(QStringList filepath, bool reset, QString& errorstr)
  {
-+    const char* managed = std::getenv("PLATINUMWT_DURABLE_SAVE");
++    const char* managed = std::getenv("DSWT_DURABLE_SAVE");
 +    if (managed && (ndsSave || !reset))
 +    {
 +        errorstr = "Restart the launcher to change a managed cartridge.";
@@ -131,7 +131,7 @@
  
  void EmuInstance::ejectCart()
  {
-+    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return;
++    if (std::getenv("DSWT_DURABLE_SAVE")) return;
      ndsSave = nullptr;
  
      if (emuIsActive())
@@ -141,7 +141,7 @@
          case msg_ImportSavefile:
              {
                  msgResult = 0;
-+                if (std::getenv("PLATINUMWT_DURABLE_SAVE")) break;
++                if (std::getenv("DSWT_DURABLE_SAVE")) break;
                  auto f = Platform::OpenFile(msg.param.value<QString>().toStdString(), Platform::FileMode::Read);
                  if (!f) break;
  
@@ -149,7 +149,7 @@
  
  int EmuThread::importSavefile(const QString& filename)
  {
-+    if (std::getenv("PLATINUMWT_DURABLE_SAVE")) return 0;
++    if (std::getenv("DSWT_DURABLE_SAVE")) return 0;
      sendMessage(msg_EmuReset);
      sendMessage({.type = msg_ImportSavefile, .param = filename});
      waitMessage(2);
@@ -190,7 +190,7 @@
 +{
 +    if (durable)
 +    {
-+        Durable = std::make_unique<platinumwt::DurableSave>(path);
++        Durable = std::make_unique<dswt::DurableSave>(path);
 +        if (!Durable->SupportsHostDurability()) throw std::runtime_error("Unsupported save filesystem");
 +    }
 +
@@ -242,7 +242,7 @@
  #include <QMutex>
  
  #include "types.h"
-+#include "platinumwt/durable_save.h"
++#include "dswt/durable_save.h"
  
  class SaveManager : public QThread
  {
@@ -260,7 +260,7 @@
  
  private:
      std::string Path;
-+    std::unique_ptr<platinumwt::DurableSave> Durable;
++    std::unique_ptr<dswt::DurableSave> Durable;
  
      std::atomic_bool Running;
  

@@ -76,7 +76,7 @@ def journal(raw, baseline=False):
     a, b = (raw[bank:bank+4096] for bank in (0x30000, 0x70000))
     if baseline and all(record in (bytes(4096), b'\xff'*4096) for record in (a, b)):
         return None
-    require(a == b and a[:6] == b'PWTJ\1\0' and a[4092:] == b'CMIT'
+    require(a == b and a[:6] == b'DSWJ\1\0' and a[4092:] == b'CMIT'
             and struct.unpack_from('<I', a, 8)[0] == 4096 and sha(a[:4060]) == a[4060:4092],
             'Journal mirrors are not identical committed v1 records')
     require(a[1440:1444] == b'\1\0\x20\0' and any(a[1444:1476])
@@ -100,10 +100,10 @@ def journal(raw, baseline=False):
 
 
 def host(path, raw):
-    store = Path(str(path)+'.platinumwt')
+    store = Path(str(path)+'.dswt')
     head, a, b = ((store/name).read_bytes() for name in ('HEAD', 'A', 'B'))
-    require(len(head) == 128 and head[:8] == b'PWTHD001' and sha(head[:-32]) == head[-32:], 'Invalid host HEAD')
-    require(a == b and len(a) == SIZE+96 and a[:8] == b'PWTHS001' and sha(a[:-32]) == a[-32:], 'Invalid host snapshots')
+    require(len(head) == 128 and head[:8] == b'DSWHD001' and sha(head[:-32]) == head[-32:], 'Invalid host HEAD')
+    require(a == b and len(a) == SIZE+96 and a[:8] == b'DSWHS001' and sha(a[:-32]) == a[-32:], 'Invalid host snapshots')
     require(a[8:64] == head[8:64] and a[64:-32] == raw and sha(raw) == head[32:64], 'Host publication mismatch')
     require(any(head[16:32]), 'Missing host lineage')
     return head[16:32], struct.unpack_from('<Q', head, 8)[0]
@@ -119,7 +119,7 @@ def traded(pk):
 def verify(before, after, slots):
     with ExitStack() as stack:
         for path in sorted(set(after)):
-            lock = stack.enter_context(Path(str(path)+'.platinumwt.lock').open('rb'))
+            lock = stack.enter_context(Path(str(path)+'.dswt.lock').open('rb'))
             fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
         sources = [p.read_bytes() for p in before]
         results = [p.read_bytes() for p in after]

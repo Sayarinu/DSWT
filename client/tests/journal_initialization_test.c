@@ -56,7 +56,7 @@ int main(void)
     memset(seed, 7, 32);
     /* Independent legacy host-provisioner layout, not the initializer's encoder. */
     memset(expected, 0, sizeof(expected));
-    memcpy(expected, "PWTJ\1\0\0\0\0\20\0\0\0\0\0\0", 16); expected[16] = 1;
+    memcpy(expected, "DSWJ\1\0\0\0\0\20\0\0\0\0\0\0", 16); expected[16] = 1;
     memcpy(expected + 1440, "\1\0\40\0", 4); memcpy(expected + 1444, seed, 32);
     assert(Hash(expected, 4060, expected + 4060) == 0); memcpy(expected + 4092, "CMIT", 4);
     for (first = 0; first < 2; first++) {

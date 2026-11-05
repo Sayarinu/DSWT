@@ -19,7 +19,7 @@ Europe and physical DS hardware are not supported yet.
 2. Back up your save file before your first Wonder Trade.
 3. Check that your ROM's SHA-256 matches `manifest.json`. A different value means
    an unsupported, trimmed, encrypted or already patched ROM, and it will not work.
-4. Apply `platinum-wonder-trade-us-rev0.bps` or `platinum-wonder-trade-us-rev1.bps`
+4. Apply `dswt-us-rev0.bps` or `dswt-us-rev1.bps`
    to the copy with your BPS patcher, then
    check the output against the output SHA-256 in `manifest.json`.
 5. Name the patched ROM so it uses your existing save, then load it in melonDS.

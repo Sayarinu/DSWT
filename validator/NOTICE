@@ -1,12 +1,12 @@
 The validator adapter, tests and build controls in this directory are licensed
-under GPL-3.0-or-later. Copyright 2026 Platinum Wonder Trade contributors.
+under GPL-3.0-or-later. Copyright 2026 DSWT contributors.
 The root MIT license continues to cover the original C++ service and schema.
 
 PKHeX.Core: copyright Kaphotics / Project Pokemon, GPL-3.0-or-later.
 Exact source revision and archive digest: upstream.env. It is built directly
 from that source; the NuGet package's timestamp is not used as source evidence.
 The runtime image includes the core source, embedded resources, license,
-adapter source, schema and build controls under /usr/share/platinumwt-validator/source.
+adapter source, schema and build controls under /usr/share/dswt-validator/source.
 Complete hash-verified gRPC .NET and Protobuf runtime source archives accompany
 them in validator/.deps/runtime-source; runtime-sources.tsv records their pins.
 Retain and provide this complete source with every binary/image distribution.

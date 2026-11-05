@@ -46,7 +46,7 @@ int main(void)
     unsigned char seed[32], output[32];
     int failure, cut;
 
-    memcpy(initial, "PWTJ\1\0\0\0\0\20\0\0\0\0\0\0", 16);
+    memcpy(initial, "DSWJ\1\0\0\0\0\20\0\0\0\0\0\0", 16);
     initial[16] = 1;
     memcpy(initial + 1440, "\1\0\40\0", 4);
     memset(initial + 1444, 1, 32);

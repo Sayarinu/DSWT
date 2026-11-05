@@ -235,7 +235,7 @@ class Flips:
 
     def run(self, stage, *arguments):
         stage.check()
-        name = "platinumwt-flips-" + secrets.token_hex(8)
+        name = "dswt-flips-" + secrets.token_hex(8)
         command = ["docker", "run", "--rm", "--name", name, "--network", "none", "--read-only",
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "16",
                    "--memory", "8g", "--user", f"{os.getuid()}:{os.getgid()}",
@@ -355,7 +355,7 @@ def prepare_flips(root=ROOT, archive=None):
             source.extractall(context, filter="data")
         (context / f"Flips-{pin['revision']}").rename(context / "source")
         (context / "Dockerfile").write_bytes(dockerfile)
-        tag = f"platinumwt-flips:{pin['version']}-{key}"
+        tag = f"dswt-flips:{pin['version']}-{key}"
         _docker("build", "--pull=false", "--tag", tag, "--iidfile", str(stage / "image-id"), str(context))
         image_id = (stage / "image-id").read_text().strip()
         binary = _image_binary(image_id, stage)
@@ -494,7 +494,7 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
             })
         entries.sort(key=lambda entry: entry["variant"])
         manifest = {
-            "schema_version": 1, "kind": "platinumwt-private-bps-bundle", "version": version,
+            "schema_version": 1, "kind": "dswt-private-bps-bundle", "version": version,
             "source": {"commit": source["commit"], "dirty": False},
             "upstream": {"repository": source["upstream_repository"], "revision": source["upstream_revision"]},
             "connection_profile_sha256": sha256(profile_bytes),
@@ -520,7 +520,7 @@ def load_manifest(data):
     except ValueError:
         raise PatchError("Malformed manifest: not JSON") from None
     _require(isinstance(manifest, dict) and manifest.get("schema_version") == 1
-             and manifest.get("kind") == "platinumwt-private-bps-bundle", "unsupported schema")
+             and manifest.get("kind") == "dswt-private-bps-bundle", "unsupported schema")
     _require(manifest.get("publication_permitted") is False and manifest.get("distribution_blocked") is True,
              "a private bundle must be blocked from publication and distribution")
     entries = manifest.get("entries")

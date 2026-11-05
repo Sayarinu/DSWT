@@ -1,18 +1,18 @@
-#include "platinumwt/server/identity_service.h"
+#include "dswt/server/identity_service.h"
 
-#include "platinumwt/server/identity_store.h"
+#include "dswt/server/identity_store.h"
 #include "admission.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <openssl/crypto.h>
 
 #include <algorithm>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 struct CredentialBuffer {
   SaveCredential bytes{};
@@ -55,7 +55,7 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
     }
     detail::Database database(connection_info_);
     detail::Transaction transaction(database, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    auto row = database.Parameters("SELECT next_counter::text,event_highwater::text FROM platinumwt.save_identities WHERE save_id=$1::uuid",
+    auto row = database.Parameters("SELECT next_counter::text,event_highwater::text FROM dswt.save_identities WHERE save_id=$1::uuid",
         {detail::HexBytes(id)});
     if (PQntuples(row.get()) != 1) throw std::runtime_error("identity disappeared");
     const auto highwater = detail::Unsigned(PQgetvalue(row.get(), 0, 1));
@@ -75,4 +75,4 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
   }
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

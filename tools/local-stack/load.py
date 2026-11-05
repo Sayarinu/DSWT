@@ -275,8 +275,8 @@ class Load:
     def configure(self, args):
         """Recreate the stack with the run's sizing: one isolated validator worker and CPU per Submit handler."""
         workers = str(args.submission_workers)
-        self.local.env.update(PWT_LOCAL_MATCHERS=str(args.matchers), PWT_LOCAL_SUBMISSION_WORKERS=workers,
-                              PWT_LOCAL_VALIDATOR_WORKERS=workers)
+        self.local.env.update(DSWT_LOCAL_MATCHERS=str(args.matchers), DSWT_LOCAL_SUBMISSION_WORKERS=workers,
+                              DSWT_LOCAL_VALIDATOR_WORKERS=workers)
         acceptance.require((os.cpu_count() or 0) >= args.submission_workers + 8, "too few host CPUs for this sizing")
         self.local.up()
         self.local.run(["update", "--cpus", workers, self.container_id("validator")], capture=True)
@@ -286,7 +286,7 @@ class Load:
 
     def restore(self):
         """Recreate every application with compose defaults, which also clears run-specific limits."""
-        for name in ("PWT_LOCAL_MATCHERS", "PWT_LOCAL_SUBMISSION_WORKERS", "PWT_LOCAL_VALIDATOR_WORKERS"):
+        for name in ("DSWT_LOCAL_MATCHERS", "DSWT_LOCAL_SUBMISSION_WORKERS", "DSWT_LOCAL_VALIDATOR_WORKERS"):
             self.local.env.pop(name, None)
         self.local.up()
 
@@ -322,16 +322,16 @@ class Load:
     def retained(self, sequence=None):
         """Digest acknowledged receipts and terminal (applied) ownership at a journal position; later reads must match."""
         if sequence is None:
-            sequence = int(self.runner.sql("SELECT coalesce(max(sequence), 0) FROM platinumwt.audit_journal"))
+            sequence = int(self.runner.sql("SELECT coalesce(max(sequence), 0) FROM dswt.audit_journal"))
         digest = ("SET bytea_output = 'hex'; SELECT count(*) || ' ' || encode(sha256(convert_to(coalesce(string_agg(row, "
                   "E'\\n' ORDER BY row), ''), 'UTF8')), 'hex') FROM ({}) item")
         receipts = self.runner.sql(digest.format(
-            "SELECT to_jsonb(r)::text || to_jsonb(a)::text AS row FROM platinumwt.receipts r "
-            "JOIN platinumwt.acknowledgements a USING (receipt_id) WHERE r.receipt_id IN (SELECT (row_key ->> "
-            f"'receipt_id')::uuid FROM platinumwt.audit_journal WHERE table_name = 'acknowledgements' AND sequence <= {sequence})"))
+            "SELECT to_jsonb(r)::text || to_jsonb(a)::text AS row FROM dswt.receipts r "
+            "JOIN dswt.acknowledgements a USING (receipt_id) WHERE r.receipt_id IN (SELECT (row_key ->> "
+            f"'receipt_id')::uuid FROM dswt.audit_journal WHERE table_name = 'acknowledgements' AND sequence <= {sequence})"))
         ownership = self.runner.sql(digest.format(
-            "SELECT to_jsonb(o)::text AS row FROM platinumwt.ownership o WHERE o.asset_id IN (SELECT (row_key ->> "
-            "'asset_id')::uuid FROM platinumwt.audit_journal WHERE table_name = 'ownership' "
+            "SELECT to_jsonb(o)::text AS row FROM dswt.ownership o WHERE o.asset_id IN (SELECT (row_key ->> "
+            "'asset_id')::uuid FROM dswt.audit_journal WHERE table_name = 'ownership' "
             f"AND after_image ->> 'location' = '3' AND sequence <= {sequence})"))
         return {"sequence": sequence, "receipts": receipts.splitlines()[-1], "ownership": ownership.splitlines()[-1]}
 
@@ -377,16 +377,16 @@ class Load:
     def pair_times(self, start, end):
         """Completed pairs (both ACKs) and accepted offers by commit time, and distinct saves trading in the window."""
         rows = self.runner.rows(
-            "SELECT extract(epoch FROM max(j.recorded_at))::float8 AS completed FROM platinumwt.matches m "
-            "JOIN platinumwt.receipts r ON r.match_id = m.match_id JOIN platinumwt.audit_journal j "
+            "SELECT extract(epoch FROM max(j.recorded_at))::float8 AS completed FROM dswt.matches m "
+            "JOIN dswt.receipts r ON r.match_id = m.match_id JOIN dswt.audit_journal j "
             "ON j.table_name = 'acknowledgements' AND j.row_key ->> 'receipt_id' = r.receipt_id::text "
             "GROUP BY m.match_id HAVING count(*) = 2")
         offers = self.runner.rows(
-            "SELECT extract(epoch FROM j.recorded_at)::float8 AS accepted FROM platinumwt.operations o "
-            "JOIN platinumwt.audit_journal j ON j.table_name = 'operations' AND j.row_key ->> 'operation_id' = o.operation_id::text "
+            "SELECT extract(epoch FROM j.recorded_at)::float8 AS accepted FROM dswt.operations o "
+            "JOIN dswt.audit_journal j ON j.table_name = 'operations' AND j.row_key ->> 'operation_id' = o.operation_id::text "
             "AND j.row_key ->> 'save_id' = o.save_id::text WHERE o.opcode = 2 AND o.result = 1")
         traders = int(self.runner.sql(
-            "SELECT count(DISTINCT o.save_id) FROM platinumwt.operations o JOIN platinumwt.audit_journal j "
+            "SELECT count(DISTINCT o.save_id) FROM dswt.operations o JOIN dswt.audit_journal j "
             "ON j.table_name = 'operations' AND j.row_key ->> 'operation_id' = o.operation_id::text "
             "AND j.row_key ->> 'save_id' = o.save_id::text WHERE o.opcode = 2 AND o.result = 1 "
             f"AND j.recorded_at >= to_timestamp({start}) AND j.recorded_at < to_timestamp({end})"))
@@ -411,7 +411,7 @@ class Load:
         holders = [state["inventory"] for state in final]
         identities = {row["save_id"]: row for row in self.runner.rows(
             "SELECT replace(save_id::text, '-', '') AS save_id, next_counter::text, event_highwater::text "
-            "FROM platinumwt.save_identities")}
+            "FROM dswt.save_identities")}
         checks = {
             "clients_settled": all(state["phase"] == SETTLED and not state["pending_sha256"] for state in final),
             "one_exact_payload_each": all(banks[0] == banks[1] and len(banks[0]) == 1 for banks in holders),
@@ -422,17 +422,17 @@ class Load:
             "client_server_checkpoints": all(
                 identities.get(state["save_id"], {}).get("next_counter") == str(state["next_counter"])
                 and int(identities[state["save_id"]]["event_highwater"]) >= state["event_cursor"] for state in final),
-            "no_pending_offers": self.runner.sql("SELECT count(*) FROM platinumwt.offers WHERE state <> 4") == "0",
+            "no_pending_offers": self.runner.sql("SELECT count(*) FROM dswt.offers WHERE state <> 4") == "0",
             "receipts_applied_exactly": self.runner.sql(
-                "SELECT count(*) FROM platinumwt.receipts r JOIN platinumwt.ownership o USING (asset_id, save_id, trade_id) "
-                "JOIN platinumwt.payloads p USING (asset_id) LEFT JOIN platinumwt.acknowledgements a USING (receipt_id, save_id) "
+                "SELECT count(*) FROM dswt.receipts r JOIN dswt.ownership o USING (asset_id, save_id, trade_id) "
+                "JOIN dswt.payloads p USING (asset_id) LEFT JOIN dswt.acknowledgements a USING (receipt_id, save_id) "
                 "WHERE o.location <> 3 OR a.applied_sha256 IS DISTINCT FROM p.sha256") == "0",
             # At least one checkpoint must exist; acknowledged receipts and applied ownership never change afterwards.
             "receipts_and_ownership_immutable": bool(self.checkpoints)
                 and all(self.retained(item["sequence"]) == item for item in self.checkpoints),
             "drain_settled": results["drain_unsettled"] == 0,
         }
-        self.local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=1200)
+        self.local.compose("exec", "-T", "backend", "/build/dswt-ledger", "verify", capture=True, timeout=1200)
         checks["ledger_replay"] = True
         return {"status": "pass" if all(checks.values()) else "fail", "checks": checks,
                 "immutability_checkpoints": len(self.checkpoints)}

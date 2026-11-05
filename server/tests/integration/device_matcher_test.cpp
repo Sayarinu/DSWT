@@ -4,7 +4,7 @@
 #include <vector>
 
 namespace {
-using namespace platinumwt;
+using namespace dswt;
 
 TEST(DeviceMatcherTest, UncertainOutcomesReuseIdAndOnlyFinalOutcomesAdvance) {
   class Endpoint : public v1::TradeMatcher::Service {
