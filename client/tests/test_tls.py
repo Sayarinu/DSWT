@@ -19,7 +19,7 @@ PROBE = Path(sys.argv.pop(1)).resolve()
 ACK = b"DSWT_ACK_V1\n"
 RESPONSE = (
     b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-    b"Content-Length: 18\r\nConnection: close\r\n\r\n" + ACK
+    b"Content-Length: 12\r\nConnection: close\r\n\r\n" + ACK
 )
 
 def http_response(body):
@@ -173,8 +173,8 @@ class TlsTests(unittest.TestCase):
     def test_malformed_and_truncated_bodies_are_rejected(self):
         for response in (
             RESPONSE[:-1], RESPONSE.replace(b"200 OK", b"302 Found"),
-            RESPONSE.replace(b"Content-Length: 18", b"Transfer-Encoding: chunked"),
-            RESPONSE.replace(b"Content-Length: 18", b"Content-Length: 4097"),
+            RESPONSE.replace(b"Content-Length: 12", b"Transfer-Encoding: chunked"),
+            RESPONSE.replace(b"Content-Length: 12", b"Content-Length: 4097"),
             RESPONSE.replace(b"application/octet-stream", b"text/html"),
         ):
             with self.subTest(response=response[:40]):

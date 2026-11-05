@@ -157,7 +157,7 @@ struct Head {
     Digest digest{}, previous{};
 };
 Bytes EncodeHead(const Head &head) {
-    Bytes bytes{'P','W','T','H','D','0','0','1'};
+    Bytes bytes{'D','S','W','H','D','0','0','1'};
     Append(bytes, head.generation); Append(bytes, head.lineage); Append(bytes, head.digest); Append(bytes, head.previous);
     Seal(bytes);
     return bytes;
@@ -167,7 +167,7 @@ Head DecodeHead(const Bytes &bytes) {
     return {Generation(bytes), Field<16>(bytes, 16), Field<32>(bytes, 32), Field<32>(bytes, 64)};
 }
 Bytes Snapshot(const Head &head, const Bytes &data) {
-    Bytes bytes{'P','W','T','H','S','0','0','1'};
+    Bytes bytes{'D','S','W','H','S','0','0','1'};
     Append(bytes, head.generation); Append(bytes, head.lineage); Append(bytes, head.digest);
     bytes.insert(bytes.end(), data.begin(), data.end());
     Seal(bytes);
