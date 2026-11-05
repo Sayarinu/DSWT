@@ -1,0 +1,226 @@
+# DSWT production stack. Only HTTPS is public; Grafana is on loopback for an SSH
+# tunnel. Run through deploy/dswt.py, which prepares the database and archive.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  logging: *logging
+
+x-server: &server
+  <<: *hardened
+  image: dswt-server:${DSWT_VERSION}
+  user: ${DSWT_UID}:${DSWT_GID}
+  tmpfs: [/tmp]
+  stop_grace_period: 15s
+
+# Everything else joins this namespace, so a restarted service keeps its peers.
+x-private-network: &private-network
+  network_mode: service:netns
+  depends_on: [netns]
+
+x-database-client: &database-client
+  PGHOST: /run/dswt-database
+  PGPORT: "5432"
+  PGDATABASE: dswt
+  PGUSER: dswt_service
+
+services:
+  netns:
+    <<: *hardened
+    image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+    ports:
+      - 443:8443
+      - 127.0.0.1:3000:3000
+
+  database:
+    image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+    network_mode: none
+    restart: unless-stopped
+    logging: *logging
+    entrypoint:
+      - sh
+      - -c
+      - install -d -o postgres -g postgres -m 0700 /archive && exec docker-entrypoint.sh "$$@"
+      - --
+    environment:
+      POSTGRES_USER: dswt_admin
+      POSTGRES_DB: dswt
+      # Only the mounted socket is reachable.
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_INITDB_ARGS: --wal-segsize=1
+    command:
+      - postgres
+      - -c
+      - listen_addresses=
+      - -c
+      - fsync=on
+      - -c
+      - full_page_writes=on
+      - -c
+      - synchronous_commit=on
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -e /archive/.hold && /usr/local/bin/wal-archive.sh archive /archive %p %f
+    volumes:
+      - data:/var/lib/postgresql/data
+      - socket:/var/run/postgresql
+      - archive:/archive
+      - {type: bind, source: ./wal-archive.sh, target: /usr/local/bin/wal-archive.sh, read_only: true}
+    healthcheck:
+      test: [CMD, pg_isready, -h, /var/run/postgresql, -U, dswt_admin, -d, dswt]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 60s
+
+  migrate:
+    <<: *server
+    profiles: [tools]
+    restart: "no"
+    network_mode: none
+    environment: *database-client
+    volumes: [socket:/run/dswt-database]
+    entrypoint: [/usr/local/bin/dswt-ledger]
+    command: [migrate, /usr/local/share/dswt/migrations]
+
+  gateway:
+    <<: [*server, *private-network]
+    entrypoint: [/usr/local/bin/dswt-server]
+    environment:
+      WT_HTTP_PORT: "8443"
+      WT_METRICS_PORT: "9091"
+      WT_SUBMISSION_WORKERS: "4"
+      WT_TRADE_TARGET: 127.0.0.1:50053
+      WT_TLS_CERTIFICATE: /tls/current.pem
+      WT_TLS_PRIVATE_KEY: /tls/current.key
+    volumes:
+      - {type: bind, source: ./tls, target: /tls, read_only: true}
+
+  validator:
+    <<: [*hardened, *private-network]
+    image: dswt-validator:${DSWT_VERSION}
+    environment:
+      WT_VALIDATOR_WORKERS: "2"
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
+    mem_limit: 512m
+    pids_limit: 128
+    stop_grace_period: 10s
+
+  backend:
+    <<: [*server, *private-network]
+    depends_on:
+      netns: {condition: service_started}
+      database: {condition: service_healthy}
+      validator: {condition: service_started}
+    entrypoint: [/usr/local/bin/dswt-backend]
+    environment:
+      <<: *database-client
+      DSWT_DATABASE_URL: host=/run/dswt-database port=5432 dbname=dswt user=dswt_service
+      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-dswt2
+      WT_METRICS_PORT: "9092"
+      WT_SUBMISSION_WORKERS: "4"
+    volumes: [socket:/run/dswt-database]
+
+  # No network at all: it only needs the database socket.
+  matcher:
+    <<: *server
+    network_mode: none
+    depends_on:
+      database: {condition: service_healthy}
+    entrypoint: [/usr/local/bin/dswt-matcher]
+    environment:
+      <<: *database-client
+      DSWT_DATABASE_URL: host=/run/dswt-database port=5432 dbname=dswt user=dswt_service
+      WT_MATCHER_WORKERS: "1"
+    volumes: [socket:/run/dswt-database]
+
+  prometheus:
+    <<: [*hardened, *private-network]
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    user: "65534:65534"
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - prometheus:/prometheus
+      - {type: bind, source: ./observability/prometheus.yml, target: /etc/prometheus/prometheus.yml, read_only: true}
+      - {type: bind, source: ./observability/rules.yml, target: /etc/prometheus/rules.yml, read_only: true}
+
+  alertmanager:
+    <<: [*hardened, *private-network]
+    image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    user: "65534:65534"
+    tmpfs: [/tmp]
+    mem_limit: 64m
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=127.0.0.1:9093
+      - --cluster.listen-address=
+    volumes:
+      - alertmanager:/alertmanager
+      - {type: bind, source: ./observability/alertmanager.yml, target: /etc/alertmanager/alertmanager.yml, read_only: true}
+
+  node-exporter:
+    <<: [*hardened, *private-network]
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+    user: "65534:65534"
+    mem_limit: 32m
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+    volumes:
+      - {type: bind, source: /, target: /host, read_only: true, bind: {propagation: rslave}}
+
+  grafana:
+    <<: [*hardened, *private-network]
+    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+    user: ${DSWT_UID}:${DSWT_GID}
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=128m"]
+    mem_limit: 384m
+    environment:
+      GF_SERVER_HTTP_ADDR: 0.0.0.0
+      GF_SERVER_HTTP_PORT: "3000"
+      # Stateless: provisioning and the password file define everything.
+      GF_PATHS_DATA: /tmp
+      GF_PATHS_LOGS: /tmp
+      GF_PATHS_PLUGINS: /tmp
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/dswt/grafana-admin-password
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      # It otherwise downloads plugins into this memory-backed storage at each start.
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+    volumes:
+      - {type: bind, source: ./observability/grafana, target: /etc/grafana/provisioning, read_only: true}
+      - {type: bind, source: ./secrets/grafana-admin-password, target: /run/dswt/grafana-admin-password, read_only: true}
+
+# External so that no Compose command can delete the ledger or its archive.
+volumes:
+  data: {external: true, name: dswt-data}
+  socket: {external: true, name: dswt-socket}
+  archive: {external: true, name: dswt-archive}
+  prometheus: {external: true, name: dswt-prometheus}
+  alertmanager: {external: true, name: dswt-alertmanager}

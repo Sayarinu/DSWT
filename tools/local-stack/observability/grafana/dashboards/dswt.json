@@ -93,7 +93,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{__name__=~\"dswt_oldest_(queue|delivery)_seconds\"}",
+          "expr": "{__name__=~\"dswt_oldest_(queue|delivery)_age_seconds\"}",
           "legendFormat": "{{__name__}}"
         }
       ]

@@ -95,6 +95,10 @@ and rejects new keys when full. Limits are per process; account
 for all replicas in database/validator/node capacity and complete the soak gate
 before production. These limits are resource bounds, not throughput guarantees.
 
+## Deployment
+
+[`deploy/README.md`](deploy/README.md) runs DSWT on a VPS with Docker Compose.
+
 ## Private telemetry
 
 Set `WT_METRICS_PORT` to a nonzero port to enable `GET /metrics` on IPv4 loopback;

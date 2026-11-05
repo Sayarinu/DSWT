@@ -2,6 +2,10 @@
   "note": "Explicit path rules for inventory review. A category is not a rights decision.",
   "rules": [
     {
+      "path": "deploy",
+      "category": "project-source"
+    },
+    {
       "path": "server",
       "category": "project-source"
     },

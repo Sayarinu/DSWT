@@ -14,11 +14,8 @@ Preserve upstream notices and record its revision when refreshing the workspace.
 - Server protocols will use gRPC.
 - The legality validator is an isolated pinned PKHeX.Core gRPC service in .NET,
   with its GPL source and notice obligations.
-- Docker will package services, and Kubernetes (k3s) will orchestrate them.
-- The deployment target will be a VPS with AWS resources managed through
-  Terraform.
-- GitHub Actions will support CI/CD, Argo CD will manage deployment from Git,
-  and GHCR will store container images.
+- Docker Compose runs the services on one Hetzner VPS; see `deploy/README.md`.
+- GitHub Actions supports CI.
 - Prometheus and Grafana will provide monitoring and dashboards.
 - Dependabot will help keep dependencies and actions up to date.
 
