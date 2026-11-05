@@ -26,6 +26,7 @@ RUN apt-get -o APT::Update::Error-Mode=any update && apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build/platinumwt-server /usr/local/bin/platinumwt-server
 COPY --from=build /build/platinumwt-backend /usr/local/bin/platinumwt-backend
+COPY --from=build /build/platinumwt-matcher /usr/local/bin/platinumwt-matcher
 COPY --from=build /build/platinumwt-ledger /usr/local/bin/platinumwt-ledger
 COPY server/migrations /usr/local/share/platinumwt/migrations
 COPY LICENSE NOTICE /usr/share/platinumwt/

@@ -52,14 +52,13 @@ barrier, but a final success may not. The backup/recovery implementation must
 prove this barrier before launch; an incomplete restore keeps trading paused.
 
 The private C++ backend registers enrollment and lifecycle services. Its default
-recovery provider stays closed and must bind a recoverable WAL prefix to the current cluster
-and timeline; absence fails closed. A bounded in-memory cache ties conservative
+recovery provider attests archived WAL on the current cluster and timeline; absence fails closed. A bounded in-memory cache ties conservative
 WAL requirements to committed per-identity event highwaters, so retry row locks
-cannot keep moving the target. Restart services after recovery. Real off-site
-attestation remains a separate integration gate. The HTTPS gateway routes only
+cannot keep moving the target. Restart services after recovery. The archive
+target decides whether attestation is really off-site. The HTTPS gateway routes only
 the seven versioned DS operations, with no matcher RPC access or plaintext fallback.
 
-The unregistered worker-only matcher serializes each short pair transaction with
+The worker-only matcher has no network endpoint. It serializes each short pair transaction with
 a database advisory lock shared across replicas. It anchors the oldest unlocked
 eligible offer by its immutable admission event and randomly chooses a distinct
 unlocked owner. Busy workers return `PROCESSING`; reuse that operation ID. A

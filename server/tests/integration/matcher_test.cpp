@@ -1,3 +1,4 @@
+#include "platinumwt/server/match_worker.h"
 #include "platinumwt/server/matcher_service.h"
 #include "platinumwt/server/trade_service.h"
 #include "platinumwt/server/identity_store.h"
@@ -153,6 +154,34 @@ protected:
     }
   }
 };
+
+TEST_F(MatcherTest, PairAvailabilityNeedsTwoQueuedOwnersAndWritesNothing) {
+  const auto attempts = Scalar("SELECT count(*) FROM platinumwt.matcher_attempts");
+  const auto position = Scalar("SELECT pg_current_wal_insert_lsn()");
+  EXPECT_FALSE(matcher.PairAvailable());
+  Queue();
+  EXPECT_FALSE(matcher.PairAvailable());
+  Queue();
+  const auto queued = Scalar("SELECT pg_current_wal_insert_lsn()");
+  EXPECT_NE(position, queued);
+  EXPECT_TRUE(matcher.PairAvailable());
+  EXPECT_EQ(Scalar("SELECT count(*) FROM platinumwt.matcher_attempts"), attempts);
+  EXPECT_EQ(Scalar("SELECT pg_current_wal_insert_lsn()"), queued);
+}
+
+TEST_F(MatcherTest, PairAvailabilityFailsClosedWithoutADatabase) {
+  EXPECT_FALSE(MatcherService("host=/nonexistent port=1 dbname=none").PairAvailable());
+}
+
+TEST_F(MatcherTest, InProcessWorkerPairsQueuedOffersWithoutANetworkEndpoint) {
+  const auto first = Queue(), second = Queue();
+  MatchWorker worker([this](const auto &request, auto *reply) { return matcher.MatchNext(nullptr, &request, reply); });
+  EXPECT_EQ(worker.Poll().count(), 0);
+  EXPECT_EQ(Collect(first).context().result(), v1::RESULT_OK);
+  EXPECT_EQ(Collect(second).context().result(), v1::RESULT_OK);
+  EXPECT_FALSE(worker.Pending());
+  EXPECT_GT(worker.Poll().count(), 0) << "nothing further to pair";
+}
 
 TEST_F(MatcherTest, InvalidRequestsAndMissingRecoveryDoNotCreateAttempts) {
   for (auto operation : {std::string{}, std::string(16, '\0'), std::string(17, 'x')})

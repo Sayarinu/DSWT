@@ -50,6 +50,11 @@ add_test(NAME integration.wal_archive_barrier
         $<TARGET_FILE:platinumwt-barrier-probe> "${CMAKE_CURRENT_SOURCE_DIR}/../wal-archive.sh")
 set_tests_properties(integration.wal_archive_barrier PROPERTIES TIMEOUT 240 LABELS "integration")
 
+add_test(NAME integration.matcher_process
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_matcher_process.py"
+        $<TARGET_FILE:platinumwt-matcher>)
+set_tests_properties(integration.matcher_process PROPERTIES TIMEOUT 30 LABELS "integration")
+
 add_executable(platinumwt-trade-tests integration/trade_test.cpp)
 target_include_directories(platinumwt-trade-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 target_link_libraries(platinumwt-trade-tests PRIVATE platinumwt_trading platinumwt_ledger PostgreSQL::PostgreSQL GTest::gtest)
@@ -78,7 +83,7 @@ set_tests_properties(integration.device_fixture_refuses_unconfigured_start
     PROPERTIES WILL_FAIL TRUE TIMEOUT 10 LABELS "integration")
 
 add_executable(platinumwt-device-matcher-tests integration/device_matcher_test.cpp)
-target_link_libraries(platinumwt-device-matcher-tests PRIVATE platinumwt_protocol OpenSSL::Crypto GTest::gtest_main)
+target_link_libraries(platinumwt-device-matcher-tests PRIVATE platinumwt_trading platinumwt_protocol OpenSSL::Crypto GTest::gtest_main)
 gtest_discover_tests(platinumwt-device-matcher-tests TEST_PREFIX "integration." PROPERTIES TIMEOUT 15 LABELS "integration")
 add_test(NAME integration.device_fixture_connection_guards
     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_device_fixture.py"

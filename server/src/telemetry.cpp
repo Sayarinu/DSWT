@@ -39,6 +39,10 @@ Telemetry::Telemetry() {
   for (auto &counter : elapsed_us_) counter.store(0);
 }
 
+static const char *RoleName(TelemetryRole role) {
+  return role == TelemetryRole::Gateway ? "gateway" : role == TelemetryRole::Matcher ? "matcher" : "backend";
+}
+
 void Telemetry::Initialize(TelemetryRole role) {
   role_ = role;
   logs_.store(true, std::memory_order_release);
@@ -48,7 +52,7 @@ std::string Telemetry::LogLine(Operation operation, unsigned result, std::uint64
                               std::string_view request, std::string_view mutation, std::string_view trade, TelemetryRole role) {
   std::ostringstream output;
   output.imbue(std::locale::classic());
-  output << "{\"event\":\"trade_request\",\"service\":\"" << (role == TelemetryRole::Gateway ? "gateway" : "backend") << "\",\"timestamp_ms\":"
+  output << "{\"event\":\"trade_request\",\"service\":\"" << RoleName(role) << "\",\"timestamp_ms\":"
          << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()
          << ",\"operation\":\"" << kOperationNames[Index(operation)]
          << "\",\"result\":\"" << kResultNames[result < 12 ? result : 0] << "\",\"duration_us\":" << elapsed;
@@ -89,7 +93,7 @@ std::string Telemetry::Render() const {
   std::ostringstream output;
   output.imbue(std::locale::classic());
   output << std::setprecision(12);
-  const char *role = role_ == TelemetryRole::Gateway ? "gateway" : "backend";
+  const char *role = RoleName(role_);
   output << "# HELP platinumwt_requests_total Completed API/legality attempts; not committed trades.\n# TYPE platinumwt_requests_total counter\n";
   for (unsigned op = 0; op < kOperations; ++op) {
     const std::string labels = std::string("service=\"") + role + "\",operation=\"" + kOperationNames[op] + '"';
