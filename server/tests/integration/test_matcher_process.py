@@ -11,6 +11,16 @@ import time
 import unittest
 
 
+def sockets(pid):
+    links = set()
+    for fd in Path(f"/proc/{pid}/fd").iterdir():
+        try:
+            links.add(os.readlink(fd))
+        except FileNotFoundError:  # A database retry closed it after the listing; a listener would stay open.
+            pass
+    return {link for link in links if link.startswith("socket:")}
+
+
 class MatcherProcessTests(unittest.TestCase):
     def env(self, **extra):
         env = {key: value for key, value in os.environ.items()
@@ -40,8 +50,7 @@ class MatcherProcessTests(unittest.TestCase):
                 for table in ("tcp", "tcp6"):
                     listening = [line for line in Path(f"/proc/{process.pid}/net/{table}").read_text().splitlines()[1:]
                                  if line.split()[3] == "0A"]
-                    owned = {link for fd in Path(f"/proc/{process.pid}/fd").iterdir()
-                             for link in [os.readlink(fd)] if link.startswith("socket:")}
+                    owned = sockets(process.pid)
                     self.assertFalse([line for line in listening if f"socket:[{line.split()[9]}]" in owned])
                 started = time.monotonic()
                 process.send_signal(signal.SIGTERM)

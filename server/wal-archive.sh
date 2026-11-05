@@ -10,10 +10,15 @@
 #   wal-archive.sh init DESTINATION SYSTEM_IDENTIFIER FIRST_SEGMENT
 #   wal-archive.sh arm DESTINATION
 #   wal-archive.sh archive DESTINATION %p %f
+#   wal-archive.sh rotate DESTINATION NEW_BASE
 #
 # Nothing ships until the chain is armed, so the barrier cannot open without a
 # restorable start: run init, take a self-contained base backup (pg_basebackup
 # -X stream, because the archive is not shipping yet), then arm.
+#
+# rotate makes a verified, self-contained base backup the chain's new start and
+# deletes what it replaces. Every step leaves a restorable archive: if it stops
+# between the two renames, base.old is the valid base until the next rotate.
 set -euo pipefail
 
 fail() { echo "wal-archive: $*" >&2; exit 1; }
@@ -93,7 +98,36 @@ archive)
     fi
     publish "$path" "$destination" "$name"
     ;;
+rotate)
+    (($# == 3)) || fail "usage: rotate DESTINATION NEW_BASE"
+    destination=$2 new_base=$3
+    [[ -e $destination/chain.armed ]] || fail "chain not armed"
+    first=$(sed -n 's/^START WAL LOCATION: .*(file \([0-9A-F]\{24\}\))$/\1/p' "$new_base/backup_label")
+    is_segment "$first" || fail "$new_base has no usable backup label"
+    read -r system previous <"$destination/chain.start"
+    [[ ${first:0:8} == "${previous:0:8}" ]] || fail "$new_base is on another timeline; start a new archive"
+    [[ ! $first < $previous ]] || fail "$new_base is older than the chain"
+    if [[ -e $destination/base ]]; then
+        rm -rf "$destination/base.old"
+        mv "$destination/base" "$destination/base.old"
+    fi
+    mv "$new_base" "$destination/base"
+    sync "$destination"
+    temporary=$(mktemp "$destination/.chain.XXXXXX")
+    printf '%s %s\n' "$system" "$first" >"$temporary"
+    sync "$temporary"
+    mv "$temporary" "$destination/chain.start"
+    sync "$destination"
+    rm -rf "$destination/base.old"
+    for path in "$destination"/*; do
+        name=${path##*/}
+        if [[ $name =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ && ${name:0:24} < $first ]]; then
+            rm -f "$path"
+        fi
+    done
+    sync "$destination"
+    ;;
 *)
-    fail "usage: $0 init|archive ..."
+    fail "usage: $0 init|arm|archive|rotate ..."
     ;;
 esac
