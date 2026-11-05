@@ -266,8 +266,8 @@ party Eggs, HP, held items, capsules or moves edited in both retail copies.
 With the isolated trade services running, opening Wonder Trade connects and
 reconciles the save identity/history. Confirming a Pokémon persists its escrow
 before sending a deposit. Collection persists the received image and receipt
-before acknowledgement. Do not use a production endpoint for these tests. Info
-reports connection time (including seed I/O), peak TLS bytes, worker stack use
+before acknowledgement. Do not use a production endpoint for these tests. Holding
+Select while choosing Info reports connection time (including seed I/O), peak TLS bytes, worker stack use
 and maximum main-loop frame gap. Errors report a connection code. The TLS arena
 is capped at 65,536 bytes; the worker stack is 32 KiB, and the application heap
 is 320 KiB.

@@ -213,7 +213,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         String_Free(number);
     } else if (app->state == WT_APP_MESSAGE) {
         if (app->statusMessage == WonderTrade_Text_Completed && app->network.hasReceived) WonderTrade_DrawReceived(app);
-        if (app->statusMessage == WonderTrade_Text_Explanation) {
+        if (app->statusMessage == WonderTrade_Text_Diagnostics) {
             const int labels[] = { WonderTrade_Text_ConnectMs, WonderTrade_Text_TlsBytes, WonderTrade_Text_StackBytes, WonderTrade_Text_FrameMs };
             const u32 values[] = { app->network.handshakeMs, app->network.tlsPeakBytes, app->network.stackBytes, app->network.maxFrameMs };
             String *number = String_Init(12, HEAP_ID_WONDER_TRADE);
@@ -475,7 +475,9 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
             if (app->network.tradePhase == WT_JOURNAL_IDLE && app->fieldSystem) WonderTrade_StartPicker(app);
             else WonderTrade_Show(app, WT_APP_COLLECT_CONFIRM, WonderTrade_Text_ConfirmCollect);
         } else if (app->cursor == 1) {
-            if (app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Explanation);
+            /* Holding Select shows the connection numbers needed for hardware validation. */
+            if (app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE,
+                JOY_HELD(PAD_BUTTON_SELECT) ? WonderTrade_Text_Diagnostics : WonderTrade_Text_Explanation);
             else WonderTrade_Show(app, WT_APP_CANCEL_CONFIRM, WonderTrade_Text_ConfirmCancel);
         } else {
             WonderTrade_Close(app);

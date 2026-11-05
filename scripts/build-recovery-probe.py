@@ -72,7 +72,7 @@ def build():
             '    if (worker->result == 0) worker->result = WtRecovery_ProbeEntrypoints() ? 1 : -100;',
         '    u32 size, unused;': '    u32 size, unused;\n    int probeOK;',
         '    OS_JoinThread(&worker->thread);': '    OS_JoinThread(&worker->thread);\n    probeOK = worker->result == 1;',
-        '    WonderTrade_Show(app, WT_APP_RECOVERY, WonderTrade_Text_RecoveryRequired);': '    WonderTrade_Show(app, WT_APP_RECOVERY, probeOK ? WonderTrade_Text_Acknowledged : WonderTrade_Text_RecoveryRequired);',
+        '    WonderTrade_Show(app, WT_APP_RECOVERY, WonderTrade_Text_RecoveryRequired);': '    WonderTrade_Show(app, WT_APP_RECOVERY, probeOK ? WonderTrade_Text_ProbePassed : WonderTrade_Text_RecoveryRequired);',
     }
     for old, new in replacements.items():
         if text.count(old) != 1:
@@ -80,9 +80,8 @@ def build():
         text = text.replace(old, new)
     original_messages = (ROOT / "client/res/text/wonder_trade.json").read_bytes()
     data = json.loads(original_messages)
-    for message in data["messages"]:
-        if message["id"] == "WonderTrade_Text_Acknowledged":
-            message["en_US"] = "Retail guards and receive replay\npassed. Save data unchanged."
+    data["messages"].append({"id": "WonderTrade_Text_ProbePassed",
+                             "en_US": "Retail guards and receive replay\npassed. Save data unchanged."})
     edits = [
         (workspace / ".git/platinumwt-entrypoint-probe.inc", None, (ROOT / "client/tests/retail_guard_probe.c").read_bytes()),
         (app, original, text.encode()),
