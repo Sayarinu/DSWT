@@ -58,12 +58,12 @@
       "en_US": "Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail or capsules."
     },
     {
-      "id": "WonderTrade_Text_Acknowledged",
-      "en_US": "Server acknowledged!\nYour Pokémon was not traded."
+      "id": "WonderTrade_Text_Explanation",
+      "en_US": "Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save."
     },
     {
-      "id": "WonderTrade_Text_Explanation",
-      "en_US": "One pending trade per save.\nReconnect to check its status."
+      "id": "WonderTrade_Text_Diagnostics",
+      "en_US": "Connection details"
     },
     {
       "id": "WonderTrade_Text_ErrorCode",
