@@ -18,6 +18,8 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL = Path(subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                      text=True).strip()).parent / "game/dswt-production"  # Survives worktree removal.
+REGISTRY = "ghcr.io/sayarinu"
+IMAGES = {"dswt-server": ("server/Dockerfile", "--target", "production"), "dswt-validator": ("validator/Dockerfile",)}
 REMOTE = "/opt/dswt"
 REMOTE_USER = "dswt"
 ADMIN = "dswt_admin"
@@ -87,14 +89,8 @@ class Target:
         return self.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-U", ADMIN,
                             "-d", "dswt", "-c", query, capture=True).stdout.strip()
 
-    def build_and_load(self, version):
-        built = []
-        for image, dockerfile, *target in (("dswt-server", "server/Dockerfile", "--target", "production"),
-                                           ("dswt-validator", "validator/Dockerfile")):
-            tag = f"{image}:{version}"
-            subprocess.run(["docker", "build", "-f", dockerfile, *target, "-t", tag, "."], cwd=ROOT, check=True)
-            built.append(tag)
-        save = subprocess.Popen(["docker", "save", *built], stdout=subprocess.PIPE)
+    def load(self, tags):
+        save = subprocess.Popen(["docker", "save", *tags], stdout=subprocess.PIPE)
         compress = subprocess.Popen(["gzip", "-1"], stdin=save.stdout, stdout=subprocess.PIPE)
         save.stdout.close()
         load = subprocess.run([*self.ssh, self.address, "gunzip | docker load"], stdin=compress.stdout, check=False)
@@ -213,6 +209,30 @@ class Target:
         print("Public endpoint and ledger verified")
 
 
+def build_images(version):
+    for image, (dockerfile, *target) in IMAGES.items():
+        subprocess.run(["docker", "build", "-f", dockerfile, *target, "-t", f"{image}:{version}", "."], cwd=ROOT, check=True)
+
+
+def pull_images(version):
+    """Fetch the audited images. The login lasts for this call, and the server never holds one."""
+    token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+    host = subprocess.check_output(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("DOCKER_")}
+    with tempfile.TemporaryDirectory(prefix="dswt-registry-") as config:
+        docker = ["docker", "--config", config, "--host", host]
+        subprocess.run([*docker, "login", "ghcr.io", "--username", "token", "--password-stdin"], input=token, text=True,
+                       env=environment, check=True, stdout=subprocess.DEVNULL)
+        for image in IMAGES:
+            published = f"{REGISTRY}/{image}:{version}"
+            if subprocess.run([*docker, "pull", "--quiet", published], env=environment, check=False).returncode:
+                raise RuntimeError(f"No published {image} for {version}. Run the Publish service images workflow, "
+                                   "deploy a commit it published, or pass --build")
+            print(subprocess.check_output([*docker, "image", "inspect", "--format", "{{index .RepoDigests 0}}", published],
+                                          text=True, env=environment).strip())
+            subprocess.run([*docker, "tag", published, f"{image}:{version}"], env=environment, check=True)
+
+
 def source_version():
     def git(*arguments):
         return subprocess.check_output(["git", "-C", str(ROOT), *arguments], text=True).strip()
@@ -227,6 +247,7 @@ def main():
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
+    parser.add_argument("--build", action="store_true", help="deploy: build images here instead of pulling published ones")
     args = parser.parse_args()
     os.umask(0o077)
     try:
@@ -238,7 +259,8 @@ def main():
         target = Target(args.ssh_key)
         if args.action == "deploy":
             version = source_version()
-            target.build_and_load(version)
+            (build_images if args.build else pull_images)(version)
+            target.load(f"{image}:{version}" for image in IMAGES)
             target.sync(version)
             target.start()
         target.verify()

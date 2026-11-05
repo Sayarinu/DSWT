@@ -1,5 +1,6 @@
 """Review unprivileged workflows and compare read-only GitHub policy evidence."""
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,8 @@ import re
 import subprocess
 
 import yaml
+
+PUBLISHER = "publish-images.yml"
 
 
 class WorkflowLoader(yaml.BaseLoader):
@@ -97,6 +100,24 @@ def workflow(data):
     return names
 
 
+def publisher(data):
+    """The one privileged workflow: run by hand, from main only, able to write packages and nothing else."""
+    require(data.get("on") == "workflow_dispatch", "Publishing must only run by hand")
+    jobs = data.get("jobs")
+    require(isinstance(jobs, dict) and len(jobs) == 1, "Publishing needs exactly one job")
+    job = next(iter(jobs.values()))
+    require(isinstance(job, dict) and job.get("if") == "github.ref == 'refs/heads/main'", "Publishing must only run from main")
+    require(job.get("permissions") == {"contents": "read", "packages": "write"}, "Publishing may only write packages")
+    # What remains must satisfy every contribution rule, without the two exceptions granted here.
+    reviewed = copy.deepcopy(data)
+    job = next(iter(reviewed["jobs"].values()))
+    del job["permissions"]
+    for step in job.get("steps", []):
+        if isinstance(step, dict) and isinstance(step.get("env"), dict) and step["env"].get("GH_TOKEN") == "${{ github.token }}":
+            del step["env"]["GH_TOKEN"]
+    workflow(reviewed)
+
+
 def audit(root):
     settings = json.loads((root / ".github/repository-settings.json").read_text())
     files, names = {}, []
@@ -105,7 +126,11 @@ def audit(root):
         require(path.is_file() and not path.is_symlink() and path.suffix in (".yml", ".yaml"), "Unexpected workflow input")
         data = path.read_bytes()
         require(len(data) <= 256 * 1024, "Workflow too large to review")
-        names.extend(workflow(yaml.load(data, Loader=WorkflowLoader)))
+        loaded = yaml.load(data, Loader=WorkflowLoader)
+        if path.name == PUBLISHER:
+            publisher(loaded)  # Never a required PR check: it does not run on pull requests.
+        else:
+            names.extend(workflow(loaded))
         files[path.name] = hashlib.sha256(data).hexdigest()
     required = settings["main_protection"]["required_status_checks"]["contexts"]
     require(len(names) == len(set(names)) and len(required) == len(set(required)), "Check names must be unique")

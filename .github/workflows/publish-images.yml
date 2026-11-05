@@ -1,0 +1,64 @@
+name: Publish service images
+
+# Run by hand, from main only. It can write packages and nothing else, and it
+# publishes the exact bytes the audit checked. Nothing here can reach the server.
+# tools/local-stack/policy.py holds this file to those rules.
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Audit and publish images
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build, test and audit both images
+        run: |
+          python3 tools/image-audit/audit.py run --workspace "$PWD/game/image-audit" --platform linux/amd64
+          python3 tools/image-audit/audit.py verify --workspace "$PWD/game/image-audit"
+      - name: Keep audit evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-audit
+          retention-days: 30
+          path: |
+            game/image-audit/report.json
+            game/image-audit/*.build.json
+            game/image-audit/*.trivy.json
+            game/image-audit/*.cdx.json
+            game/image-audit/*.filesystem.json
+            game/image-audit/validator.resources.json
+      - name: Publish to private GHCR packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$GH_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for service in server validator; do
+            expected="$(jq -r ".images.$service.manifest_digest" game/image-audit/report.json)"
+            skopeo copy --preserve-digests --override-arch amd64 --override-os linux --digestfile digest \
+              "oci:game/image-audit/$service.oci" "docker://ghcr.io/$owner/dswt-$service:${GITHUB_SHA::12}"
+            test "$(cat digest)" = "$expected"
+            echo "dswt-$service:${GITHUB_SHA::12} $expected" >> "$GITHUB_STEP_SUMMARY"
+          done
+          jq -r '.images | to_entries[] | "\(.key) findings: \(.value.scan.vulnerabilities_by_severity | tostring)"' game/image-audit/report.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the newest five versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for service in server validator; do
+            versions="/users/$GITHUB_REPOSITORY_OWNER/packages/container/dswt-$service/versions"
+            gh api --paginate "$versions" --jq '.[].id' | tail -n +6 | while read -r id; do
+              gh api --method DELETE "$versions/$id"
+            done
+          done
