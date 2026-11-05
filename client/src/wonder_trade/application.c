@@ -49,6 +49,7 @@ enum WonderTradeAppState {
 };
 
 #define WT_BOOT_STACK_SIZE 0x8000
+#define WT_BOOT_SILENT_FRAMES 30
 typedef struct WonderTradeBootWorker {
     OSThread thread;
     WtFlashAccess flash;
@@ -72,6 +73,7 @@ typedef struct WonderTradeApp {
     int selectedSlot;
     BOOL graphicsReady;
     WonderTradeBootWorker *boot;
+    int bootFrames;
 } WonderTradeApp;
 
 static void WonderTrade_Draw(WonderTradeApp *app);
@@ -291,7 +293,7 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
     WonderTrade_Show(app, WT_APP_CONFIRM, WonderTrade_Text_Confirm);
 }
 
-static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSystem *fieldSystem, int state, int message)
+static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSystem *fieldSystem, int state, int message, BOOL visible)
 {
     Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_WONDER_TRADE, 0x80000);
     WonderTradeApp *app = ApplicationManager_NewData(appMan, sizeof(WonderTradeApp), HEAP_ID_WONDER_TRADE);
@@ -303,13 +305,13 @@ static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSyste
     app->bgConfig = BgConfig_New(HEAP_ID_WONDER_TRADE);
     app->state = state;
     app->statusMessage = message;
-    WonderTrade_InitGraphics(app);
+    if (visible) WonderTrade_InitGraphics(app);
     return app;
 }
 
 static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
 {
-    WonderTradeApp *app = WonderTrade_Create(appMan, ApplicationManager_Args(appMan), WT_APP_CONNECTING, WonderTrade_Text_Connecting);
+    WonderTradeApp *app = WonderTrade_Create(appMan, ApplicationManager_Args(appMan), WT_APP_CONNECTING, WonderTrade_Text_Connecting, TRUE);
     WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
     return TRUE;
 }
@@ -331,7 +333,8 @@ static BOOL WonderTrade_BootInit(ApplicationManager *appMan, int *state)
     WonderTradeBootWorker *worker;
     void *stackTop;
     WtRecovery_Begin();
-    app = WonderTrade_Create(appMan, NULL, WT_APP_BOOT, WonderTrade_Text_CheckingSave);
+    /* A normal boot shows nothing: a screen opens only for recovery or a long check. */
+    app = WonderTrade_Create(appMan, NULL, WT_APP_BOOT, WonderTrade_Text_CheckingSave, FALSE);
     worker = Heap_Alloc(HEAP_ID_WONDER_TRADE, sizeof(*worker));
     memset(worker, 0, sizeof(*worker)); app->boot = worker;
     stackTop = (void *)(((u32)worker->stack + WT_BOOT_STACK_SIZE) & ~7);
@@ -348,7 +351,11 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     WonderTradeBootWorker *worker = app->boot;
     const unsigned char *stack;
     u32 size, unused;
-    if (!OS_IsThreadTerminated(&worker->thread)) return FALSE;
+    if (!OS_IsThreadTerminated(&worker->thread)) {
+        /* Usually this finishes unseen. A longer check may be writing, so ask for patience. */
+        if (!app->graphicsReady && ++app->bootFrames == WT_BOOT_SILENT_FRAMES) WonderTrade_InitGraphics(app);
+        return FALSE;
+    }
     OS_JoinThread(&worker->thread);
     stack = (const unsigned char *)(worker->thread.stackTop + sizeof(u32));
     size = worker->thread.stackBottom - worker->thread.stackTop - 2 * sizeof(u32);
@@ -357,7 +364,10 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     mbedtls_platform_zeroize(worker, sizeof(*worker));
     Heap_Free(worker); app->boot = NULL;
     if (WtRecovery_CanWrite()) return TRUE;
-    WonderTrade_Show(app, WT_APP_RECOVERY, WonderTrade_Text_RecoveryRequired);
+    app->state = WT_APP_RECOVERY;
+    app->statusMessage = WonderTrade_Text_RecoveryRequired;
+    if (app->graphicsReady) WonderTrade_Draw(app);
+    else WonderTrade_InitGraphics(app);
     return FALSE;
 }
 

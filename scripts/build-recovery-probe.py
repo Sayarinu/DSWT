@@ -72,7 +72,7 @@ def build():
             '    if (worker->result == 0) worker->result = WtRecovery_ProbeEntrypoints() ? 1 : -100;',
         '    u32 size, unused;': '    u32 size, unused;\n    int probeOK;',
         '    OS_JoinThread(&worker->thread);': '    OS_JoinThread(&worker->thread);\n    probeOK = worker->result == 1;',
-        '    WonderTrade_Show(app, WT_APP_RECOVERY, WonderTrade_Text_RecoveryRequired);': '    WonderTrade_Show(app, WT_APP_RECOVERY, probeOK ? WonderTrade_Text_ProbePassed : WonderTrade_Text_RecoveryRequired);',
+        '    app->statusMessage = WonderTrade_Text_RecoveryRequired;': '    app->statusMessage = probeOK ? WonderTrade_Text_ProbePassed : WonderTrade_Text_RecoveryRequired;',
     }
     for old, new in replacements.items():
         if text.count(old) != 1:
