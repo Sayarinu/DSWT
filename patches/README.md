@@ -1,5 +1,7 @@
 # ROM compatibility and patch bundle
 
+Players: see [INSTALL.md](INSTALL.md).
+
 [`compatibility.json`](compatibility.json) inventories the three English retail
 records found in No-Intro's Nintendo DS database on the recorded date. Each input
 is a full-size, decrypted 134,217,728-byte dump. Filenames, cartridge labels and
