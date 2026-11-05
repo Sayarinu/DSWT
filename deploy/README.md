@@ -24,7 +24,7 @@ python3 deploy/dswt.py verify
 The ROM builds in the hostname, address, port and both pins. Changing the hostname or
 address, or losing both keys, means new patches for every player.
 
-`deploy` needs a clean commit, and tags the images with it. It stops the services
+`deploy` needs a clean commit, and deploys the images published for it. It stops the services
 briefly. It cannot delete data: the volumes are external, so no Compose command
 removes them. Before migrating, it saves a dump to ignored
 `game/dswt-production/backups/`. Dumps hold private verifiers, so keep them private.
@@ -33,6 +33,18 @@ Once the new release is verified, `deploy` frees disk: the WAL archive restarts 
 fresh base backup, dropping older WAL, and images no container uses are removed. Run
 `python3 deploy/dswt.py tidy` to do just this between releases. Trades keep running.
 To go back, deploy the older commit, and restore a dump if its schema needs it.
+
+## Releasing
+
+1. Merge to `main` and wait for its checks.
+2. Run the **Publish service images** workflow on `main`. It builds, tests and audits both
+   images, then publishes those exact bytes to private GHCR packages, tagged with the
+   commit. Read the scan results in its summary. Audit evidence stays for 30 days.
+3. Update `main` here and run `deploy`. It needs `gh` signed in with `read:packages`
+   (`gh auth refresh -s read:packages`). The server holds no registry login.
+
+To roll back, deploy the older commit from a clean worktree. GHCR keeps the newest five
+versions. `--build` builds on your machine instead, if GHCR is down or the commit is older.
 
 ## Monitoring
 

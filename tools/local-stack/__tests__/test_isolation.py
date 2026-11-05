@@ -74,6 +74,33 @@ class WorkflowTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     policy.workflow(data)
 
+    def test_publisher_may_only_write_packages_by_hand_from_main(self):
+        real = policy.yaml.load((ROOT / ".github/workflows/publish-images.yml").read_text(), Loader=policy.WorkflowLoader)
+        policy.publisher(real)
+        job = lambda d: d["jobs"]["publish"]
+        changes = [
+            lambda d: d.update(on="pull_request"),
+            lambda d: d.update(on=["push", "workflow_dispatch"]),
+            lambda d: d.update(permissions={"contents": "write"}),
+            lambda d: job(d).pop("if"),
+            lambda d: job(d).update({"if": "always()"}),
+            lambda d: job(d).update(permissions={"contents": "write", "packages": "write"}),
+            lambda d: job(d).update(permissions={"contents": "read", "packages": "write", "id-token": "write"}),
+            lambda d: job(d).update({"runs-on": "self-hosted"}),
+            lambda d: job(d).update(environment="production"),
+            lambda d: job(d)["steps"][0].update(uses="actions/checkout@v4"),
+            lambda d: job(d)["steps"].append({"run": "true", "env": {"KEY": "${{ secrets.PRODUCTION_TOKEN }}"}}),
+            lambda d: job(d)["steps"].append({"run": "true", "env": {"OTHER": "${{ github.token }}"}}),
+            lambda d: job(d)["steps"].append({"run": "true", "env": {"GH_TOKEN": "${{ secrets.PERSONAL_TOKEN }}"}}),
+            lambda d: d["jobs"].update(second=copy.deepcopy(job(d))),
+        ]
+        for index, change in enumerate(changes):
+            with self.subTest(case=index):
+                data = copy.deepcopy(real)
+                change(data)
+                with self.assertRaises(ValueError):
+                    policy.publisher(data)
+
     def test_duplicate_merged_and_recursive_yaml_are_refused(self):
         for text in (WORKFLOW + "permissions: {contents: write}\n", "jobs: {<<: {test: unsafe}}", "jobs: {test: &job {copy: *job}}"):
             with self.subTest(text=text), self.assertRaises(ValueError):
