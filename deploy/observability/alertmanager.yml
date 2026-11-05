@@ -1,0 +1,7 @@
+# Alerts appear in Grafana and Alertmanager only until a delivery channel is chosen.
+route:
+  receiver: none
+  group_by: [alertname, job]
+  repeat_interval: 12h
+receivers:
+  - name: none

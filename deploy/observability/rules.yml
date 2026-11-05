@@ -1,0 +1,28 @@
+groups:
+  - name: dswt
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"gateway|backend"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "{{ $labels.job }} metrics endpoint is unreachable"}
+      - alert: LedgerDatabaseUnavailable
+        expr: dswt_database_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: Backend ledger sampler cannot reach PostgreSQL}
+      # The WAL archive grows with trades, and trades stop if it cannot ship.
+      - alert: DiskPressure
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.15
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: The server disk has less than 15% free space}
+      - alert: MemoryPressure
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: Host memory available is below 5%}
+      - alert: LogsDropped
+        expr: increase(dswt_dropped_logs_total[5m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "{{ $labels.service }} dropped structured logs"}

@@ -15,7 +15,9 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker-compose
-    directory: /tools/local-stack
+    directories:
+      - /tools/local-stack
+      - /deploy
     schedule:
       interval: weekly
   - package-ecosystem: nuget
