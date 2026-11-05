@@ -224,6 +224,11 @@ class Target:
             self.install_secret("discord-webhook", webhook)
         elif self.run(f"test -s {REMOTE}/secrets/discord-webhook", check=False).returncode:
             raise ValueError("Set DISCORD_WEBHOOK_URL in the ignored .env: alerts have nowhere to go")
+        user = local_secret("DISCORD_ALERT_USER_ID")
+        if not (user and user.isdecimal()):
+            raise ValueError("Set DISCORD_ALERT_USER_ID in the ignored .env to the Discord user alerts should ping")
+        self.install_secret("alert-mention.tmpl",
+                            f'{{{{ define "dswt.mention" }}}}{{{{ if eq .Status "firing" }}}}<@{user}>{{{{ end }}}}{{{{ end }}}}\n')
         password = local_secret("DSWT_BACKUP_PASSWORD")
         if not password:
             raise ValueError("Set DSWT_BACKUP_PASSWORD in the ignored .env, and keep a copy outside this machine")

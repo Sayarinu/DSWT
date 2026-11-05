@@ -202,6 +202,7 @@ services:
       - alertmanager:/alertmanager
       - {type: bind, source: ./observability/alertmanager.yml, target: /etc/alertmanager/alertmanager.yml, read_only: true}
       - {type: bind, source: ./secrets/discord-webhook, target: /run/dswt/discord-webhook, read_only: true}
+      - {type: bind, source: ./secrets/alert-mention.tmpl, target: /run/dswt/alert-mention.tmpl, read_only: true}
 
   node-exporter:
     <<: [*hardened, *private-network]

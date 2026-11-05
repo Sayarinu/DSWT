@@ -1,5 +1,7 @@
 # Only alerts that need action reach Discord. Warnings stay in Grafana and Alertmanager.
 # The webhook URL is a secret: dswt.py installs it from the ignored .env into secrets/.
+# Your Discord user ID stays out of Git too: dswt.py writes this template from .env.
+templates: [/run/dswt/alert-mention.tmpl]
 route:
   receiver: none
   group_by: [alertname, job]
@@ -15,5 +17,7 @@ receivers:
     discord_configs:
       - webhook_url_file: /run/dswt/discord-webhook
         send_resolved: true
+        # Embeds can't ping, so the mention goes in the message text, and only when firing.
+        content: '{{ template "dswt.mention" . }}'
         title: '{{ if eq .Status "firing" }}🔴 {{ .CommonLabels.alertname }}{{ else }}🟢 Resolved: {{ .CommonLabels.alertname }}{{ end }}'
         message: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
