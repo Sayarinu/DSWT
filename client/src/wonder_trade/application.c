@@ -282,6 +282,11 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
         return;
     }
 
+    if (!WtGameSave_Unique(app->fieldSystem->saveData, slot, HEAP_ID_WONDER_TRADE)) {
+        WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Duplicate);
+        return;
+    }
+
     app->selectedSlot = slot;
     WonderTrade_Show(app, WT_APP_CONFIRM, WonderTrade_Text_Confirm);
 }

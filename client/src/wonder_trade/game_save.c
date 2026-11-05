@@ -403,6 +403,24 @@ done:
     return result;
 }
 
+BOOL WtGameSave_Unique(SaveData *save, unsigned slot, enum HeapID heapID)
+{
+    SaveData *candidate;
+    Party *party = SaveData_GetParty(save);
+    unsigned char canonical[136];
+    BOOL unique = TRUE;
+    if (slot >= (unsigned)party->currentCount
+        || WtPokemon_Decode((const unsigned char *)&party->pokemon[slot], canonical) != 0) return TRUE;
+    candidate = Heap_Alloc(heapID, sizeof(*candidate));
+    /* Anything uncertain falls through to the deposit's own fail-closed check. */
+    if (!candidate) return TRUE;
+    memcpy(candidate, save, sizeof(*candidate));
+    Party_RemovePokemonBySlotIndex(SaveData_GetParty(candidate), slot);
+    unique = Absent(candidate, canonical) == 0;
+    mbedtls_platform_zeroize(candidate, sizeof(*candidate)); Heap_Free(candidate);
+    return unique;
+}
+
 int WtGameSave_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
 {
     BoxPokemon box;

@@ -58,6 +58,10 @@
       "en_US": "Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail or capsules."
     },
     {
+      "id": "WonderTrade_Text_Duplicate",
+      "en_US": "An identical or damaged\nPokémon in your party or PC\nstops this one being offered."
+    },
+    {
       "id": "WonderTrade_Text_Explanation",
       "en_US": "Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save."
     },
