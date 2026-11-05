@@ -34,7 +34,8 @@ services:
     <<: *hardened
     image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
     ports:
-      - 443:8443
+      # IPv4 only, like the ROM. docker-proxy would hide IPv6 clients' addresses behind one budget.
+      - 0.0.0.0:443:8443
       - 127.0.0.1:3000:3000
 
   database:

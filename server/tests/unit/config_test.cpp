@@ -39,11 +39,27 @@ protected:
   }
 
 private:
-  const std::array<const char *, 13> names_{"WT_SUBMISSION_WORKERS", "WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
+  const std::array<const char *, 15> names_{"WT_ENROLLMENTS_PER_HOUR", "WT_ENROLLMENTS_PER_NETWORK", "WT_SUBMISSION_WORKERS", "WT_HTTP_ADDRESS", "WT_HTTP_PORT", "WT_GRPC_ADDRESS", "WT_GRPC_TARGET",
       "WT_TRADE_TARGET", "WT_TLS_CERTIFICATE", "WT_TLS_PRIVATE_KEY", "WT_BACKEND_ADDRESS", "DSWT_DATABASE_URL",
       "WT_LEGALITY_TARGET", "WT_LEGALITY_POLICY", "WT_METRICS_PORT"};
-  std::array<std::optional<std::string>, 13> saved_;
+  std::array<std::optional<std::string>, 15> saved_;
 };
+
+TEST_F(ConfigTest, EnrollmentLimitsHaveBoundedOverrides) {
+  EXPECT_EQ(LoadServerConfig().enrollments_per_hour, kDefaultEnrollmentsPerHour);
+  EXPECT_EQ(LoadServerConfig().enrollments_per_network, kDefaultEnrollmentsPerNetwork);
+  Set("WT_ENROLLMENTS_PER_HOUR", "5000");
+  Set("WT_ENROLLMENTS_PER_NETWORK", "6");
+  EXPECT_EQ(LoadServerConfig().enrollments_per_hour, 5000u);
+  EXPECT_EQ(LoadServerConfig().enrollments_per_network, 6u);
+  for (const char *name : {"WT_ENROLLMENTS_PER_HOUR", "WT_ENROLLMENTS_PER_NETWORK"}) {
+    for (const char *value : {"0", "x", "", "1000001", "10x"}) {
+      Set(name, value);
+      EXPECT_THROW(LoadServerConfig(), std::invalid_argument) << name << "=" << value;
+    }
+    Set(name, "1");
+  }
+}
 
 TEST_F(ConfigTest, LoadsDefaults) {
   const auto config = LoadServerConfig();

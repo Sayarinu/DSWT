@@ -69,7 +69,7 @@ void RunServer(const ServerConfig &config) {
   asio::io_context io;
   auto services = std::make_shared<HttpServices>(
       std::make_shared<HttpRequestHandler>(std::move(channel), std::move(trade_channel)), submissions, recovery, std::move(tls),
-      config.submission_workers);
+      config.submission_workers, config.enrollments_per_hour, config.enrollments_per_network);
   asio::signal_set signals(io, SIGINT, SIGTERM);
   signals.async_wait([&](boost::system::error_code, int) { io.stop(); });
   std::make_shared<HttpListener>(

@@ -82,10 +82,14 @@ with separate four-worker submission and recovery pools. Admission budgets are:
 | Resource | Total concurrent/queued | Per key concurrent | Burst / refill per second |
 | --- | ---: | ---: | ---: |
 | Gateway connections | 1,024 | 64 | 128 / 64 |
-| Gateway enrollment/submission jobs | 8 | 8 | 64 / 32 |
+| Gateway enrollment/submission jobs | 8 | 4 | 64 / 32 |
 | Gateway status/cancel/collect/ack/reconcile jobs | 16 | 8 | 256 / 128 |
 | Backend enrollment/submission calls | 4 | 2 | 16 / 4 |
 | Backend recovery calls | 8 | 2 | 64 / 16 |
+
+Each network may also enroll 16 distinct saves a day, and the gateway allows 200 new
+enrollments an hour overall (`WT_ENROLLMENTS_PER_NETWORK`, `WT_ENROLLMENTS_PER_HOUR`). Repeating a request costs nothing more.
+Saves stay in the immutable ledger once enrolled, so these limits apply before anything is written.
 
 Gateway keys use the direct IPv4 peer or IPv6 /64; forwarded headers do not
 override them. Backend identity budgets admit only verified credentials, with a

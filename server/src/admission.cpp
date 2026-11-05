@@ -85,6 +85,43 @@ bool Quota::Permit::Bind(std::string_view key) {
   return true;
 }
 
+EnrollmentBudget::EnrollmentBudget(Limits limits, Quota::Now now)
+    : limits_(limits), now_(std::move(now)), hour_started_(now_()) {
+  if (!limits.per_network_daily || !limits.hourly) throw std::invalid_argument("invalid enrollment budget");
+}
+
+bool EnrollmentBudget::Allow(const std::string &network, std::string_view request) {
+  std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+  std::size_t size = 0;
+  if (EVP_Q_digest(nullptr, "SHA256", nullptr, request.data(), request.size(), digest.data(), &size) != 1 || size != 32)
+    throw std::runtime_error("admission hashing unavailable");
+  const std::string key(reinterpret_cast<const char *>(digest.data()), 16);
+  const auto now = now_();
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (now - hour_started_ >= std::chrono::hours(1)) { hour_started_ = now; hour_count_ = 0; }
+  auto found = networks_.find(network);
+  if (found != networks_.end() && now - found->second.started >= std::chrono::hours(24)) {
+    networks_.erase(found);
+    found = networks_.end();
+  }
+  if (found == networks_.end()) {
+    if (networks_.size() >= 4096) {
+      for (auto it = networks_.begin(); it != networks_.end();) {
+        if (now - it->second.started >= std::chrono::hours(24)) it = networks_.erase(it);
+        else ++it;
+      }
+      if (networks_.size() >= 4096) return false;
+    }
+    found = networks_.emplace(network, Network{now, {}}).first;
+  }
+  auto &seen = found->second.seen;
+  if (seen.count(key)) return true;
+  if (seen.size() >= limits_.per_network_daily || hour_count_ >= limits_.hourly) return false;
+  seen.insert(key);
+  ++hour_count_;
+  return true;
+}
+
 std::unique_ptr<Quota::Permit> ServiceAdmission::Acquire(RequestKind kind) {
   return (kind == RequestKind::Recovery ? recovery_ : submissions_).Acquire();
 }

@@ -11,6 +11,46 @@
 namespace dswt::server::detail {
 namespace {
 
+TEST(EnrollmentBudgetTest, RepeatsAreFreeAndEachNetworkHasADailyLimit) {
+  Quota::Clock::time_point now{};
+  EnrollmentBudget budget({2, 100}, [&] { return now; });
+  EXPECT_TRUE(budget.Allow("a", "one"));
+  EXPECT_TRUE(budget.Allow("a", "one"));
+  EXPECT_TRUE(budget.Allow("a", "two"));
+  EXPECT_FALSE(budget.Allow("a", "three"));
+  EXPECT_TRUE(budget.Allow("a", "two"));
+  EXPECT_TRUE(budget.Allow("b", "three"));
+  now += std::chrono::hours(23);
+  EXPECT_FALSE(budget.Allow("a", "three"));
+  now += std::chrono::hours(1);
+  EXPECT_TRUE(budget.Allow("a", "three"));
+}
+
+TEST(EnrollmentBudgetTest, OverallHourlyLimitStopsManyNetworksAndRecovers) {
+  Quota::Clock::time_point now{};
+  EnrollmentBudget budget({10, 2}, [&] { return now; });
+  EXPECT_TRUE(budget.Allow("a", "one"));
+  EXPECT_TRUE(budget.Allow("b", "two"));
+  EXPECT_FALSE(budget.Allow("c", "three"));
+  EXPECT_TRUE(budget.Allow("a", "one"));
+  now += std::chrono::hours(1);
+  EXPECT_TRUE(budget.Allow("c", "three"));
+}
+
+TEST(EnrollmentBudgetTest, TrackedNetworksAreBoundedAndExpire) {
+  Quota::Clock::time_point now{};
+  EnrollmentBudget budget({1, 1000000}, [&] { return now; });
+  for (int index = 0; index < 4096; ++index) EXPECT_TRUE(budget.Allow(std::to_string(index), "one"));
+  EXPECT_FALSE(budget.Allow("full", "one"));
+  now += std::chrono::hours(24);
+  EXPECT_TRUE(budget.Allow("full", "one"));
+}
+
+TEST(EnrollmentBudgetTest, RejectsEmptyLimits) {
+  EXPECT_THROW(EnrollmentBudget({0, 1}), std::invalid_argument);
+  EXPECT_THROW(EnrollmentBudget({1, 0}), std::invalid_argument);
+}
+
 TEST(AdmissionTest, RatesAndParallelLimitsHaveIndependentRecoveryBudgets) {
   Quota::Clock::time_point now{};
   Quota quota({2, 1, 2, 1}, [&] { return now; });
