@@ -403,6 +403,18 @@ done:
     return result;
 }
 
+int WtGameSave_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
+{
+    BoxPokemon box;
+    if (entry->deliveryKind != WT_DELIVERY_MATCH || entry->destination.length < sizeof(box)) return -1;
+    memcpy(&box, entry->destinationAfter, sizeof(box));
+    received->species = BoxPokemon_GetValue(&box, MON_DATA_SPECIES, NULL);
+    received->hasNickname = BoxPokemon_GetValue(&box, MON_DATA_HAS_NICKNAME, NULL);
+    BoxPokemon_GetValue(&box, MON_DATA_NICKNAME, received->nickname);
+    BoxPokemon_GetValue(&box, MON_DATA_OT_NAME, received->originalTrainer);
+    return 0;
+}
+
 int WtGameSave_CanLeave(WtGameSave *game, const WtJournalEntry *entry)
 {
     if (entry->phase == WT_JOURNAL_EMPTY || entry->phase == WT_JOURNAL_IDLE) return 1;

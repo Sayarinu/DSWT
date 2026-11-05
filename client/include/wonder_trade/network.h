@@ -4,6 +4,7 @@
 #include <nitro.h>
 
 #include "constants/heap.h"
+#include "wonder_trade/game_save.h"
 #include "wonder_trade/wire.h"
 #include "savedata.h"
 
@@ -40,7 +41,8 @@ typedef struct WonderTradeNetwork {
     WtWireReply reply;
     unsigned tradePhase;
     BOOL canLeave;
-    BOOL completed, returned, rejected, waiting, superseded, needsEntropy;
+    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived;
+    WtReceivedPokemon received;
 } WonderTradeNetwork;
 
 void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);

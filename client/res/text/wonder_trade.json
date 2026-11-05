@@ -122,6 +122,14 @@
       "en_US": "Trade completed!\nYour Pokémon is saved in\nyour party or PC."
     },
     {
+      "id": "WonderTrade_Text_Received",
+      "en_US": "You received"
+    },
+    {
+      "id": "WonderTrade_Text_OriginalTrainer",
+      "en_US": "From"
+    },
+    {
       "id": "WonderTrade_Text_Returned",
       "en_US": "Offer cancelled.\nYour original Pokémon\nis saved in your party or PC."
     },

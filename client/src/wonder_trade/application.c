@@ -153,6 +153,26 @@ static void WonderTrade_Print(WonderTradeApp *app, int message, int x, int y)
     String_Free(text);
 }
 
+static void WonderTrade_PrintChars(WonderTradeApp *app, const charcode_t *chars, int x, int y)
+{
+    String *text = String_Init(MON_NAME_LEN + TRAINER_NAME_LEN + 2, HEAP_ID_WONDER_TRADE);
+    String_CopyChars(text, chars);
+    Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, text, x, y, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
+    String_Free(text);
+}
+
+static void WonderTrade_DrawReceived(WonderTradeApp *app)
+{
+    const WtReceivedPokemon *received = &app->network.received;
+    charcode_t species[MON_NAME_LEN + 1];
+    MessageLoader_GetSpeciesName(received->species, HEAP_ID_WONDER_TRADE, species);
+    WonderTrade_Print(app, WonderTrade_Text_Received, 8, 88);
+    WonderTrade_PrintChars(app, species, 120, 88);
+    if (received->hasNickname) WonderTrade_PrintChars(app, received->nickname, 120, 104);
+    WonderTrade_Print(app, WonderTrade_Text_OriginalTrainer, 8, 120);
+    WonderTrade_PrintChars(app, received->originalTrainer, 120, 120);
+}
+
 static void WonderTrade_Draw(WonderTradeApp *app)
 {
     Window_FillTilemap(&app->window, 15);
@@ -192,6 +212,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         Text_AddPrinterWithParamsAndColor(&app->window, FONT_SYSTEM, number, 152, 152, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(1, 2, 15), NULL);
         String_Free(number);
     } else if (app->state == WT_APP_MESSAGE) {
+        if (app->statusMessage == WonderTrade_Text_Completed && app->network.hasReceived) WonderTrade_DrawReceived(app);
         if (app->statusMessage == WonderTrade_Text_Explanation) {
             const int labels[] = { WonderTrade_Text_ConnectMs, WonderTrade_Text_TlsBytes, WonderTrade_Text_StackBytes, WonderTrade_Text_FrameMs };
             const u32 values[] = { app->network.handshakeMs, app->network.tlsPeakBytes, app->network.stackBytes, app->network.maxFrameMs };
