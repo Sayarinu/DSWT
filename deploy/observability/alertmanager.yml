@@ -1,7 +1,12 @@
-# Alerts appear in Grafana and Alertmanager only until a delivery channel is chosen.
+# The webhook URL is a secret: dswt.py installs it from the ignored .env into secrets/.
 route:
-  receiver: none
+  receiver: discord
   group_by: [alertname, job]
+  group_wait: 30s
+  group_interval: 5m
   repeat_interval: 12h
 receivers:
-  - name: none
+  - name: discord
+    discord_configs:
+      - webhook_url_file: /run/dswt/discord-webhook
+        send_resolved: true

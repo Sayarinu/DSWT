@@ -181,6 +181,37 @@
           "legendFormat": "{{mountpoint}}"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Host memory free and CPU load",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+          "legendFormat": "memory free ratio"
+        },
+        {
+          "refId": "B",
+          "expr": "node_load5",
+          "legendFormat": "load 5m"
+        }
+      ]
     }
   ],
   "templating": {
