@@ -91,8 +91,8 @@ Then open `http://localhost:3000` and log in as `admin`, with the password from
 `/opt/dswt/secrets/grafana-admin-password`. Read logs with
 `docker compose -p dswt logs SERVICE` in `/opt/dswt`.
 
-Alerts go to Discord. `deploy` installs `DISCORD_WEBHOOK_URL` from the ignored `.env` into
-`/opt/dswt/secrets/`. To rotate it, change `.env` and deploy. Nothing alerts if the server
+Critical alerts go to Discord and ping `DISCORD_ALERT_USER_ID`. `deploy` installs that and
+`DISCORD_WEBHOOK_URL` from the ignored `.env` into `/opt/dswt/secrets/`. To change them, edit `.env` and deploy. Nothing alerts if the server
 or Prometheus itself is down, so use an outside uptime check before public launch.
 
 ## Before public launch
