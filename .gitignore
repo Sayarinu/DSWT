@@ -14,6 +14,11 @@ bios9.bin
 firmware.bin
 __pycache__/
 node_modules/
+.terraform/
+*.tfvars
+*.tfstate
+*.tfstate.*
+tfplan
 /package.json
 /package-lock.json
 /.agents/

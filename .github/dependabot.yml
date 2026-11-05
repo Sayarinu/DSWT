@@ -20,6 +20,10 @@ updates:
       - /deploy
     schedule:
       interval: weekly
+  - package-ecosystem: terraform
+    directory: /deploy/terraform
+    schedule:
+      interval: weekly
   - package-ecosystem: nuget
     directories:
       - /validator
