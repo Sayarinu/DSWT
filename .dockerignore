@@ -3,6 +3,8 @@ game
 .aws
 .codex
 .agents
+.claude
+node_modules
 .vscode
 .env
 .env.*

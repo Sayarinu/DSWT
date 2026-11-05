@@ -26,7 +26,13 @@ address, or losing both keys, means new patches for every player.
 
 `deploy` needs a clean commit, and tags the images with it. It stops the services
 briefly. It cannot delete data: the volumes are external, so no Compose command
-removes them.
+removes them. Before migrating, it saves a dump to ignored
+`game/dswt-production/backups/`. Dumps hold private verifiers, so keep them private.
+
+Once the new release is verified, `deploy` frees disk: the WAL archive restarts from a
+fresh base backup, dropping older WAL, and images no container uses are removed. Run
+`python3 deploy/dswt.py tidy` to do just this between releases. Trades keep running.
+To go back, deploy the older commit, and restore a dump if its schema needs it.
 
 ## Monitoring
 
@@ -44,4 +50,5 @@ Then open `http://localhost:3000` and log in as `admin`, with the password from
   lost server loses both.
 - Choose an alert channel in `observability/alertmanager.yml`. Until then, alerts only
   show in Grafana and Alertmanager.
-- The WAL archive is never pruned. `DiskPressure` warns at 15% free.
+- The WAL archive grows until the next `deploy` or `tidy`. `DiskPressure` warns at 15%
+  free, so it needs that alert channel.

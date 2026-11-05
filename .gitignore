@@ -13,3 +13,10 @@ bios7.bin
 bios9.bin
 firmware.bin
 __pycache__/
+node_modules/
+/package.json
+/package-lock.json
+/.agents/
+/.aws/
+/.claude/
+/.codex/

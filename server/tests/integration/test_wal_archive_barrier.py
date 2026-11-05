@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,58 @@ class ArchiveScriptTests(unittest.TestCase):
             path.write_text("history")
             self.assertEqual(self.run_script("archive", self.archive, path, name).returncode, 0)
             self.assertEqual((self.archive / name).read_text(), "history")
+
+    def base(self, first):
+        base = self.root / "base.next"
+        base.mkdir()
+        (base / "backup_label").write_text(f"START WAL LOCATION: 0/C00028 (file {first})\nBACKUP METHOD: streamed\n")
+        return base
+
+    def test_rotate_replaces_the_base_and_only_older_files(self):
+        self.init()
+        for name in ("000000010000000000000003", "000000010000000000000004", "000000010000000000000005"):
+            self.assertEqual(self.ship(name).returncode, 0)
+        kept = ("00000002.history", "000000010000000000000004.00000028.backup")
+        removed = "000000010000000000000003.00000028.backup"
+        for name in (*kept, removed):
+            (self.archive / name).write_text("history")
+        (self.archive / "base").mkdir()
+        (self.archive / "base/old").touch()
+        self.assertEqual(self.run_script("rotate", self.archive, self.base("000000010000000000000004")).returncode, 0)
+        self.assertFalse((self.archive / "base/old").exists())
+        self.assertTrue((self.archive / "base/backup_label").exists())
+        self.assertFalse((self.archive / "base.old").exists())
+        self.assertFalse((self.root / "base.next").exists())
+        self.assertEqual((self.archive / "chain.start").read_text(), f"{self.SYSTEM} 000000010000000000000004\n")
+        names = {path.name for path in self.archive.iterdir()}
+        self.assertLessEqual({"000000010000000000000004", "000000010000000000000005", *kept}, names)
+        self.assertFalse({"000000010000000000000003", removed} & names)
+        self.assertEqual(self.ship("000000010000000000000006").returncode, 0)
+        self.assertEqual(self.ship("000000010000000000000003").returncode, 0)
+        self.assertFalse((self.archive / "000000010000000000000003").exists())
+
+    def test_rotate_finishes_after_stopping_between_renames(self):
+        self.init()
+        self.assertEqual(self.ship("000000010000000000000003").returncode, 0)
+        (self.archive / "base.old").mkdir()
+        self.assertEqual(self.run_script("rotate", self.archive, self.base("000000010000000000000004")).returncode, 0)
+        self.assertTrue((self.archive / "base/backup_label").exists())
+        self.assertFalse((self.archive / "base.old").exists())
+
+    def test_rotate_refuses_a_base_that_cannot_start_the_chain(self):
+        self.init("000000010000000000000005")
+        self.assertEqual(self.ship("000000010000000000000005").returncode, 0)
+        (self.archive / "base").mkdir()
+        before = (self.archive / "chain.start").read_text()
+        for first in ("000000010000000000000004", "000000020000000000000006", "nonsense"):
+            with self.subTest(first=first):
+                base = self.base(first)
+                self.assertEqual(self.run_script("rotate", self.archive, base).returncode, 1)
+                base.joinpath("backup_label").unlink()
+                base.rmdir()
+        self.assertEqual((self.archive / "chain.start").read_text(), before)
+        self.assertTrue((self.archive / "000000010000000000000005").exists())
+        self.assertTrue((self.archive / "base").exists())
 
 
 class WalArchiveBarrierTests(unittest.TestCase):
@@ -255,6 +308,44 @@ class WalArchiveBarrierTests(unittest.TestCase):
         finally:
             if waiter.poll() is None:
                 waiter.kill(); waiter.wait()
+
+    def test_a_rotated_archive_restores_every_commit(self):
+        next_base = self.root / "rotation-base"
+        subprocess.run([str(self.pg_bin / "pg_basebackup"), "-D", str(next_base), "-X", "stream", "-c", "fast"],
+                       check=True, capture_output=True, env=self.env, timeout=60)
+        subprocess.run([str(self.pg_bin / "pg_verifybackup"), str(next_base)], check=True, capture_output=True, env=self.env)
+        before = (self.archive / "chain.start").read_text()
+        subprocess.run([str(self.script), "rotate", str(self.archive), str(next_base)], check=True, capture_output=True)
+        first = (self.archive / "chain.start").read_text().split()[1]
+        self.assertNotEqual(before, (self.archive / "chain.start").read_text())
+        self.sql("CREATE TABLE after_rotation(value int)")
+        self.sql("INSERT INTO after_rotation VALUES (42)")
+        self.assertEqual(self.probe(self.sql("SELECT (pg_current_wal_flush_lsn() - '0/0'::pg_lsn)::text"), 20000), 0)
+        self.assertFalse([path.name for path in self.archive.iterdir()
+                          if len(path.name) == 24 and path.name[:8] == first[:8] and path.name < first])
+
+        restored = self.root / "restored"
+        shutil.copytree(self.archive / "base", restored)
+        restored.chmod(0o700)
+        with (restored / "postgresql.conf").open("a") as config:
+            config.write(f"restore_command = 'cp {self.archive}/%f %p'\narchive_mode = off\n")
+        (restored / "recovery.signal").touch()
+        env = dict(self.env, PGPORT="55436")
+        control = [str(self.pg_bin / "pg_ctl"), "-D", str(restored), "-w"]
+        subprocess.run(control + ["-l", str(self.root / "restored.log"), "-o",
+                                  f"-k {self.root} -p 55436 -c listen_addresses='' -c shared_buffers=16MB", "start"],
+                       check=True, capture_output=True, env=env)
+        try:
+            deadline = time.monotonic() + 30
+            query = [str(self.pg_bin / "psql"), "-XAtq", "-c", "SELECT value FROM after_rotation"]
+            while True:
+                result = subprocess.run(query, capture_output=True, text=True, env=env)
+                if result.stdout.strip() == "42" or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.2)
+            self.assertEqual(result.stdout.strip(), "42", result.stderr)
+        finally:
+            subprocess.run(control + ["-m", "immediate", "stop"], capture_output=True, env=env)
 
     def test_no_chain_start_ships_nothing(self):
         data, empty = self.root / "unchained", self.root / "unchained-archive"

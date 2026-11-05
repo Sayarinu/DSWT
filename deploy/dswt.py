@@ -142,10 +142,38 @@ class Target:
                      "-X", "stream", "-c", "fast")
         self.compose(*archive, "/usr/local/bin/wal-archive.sh", "arm", "/archive")
 
+    def backup(self):
+        """Copy the database off the server before a migration can change it."""
+        directory = LOCAL / "backups"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        final = directory / f"dswt-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.dump"
+        partial = final.with_suffix(".partial")
+        with partial.open("wb") as output:
+            dump = subprocess.run([*self.ssh, self.address, f"cd {REMOTE} && docker compose -p dswt exec -T database "
+                                   f"pg_dump -Fc -U {ADMIN} dswt"], stdout=output, check=False)
+        with partial.open("rb") as written:
+            if dump.returncode or written.read(5) != b"PGDMP":
+                raise RuntimeError(f"The database backup failed, so nothing was migrated: {partial}")
+        partial.rename(final)
+        print(f"Saved database backup {final}")
+
+    def tidy(self):
+        """Run after a verified release: only then is the old archive chain safe to replace."""
+        archive = ("exec", "-T", "--user", "postgres", "database")
+        self.compose(*archive, "rm", "-rf", "/archive/base.next")
+        self.compose(*archive, "pg_basebackup", "-h", "/var/run/postgresql", "-U", ADMIN, "-D", "/archive/base.next",
+                     "-X", "stream", "-c", "fast")
+        self.compose(*archive, "pg_verifybackup", "/archive/base.next")
+        self.compose(*archive, "/usr/local/bin/wal-archive.sh", "rotate", "/archive", "/archive/base.next")
+        self.run("docker image prune --all --force >/dev/null")
+        self.run("df -h / | tail -1")
+
     def start(self):
         self.compose("stop", *reversed(APPLICATIONS))
-        self.compose("up", "-d", "--wait", "--wait-timeout", "120", "database")
+        # Recreated so the database mounts the wal-archive.sh just synced; a bind mount keeps the replaced file.
+        self.compose("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120", "database")
         self.prepare_database()
+        self.backup()
         self.compose("run", "--rm", "--no-deps", "migrate")
         self.compose("up", "-d", "--force-recreate", "--remove-orphans", *APPLICATIONS)
 
@@ -195,7 +223,7 @@ def source_version():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("keys", "deploy", "verify"))
+    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy"))
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
@@ -214,6 +242,8 @@ def main():
             target.sync(version)
             target.start()
         target.verify()
+        if args.action != "verify":
+            target.tidy()
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"Cannot complete {args.action}: {error}", file=sys.stderr)
