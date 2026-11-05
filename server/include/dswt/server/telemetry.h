@@ -11,7 +11,7 @@
 
 #include <grpcpp/server_context.h>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 enum class TelemetryRole { Gateway, Backend, Matcher };
 enum class Operation : unsigned { Invalid, Enroll, Submit, Status, Cancel, Collect, Acknowledge, Reconcile, Match, Legality, Count };
@@ -68,4 +68,4 @@ private:
   std::string request_id_, operation_id_, trade_id_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

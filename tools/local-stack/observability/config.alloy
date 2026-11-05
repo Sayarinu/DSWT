@@ -7,11 +7,11 @@ otelcol.receiver.fluentforward "docker" {
 }
 
 otelcol.exporter.loki "local" {
-  forward_to = [loki.process.platinumwt.receiver]
+  forward_to = [loki.process.dswt.receiver]
 }
 
 // Keep the original container line and one low-cardinality service label; identifiers stay in the line.
-loki.process "platinumwt" {
+loki.process "dswt" {
   stage.json {
     expressions = { line = "body", container = "attributes.container_name" }
   }

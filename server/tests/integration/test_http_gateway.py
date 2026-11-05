@@ -18,7 +18,7 @@ class HttpGatewayTests(ServerTestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("version=0.0.4", response.getheader("Content-Type"))
         self.assertIn('service="gateway"', text)
-        self.assertNotIn("platinumwt_database_up", text)
+        self.assertNotIn("dswt_database_up", text)
         self.assertEqual(self.request(game_port, path="/metrics")[0], 404)
         connection = http.client.HTTPConnection("127.0.0.1", metrics_port, timeout=4)
         self.addCleanup(connection.close)

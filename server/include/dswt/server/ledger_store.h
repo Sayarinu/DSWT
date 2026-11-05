@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 // Operator-only migration/replay interface. No trading endpoint is enabled
 // here.
@@ -24,4 +24,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

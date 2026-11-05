@@ -1,4 +1,4 @@
-#include "platinumwt/server/identity_store.h"
+#include "dswt/server/identity_store.h"
 
 #include "postgres.h"
 #include "identity_auth.h"
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 template <std::size_t N>
@@ -60,7 +60,7 @@ IdentityId RandomId() {
 
 SaveCredential Verifier(const IdentityId &id,
                         const SaveCredential &credential) {
-  constexpr char domain[] = "PlatinumWT save credential v1";
+  constexpr char domain[] = "DSWT save credential v1";
   std::array<unsigned char, sizeof(domain) + 16 + 32> input{};
   std::copy_n(domain, sizeof(domain), input.begin());
   std::copy(id.begin(), id.end(), input.begin() + sizeof(domain));
@@ -124,7 +124,7 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
       auto existing = impl_->database.Parameters(
           "SELECT replace(save_id::text, '-', ''), encode(credential_verifier, "
           "'hex') "
-          "FROM platinumwt.save_identities WHERE enrollment_id = $1::uuid",
+          "FROM dswt.save_identities WHERE enrollment_id = $1::uuid",
           {Hex(enrollment_id)});
       if (PQntuples(existing.get()) == 1) {
         const auto id = Unhex<16>(PQgetvalue(existing.get(), 0, 0));
@@ -137,7 +137,7 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
       if (!Nonzero(id))
         continue;
       auto inserted = impl_->database.Parameters(
-          "INSERT INTO platinumwt.save_identities(save_id, enrollment_id, "
+          "INSERT INTO dswt.save_identities(save_id, enrollment_id, "
           "credential_verifier) "
           "VALUES ($1::uuid, $2::uuid, decode($3, 'hex')) ON CONFLICT "
           "(enrollment_id) DO NOTHING RETURNING save_id",
@@ -145,7 +145,7 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
       if (PQntuples(inserted.get()) == 0)
         continue;
       impl_->database.Parameters(
-          "INSERT INTO platinumwt.trade_events(save_id, sequence, kind, state) "
+          "INSERT INTO dswt.trade_events(save_id, sequence, kind, state) "
           "VALUES ($1::uuid, 1, 1, 0)",
           {Hex(id)});
       transaction.Commit();
@@ -165,7 +165,7 @@ bool IdentityStore::Authenticate(const IdentityId &save_id,
     return false;
   auto row = impl_->database.Parameters(
       "SELECT encode(credential_verifier, 'hex') "
-      "FROM platinumwt.save_identities WHERE save_id = $1::uuid",
+      "FROM dswt.save_identities WHERE save_id = $1::uuid",
       {Hex(save_id)});
   const bool found = PQntuples(row.get()) == 1;
   const bool equal =
@@ -179,10 +179,10 @@ bool IdentityStore::OwnsTrade(const IdentityId &save_id,
   if (!Nonzero(trade_id) || !Authenticate(save_id, credential))
     return false;
   auto row = impl_->database.Parameters(
-      "SELECT 1 FROM platinumwt.offers "
+      "SELECT 1 FROM dswt.offers "
       "WHERE save_id = $1::uuid AND trade_id = $2::uuid",
       {Hex(save_id), Hex(trade_id)});
   return PQntuples(row.get()) == 1;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

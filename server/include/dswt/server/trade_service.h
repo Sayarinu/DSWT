@@ -1,7 +1,7 @@
 #pragma once
 
-#include "platinumwt/server/legality_client.h"
-#include "platinumwt/server/recovery_barrier.h"
+#include "dswt/server/legality_client.h"
+#include "dswt/server/recovery_barrier.h"
 
 #include <cstdint>
 #include <functional>
@@ -10,7 +10,7 @@
 
 #include "trade.grpc.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, 136> &)>;
 
@@ -35,4 +35,4 @@ private:
   std::shared_ptr<detail::ServiceAdmission> admission_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

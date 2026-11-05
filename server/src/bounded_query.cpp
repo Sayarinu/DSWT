@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <string_view>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -97,4 +97,4 @@ QueryResult BoundedQuery(const std::string &database, const char *sql, const cha
   return row;
 }
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

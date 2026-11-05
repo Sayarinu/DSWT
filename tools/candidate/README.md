@@ -6,10 +6,10 @@ Nothing here releases, uploads, deploys or changes repository visibility.
 
 ```sh
 python3 tools/candidate/candidate.py assemble --bundle game/bundles/0.1.0-rc1 \
-  --output game/candidate/platinumwt-0.1.0-rc1.tar
-python3 tools/candidate/candidate.py verify game/candidate/platinumwt-0.1.0-rc1.tar
+  --output game/candidate/dswt-0.1.0-rc1.tar
+python3 tools/candidate/candidate.py verify game/candidate/dswt-0.1.0-rc1.tar
 python3 tools/candidate/readiness.py source --output game/candidate/source-audit
-python3 tools/candidate/readiness.py report --candidate game/candidate/platinumwt-0.1.0-rc1.tar \
+python3 tools/candidate/readiness.py report --candidate game/candidate/dswt-0.1.0-rc1.tar \
   --stack-manifest game/local-e2e/manifest.json --evidence load game/local-e2e/load/RUN/report.json \
   --output game/candidate/readiness.json
 ```

@@ -23,7 +23,7 @@ COMPOSE = Path(__file__).with_name("compose.yaml")
 OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
 PRODUCTION = Path(__file__).with_name("compose.production.yaml")
 OBSERVABILITY_CONFIG = Path(__file__).with_name("observability")
-LABEL = "studio.nouvellelune.platinumwt.local-workspace"
+LABEL = "studio.nouvellelune.dswt.local-workspace"
 SERVICES = ("database", "gateway", "validator", "backend")
 OBSERVABILITY_SERVICES = ("prometheus", "alertmanager", "loki", "alloy", "grafana", "capture")
 DEFAULT_PORT = 8443
@@ -100,7 +100,7 @@ def initialize(workspace, port=DEFAULT_PORT, observability=None, production=Fals
     peer = load_module("local_stack_tls_peer", ROOT / "scripts/tls-test-server.py")
     peer.prepare(workspace / "tls", "10.64.0.1", "localhost", port)
     manifest = {
-        "version": 1, "project": "platinumwt-local-" + uuid.uuid4().hex,
+        "version": 1, "project": "dswt-local-" + uuid.uuid4().hex,
         "workspace": str(workspace), "profile": "tls/connection.json",
         "host_endpoint": f"https://localhost:{port}/wt/v1", "volumes_created": False,
         "database_system_id": None, "source_commit": None, "source_dirty": None, "images": {},
@@ -134,7 +134,7 @@ def read_manifest(workspace):
     manifest = json.loads(path.read_text())
     if (not isinstance(manifest, dict) or manifest.get("version") != 1 or manifest.get("workspace") != str(workspace)
             or not isinstance(manifest.get("project"), str)
-            or not re.fullmatch(r"platinumwt-local-[0-9a-f]{32}", manifest["project"])
+            or not re.fullmatch(r"dswt-local-[0-9a-f]{32}", manifest["project"])
             or type(manifest.get("volumes_created")) is not bool
             or manifest.get("profile") != "tls/connection.json"
             or ("https_port" in manifest and (not valid_port(manifest["https_port"]) or manifest["https_port"] == DEFAULT_PORT))
@@ -169,8 +169,8 @@ class Stack:
     def __init__(self, workspace, manifest):
         self.workspace, self.manifest = workspace, manifest
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(("COMPOSE_", "PWT_LOCAL_", "PG"))
-                    and key not in ("PLATINUMWT_DATABASE_URL", "DATABASE_URL", "DOCKER_DEFAULT_PLATFORM")}
+                    if not key.startswith(("COMPOSE_", "DSWT_LOCAL_", "PG"))
+                    and key not in ("DSWT_DATABASE_URL", "DATABASE_URL", "DOCKER_DEFAULT_PLATFORM")}
         endpoint = None
         if os.environ.get("DOCKER_HOST") and not os.environ.get("DOCKER_CONTEXT"):
             endpoint = os.environ["DOCKER_HOST"]
@@ -188,18 +188,18 @@ class Stack:
                      "linux/x86_64": "linux/amd64", "linux/amd64": "linux/amd64"}
         if architecture not in platforms:
             raise ValueError("Use a local Linux Docker engine on arm64 or amd64")
-        self.env.update(PWT_LOCAL_WORKSPACE=str(workspace), PWT_LOCAL_PROJECT=manifest["project"],
-                        PWT_LOCAL_UID=str(os.getuid()), PWT_LOCAL_GID=str(os.getgid()),
-                        PWT_LOCAL_PLATFORM=platforms[architecture], PWT_LOCAL_HTTPS_PORT=str(https_port(manifest)),
+        self.env.update(DSWT_LOCAL_WORKSPACE=str(workspace), DSWT_LOCAL_PROJECT=manifest["project"],
+                        DSWT_LOCAL_UID=str(os.getuid()), DSWT_LOCAL_GID=str(os.getgid()),
+                        DSWT_LOCAL_PLATFORM=platforms[architecture], DSWT_LOCAL_HTTPS_PORT=str(https_port(manifest)),
                         # Default attestations give every rebuild a new image ID; evidence binds to stable IDs.
                         BUILDX_NO_DEFAULT_ATTESTATIONS="1")
         self.observability = manifest.get("observability")
         if self.observability:
-            self.env.update(PWT_OBS_GRAFANA_PORT=str(self.observability["grafana_port"]),
-                            PWT_OBS_LOG_PORT=str(self.observability["log_port"]))
+            self.env.update(DSWT_OBS_GRAFANA_PORT=str(self.observability["grafana_port"]),
+                            DSWT_OBS_LOG_PORT=str(self.observability["log_port"]))
         self.production = manifest.get("production", False)
         self.services = SERVICES + (OBSERVABILITY_SERVICES if self.observability else ()) + (("matcher",) if self.production else ())
-        self.ledger = "/usr/local/bin/platinumwt-ledger" if self.production else "/build/platinumwt-ledger"
+        self.ledger = "/usr/local/bin/dswt-ledger" if self.production else "/build/dswt-ledger"
 
     def run(self, arguments, **kwargs):
         return command(self.docker + arguments, env=self.env, **kwargs)
@@ -232,8 +232,8 @@ class Stack:
             save_manifest(self.workspace, self.manifest)
 
     def database_identity(self):
-        result = self.compose("exec", "-T", "database", "psql", "-XAt", "-U", "platinumwt_local",
-                              "-d", "platinumwt_e2e", "-c", "SELECT system_identifier FROM pg_control_system()",
+        result = self.compose("exec", "-T", "database", "psql", "-XAt", "-U", "dswt_local",
+                              "-d", "dswt_e2e", "-c", "SELECT system_identifier FROM pg_control_system()",
                               capture=True, timeout=10)
         identity = result.stdout.strip()
         if not re.fullmatch(r"[0-9]+", identity):
@@ -246,22 +246,22 @@ class Stack:
             save_manifest(self.workspace, self.manifest)
 
     def superuser_sql(self, query):
-        return self.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-U", "platinumwt_local",
-                            "-d", "platinumwt_e2e", "-c", query, capture=True, timeout=30).stdout.strip()
+        return self.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-U", "dswt_local",
+                            "-d", "dswt_e2e", "-c", query, capture=True, timeout=30).stdout.strip()
 
     def prepare_production_database(self):
         """Serve as an unprivileged owner, and start the archive chain from a base backup."""
-        if self.superuser_sql("SELECT count(*) FROM pg_roles WHERE rolname='platinumwt_service'") == "0":
-            self.superuser_sql("CREATE ROLE platinumwt_service LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE")
-        self.superuser_sql("ALTER DATABASE platinumwt_e2e OWNER TO platinumwt_service")
-        self.superuser_sql("GRANT EXECUTE ON FUNCTION pg_switch_wal() TO platinumwt_service")
+        if self.superuser_sql("SELECT count(*) FROM pg_roles WHERE rolname='dswt_service'") == "0":
+            self.superuser_sql("CREATE ROLE dswt_service LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE")
+        self.superuser_sql("ALTER DATABASE dswt_e2e OWNER TO dswt_service")
+        self.superuser_sql("GRANT EXECUTE ON FUNCTION pg_switch_wal() TO dswt_service")
         archive = ["exec", "-T", "--user", "postgres", "database"]
         if self.compose(*archive, "test", "-e", "/archive/chain.armed", capture=True, timeout=10, check=False).returncode == 0:
             return
         self.compose(*archive, "/usr/local/bin/wal-archive.sh", "init", "/archive",
                      self.superuser_sql("SELECT system_identifier FROM pg_control_system()"),
                      self.superuser_sql("SELECT pg_walfile_name(pg_current_wal_insert_lsn())"), capture=True, timeout=30)
-        self.compose(*archive, "pg_basebackup", "-h", "/var/run/postgresql", "-U", "platinumwt_local", "-D", "/archive/base",
+        self.compose(*archive, "pg_basebackup", "-h", "/var/run/postgresql", "-U", "dswt_local", "-D", "/archive/base",
                      "-X", "stream", "-c", "fast", capture=True, timeout=120)
         self.compose(*archive, "/usr/local/bin/wal-archive.sh", "arm", "/archive", capture=True, timeout=30)
 
@@ -271,7 +271,7 @@ class Stack:
 
     def ready(self, request_id=b"\x01" * 16):
         if not self.production:
-            self.compose("exec", "-T", "backend", "/build/tests/platinumwt-device-fixture", "--check",
+            self.compose("exec", "-T", "backend", "/build/tests/dswt-device-fixture", "--check",
                          capture=True, timeout=10)
         context = ssl.create_default_context(cafile=str(self.workspace / "tls/current.pem"))
         context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_2

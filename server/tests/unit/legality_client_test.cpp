@@ -1,4 +1,4 @@
-#include "platinumwt/server/legality_client.h"
+#include "dswt/server/legality_client.h"
 
 #include <functional>
 #include <atomic>
@@ -9,9 +9,9 @@
 
 #include "trade.grpc.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-pwt2";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt2";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
@@ -122,4 +122,4 @@ TEST_F(LegalityClientTest, RejectsInvalidPolicyAndDeadlineConfiguration) {
   EXPECT_THROW(LegalityClient(address, kPolicy, std::chrono::milliseconds(1501)), std::invalid_argument);
 }
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

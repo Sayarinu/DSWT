@@ -79,13 +79,13 @@ def run(save, target, command, store_tool=None):
     if not command:
         raise ValueError("Supply the emulator command after --")
     save = save.absolute()
-    lock = os.open(str(save) + ".platinumwt.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lock = os.open(str(save) + ".dswt.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         owned_file(lock)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        environment = dict(os.environ, PLATINUMWT_SAVE_LOCK_FD=str(lock))
+        environment = dict(os.environ, DSWT_SAVE_LOCK_FD=str(lock))
         if store_tool:
-            if not Path(str(save) + '.platinumwt').exists():
+            if not Path(str(save) + '.dswt').exists():
                 # No recovery store may be created from an original/unseeded save.
                 subprocess.run([str(store_tool), 'inspect', str(save), target], env=environment,
                                pass_fds=(lock,), check=True, capture_output=True, timeout=15)
@@ -93,7 +93,7 @@ def run(save, target, command, store_tool=None):
                            pass_fds=(lock,), check=True, capture_output=True, timeout=15)
             subprocess.run([str(store_tool), 'seed', str(save), target], env=environment,
                            pass_fds=(lock,), check=True, capture_output=True, timeout=15)
-            environment['PLATINUMWT_DURABLE_SAVE'] = str(save)
+            environment['DSWT_DURABLE_SAVE'] = str(save)
             result = subprocess.run(command, pass_fds=(lock,), env=environment, check=False).returncode
             subprocess.run([str(store_tool), 'prepare', str(save)], env=environment,
                            pass_fds=(lock,), check=True, capture_output=True, timeout=15)
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", type=Path, required=True)
     parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
-    parser.add_argument("--store-tool", type=Path, help="Use the built platinumwt-save-store and durable emulator mode")
+    parser.add_argument("--store-tool", type=Path, help="Use the built dswt-save-store and durable emulator mode")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command

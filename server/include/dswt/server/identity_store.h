@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 using IdentityId = std::array<unsigned char, 16>;
 using SaveCredential = std::array<unsigned char, 32>;
@@ -37,4 +37,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

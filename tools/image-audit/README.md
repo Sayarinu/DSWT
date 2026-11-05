@@ -27,7 +27,7 @@ CI and Compose builds use the same allowlists.
 
 The owned digest-pinned BuildKit builder has two CPUs, a 4 GiB memory limit and
 two parallel steps. It is removed before scanners run. The validator test image
-remains locally tagged with the run's unique `platinumwt-audit-...` name for
+remains locally tagged with the run's unique `dswt-audit-...` name for
 independent inspection. No existing builder, image, container or volume is reset.
 The exported OCI archives include maximum BuildKit provenance. Reports separately
 record the layout wrapper, deployable image index, platform manifest and

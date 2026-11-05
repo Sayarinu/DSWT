@@ -2,14 +2,14 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using PKHeX.Core;
-using Platinumwt.V1;
+using Dswt.V1;
 
-namespace PlatinumWT.Validator;
+namespace DSWT.Validator;
 
 public static class Policy
 {
     // Bump for changes to the adapter, core, resources or parsing settings.
-    public const string Version = "pkhex-26.08.26-74b88906-pwt2";
+    public const string Version = "pkhex-26.08.26-74b88906-dswt2";
     public const int PayloadSize = 136;
 
     public static ValidateReply Analyze(byte[] data)

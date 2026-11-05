@@ -100,7 +100,7 @@ int Initialize(const char *path, const char *fixture)
     if (input < 0) return -1;
     if (read(input, pk4, sizeof(pk4)) != 136) { close(input); return -1; }
     close(input);
-    memcpy(inventory, "PWTINV01", 8);
+    memcpy(inventory, "DSWINV01", 8);
     if (WtPokemon_Encode(pk4, inventory + 8) != 0 || Hash(inventory, INVENTORY_BODY, inventory + INVENTORY_BODY) != 0
         || HostRandom(entry.seed, 32) != 0 || WtJournal_Encode(&entry, Hash, banks) != 0) return -1;
     memcpy(banks + 4096, banks, 4096);
@@ -151,7 +151,7 @@ static int ReadInventory(Probe *probe, int bank, unsigned char bytes[INVENTORY_S
 {
     unsigned char digest[32];
     return pread(probe->inventory[bank], bytes, INVENTORY_SIZE, 0) == INVENTORY_SIZE
-        && memcmp(bytes, "PWTINV01", 8) == 0 && Hash(bytes, INVENTORY_BODY, digest) == 0
+        && memcmp(bytes, "DSWINV01", 8) == 0 && Hash(bytes, INVENTORY_BODY, digest) == 0
         && memcmp(digest, bytes + INVENTORY_BODY, 32) == 0 ? 0 : -1;
 }
 

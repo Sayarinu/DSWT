@@ -70,7 +70,7 @@ class InventoryTests(RepositoryFixture):
 
 
 IMAGES = {name: "sha256:" + str(index) * 64 for index, name in enumerate(("database", "gateway", "backend", "validator"), 1)}
-STACK = {"project": "platinumwt-local-" + "0" * 32, "workspace": "/w", "database_system_id": "7", "images": IMAGES}
+STACK = {"project": "dswt-local-" + "0" * 32, "workspace": "/w", "database_system_id": "7", "images": IMAGES}
 
 
 class BindingTests(unittest.TestCase):
@@ -110,7 +110,7 @@ class BindingTests(unittest.TestCase):
         isolation = {"status": "pass", "source_commit": COMMIT, "source_dirty": False, "database_system_id": "7"}
         self.assertEqual(self.bind("isolation", isolation)["status"], "applicable")
         self.assertEqual(self.bind("isolation", dict(isolation, database_system_id="8"))["status"], "stale")
-        source = {"kind": "platinumwt-source-audit", "source_commit": COMMIT, "source_dirty": False,
+        source = {"kind": "dswt-source-audit", "source_commit": COMMIT, "source_dirty": False,
                   "inventory": {"forbidden": [], "unclassified": [], "private_marker_blobs": [{"expected": True}]},
                   "source_archive": {"reproducible": True, "complete": True, "findings": []},
                   "secrets": {"git": {"findings": 0}}}

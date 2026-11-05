@@ -96,9 +96,9 @@ def audit_sources(image, context, service, pkhex_archive=None):
     expected = {}
     if service == "server":
         for name in ("LICENSE", "NOTICE"):
-            expected["usr/share/platinumwt/" + name] = (context / name).read_bytes()
+            expected["usr/share/dswt/" + name] = (context / name).read_bytes()
         for path in (context / "server/migrations").iterdir():
-            expected["usr/local/share/platinumwt/migrations/" + path.name] = path.read_bytes()
+            expected["usr/local/share/dswt/migrations/" + path.name] = path.read_bytes()
     else:
         for path in context.rglob("*"):
             if path.is_file():
@@ -271,7 +271,7 @@ class Runner:
     def __init__(self, workspace, platform):
         self.workspace, self.platform = workspace, platform
         self.pins = json.loads(PINS.read_text())
-        self.name = "platinumwt-audit-" + uuid.uuid4().hex
+        self.name = "dswt-audit-" + uuid.uuid4().hex
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("DOCKER_", "BUILDX_", "BUILDKIT_"))}
         endpoint = os.environ.get("DOCKER_HOST") if not os.environ.get("DOCKER_CONTEXT") else None
         if not endpoint:

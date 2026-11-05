@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platinumwt/server/recovery_barrier.h"
+#include "dswt/server/recovery_barrier.h"
 
 #include <chrono>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 // WAL known to be archived on one timeline. An end of zero covers nothing.
 struct WalCoverage {
@@ -60,4 +60,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

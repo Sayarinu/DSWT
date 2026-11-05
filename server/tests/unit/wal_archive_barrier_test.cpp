@@ -1,8 +1,8 @@
-#include "platinumwt/server/wal_archive_barrier.h"
+#include "dswt/server/wal_archive_barrier.h"
 
 #include <gtest/gtest.h>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 constexpr std::uint64_t kSegment = 16 * 1024 * 1024;
@@ -105,4 +105,4 @@ TEST(WalArchiveBarrierTest, UnreachableDatabaseStaysClosedAndStopsPromptly) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

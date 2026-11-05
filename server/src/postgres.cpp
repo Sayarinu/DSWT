@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 namespace {
 
 Result CheckResult(PGresult *raw) {
@@ -28,7 +28,7 @@ DatabaseError::DatabaseError(std::string state, std::string constraint)
 Database::Database(const std::string &info) {
   const char *keys[] = {"dbname", "connect_timeout", "application_name",
                         nullptr};
-  const char *values[] = {info.c_str(), "3", "platinumwt-ledger", nullptr};
+  const char *values[] = {info.c_str(), "3", "dswt-ledger", nullptr};
   connection_.reset(PQconnectdbParams(keys, values, 1));
   if (!connection_ || PQstatus(connection_.get()) != CONNECTION_OK)
     throw std::runtime_error("database connection failed");
@@ -83,4 +83,4 @@ void Transaction::Commit() {
   committed_ = true;
 }
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

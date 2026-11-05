@@ -1,11 +1,11 @@
-#include "platinumwt/server/http_session.h"
+#include "dswt/server/http_session.h"
 
 #include "http_services.h"
 
 #include <chrono>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -120,4 +120,4 @@ void HttpSession::Close() {
   Lowest().socket().close(ignored);
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

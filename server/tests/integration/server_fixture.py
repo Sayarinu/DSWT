@@ -6,7 +6,7 @@ import selectors
 import subprocess
 import unittest
 
-ACK = b"PLATINUMWT_ACK_V1\n"
+ACK = b"DSWT_ACK_V1\n"
 
 
 class ServerTestCase(unittest.TestCase):

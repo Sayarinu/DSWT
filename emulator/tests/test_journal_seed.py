@@ -38,11 +38,11 @@ def retail_save(record):
 
 class JournalSeedTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="platinumwt-journal-host-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="dswt-journal-host-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         # ld.so splits LD_PRELOAD on spaces, including spaces in checkout paths.
-        preload = tempfile.TemporaryDirectory(prefix="platinumwt-preload-", dir="/tmp")
+        preload = tempfile.TemporaryDirectory(prefix="dswt-preload-", dir="/tmp")
         self.addCleanup(preload.cleanup)
         alias = Path(preload.name) / "faults.so"
         alias.symlink_to(self.faults)
@@ -89,7 +89,7 @@ class JournalSeedTests(unittest.TestCase):
                 self.save = self.root / f"phase-{phase}.sav"
                 original = self.install(phase)
                 self.tool("inspect")
-                self.assertFalse(Path(str(self.save) + ".platinumwt").exists())
+                self.assertFalse(Path(str(self.save) + ".dswt").exists())
                 self.assertEqual(self.save.read_bytes(), original)
                 self.tool("prepare")
                 self.tool("seed")
@@ -122,7 +122,7 @@ class JournalSeedTests(unittest.TestCase):
                 self.save = self.root / f"unknown-{index}.sav"; self.save.write_bytes(data); self.save.chmod(0o600)
                 self.tool("inspect", ok=False)
                 self.assertEqual(self.save.read_bytes(), data)
-                self.assertFalse(Path(str(self.save) + ".platinumwt").exists())
+                self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.install(1); self.tool("inspect", target="europe", ok=False)
 
     def test_a_recognized_torn_mirror_is_repaired_without_losing_active_data(self):
@@ -136,7 +136,7 @@ class JournalSeedTests(unittest.TestCase):
         original = bytearray(self.install(8)); original[BANKS[1] + 4] = 2
         self.save.write_bytes(original)
         self.tool("prepare")
-        store = Path(str(self.save) + ".platinumwt")
+        store = Path(str(self.save) + ".dswt")
         before = {name: (store / name).read_bytes() for name in ("A", "B", "HEAD")}
         self.tool("seed", ok=False)
         self.assertEqual(self.save.read_bytes(), bytes(original))
@@ -145,7 +145,7 @@ class JournalSeedTests(unittest.TestCase):
     def test_every_seed_publication_survives_kill_or_write_failure(self):
         original = self.install(5)
         self.tool("prepare")
-        store = Path(str(self.save) + ".platinumwt")
+        store = Path(str(self.save) + ".dswt")
         baseline = self.root / "baseline"
         shutil.copytree(store, baseline)
         # Each journal mirror uses four atomic host publications and five fences.
@@ -153,8 +153,8 @@ class JournalSeedTests(unittest.TestCase):
             for stage in range(1, 41):
                 with self.subTest(mode=mode, stage=stage):
                     shutil.rmtree(store); shutil.copytree(baseline, store); self.save.write_bytes(original)
-                    env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_ARMED="1",
-                               PWT_FAULT_SAVE=str(self.save), PWT_FAULT_AT=str(stage), PWT_FAULT_MODE=mode)
+                    env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_ARMED="1",
+                               DSWT_FAULT_SAVE=str(self.save), DSWT_FAULT_AT=str(stage), DSWT_FAULT_MODE=mode)
                     process = subprocess.Popen([str(self.store), "seed", str(self.save), "us-rev1"],
                                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     try:
@@ -178,8 +178,8 @@ class JournalSeedTests(unittest.TestCase):
         original = self.install(8)
         marker = self.root / "child-observed"
         code = ("import fcntl,os,sys; from pathlib import Path; "
-                "assert os.environ['PLATINUMWT_DURABLE_SAVE']==sys.argv[1]; "
-                "fcntl.flock(int(os.environ['PLATINUMWT_SAVE_LOCK_FD']),fcntl.LOCK_EX|fcntl.LOCK_NB); "
+                "assert os.environ['DSWT_DURABLE_SAVE']==sys.argv[1]; "
+                "fcntl.flock(int(os.environ['DSWT_SAVE_LOCK_FD']),fcntl.LOCK_EX|fcntl.LOCK_NB); "
                 "Path(sys.argv[2]).write_text('started')")
         result = subprocess.run([sys.executable, str(ROOT / "scripts/run-emulator.py"),
                                  "--save", str(self.save), "--target", "us-rev1", "--store-tool", str(self.store),
@@ -199,7 +199,7 @@ class JournalSeedTests(unittest.TestCase):
                                 capture_output=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(marker.exists())
-        self.assertFalse(Path(str(self.save) + ".platinumwt").exists())
+        self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.assertEqual(self.save.read_bytes(), original)
 
     def test_inspection_rejects_symlink_and_hardlink_aliases(self):
@@ -214,11 +214,11 @@ class JournalSeedTests(unittest.TestCase):
     def test_failed_zero_or_repeated_host_entropy_never_publishes(self):
         original = self.install(8)
         self.tool("prepare")
-        store = Path(str(self.save) + ".platinumwt")
+        store = Path(str(self.save) + ".dswt")
         before = {name: (store / name).read_bytes() for name in ("A", "B", "HEAD")}
         for mode in ("error", "zero", "same"):
             with self.subTest(mode=mode):
-                env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_SEED_RANDOM_MODE=mode)
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_SEED_RANDOM_MODE=mode)
                 result = subprocess.run([str(self.store), "seed", str(self.save), "us-rev1"],
                                         env=env, capture_output=True, timeout=5)
                 self.assertEqual(result.returncode, 74, result.stdout + result.stderr)

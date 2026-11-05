@@ -1,8 +1,8 @@
-#include "platinumwt/server/connectivity_service.h"
+#include "dswt/server/connectivity_service.h"
 
 #include <gtest/gtest.h>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 TEST(ConnectivityServiceTest, ReturnsProtocolAcknowledgement) {
@@ -14,8 +14,8 @@ TEST(ConnectivityServiceTest, ReturnsProtocolAcknowledgement) {
   const auto status = service.Ping(&context, &request, &response);
 
   EXPECT_TRUE(status.ok());
-  EXPECT_EQ(response.acknowledgement(), "PLATINUMWT_ACK_V1\n");
+  EXPECT_EQ(response.acknowledgement(), "DSWT_ACK_V1\n");
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

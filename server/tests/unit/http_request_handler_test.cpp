@@ -1,8 +1,8 @@
-#include "platinumwt/server/http_request_handler.h"
+#include "dswt/server/http_request_handler.h"
 
 #include <gtest/gtest.h>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 namespace http = boost::beast::http;
 
@@ -61,4 +61,4 @@ TEST_F(HttpRequestHandlerTest, PreservesHttp10Framing) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

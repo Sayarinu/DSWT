@@ -24,10 +24,10 @@ def prepare(root=ROOT, archive=None):
     pin = json.loads((root / 'emulator/upstream.json').read_text())
     patch = root / 'emulator/melonds.patch'
     additions = {
-        'platinumwt-MIT-LICENSE': root / 'LICENSE',
-        'src/frontend/qt_sdl/platinumwt/durable_save.cpp': root / 'emulator/durable_save.cpp',
-        'src/frontend/qt_sdl/platinumwt/durable_save.h': root / 'emulator/durable_save.h',
-        'src/PlatinumWTPersistence.h': root / 'client/include/wonder_trade/persistence.h',
+        'dswt-MIT-LICENSE': root / 'LICENSE',
+        'src/frontend/qt_sdl/dswt/durable_save.cpp': root / 'emulator/durable_save.cpp',
+        'src/frontend/qt_sdl/dswt/durable_save.h': root / 'emulator/durable_save.h',
+        'src/DSWTPersistence.h': root / 'client/include/wonder_trade/persistence.h',
     }
     inputs = {'revision': pin['revision'], 'archive_sha256': pin['sha256'],
               'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
@@ -39,7 +39,7 @@ def prepare(root=ROOT, archive=None):
     parent.mkdir(exist_ok=True)
     destination = parent / f'melonds-{pin["version"]}-{key[:16]}'
     if destination.exists() or destination.is_symlink():
-        manifest = destination / '.platinumwt-files.json'
+        manifest = destination / '.dswt-files.json'
         if destination.is_symlink() or manifest.is_symlink() or not manifest.is_file():
             raise ValueError('Existing emulator source is unmanaged; preserve it')
         recorded = json.loads(manifest.read_text())
@@ -79,7 +79,7 @@ def prepare(root=ROOT, archive=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
         files = tls_source.inventory(extracted)
-        (extracted / '.platinumwt-files.json').write_text(json.dumps({'inputs': inputs, 'files': files}, sort_keys=True) + '\n')
+        (extracted / '.dswt-files.json').write_text(json.dumps({'inputs': inputs, 'files': files}, sort_keys=True) + '\n')
         extracted.rename(destination)
     return destination
 

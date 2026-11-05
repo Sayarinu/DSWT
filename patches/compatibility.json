@@ -14,7 +14,7 @@
       "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3541",
       "build_revision": 0,
       "pristine_verified": true,
-      "planned_patch": "platinum-wonder-trade-us-rev0.bps"
+      "planned_patch": "dswt-us-rev0.bps"
     },
     {
       "id": "us-rev1",
@@ -26,7 +26,7 @@
       "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=4997",
       "build_revision": 1,
       "pristine_verified": true,
-      "planned_patch": "platinum-wonder-trade-us-rev1.bps"
+      "planned_patch": "dswt-us-rev1.bps"
     },
     {
       "id": "europe",
@@ -38,7 +38,7 @@
       "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3797",
       "build_revision": null,
       "pristine_verified": false,
-      "planned_patch": "platinum-wonder-trade-europe.bps"
+      "planned_patch": "dswt-europe.bps"
     }
   ]
 }

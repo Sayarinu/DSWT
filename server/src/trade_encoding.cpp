@@ -7,7 +7,7 @@
 #include <charconv>
 #include <stdexcept>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 bool NonzeroBytes(std::string_view bytes, std::size_t size) {
   return bytes.size() == size && std::any_of(bytes.begin(), bytes.end(), [](char c) { return c != 0; });
@@ -150,4 +150,4 @@ void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply) {
   snapshot->set_last_event(number(8));
 }
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

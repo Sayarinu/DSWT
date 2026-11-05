@@ -21,7 +21,7 @@ RUN find /source -type d \( -name bin -o -name obj \) -prune -exec rm -rf '{}' +
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac
 WORKDIR /app
 COPY --from=publish /app /app
-COPY --from=publish /source /usr/share/platinumwt-validator/source
+COPY --from=publish /source /usr/share/dswt-validator/source
 ENV DOTNET_EnableDiagnostics=0 \
     DOTNET_PROCESSOR_COUNT=2 \
     DOTNET_GCHeapHardLimit=8000000

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platinumwt/server/http_request_handler.h"
+#include "dswt/server/http_request_handler.h"
 #include "admission.h"
 
 #include <boost/asio/ssl/context.hpp>
@@ -8,7 +8,7 @@
 
 #include <functional>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 struct HttpConnection {
   std::string network;
@@ -36,4 +36,4 @@ private:
   detail::Quota recovery_jobs_{{16, 8, 256, 128}};
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

@@ -1,13 +1,13 @@
 The isolated validator accepts only canonical 136-byte PK4 data and its SHA-256
 through `PokemonLegality.Validate`. It returns a boolean, the exact payload hash,
-policy `pkhex-26.08.26-74b88906-pwt2` and up to eight stable reason codes. It never
+policy `pkhex-26.08.26-74b88906-dswt2` and up to eight stable reason codes. It never
 returns a Pokémon or repairs data. No ROM, save, UI, sprite or package icon is
 included in the build context or runtime.
 
 Build and test from the repository root:
 
 ```sh
-docker build -f validator/Dockerfile -t platinumwt-validator .
+docker build -f validator/Dockerfile -t dswt-validator .
 ```
 
 Run as a sidecar sharing the C++ service's network namespace, with no published
@@ -57,6 +57,6 @@ the core; that declaration does not independently establish provenance for
 every embedded game-derived resource. Keep image publication gated on the
 existing artifact/rights review. The adapter is GPL-3.0-or-later and every
 runtime image carries complete corresponding adapter/core source, build files,
-schema, license and notices in `/usr/share/platinumwt-validator/source`, plus
+schema, license and notices in `/usr/share/dswt-validator/source`, plus
 hash-verified gRPC/Protobuf runtime source archives pinned in `runtime-sources.tsv`.
 Ship that source with distributed images, preserving third-party notices.

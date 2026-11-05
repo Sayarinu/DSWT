@@ -112,7 +112,7 @@ class TlsToolTests(unittest.TestCase):
             (source / "source.c").write_text("original")
             (source / "alias.c").symlink_to("source.c")
             recorded = {"archive_sha256": "expected", "files": prepare.inventory(source)}
-            (source / ".platinumwt-files.json").write_text(json.dumps(recorded))
+            (source / ".dswt-files.json").write_text(json.dumps(recorded))
             self.assertEqual(prepare.prepare(root), source)
             (source / "source.c").write_text("changed")
             with self.assertRaisesRegex(ValueError, "differs"):
@@ -201,7 +201,7 @@ class EmulatorLauncherTests(unittest.TestCase):
             save = root / "test.sav"
             original = provision.provision(synthetic_save(), "us-rev1")
             provision.write_new(save, original)
-            with open(str(save) + ".platinumwt.lock", "w") as lock:
+            with open(str(save) + ".dswt.lock", "w") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 with self.assertRaises(BlockingIOError):
                     launcher.run(save, "us-rev1", ["unused"])

@@ -1,4 +1,4 @@
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 TEST(TelemetryTest, RecordsCumulativeHistogramAndFixedResultLabels) {
@@ -16,15 +16,15 @@ TEST(TelemetryTest, RecordsCumulativeHistogramAndFixedResultLabels) {
   metrics.Record(static_cast<Operation>(999), 999, std::chrono::microseconds(-1));
   const auto text = metrics.Render();
   for (const auto *expected : {
-      "platinumwt_requests_total{service=\"backend\",operation=\"submit\",result=\"ok\"} 1\n",
-      "platinumwt_requests_total{service=\"backend\",operation=\"submit\",result=\"illegal_pokemon\"} 1\n",
-      "platinumwt_requests_total{service=\"backend\",operation=\"invalid\",result=\"transport_error\"} 1\n",
-      "platinumwt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.005\"} 1\n",
-      "platinumwt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.01\"} 1\n",
-      "platinumwt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.025\"} 2\n",
-      "platinumwt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"+Inf\"} 2\n",
-      "platinumwt_request_duration_seconds_count{service=\"backend\",operation=\"submit\"} 2\n",
-      "platinumwt_request_duration_seconds_sum{service=\"backend\",operation=\"submit\"} 0.025\n"})
+      "dswt_requests_total{service=\"backend\",operation=\"submit\",result=\"ok\"} 1\n",
+      "dswt_requests_total{service=\"backend\",operation=\"submit\",result=\"illegal_pokemon\"} 1\n",
+      "dswt_requests_total{service=\"backend\",operation=\"invalid\",result=\"transport_error\"} 1\n",
+      "dswt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.005\"} 1\n",
+      "dswt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.01\"} 1\n",
+      "dswt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"0.025\"} 2\n",
+      "dswt_request_duration_seconds_bucket{service=\"backend\",operation=\"submit\",le=\"+Inf\"} 2\n",
+      "dswt_request_duration_seconds_count{service=\"backend\",operation=\"submit\"} 2\n",
+      "dswt_request_duration_seconds_sum{service=\"backend\",operation=\"submit\"} 0.025\n"})
     EXPECT_NE(text.find(expected), std::string::npos) << expected;
 }
 
@@ -66,20 +66,20 @@ TEST(TelemetryTest, UnknownAndUnavailableLedgerAgesRemainUnknown) {
   ledger.pending = 1; ledger.oldest_delivery_seconds = 15;
   metrics.SetLedger(ledger);
   auto text = metrics.Render();
-  EXPECT_NE(text.find("platinumwt_queued_offers 2\n"), std::string::npos);
-  EXPECT_NE(text.find("platinumwt_oldest_queue_age_seconds NaN\n"), std::string::npos);
-  EXPECT_NE(text.find("platinumwt_oldest_delivery_age_seconds 15\n"), std::string::npos);
+  EXPECT_NE(text.find("dswt_queued_offers 2\n"), std::string::npos);
+  EXPECT_NE(text.find("dswt_oldest_queue_age_seconds NaN\n"), std::string::npos);
+  EXPECT_NE(text.find("dswt_oldest_delivery_age_seconds 15\n"), std::string::npos);
   metrics.SetLedger({});
   text = metrics.Render();
-  EXPECT_NE(text.find("platinumwt_database_up 0\n"), std::string::npos);
-  EXPECT_NE(text.find("platinumwt_queued_offers NaN\n"), std::string::npos);
+  EXPECT_NE(text.find("dswt_database_up 0\n"), std::string::npos);
+  EXPECT_NE(text.find("dswt_queued_offers NaN\n"), std::string::npos);
 }
 
 TEST(TelemetryTest, GatewayDoesNotPublishBackendLedgerGauges) {
   Telemetry metrics;
   metrics.Initialize(TelemetryRole::Gateway);
-  EXPECT_EQ(metrics.Render().find("platinumwt_database_up"), std::string::npos);
+  EXPECT_EQ(metrics.Render().find("dswt_database_up"), std::string::npos);
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

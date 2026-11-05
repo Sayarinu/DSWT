@@ -1,4 +1,4 @@
-#include "platinumwt/server/ledger_store.h"
+#include "dswt/server/ledger_store.h"
 
 #include <cstdlib>
 #include <exception>
@@ -9,12 +9,12 @@ int main(int argc, char **argv) {
   if (argc < 2 || (std::string(argv[1]) == "migrate"
                        ? argc != 3
                        : std::string(argv[1]) != "verify" || argc != 2)) {
-    std::cerr << "Usage: platinumwt-ledger migrate DIRECTORY | verify\n";
+    std::cerr << "Usage: dswt-ledger migrate DIRECTORY | verify\n";
     return 2;
   }
   try {
-    const char *info = std::getenv("PLATINUMWT_DATABASE_URL");
-    platinumwt::server::LedgerStore ledger(info ? info : "");
+    const char *info = std::getenv("DSWT_DATABASE_URL");
+    dswt::server::LedgerStore ledger(info ? info : "");
     if (std::string(argv[1]) == "migrate") {
       ledger.Migrate(argv[2]);
       std::cout << "Ledger migrations verified and applied\n";

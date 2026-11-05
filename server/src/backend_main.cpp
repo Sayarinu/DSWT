@@ -1,10 +1,10 @@
-#include "platinumwt/server/config.h"
-#include "platinumwt/server/identity_service.h"
-#include "platinumwt/server/legality_client.h"
-#include "platinumwt/server/trade_service.h"
-#include "platinumwt/server/wal_archive_barrier.h"
+#include "dswt/server/config.h"
+#include "dswt/server/identity_service.h"
+#include "dswt/server/legality_client.h"
+#include "dswt/server/trade_service.h"
+#include "dswt/server/wal_archive_barrier.h"
 #include "admission.h"
-#include "platinumwt/server/metrics_server.h"
+#include "dswt/server/metrics_server.h"
 
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
@@ -15,7 +15,7 @@
 
 int main() {
   try {
-    using namespace platinumwt::server;
+    using namespace dswt::server;
     const auto config = LoadBackendConfig();
     Telemetry::Global().Initialize(TelemetryRole::Backend);
     MetricsServer metrics(config.metrics_port, config.connection_info);

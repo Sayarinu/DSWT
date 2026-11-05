@@ -1,6 +1,6 @@
-#include "platinumwt/server/trade_service.h"
-#include "platinumwt/server/identity_store.h"
-#include "platinumwt/server/identity_service.h"
+#include "dswt/server/trade_service.h"
+#include "dswt/server/identity_store.h"
+#include "dswt/server/identity_service.h"
 
 #include "postgres.h"
 #include "trade_encoding.h"
@@ -16,7 +16,7 @@
 
 extern char **environ;
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 std::string Identifier() {
@@ -301,7 +301,7 @@ TEST_F(TradeTest, ForgedCredentialsNeverAcquireOrWaitForAnOwnersWriteLock) {
   auto forged = Submission(auth);
   forged.mutable_context()->mutable_auth()->set_credential(std::string(32, '\x52'));
   detail::Transaction held(database);
-  database.Parameters("SELECT save_id FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
+  database.Parameters("SELECT save_id FROM dswt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
       {detail::HexBytes(auth.save_id())});
   const auto before = std::chrono::steady_clock::now();
   const auto reply = Submit(forged);
@@ -383,27 +383,27 @@ TEST_F(TradeTest, MatchedTradeCannotCancelAndDeliversOnlyItsAssignedPeerAsset) {
       detail::HexBytes(offered.outcome().offered_asset_id()), detail::HexBytes(peer.save_id()),
       detail::HexBytes(peer_offer.outcome().trade_id()), detail::HexBytes(peer_offer.outcome().offered_asset_id()),
       detail::HexBytes(receipt), detail::HexBytes(peer_receipt), detail::HexBytes(match), detail::HexBytes(Identifier())};
-  database.Parameters("SELECT save_id FROM platinumwt.save_identities WHERE save_id IN ($1::uuid,$2::uuid) "
+  database.Parameters("SELECT save_id FROM dswt.save_identities WHERE save_id IN ($1::uuid,$2::uuid) "
       "ORDER BY save_id FOR UPDATE", {parameters[0], parameters[3]});
   auto pair_sql = [&](const char *sql) {
     const std::string typed = "WITH args AS (SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,"
         "$6::uuid,$7::uuid,$8::uuid,$9::uuid,$10::uuid) ";
     return database.Parameters((typed + sql).c_str(), parameters);
   };
-  pair_sql("INSERT INTO platinumwt.matches VALUES ($9::uuid,$10::uuid,"
+  pair_sql("INSERT INTO dswt.matches VALUES ($9::uuid,$10::uuid,"
       "least($2::uuid,$5::uuid),greatest($2::uuid,$5::uuid))");
-  pair_sql("INSERT INTO platinumwt.matcher_attempts VALUES ($10::uuid,$9::uuid)");
-  pair_sql("INSERT INTO platinumwt.receipts VALUES "
+  pair_sql("INSERT INTO dswt.matcher_attempts VALUES ($10::uuid,$9::uuid)");
+  pair_sql("INSERT INTO dswt.receipts VALUES "
       "($7::uuid,$2::uuid,$1::uuid,$6::uuid,1,$9::uuid),"
       "($8::uuid,$5::uuid,$4::uuid,$3::uuid,1,$9::uuid)");
-  pair_sql("UPDATE platinumwt.offers SET state=2,last_event=3,receipt_id=CASE "
+  pair_sql("UPDATE dswt.offers SET state=2,last_event=3,receipt_id=CASE "
       "WHEN trade_id=$2::uuid THEN $7::uuid ELSE $8::uuid END WHERE trade_id IN ($2::uuid,$5::uuid)");
-  pair_sql("UPDATE platinumwt.ownership SET location=2,last_event=3,"
+  pair_sql("UPDATE dswt.ownership SET location=2,last_event=3,"
       "save_id=CASE WHEN asset_id=$3::uuid THEN $4::uuid ELSE $1::uuid END,"
       "trade_id=CASE WHEN asset_id=$3::uuid THEN $5::uuid ELSE $2::uuid END WHERE asset_id IN ($3::uuid,$6::uuid)");
-  pair_sql("INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,receipt_id,state) "
-      "SELECT r.save_id,3,3,r.trade_id,r.asset_id,p.sha256,r.receipt_id,2 FROM platinumwt.receipts r "
-      "JOIN platinumwt.payloads p USING(asset_id) WHERE r.match_id=$9::uuid");
+  pair_sql("INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,receipt_id,state) "
+      "SELECT r.save_id,3,3,r.trade_id,r.asset_id,p.sha256,r.receipt_id,2 FROM dswt.receipts r "
+      "JOIN dswt.payloads p USING(asset_id) WHERE r.match_id=$9::uuid");
   transaction.Commit();
   EXPECT_EQ(Cancel(Cancellation(offered.outcome())).context().result(), v1::RESULT_CONFLICT);
   const auto incoming = Collect(offered.outcome().trade_id());
@@ -488,7 +488,7 @@ TEST_F(TradeTest, ReconciliationRejectsTruncatedOrContradictoryHistory) {
     EXPECT_EQ(status.error_code(), grpc::StatusCode::UNAVAILABLE);
     EXPECT_EQ(reply.ByteSizeLong(), 0U);
   };
-  const char *watermark = "UPDATE platinumwt.save_identities SET event_highwater=$2::numeric WHERE save_id=$1::uuid";
+  const char *watermark = "UPDATE dswt.save_identities SET event_highwater=$2::numeric WHERE save_id=$1::uuid";
   // Privileged corruption bypasses normal guards; restore the original rows so
   // the independent audit replay still verifies the rest of the fixture.
   corrupt(watermark, "5");
@@ -497,9 +497,9 @@ TEST_F(TradeTest, ReconciliationRejectsTruncatedOrContradictoryHistory) {
   corrupt(watermark, "1");
   rejected(0); // Retained events extend beyond this snapshot's highwater.
   corrupt(watermark, "3");
-  corrupt("UPDATE platinumwt.trade_events SET sequence=$2::numeric WHERE save_id=$1::uuid AND sequence=2", "4");
+  corrupt("UPDATE dswt.trade_events SET sequence=$2::numeric WHERE save_id=$1::uuid AND sequence=2", "4");
   rejected(0); // Same row count, but an interior gap and an event beyond highwater.
-  corrupt("UPDATE platinumwt.trade_events SET sequence=2 WHERE save_id=$1::uuid AND sequence=$2::numeric", "4");
+  corrupt("UPDATE dswt.trade_events SET sequence=2 WHERE save_id=$1::uuid AND sequence=$2::numeric", "4");
   EXPECT_EQ(Reconcile().events_size(), 3);
 }
 
@@ -600,21 +600,21 @@ TEST_F(TradeTest, LaggingWalWatermarkCanFinishWithoutChasingRetryLocks) {
 }
 
 TEST_F(TradeTest, CommitFailureRollsBackPayloadOwnershipOperationAndAudit) {
-  const auto before = Scalar("SELECT count(*) FROM platinumwt.audit_journal");
-  database.Execute("CREATE FUNCTION platinumwt.fail_lifecycle_test() RETURNS trigger LANGUAGE plpgsql AS $$ "
+  const auto before = Scalar("SELECT count(*) FROM dswt.audit_journal");
+  database.Execute("CREATE FUNCTION dswt.fail_lifecycle_test() RETURNS trigger LANGUAGE plpgsql AS $$ "
       "BEGIN RAISE EXCEPTION 'PRIVATE_SENTINEL'; END $$; "
-      "CREATE CONSTRAINT TRIGGER fail_lifecycle_test AFTER INSERT ON platinumwt.operations "
-      "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION platinumwt.fail_lifecycle_test()");
+      "CREATE CONSTRAINT TRIGGER fail_lifecycle_test AFTER INSERT ON dswt.operations "
+      "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION dswt.fail_lifecycle_test()");
   const auto request = Submission(auth);
   v1::MutationReply reply;
   const auto status = service.Submit(nullptr, &request, &reply);
-  database.Execute("DROP TRIGGER fail_lifecycle_test ON platinumwt.operations; DROP FUNCTION platinumwt.fail_lifecycle_test()");
+  database.Execute("DROP TRIGGER fail_lifecycle_test ON dswt.operations; DROP FUNCTION dswt.fail_lifecycle_test()");
   EXPECT_EQ(status.error_code(), grpc::StatusCode::UNAVAILABLE);
   EXPECT_EQ(status.error_message().find("PRIVATE_SENTINEL"), std::string::npos);
   EXPECT_FALSE(reply.has_outcome());
   EXPECT_EQ(Status().context().next_counter(), 1U);
   EXPECT_EQ(Status().trade().state(), v1::TRADE_NONE);
-  EXPECT_EQ(Scalar("SELECT count(*) FROM platinumwt.audit_journal"), before);
+  EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.audit_journal"), before);
 }
 
 TEST_F(TradeTest, ActualGrpcServiceUsesTheSamePersistentContract) {
@@ -660,13 +660,13 @@ TEST_F(TradeTest, CallerExitAndNewProcessRecoverTheCommittedOutcome) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 int main(int argc, char **argv) {
   if (argc == 2 && std::string(argv[1]) == "--commit-and-exit")
-    std::_Exit(platinumwt::server::RestartScenario());
+    std::_Exit(dswt::server::RestartScenario());
   if (argc == 2 && std::string(argv[1]) == "--verify-restart")
-    return platinumwt::server::RestartScenario();
+    return dswt::server::RestartScenario();
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

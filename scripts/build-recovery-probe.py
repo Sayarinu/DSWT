@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def write_probe_file(path, content, exclusive=False):
-    descriptor, temporary = tempfile.mkstemp(prefix=".platinumwt-probe-", dir=path.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=".dswt-probe-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as output:
             output.write(content)
@@ -66,7 +66,7 @@ def build():
     original = (ROOT / "client/src/wonder_trade/application.c").read_bytes()
     text = original.decode()
     replacements = {
-        '#include "wonder_trade/recovery.h"': '#include "wonder_trade/recovery.h"\n#include "../../.git/platinumwt-entrypoint-probe.inc"',
+        '#include "wonder_trade/recovery.h"': '#include "wonder_trade/recovery.h"\n#include "../../.git/dswt-entrypoint-probe.inc"',
         '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }':
             '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }\n'
             '    if (worker->result == 0) worker->result = WtRecovery_ProbeEntrypoints() ? 1 : -100;',
@@ -83,7 +83,7 @@ def build():
     data["messages"].append({"id": "WonderTrade_Text_ProbePassed",
                              "en_US": "Retail guards and receive replay\npassed. Save data unchanged."})
     edits = [
-        (workspace / ".git/platinumwt-entrypoint-probe.inc", None, (ROOT / "client/tests/retail_guard_probe.c").read_bytes()),
+        (workspace / ".git/dswt-entrypoint-probe.inc", None, (ROOT / "client/tests/retail_guard_probe.c").read_bytes()),
         (app, original, text.encode()),
         (messages, original_messages, (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()),
     ]
@@ -92,7 +92,7 @@ def build():
         with probe_edits(edits):
             subprocess.run(["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
                             "-v", f"{workspace}:/workspace", "-v", f"{tls}:/tls:ro", "-w", "/workspace",
-                            "platinumwt-rom-builder", "make", "release"], cwd=ROOT, env=environment, check=True)
+                            "dswt-rom-builder", "make", "release"], cwd=ROOT, env=environment, check=True)
             shutil.copyfile(workspace / "build/pokeplatinum.us.nds", output)
     finally:
         # Rebuild from the restored production inputs; never leave a probe as the normal output.

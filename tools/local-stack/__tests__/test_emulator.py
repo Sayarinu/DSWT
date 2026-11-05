@@ -68,7 +68,7 @@ class EmulatorTests(unittest.TestCase):
             fixture.idle(raw, 1)
             save = runner.directory / "platinum.sav"
             fixture.publication(save, raw, 1)
-            lock = Path(str(save) + ".platinumwt.lock"); lock.chmod(0o600)
+            lock = Path(str(save) + ".dswt.lock"); lock.chmod(0o600)
             with lock.open("r+b") as writer:
                 fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 with self.assertRaises(BlockingIOError): runner.snapshot("blocked")
@@ -227,12 +227,12 @@ class EmulatorTests(unittest.TestCase):
             runner.image = lambda name: "sha256:stale"
             runner.image_sources = lambda image: (_ for _ in ()).throw(ValueError("Rebuild the emulator image from these checked sources"))
             with patch.object(emulator.PROVISION, "provision", lambda data, target: data), self.assertRaisesRegex(ValueError, "Rebuild"):
-                runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
+                runner.create(save, rom, "us-rev1", "dswt-emulator-builder")
             self.assertFalse(runner.directory.exists())
             def copy_binary(arguments, **kwargs):  # Stands in for copying melonDS out of the checked image.
                 if arguments[-1] == "/profile/melonDS": (runner.directory / "melonDS").write_bytes(b"emulator")
             runner.local.run = copy_binary
             runner.image_sources = lambda image: {"emulator/durable_save.cpp": "checked"}
             with patch.object(emulator.PROVISION, "provision", lambda data, target: data):
-                runner.create(save, rom, "us-rev1", "platinumwt-emulator-builder")
+                runner.create(save, rom, "us-rev1", "dswt-emulator-builder")
             self.assertEqual(runner.manifest()["image_source_sha256"], {"emulator/durable_save.cpp": "checked"})

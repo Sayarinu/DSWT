@@ -1,5 +1,5 @@
-#ifndef PLATINUMWT_SERVER_HTTP_SESSION_H
-#define PLATINUMWT_SERVER_HTTP_SESSION_H
+#ifndef DSWT_SERVER_HTTP_SESSION_H
+#define DSWT_SERVER_HTTP_SESSION_H
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -8,7 +8,7 @@
 #include <memory>
 #include <variant>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 class HttpServices;
 struct HttpConnection;
@@ -46,6 +46,6 @@ private:
   unsigned version_ = 11;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 #endif

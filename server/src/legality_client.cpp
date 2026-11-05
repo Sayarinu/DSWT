@@ -1,5 +1,5 @@
-#include "platinumwt/server/legality_client.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/legality_client.h"
+#include "dswt/server/telemetry.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -10,7 +10,7 @@
 
 #include "trade.grpc.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 bool KnownReason(std::string_view reason) {
   constexpr std::string_view reasons[] = {
@@ -87,4 +87,4 @@ LegalityDecision LegalityClient::CheckNewSubmission(
   return decision;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

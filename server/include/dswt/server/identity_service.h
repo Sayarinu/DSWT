@@ -1,13 +1,13 @@
 #pragma once
 
-#include "platinumwt/server/recovery_barrier.h"
+#include "dswt/server/recovery_barrier.h"
 
 #include <memory>
 #include <string>
 
 #include "trade.grpc.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 namespace detail { class RecoveryGate; class ServiceAdmission; }
 
@@ -23,4 +23,4 @@ private:
   std::shared_ptr<detail::ServiceAdmission> admission_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

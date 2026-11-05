@@ -1,6 +1,6 @@
-#include "platinumwt/server/connectivity_service.h"
+#include "dswt/server/connectivity_service.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 grpc::Status ConnectivityService::Ping(grpc::ServerContext *,
                                        const google::protobuf::Empty *,
@@ -9,4 +9,4 @@ grpc::Status ConnectivityService::Ping(grpc::ServerContext *,
   return grpc::Status::OK;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

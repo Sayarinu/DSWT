@@ -1,8 +1,8 @@
 // Synthetic-only backend for the real HTTPS/ledger integration scenario.
 // This target is not copied into runtime images and grants no production bypass.
-#include "platinumwt/server/identity_service.h"
-#include "platinumwt/server/trade_service.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/identity_service.h"
+#include "dswt/server/trade_service.h"
+#include "dswt/server/telemetry.h"
 #include "admission.h"
 
 #include <boost/asio.hpp>
@@ -15,7 +15,7 @@
 #include <mutex>
 #include <thread>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 void Mark(const char *message) {
   static std::mutex output;
@@ -90,7 +90,7 @@ public:
 
 int Run() {
   auto admission = std::make_shared<detail::ServiceAdmission>();
-  const auto *release = std::getenv("PLATINUMWT_GATEWAY_FIXTURE_RELEASE");
+  const auto *release = std::getenv("DSWT_GATEWAY_FIXTURE_RELEASE");
   IdentityService identities("", [](auto) { return true; }, admission);
   TestTrades trades(admission, release ? release : "");
   grpc::ServerBuilder builder;
@@ -117,18 +117,18 @@ int Run() {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 int main(int argc, char **argv) {
-  platinumwt::server::Telemetry::Global().Initialize(platinumwt::server::TelemetryRole::Backend);
+  dswt::server::Telemetry::Global().Initialize(dswt::server::TelemetryRole::Backend);
   if (argc == 3 && std::string(argv[1]) == "--probe-worker") {
-    auto stub = platinumwt::v1::TradeMatcher::NewStub(grpc::CreateChannel(argv[2], grpc::InsecureChannelCredentials()));
+    auto stub = dswt::v1::TradeMatcher::NewStub(grpc::CreateChannel(argv[2], grpc::InsecureChannelCredentials()));
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(2));
-    platinumwt::v1::MatchRequest request;
+    dswt::v1::MatchRequest request;
     request.set_operation_id(std::string(16, '\xEF'));
-    platinumwt::v1::MatchReply reply;
+    dswt::v1::MatchReply reply;
     return stub->MatchNext(&context, request, &reply).error_code() == grpc::StatusCode::UNIMPLEMENTED ? 0 : 1;
   }
-  return platinumwt::server::Run();
+  return dswt::server::Run();
 }

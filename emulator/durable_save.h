@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace platinumwt {
+namespace dswt {
 
 // Linux host persistence for one exclusively managed 512 KiB save. Successful
 // Commit means both recovery snapshots, the head and the raw save are fsynced.
@@ -23,4 +23,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt
+} // namespace dswt

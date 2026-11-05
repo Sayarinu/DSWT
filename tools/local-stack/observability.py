@@ -22,11 +22,11 @@ import stack
 
 require = policy.require
 CONFIGS = ("prometheus.yml", "rules.yml", "alertmanager.yml", "loki.yaml", "config.alloy", "capture.py",
-           "grafana/datasources/datasources.yaml", "grafana/dashboards/provider.yaml", "grafana/dashboards/platinumwt.json")
+           "grafana/datasources/datasources.yaml", "grafana/dashboards/provider.yaml", "grafana/dashboards/dswt.json")
 LOG_FIELDS = {"event", "service", "timestamp_ms", "operation", "result", "duration_us",
               "request_id", "operation_id", "trade_id"}
 CAPTURE = "http://127.0.0.1:9099/alerts"
-BACKUP_METRIC = "platinumwt_backup_last_success_timestamp_seconds"
+BACKUP_METRIC = "dswt_backup_last_success_timestamp_seconds"
 SCRAPE_JOBS = {"gateway", "backend", "host", "collectors"}
 
 
@@ -119,7 +119,7 @@ class Observer:
         code, sources = self.grafana("/api/datasources")
         require(code == 200 and sorted(item["uid"] for item in sources) == ["alertmanager", "loki", "prometheus"],
                 "Grafana must provision only the local data sources")
-        code, dashboard = self.grafana("/api/dashboards/uid/platinumwt-local")
+        code, dashboard = self.grafana("/api/dashboards/uid/dswt-local")
         require(code == 200, "Provisioned dashboard is missing")
         gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
         bindings = json.loads(self.local.run(["inspect", "--format", "{{json .HostConfig.PortBindings}}", gateway],
@@ -252,7 +252,7 @@ def main():
             report["alerts"] = observer.alerts()
             local.database_identity()
             local.ready()
-            local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
+            local.compose("exec", "-T", "backend", "/build/dswt-ledger", "verify", capture=True, timeout=60)
             report["ledger_replay_after"] = "pass"
         report["status"] = "pass"
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, policy.yaml.YAMLError) as error:

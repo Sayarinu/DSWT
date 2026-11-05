@@ -1,11 +1,11 @@
 #pragma once
 
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <memory>
 #include <string>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 // Port zero disables export. Enabled listeners bind only IPv4 loopback.
 // A single bounded read-only ledger sampler runs independently of RPC workers.
@@ -18,4 +18,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server

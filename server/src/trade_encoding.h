@@ -6,7 +6,7 @@
 
 #include "trade.pb.h"
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 bool NonzeroBytes(std::string_view bytes, std::size_t size);
 bool CanonicalShape(std::string_view bytes);
@@ -21,4 +21,4 @@ std::string MutationHash(unsigned char opcode, const v1::MutationContext &contex
 std::string EncodeOutcome(std::uint64_t sequence, const v1::TradeSnapshot &snapshot);
 void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply);
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

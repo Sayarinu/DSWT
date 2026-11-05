@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 using Result = std::unique_ptr<PGresult, decltype(&PQclear)>;
 
@@ -46,4 +46,4 @@ private:
   bool committed_ = false;
 };
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

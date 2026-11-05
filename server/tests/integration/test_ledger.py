@@ -34,12 +34,12 @@ def blob(value):
 class LedgerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.directory = tempfile.TemporaryDirectory(prefix="platinumwt-ledger-", dir="/tmp")
+        cls.directory = tempfile.TemporaryDirectory(prefix="dswt-ledger-", dir="/tmp")
         cls.root = Path(cls.directory.name)
         cls.data = cls.root / "data"
         cls.pg_bin = Path(subprocess.check_output(["pg_config", "--bindir"], text=True).strip())
         cls.env = {key: value for key, value in os.environ.items()
-                   if not key.startswith("PG") and key != "PLATINUMWT_DATABASE_URL"}
+                   if not key.startswith("PG") and key != "DSWT_DATABASE_URL"}
         cls.env.update(PGHOST=str(cls.root), PGPORT="55432", PGUSER="ledger_owner", PGCONNECT_TIMEOUT="3",
                        PGOPTIONS="-c statement_timeout=5000 -c lock_timeout=3000")
         subprocess.run([str(cls.pg_bin / "initdb"), "-D", str(cls.data), "-A", "trust",
@@ -93,9 +93,9 @@ class LedgerTests(unittest.TestCase):
 
     def enroll(self, owner=1):
         self.sql(f"""BEGIN;
-            INSERT INTO platinumwt.save_identities(save_id,enrollment_id,credential_verifier)
+            INSERT INTO dswt.save_identities(save_id,enrollment_id,credential_verifier)
                 VALUES ('{identifier(owner)}','{identifier(owner + 100)}',{blob(bytes([owner]) * 32)});
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,state)
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,state)
                 VALUES ('{identifier(owner)}',1,1,0);
             COMMIT;""")
 
@@ -106,14 +106,14 @@ class LedgerTests(unittest.TestCase):
         payload = bytes(136)
         digest = hashlib.sha256(payload).digest()
         return f"""
-            INSERT INTO platinumwt.payloads VALUES ('{identifier(asset)}',{blob(payload)},{blob(digest)});
-            INSERT INTO platinumwt.offers(trade_id,save_id,offered_asset_id,state,receipt_id,last_event) VALUES
+            INSERT INTO dswt.payloads VALUES ('{identifier(asset)}',{blob(payload)},{blob(digest)});
+            INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,receipt_id,last_event) VALUES
                 ('{identifier(trade)}','{identifier(owner)}','{identifier(asset)}',1,NULL,{sequence});
-            INSERT INTO platinumwt.ownership VALUES
+            INSERT INTO dswt.ownership VALUES
                 ('{identifier(asset)}','{identifier(owner)}','{identifier(trade)}',1,{sequence});
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',
+            INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',
                 {counter},2,{blob(bytes([3]) * 32)},1,{sequence},{blob(bytes(146))});
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,
                 asset_id,payload_sha256,state) VALUES ('{identifier(owner)}',{sequence},2,
                 '{identifier(trade)}','{identifier(operation)}','{identifier(asset)}',{blob(digest)},1);
         """
@@ -124,51 +124,51 @@ class LedgerTests(unittest.TestCase):
     def cancel(self, owner=1):
         trade, asset, operation, receipt = [identifier(owner + delta) for delta in (1000, 2000, 4000, 5000)]
         self.sql(f"""BEGIN;
-            INSERT INTO platinumwt.receipts VALUES ('{receipt}','{trade}','{identifier(owner)}','{asset}',2,NULL);
-            UPDATE platinumwt.offers SET state=3,receipt_id='{receipt}',last_event=3 WHERE trade_id='{trade}';
-            UPDATE platinumwt.ownership SET location=2,last_event=3 WHERE asset_id='{asset}';
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{operation}',2,4,
+            INSERT INTO dswt.receipts VALUES ('{receipt}','{trade}','{identifier(owner)}','{asset}',2,NULL);
+            UPDATE dswt.offers SET state=3,receipt_id='{receipt}',last_event=3 WHERE trade_id='{trade}';
+            UPDATE dswt.ownership SET location=2,last_event=3 WHERE asset_id='{asset}';
+            INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{operation}',2,4,
                 {blob(bytes([4]) * 32)},1,3,{blob(bytes(146))});
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,asset_id,
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,asset_id,
                 payload_sha256,receipt_id,state) VALUES ('{identifier(owner)}',3,4,'{trade}','{operation}',
                 '{asset}',{blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',3);
             COMMIT;""")
 
     def acknowledge(self, owner=1):
         trade, operation, receipt = [identifier(owner + delta) for delta in (1000, 6000, 5000)]
-        asset = self.sql(f"SELECT asset_id FROM platinumwt.receipts WHERE receipt_id='{receipt}'")
-        counter, sequence = self.sql("SELECT next_counter||':'||(event_highwater+1) FROM platinumwt.save_identities "
+        asset = self.sql(f"SELECT asset_id FROM dswt.receipts WHERE receipt_id='{receipt}'")
+        counter, sequence = self.sql("SELECT next_counter||':'||(event_highwater+1) FROM dswt.save_identities "
                                      f"WHERE save_id='{identifier(owner)}'").split(':')
         self.sql(f"""BEGIN;
-            UPDATE platinumwt.offers SET state=4,last_event={sequence} WHERE trade_id='{trade}';
-            UPDATE platinumwt.ownership SET location=3,last_event={sequence} WHERE asset_id='{asset}';
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{operation}',{counter},6,
+            UPDATE dswt.offers SET state=4,last_event={sequence} WHERE trade_id='{trade}';
+            UPDATE dswt.ownership SET location=3,last_event={sequence} WHERE asset_id='{asset}';
+            INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{operation}',{counter},6,
                 {blob(bytes([6]) * 32)},1,{sequence},{blob(bytes(146))});
-            INSERT INTO platinumwt.acknowledgements VALUES ('{receipt}','{identifier(owner)}','{operation}',
+            INSERT INTO dswt.acknowledgements VALUES ('{receipt}','{identifier(owner)}','{operation}',
                 {blob(hashlib.sha256(bytes(136)).digest())},18446744073709551615);
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,asset_id,
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,asset_id,
                 payload_sha256,receipt_id,state) VALUES ('{identifier(owner)}',{sequence},5,'{trade}','{operation}',
                 '{asset}',{blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',4);
             COMMIT;""")
 
     def match_sql(self, sequences=None, *, record_attempt=True):
         match = identifier(7001)
-        text = f"INSERT INTO platinumwt.matches VALUES ('{match}','{identifier(8001)}'," \
+        text = f"INSERT INTO dswt.matches VALUES ('{match}','{identifier(8001)}'," \
                f"'{identifier(1001)}','{identifier(1002)}');"
         if record_attempt:
-            text += f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(8001)}','{match}');"
+            text += f"INSERT INTO dswt.matcher_attempts VALUES ('{identifier(8001)}','{match}');"
         for owner in (1, 2):
             sequence = (sequences or {}).get(owner, 3)
             peer = 3 - owner
             trade, receipt = identifier(owner + 1000), identifier(owner + 5000)
             asset = identifier(peer + 2000)
             text += f"""
-                INSERT INTO platinumwt.receipts VALUES ('{receipt}','{trade}','{identifier(owner)}',
+                INSERT INTO dswt.receipts VALUES ('{receipt}','{trade}','{identifier(owner)}',
                     '{asset}',1,'{match}');
-                UPDATE platinumwt.offers SET state=2,receipt_id='{receipt}',last_event={sequence} WHERE trade_id='{trade}';
-                UPDATE platinumwt.ownership SET save_id='{identifier(owner)}',trade_id='{trade}',location=2,
+                UPDATE dswt.offers SET state=2,receipt_id='{receipt}',last_event={sequence} WHERE trade_id='{trade}';
+                UPDATE dswt.ownership SET save_id='{identifier(owner)}',trade_id='{trade}',location=2,
                     last_event={sequence} WHERE asset_id='{asset}';
-                INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,
+                INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,
                     receipt_id,state) VALUES ('{identifier(owner)}',{sequence},3,'{trade}','{asset}',
                     {blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',2);
             """
@@ -177,9 +177,9 @@ class LedgerTests(unittest.TestCase):
     def rejection_sql(self, owner=1, sequence=2, counter=1, operation=None):
         operation = operation or owner + 3000
         return f"""
-            INSERT INTO platinumwt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',{counter},2,
+            INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',{counter},2,
                 {blob(bytes([3]) * 32)},8,{sequence},{blob(b'')});
-            INSERT INTO platinumwt.trade_events(save_id,sequence,kind,operation_id,payload_sha256,state)
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,operation_id,payload_sha256,state)
                 VALUES ('{identifier(owner)}',{sequence},6,'{identifier(operation)}',
                     {blob(hashlib.sha256(bytes(136)).digest())},0);
         """
@@ -191,7 +191,7 @@ class LedgerTests(unittest.TestCase):
         before = self.tool("verify")
         self.tool("migrate", str(self.migrations))
         self.assertEqual(self.tool("verify"), before)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "1")
 
     def test_forward_migration_is_atomic_and_checksummed(self):
         self.enroll()
@@ -199,11 +199,11 @@ class LedgerTests(unittest.TestCase):
         shutil.copytree(self.migrations, copied)
         installed_count = len(list(self.migrations.glob("*.sql")))
         upgrade = copied / f"{installed_count + 1:04d}_upgrade.sql"
-        upgrade.write_text("CREATE TABLE platinumwt_meta.upgrade_test(id integer); SELECT missing_function();")
+        upgrade.write_text("CREATE TABLE dswt_meta.upgrade_test(id integer); SELECT missing_function();")
         self.tool("migrate", str(copied), ok=False)
-        self.assertEqual(self.sql("SELECT to_regclass('platinumwt_meta.upgrade_test') IS NULL"), "t")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt_meta.schema_migrations"), str(installed_count))
-        upgrade.write_text("CREATE TABLE platinumwt_meta.upgrade_test(id integer);")
+        self.assertEqual(self.sql("SELECT to_regclass('dswt_meta.upgrade_test') IS NULL"), "t")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt_meta.schema_migrations"), str(installed_count))
+        upgrade.write_text("CREATE TABLE dswt_meta.upgrade_test(id integer);")
         self.tool("migrate", str(copied))
         self.tool("verify")
         upgrade.write_text(upgrade.read_text() + "\n-- changed")
@@ -223,7 +223,7 @@ class LedgerTests(unittest.TestCase):
         self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;")
         self.tool("verify")
         self.tool("migrate", str(self.migrations))
-        self.assertEqual(self.sql("SELECT operation_id::text||'|'||match_id::text FROM platinumwt.matcher_attempts"),
+        self.assertEqual(self.sql("SELECT operation_id::text||'|'||match_id::text FROM dswt.matcher_attempts"),
                          f"{identifier(8001)}|{identifier(7001)}")
         self.tool("verify")
 
@@ -236,13 +236,13 @@ class LedgerTests(unittest.TestCase):
         self.sql(f"CREATE DATABASE {self.database}", database="postgres")
         self.tool("migrate", str(previous))
         self.enroll(); self.submit()
-        images = self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM platinumwt.audit_journal")
+        images = self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM dswt.audit_journal")
         self.tool("migrate", str(self.migrations))
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.audit_journal WHERE recorded_at IS NOT NULL"), "0")
-        self.assertEqual(self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM platinumwt.audit_journal"), images)
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.audit_journal WHERE recorded_at IS NOT NULL"), "0")
+        self.assertEqual(self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM dswt.audit_journal"), images)
         self.tool("verify")
         self.cancel()
-        self.assertEqual(self.sql("SELECT recorded_at IS NOT NULL FROM platinumwt.audit_journal WHERE table_name='offers' AND after_image->>'state'='3'"), "t")
+        self.assertEqual(self.sql("SELECT recorded_at IS NOT NULL FROM dswt.audit_journal WHERE table_name='offers' AND after_image->>'state'='3'"), "t")
         self.tool("verify")
 
     def test_private_metrics_observe_real_ledger_counts_without_changing_evidence(self):
@@ -252,7 +252,7 @@ class LedgerTests(unittest.TestCase):
             reserve.bind(("127.0.0.1", 0))
             port = reserve.getsockname()[1]
         env = dict(self.env, PGDATABASE=self.database, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT=str(port),
-                   WT_LEGALITY_POLICY="synthetic-policy", PLATINUMWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}")
+                   WT_LEGALITY_POLICY="synthetic-policy", DSWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}")
         log = (self.root / f"metrics-{self.serial}.log").open("wb")
         process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -266,17 +266,17 @@ class LedgerTests(unittest.TestCase):
                         text = response.read().decode()
                     finally:
                         connection.close()
-                    if response.status == 200 and "platinumwt_database_up 1\n" in text:
+                    if response.status == 200 and "dswt_database_up 1\n" in text:
                         break
                 except OSError:
                     pass
                 if time.monotonic() >= deadline:
                     self.fail("private ledger metrics did not become ready")
                 time.sleep(0.05)
-            self.assertIn("platinumwt_queued_offers 1\n", text)
-            self.assertIn("platinumwt_pending_deliveries 0\n", text)
-            self.assertIn("platinumwt_unknown_queue_ages 0\n", text)
-            self.assertNotIn("platinumwt_oldest_queue_age_seconds NaN", text)
+            self.assertIn("dswt_queued_offers 1\n", text)
+            self.assertIn("dswt_pending_deliveries 0\n", text)
+            self.assertIn("dswt_unknown_queue_ages 0\n", text)
+            self.assertNotIn("dswt_oldest_queue_age_seconds NaN", text)
             self.assertNotIn(identifier(1), text)
             self.assertEqual(self.tool("verify"), before)
         finally:
@@ -326,7 +326,7 @@ class LedgerTests(unittest.TestCase):
                 thread = threading.Thread(target=peer)
                 thread.start()
                 env = dict(self.env, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT="1", WT_LEGALITY_POLICY="synthetic-policy",
-                           PLATINUMWT_DATABASE_URL=f"host=127.0.0.1 port={listener.getsockname()[1]} dbname=stalled sslmode=disable gssencmode=disable")
+                           DSWT_DATABASE_URL=f"host=127.0.0.1 port={listener.getsockname()[1]} dbname=stalled sslmode=disable gssencmode=disable")
                 # Reserve a normal unprivileged exporter port, independently of the fake database.
                 with socket.socket() as reserve:
                     reserve.bind(("127.0.0.1", 0)); env["WT_METRICS_PORT"] = str(reserve.getsockname()[1])
@@ -362,9 +362,9 @@ class LedgerTests(unittest.TestCase):
             with self.subTest(setting=setting), socket.socket() as reserve:
                 reserve.bind(("127.0.0.1", 0)); port = reserve.getsockname()[1]
             env = dict(self.env, WT_BACKEND_ADDRESS="127.0.0.1:0", WT_METRICS_PORT=str(port), WT_LEGALITY_POLICY="synthetic-policy",
-                       PLATINUMWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}",
+                       DSWT_DATABASE_URL=f"host={self.root} port=55432 user=ledger_owner dbname={self.database}",
                        PGSERVICEFILE=str(service_file))
-            if setting == "empty-explicit": env["PLATINUMWT_DATABASE_URL"] += " service=''"
+            if setting == "empty-explicit": env["DSWT_DATABASE_URL"] += " service=''"
             else: env["PGSERVICE"] = "stalled" if setting == "env" else ""
             process = subprocess.Popen([str(self.backend_binary)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
@@ -376,7 +376,7 @@ class LedgerTests(unittest.TestCase):
                 connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
                 try:
                     connection.request("GET", "/metrics")
-                    self.assertIn(b"platinumwt_database_up 0\n", connection.getresponse().read())
+                    self.assertIn(b"dswt_database_up 0\n", connection.getresponse().read())
                 finally:
                     connection.close()
                 process.terminate(); process.communicate(timeout=2)
@@ -388,15 +388,15 @@ class LedgerTests(unittest.TestCase):
 
     def test_matcher_attempts_are_immutable_and_replayed(self):
         operation = identifier(9001)
-        self.sql(f"INSERT INTO platinumwt.matcher_attempts VALUES ('{operation}',NULL)")
+        self.sql(f"INSERT INTO dswt.matcher_attempts VALUES ('{operation}',NULL)")
         self.tool("verify")
-        for statement in (f"DELETE FROM platinumwt.matcher_attempts WHERE operation_id='{operation}'",
-                          "TRUNCATE platinumwt.matcher_attempts",
-                          f"UPDATE platinumwt.matcher_attempts SET match_id=NULL WHERE operation_id='{operation}'",
-                          f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(9002)}','{identifier(7001)}')"):
+        for statement in (f"DELETE FROM dswt.matcher_attempts WHERE operation_id='{operation}'",
+                          "TRUNCATE dswt.matcher_attempts",
+                          f"UPDATE dswt.matcher_attempts SET match_id=NULL WHERE operation_id='{operation}'",
+                          f"INSERT INTO dswt.matcher_attempts VALUES ('{identifier(9002)}','{identifier(7001)}')"):
             self.sql(statement, ok=False)
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 f"DELETE FROM platinumwt.matcher_attempts WHERE operation_id='{operation}'; COMMIT;")
+                 f"DELETE FROM dswt.matcher_attempts WHERE operation_id='{operation}'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_pair_requires_a_matching_attempt_in_writes_and_replay(self):
@@ -404,26 +404,26 @@ class LedgerTests(unittest.TestCase):
             self.enroll(owner)
             self.submit(owner)
         self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.matches"), "0")
-        self.sql(f"INSERT INTO platinumwt.matcher_attempts VALUES ('{identifier(8001)}',NULL)")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.matches"), "0")
+        self.sql(f"INSERT INTO dswt.matcher_attempts VALUES ('{identifier(8001)}',NULL)")
         self.sql("BEGIN;" + self.match_sql(record_attempt=False) + "COMMIT;", ok=False)
         self.tool("verify")
         # Start from a valid pair, then corrupt both projection and audit so
         # replay's graph checks, rather than only image comparison, must reject it.
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "DELETE FROM platinumwt.matcher_attempts; "
-                 "DELETE FROM platinumwt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
+                 "DELETE FROM dswt.matcher_attempts; "
+                 "DELETE FROM dswt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
         self.sql("BEGIN;" + self.match_sql() + "COMMIT;")
         self.tool("verify")
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "DELETE FROM platinumwt.matcher_attempts; "
-                 "DELETE FROM platinumwt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
+                 "DELETE FROM dswt.matcher_attempts; "
+                 "DELETE FROM dswt.audit_journal WHERE table_name='matcher_attempts'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
-        self.sql("INSERT INTO platinumwt.matcher_attempts SELECT operation_id,match_id FROM platinumwt.matches")
+        self.sql("INSERT INTO dswt.matcher_attempts SELECT operation_id,match_id FROM dswt.matches")
         self.tool("verify")
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "UPDATE platinumwt.matcher_attempts SET match_id=NULL; "
-                 "UPDATE platinumwt.audit_journal SET after_image=jsonb_set(after_image,'{match_id}','null'::jsonb) "
+                 "UPDATE dswt.matcher_attempts SET match_id=NULL; "
+                 "UPDATE dswt.audit_journal SET after_image=jsonb_set(after_image,'{match_id}','null'::jsonb) "
                  "WHERE table_name='matcher_attempts'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
@@ -431,8 +431,8 @@ class LedgerTests(unittest.TestCase):
         self.enroll()
         before = self.tool("verify")
         self.sql("BEGIN;" + self.submit_sql() + "SELECT 1/0; COMMIT;", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "0")
-        self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM platinumwt.save_identities"), "1:1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "0")
+        self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM dswt.save_identities"), "1:1")
         self.assertEqual(self.tool("verify"), before)
 
     def test_pending_offer_and_operation_uniqueness(self):
@@ -441,15 +441,15 @@ class LedgerTests(unittest.TestCase):
         before = self.tool("verify")
         self.sql("BEGIN;" + self.submit_sql(trade=11001, asset=12001, operation=13001,
                                          sequence=3, counter=2) + "COMMIT;", ok=False)
-        self.sql(f"INSERT INTO platinumwt.operations SELECT * FROM platinumwt.operations", ok=False)
+        self.sql(f"INSERT INTO dswt.operations SELECT * FROM dswt.operations", ok=False)
         self.assertEqual(self.tool("verify"), before)
 
     def test_payload_hash_is_not_a_global_pokemon_identity(self):
         for owner in (1, 2):
             self.enroll(owner)
             self.submit(owner)
-        self.assertEqual(self.sql("SELECT count(DISTINCT sha256)||':'||count(*) FROM platinumwt.payloads"), "1:2")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.ownership"), "2")
+        self.assertEqual(self.sql("SELECT count(DISTINCT sha256)||':'||count(*) FROM dswt.payloads"), "1:2")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.ownership"), "2")
         self.tool("verify")
 
     def test_match_commits_both_owners_and_receipts(self):
@@ -457,19 +457,19 @@ class LedgerTests(unittest.TestCase):
             self.enroll(owner)
             self.submit(owner)
         before = self.tool("verify")
-        partial = f"INSERT INTO platinumwt.matches VALUES ('{identifier(7001)}','{identifier(8001)}'," \
+        partial = f"INSERT INTO dswt.matches VALUES ('{identifier(7001)}','{identifier(8001)}'," \
                   f"'{identifier(1001)}','{identifier(1002)}');"
         self.sql("BEGIN;" + partial + "COMMIT;", ok=False)
         self.assertEqual(self.tool("verify"), before)
         self.sql("BEGIN;" + self.match_sql() + "COMMIT;")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.receipts"), "2")
-        self.assertEqual(self.sql("SELECT asset_id FROM platinumwt.ownership WHERE save_id='" + identifier(1) + "'"),
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.receipts"), "2")
+        self.assertEqual(self.sql("SELECT asset_id FROM dswt.ownership WHERE save_id='" + identifier(1) + "'"),
                          identifier(2002))
-        self.assertEqual(self.sql("SELECT asset_id FROM platinumwt.ownership WHERE save_id='" + identifier(2) + "'"),
+        self.assertEqual(self.sql("SELECT asset_id FROM dswt.ownership WHERE save_id='" + identifier(2) + "'"),
                          identifier(2001))
         for owner in (1, 2):
             self.acknowledge(owner)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.acknowledgements"), "2")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.acknowledgements"), "2")
         self.tool("verify")
 
     def test_match_and_acknowledge_with_unequal_owner_histories(self):
@@ -482,7 +482,7 @@ class LedgerTests(unittest.TestCase):
         self.sql("BEGIN;" + self.match_sql({1: 6, 2: 3}) + "COMMIT;")
         for owner in (1, 2):
             self.acknowledge(owner)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.acknowledgements"), "2")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.acknowledgements"), "2")
         self.tool("verify")
 
     def test_foreign_receipt_cannot_be_acknowledged(self):
@@ -490,9 +490,9 @@ class LedgerTests(unittest.TestCase):
             self.enroll(owner)
             self.submit(owner)
         self.cancel(1)
-        self.sql(f"INSERT INTO platinumwt.acknowledgements VALUES ('{identifier(5001)}','{identifier(2)}',"
+        self.sql(f"INSERT INTO dswt.acknowledgements VALUES ('{identifier(5001)}','{identifier(2)}',"
                  f"'{identifier(3002)}',{blob(bytes(32))},1)", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.acknowledgements"), "0")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.acknowledgements"), "0")
         self.tool("verify")
 
     def test_concurrent_deposits_have_one_winner(self):
@@ -505,9 +505,9 @@ class LedgerTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             codes = list(executor.map(attempt, commands))
         self.assertEqual(sum(code == 0 for code in codes), 1)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.offers"), "1")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "1")
-        self.assertEqual(self.sql("SELECT next_counter FROM platinumwt.save_identities"), "2")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.offers"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "1")
+        self.assertEqual(self.sql("SELECT next_counter FROM dswt.save_identities"), "2")
         self.tool("verify")
 
     def test_cancel_acknowledge_retains_all_evidence(self):
@@ -515,42 +515,42 @@ class LedgerTests(unittest.TestCase):
         self.submit()
         self.cancel()
         self.acknowledge()
-        self.assertEqual(self.sql("SELECT state FROM platinumwt.offers"), "4")
+        self.assertEqual(self.sql("SELECT state FROM dswt.offers"), "4")
         for table in ("payloads", "ownership", "receipts", "acknowledgements"):
-            self.assertEqual(self.sql(f"SELECT count(*) FROM platinumwt.{table}"), "1")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.operations"), "3")
+            self.assertEqual(self.sql(f"SELECT count(*) FROM dswt.{table}"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.operations"), "3")
         self.tool("verify")
 
     def test_no_ownerless_or_extra_unassigned_asset(self):
         self.enroll()
         self.submit()
-        self.sql(f"INSERT INTO platinumwt.payloads VALUES ('{identifier(777)}',{blob(bytes(136))},"
+        self.sql(f"INSERT INTO dswt.payloads VALUES ('{identifier(777)}',{blob(bytes(136))},"
                  f"{blob(hashlib.sha256(bytes(136)).digest())})", ok=False)
         self.sql(f"""BEGIN;
-            INSERT INTO platinumwt.payloads SELECT '{identifier(778)}',pk4,sha256 FROM platinumwt.payloads;
-            INSERT INTO platinumwt.ownership SELECT '{identifier(778)}',save_id,trade_id,location,last_event
-                FROM platinumwt.ownership;
+            INSERT INTO dswt.payloads SELECT '{identifier(778)}',pk4,sha256 FROM dswt.payloads;
+            INSERT INTO dswt.ownership SELECT '{identifier(778)}',save_id,trade_id,location,last_event
+                FROM dswt.ownership;
             COMMIT;""", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "1")
         self.tool("verify")
 
     def test_no_partial_checkpoint_event_or_ack(self):
         self.enroll()
         self.submit()
-        self.sql("UPDATE platinumwt.save_identities SET next_counter=99", ok=False)
-        self.sql("UPDATE platinumwt.save_identities SET event_highwater=1", ok=False)
-        self.sql(f"INSERT INTO platinumwt.trade_events(save_id,sequence,kind,state) "
+        self.sql("UPDATE dswt.save_identities SET next_counter=99", ok=False)
+        self.sql("UPDATE dswt.save_identities SET event_highwater=1", ok=False)
+        self.sql(f"INSERT INTO dswt.trade_events(save_id,sequence,kind,state) "
                  f"VALUES ('{identifier(1)}',4,1,0)", ok=False)
         self.cancel()
-        self.sql("UPDATE platinumwt.offers SET state=4,last_event=3", ok=False)
+        self.sql("UPDATE dswt.offers SET state=4,last_event=3", ok=False)
         self.tool("verify")
 
     def test_rejected_submission_retains_digest_without_creating_asset(self):
         self.enroll()
         self.sql("BEGIN;" + self.rejection_sql() + "COMMIT;")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "0")
-        self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM platinumwt.save_identities"), "2:2")
-        self.assertEqual(self.sql("SELECT result FROM platinumwt.operations"), "8")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "0")
+        self.assertEqual(self.sql("SELECT next_counter||':'||event_highwater FROM dswt.save_identities"), "2:2")
+        self.assertEqual(self.sql("SELECT result FROM dswt.operations"), "8")
         self.tool("verify")
 
     def test_rejected_submission_cannot_create_queued_ownership(self):
@@ -561,42 +561,42 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(text.count(success), 1)
         text = text.replace(success, rejection).replace(f"'{identifier(1)}',2,2,", f"'{identifier(1)}',2,6,")
         self.sql("BEGIN;" + text + "COMMIT;", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.payloads"), "0")
-        self.assertEqual(self.sql("SELECT next_counter FROM platinumwt.save_identities"), "1")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.payloads"), "0")
+        self.assertEqual(self.sql("SELECT next_counter FROM dswt.save_identities"), "1")
         self.tool("verify")
 
     def test_replay_detects_ownerless_payload_after_audited_bypass(self):
         payload = bytes(136)
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "ALTER TABLE platinumwt.payloads ENABLE ALWAYS TRIGGER audit_rows; "
-                 f"INSERT INTO platinumwt.payloads VALUES ('{identifier(777)}',{blob(payload)},"
+                 "ALTER TABLE dswt.payloads ENABLE ALWAYS TRIGGER audit_rows; "
+                 f"INSERT INTO dswt.payloads VALUES ('{identifier(777)}',{blob(payload)},"
                  f"{blob(hashlib.sha256(payload).digest())}); "
-                 "ALTER TABLE platinumwt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
+                 "ALTER TABLE dswt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_operation_has_exactly_one_outcome_event(self):
         self.enroll()
         self.submit()
         before = self.tool("verify")
-        self.sql("INSERT INTO platinumwt.trade_events SELECT save_id,3,version,kind,trade_id,operation_id,"
-                 "asset_id,payload_sha256,receipt_id,state FROM platinumwt.trade_events WHERE sequence=2", ok=False)
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.trade_events WHERE operation_id IS NOT NULL"), "1")
+        self.sql("INSERT INTO dswt.trade_events SELECT save_id,3,version,kind,trade_id,operation_id,"
+                 "asset_id,payload_sha256,receipt_id,state FROM dswt.trade_events WHERE sequence=2", ok=False)
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.trade_events WHERE operation_id IS NOT NULL"), "1")
         self.assertEqual(self.tool("verify"), before)
 
     def test_checkpoint_gaps_fail_on_write_and_replay(self):
-        self.sql(f"INSERT INTO platinumwt.save_identities VALUES ('{identifier(1)}','{identifier(101)}',"
+        self.sql(f"INSERT INTO dswt.save_identities VALUES ('{identifier(1)}','{identifier(101)}',"
                  f"{blob(bytes(32))},1,5)", ok=False)
         self.enroll()
-        self.sql("BEGIN; UPDATE platinumwt.save_identities SET event_highwater=5;" +
+        self.sql("BEGIN; UPDATE dswt.save_identities SET event_highwater=5;" +
                  self.rejection_sql(sequence=6) + "COMMIT;", ok=False)
         self.tool("verify")
         # Bypass only the initial guard to prove the replay fold checks bootstrap state independently.
-        self.sql("ALTER TABLE platinumwt.save_identities DISABLE TRIGGER identity_initial")
+        self.sql("ALTER TABLE dswt.save_identities DISABLE TRIGGER identity_initial")
         try:
-            self.sql(f"BEGIN; INSERT INTO platinumwt.save_identities VALUES ('{identifier(2)}',"
+            self.sql(f"BEGIN; INSERT INTO dswt.save_identities VALUES ('{identifier(2)}',"
                      f"'{identifier(102)}',{blob(bytes(32))},1,5);" + self.rejection_sql(2, 6) + "COMMIT;")
         finally:
-            self.sql("ALTER TABLE platinumwt.save_identities ENABLE TRIGGER identity_initial")
+            self.sql("ALTER TABLE dswt.save_identities ENABLE TRIGGER identity_initial")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_acknowledged_trade_cannot_regress_on_write_or_replay(self):
@@ -605,26 +605,26 @@ class LedgerTests(unittest.TestCase):
         self.cancel()
         self.acknowledge()
         before = self.tool("verify")
-        regression = "UPDATE platinumwt.offers SET state=3,last_event=3; " \
-                     "UPDATE platinumwt.ownership SET location=2,last_event=3;"
+        regression = "UPDATE dswt.offers SET state=3,last_event=3; " \
+                     "UPDATE dswt.ownership SET location=2,last_event=3;"
         self.sql("BEGIN;" + regression + "COMMIT;", ok=False)
         self.assertEqual(self.tool("verify"), before)
         # Retain the audit images while simulating a privileged bypass of write guards.
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "ALTER TABLE platinumwt.offers ENABLE ALWAYS TRIGGER audit_rows; "
-                 "ALTER TABLE platinumwt.ownership ENABLE ALWAYS TRIGGER audit_rows; " + regression +
-                 "ALTER TABLE platinumwt.offers ENABLE TRIGGER audit_rows; "
-                 "ALTER TABLE platinumwt.ownership ENABLE TRIGGER audit_rows; COMMIT;")
+                 "ALTER TABLE dswt.offers ENABLE ALWAYS TRIGGER audit_rows; "
+                 "ALTER TABLE dswt.ownership ENABLE ALWAYS TRIGGER audit_rows; " + regression +
+                 "ALTER TABLE dswt.offers ENABLE TRIGGER audit_rows; "
+                 "ALTER TABLE dswt.ownership ENABLE TRIGGER audit_rows; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_immutable_payload_operations_and_retained_journal(self):
         self.enroll()
         self.submit()
         for table in ("save_identities", "payloads", "offers", "ownership", "operations", "trade_events", "audit_journal"):
-            self.sql(f"DELETE FROM platinumwt.{table}", ok=False)
-            self.sql(f"TRUNCATE platinumwt.{table} CASCADE", ok=False)
+            self.sql(f"DELETE FROM dswt.{table}", ok=False)
+            self.sql(f"TRUNCATE dswt.{table} CASCADE", ok=False)
         for table in ("payloads", "operations", "trade_events", "audit_journal"):
-            self.sql(f"UPDATE platinumwt.{table} SET " +
+            self.sql(f"UPDATE dswt.{table} SET " +
                      ("version=version" if table in ("trade_events", "audit_journal") else
                       "pk4=pk4" if table == "payloads" else "counter=counter"), ok=False)
         self.tool("verify")
@@ -636,24 +636,24 @@ class LedgerTests(unittest.TestCase):
         self.stop()
         self.start()
         self.assertEqual(self.tool("verify"), before)
-        self.assertEqual(self.sql("SELECT state FROM platinumwt.offers"), "1")
+        self.assertEqual(self.sql("SELECT state FROM dswt.offers"), "1")
 
     def test_replay_detects_tampered_projection_without_repair(self):
         self.enroll()
-        self.sql("ALTER TABLE platinumwt.save_identities DISABLE TRIGGER audit_rows; "
-                 "ALTER TABLE platinumwt.save_identities DISABLE TRIGGER identity_columns; "
-                 f"UPDATE platinumwt.save_identities SET credential_verifier={blob(bytes([7]) * 32)}; "
-                 "ALTER TABLE platinumwt.save_identities ENABLE TRIGGER audit_rows; "
-                 "ALTER TABLE platinumwt.save_identities ENABLE TRIGGER identity_columns;")
-        before = self.sql("SELECT encode(credential_verifier,'hex') FROM platinumwt.save_identities")
+        self.sql("ALTER TABLE dswt.save_identities DISABLE TRIGGER audit_rows; "
+                 "ALTER TABLE dswt.save_identities DISABLE TRIGGER identity_columns; "
+                 f"UPDATE dswt.save_identities SET credential_verifier={blob(bytes([7]) * 32)}; "
+                 "ALTER TABLE dswt.save_identities ENABLE TRIGGER audit_rows; "
+                 "ALTER TABLE dswt.save_identities ENABLE TRIGGER identity_columns;")
+        before = self.sql("SELECT encode(credential_verifier,'hex') FROM dswt.save_identities")
         self.assertIn("23514", self.tool("verify", ok=False))
-        self.assertEqual(self.sql("SELECT encode(credential_verifier,'hex') FROM platinumwt.save_identities"), before)
+        self.assertEqual(self.sql("SELECT encode(credential_verifier,'hex') FROM dswt.save_identities"), before)
 
     def test_replay_detects_missing_preimage(self):
         self.enroll()
-        self.sql("ALTER TABLE platinumwt.audit_journal DISABLE TRIGGER retain_audit; "
-                 "DELETE FROM platinumwt.audit_journal WHERE sequence=(SELECT min(sequence) FROM platinumwt.audit_journal); "
-                 "ALTER TABLE platinumwt.audit_journal ENABLE TRIGGER retain_audit;")
+        self.sql("ALTER TABLE dswt.audit_journal DISABLE TRIGGER retain_audit; "
+                 "DELETE FROM dswt.audit_journal WHERE sequence=(SELECT min(sequence) FROM dswt.audit_journal); "
+                 "ALTER TABLE dswt.audit_journal ENABLE TRIGGER retain_audit;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_replay_rejects_audited_change_of_immutable_payload(self):
@@ -662,18 +662,18 @@ class LedgerTests(unittest.TestCase):
         payload = bytes([1]) + bytes(135)
         # Simulate privileged corruption while retaining its audit event.
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
-                 "ALTER TABLE platinumwt.payloads ENABLE ALWAYS TRIGGER audit_rows; "
-                 f"UPDATE platinumwt.payloads SET pk4={blob(payload)},sha256={blob(hashlib.sha256(payload).digest())}; "
-                 "ALTER TABLE platinumwt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
-        self.assertEqual(self.sql("SELECT count(*) FROM platinumwt.audit_journal "
+                 "ALTER TABLE dswt.payloads ENABLE ALWAYS TRIGGER audit_rows; "
+                 f"UPDATE dswt.payloads SET pk4={blob(payload)},sha256={blob(hashlib.sha256(payload).digest())}; "
+                 "ALTER TABLE dswt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.audit_journal "
                                   "WHERE table_name='payloads' AND before_image IS NOT NULL"), "1")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_full_u64_and_fractional_values(self):
-        self.assertEqual(self.sql("SELECT 18446744073709551615::platinumwt.u64"), "18446744073709551615")
+        self.assertEqual(self.sql("SELECT 18446744073709551615::dswt.u64"), "18446744073709551615")
         for value in ("-1", "18446744073709551616", "1.5"):
             with self.subTest(value=value):
-                self.sql(f"SELECT ({value})::platinumwt.u64", ok=False)
+                self.sql(f"SELECT ({value})::dswt.u64", ok=False)
 
     def test_cli_errors_do_not_expose_server_diagnostics(self):
         copied = self.root / self.database
@@ -700,10 +700,10 @@ class LedgerTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rows = self.sql("SELECT replace(save_id::text,'-','')||'|'||encode(credential_verifier,'hex') "
-                        "FROM platinumwt.save_identities").splitlines()
+                        "FROM dswt.save_identities").splitlines()
         for row in rows:
             save_id, verifier = row.split('|')
-            expected = {hashlib.sha256(b'PlatinumWT save credential v1\x00' + bytes.fromhex(save_id) +
+            expected = {hashlib.sha256(b'DSWT save credential v1\x00' + bytes.fromhex(save_id) +
                                        bytes([value]) * 32).hexdigest() for value in (0x51, 0x52)}
             self.assertTrue(verifier in expected, "Stored verifier differs from the protocol formula")
         self.tool("verify")
@@ -739,13 +739,13 @@ class LedgerTests(unittest.TestCase):
             coalesce(replace(r.receipt_id::text,'-',''),''),coalesce(r.delivery_kind,0),e.state,
             coalesce(encode(a.applied_sha256,'hex'),''),coalesce(a.applied_generation,0),
             encode(CASE WHEN op.opcode=2 THEN p.pk4 ELSE q.pk4 END,'hex')
-            FROM platinumwt.operations op JOIN platinumwt.trade_events e
+            FROM dswt.operations op JOIN dswt.trade_events e
                 ON (op.save_id,op.event_sequence)=(e.save_id,e.sequence)
-            JOIN platinumwt.offers o ON o.trade_id=e.trade_id
-            JOIN platinumwt.payloads p ON p.asset_id=o.offered_asset_id
-            LEFT JOIN platinumwt.receipts r ON r.receipt_id=e.receipt_id
-            LEFT JOIN platinumwt.payloads q ON q.asset_id=r.asset_id
-            LEFT JOIN platinumwt.acknowledgements a ON a.save_id=op.save_id AND a.operation_id=op.operation_id
+            JOIN dswt.offers o ON o.trade_id=e.trade_id
+            JOIN dswt.payloads p ON p.asset_id=o.offered_asset_id
+            LEFT JOIN dswt.receipts r ON r.receipt_id=e.receipt_id
+            LEFT JOIN dswt.payloads q ON q.asset_id=r.asset_id
+            LEFT JOIN dswt.acknowledgements a ON a.save_id=op.save_id AND a.operation_id=op.operation_id
             WHERE op.result=1""").splitlines()
         self.assertGreater(len(rows), 0)
         for row in rows:

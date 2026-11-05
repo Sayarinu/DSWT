@@ -1,11 +1,11 @@
-#ifndef PLATINUMWT_SERVER_CONNECTIVITY_SERVICE_H
-#define PLATINUMWT_SERVER_CONNECTIVITY_SERVICE_H
+#ifndef DSWT_SERVER_CONNECTIVITY_SERVICE_H
+#define DSWT_SERVER_CONNECTIVITY_SERVICE_H
 
 #include "connectivity.grpc.pb.h"
 
-namespace platinumwt::server {
+namespace dswt::server {
 
-inline constexpr char kAcknowledgement[] = "PLATINUMWT_ACK_V1\n";
+inline constexpr char kAcknowledgement[] = "DSWT_ACK_V1\n";
 
 class ConnectivityService final : public v1::Connectivity::Service {
 public:
@@ -14,6 +14,6 @@ public:
                     v1::PingResponse *response) override;
 };
 
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 #endif

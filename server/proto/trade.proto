@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package platinumwt.v1;
+package dswt.v1;
 
 // Internal contracts, not DS protobuf messages. See protocol/README.md for
 // authentication, exact byte lengths, wire encoding and durable replay rules.

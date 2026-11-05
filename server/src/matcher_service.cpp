@@ -1,15 +1,15 @@
-#include "platinumwt/server/matcher_service.h"
+#include "dswt/server/matcher_service.h"
 
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 using detail::Database;
@@ -37,9 +37,9 @@ void Result(v1::MatchReply &reply, v1::ResultCode code) {
 std::optional<Offer> Select(Database &database, const std::string &excluded = {}) {
   const std::string common =
       "SELECT replace(i.save_id::text,'-',''),replace(o.trade_id::text,'-','') "
-      "FROM platinumwt.offers o JOIN platinumwt.save_identities i USING(save_id) ";
+      "FROM dswt.offers o JOIN dswt.save_identities i USING(save_id) ";
   const std::string admission =
-      "JOIN platinumwt.audit_journal a ON a.table_name='offers' AND a.before_image IS NULL "
+      "JOIN dswt.audit_journal a ON a.table_name='offers' AND a.before_image IS NULL "
       "AND a.row_key->>'trade_id'=o.trade_id::text ";
   const std::string filter =
       "WHERE o.state=1 AND i.event_highwater<18446744073709551615 "
@@ -51,7 +51,7 @@ std::optional<Offer> Select(Database &database, const std::string &excluded = {}
   if (PQntuples(selected.get()) == 0) return std::nullopt;
   auto row = database.Parameters(
       "SELECT replace(o.offered_asset_id::text,'-',''),i.event_highwater::text "
-      "FROM platinumwt.offers o JOIN platinumwt.save_identities i USING(save_id) "
+      "FROM dswt.offers o JOIN dswt.save_identities i USING(save_id) "
       "WHERE o.save_id=$1::uuid AND o.trade_id=$2::uuid AND o.state=1 AND i.event_highwater<18446744073709551615",
       {PQgetvalue(selected.get(), 0, 0), PQgetvalue(selected.get(), 0, 1)});
   if (PQntuples(row.get()) == 0) throw SelectionChanged();
@@ -60,7 +60,7 @@ std::optional<Offer> Select(Database &database, const std::string &excluded = {}
 }
 
 bool Prior(Database &database, const std::string &operation) {
-  auto row = database.Parameters("SELECT 1 FROM platinumwt.matcher_attempts WHERE operation_id=$1::uuid", {HexBytes(operation)});
+  auto row = database.Parameters("SELECT 1 FROM dswt.matcher_attempts WHERE operation_id=$1::uuid", {HexBytes(operation)});
   return PQntuples(row.get()) == 1;
 }
 
@@ -68,7 +68,7 @@ void Publish(Database &database, detail::RecoveryGate &recovery, const std::stri
   auto row = database.Parameters(
       "SELECT coalesce(replace(m.first_trade_id::text,'-',''),''),"
       "coalesce(replace(m.second_trade_id::text,'-',''),'') "
-      "FROM platinumwt.matcher_attempts a LEFT JOIN platinumwt.matches m USING(match_id) WHERE a.operation_id=$1::uuid",
+      "FROM dswt.matcher_attempts a LEFT JOIN dswt.matches m USING(match_id) WHERE a.operation_id=$1::uuid",
       {HexBytes(operation)});
   if (PQntuples(row.get()) != 1) throw std::runtime_error("worker outcome missing");
   if (!recovery.Covers(database, "operation" + operation, 1)) { Result(reply, v1::RESULT_PROCESSING); return; }
@@ -82,27 +82,27 @@ void Publish(Database &database, detail::RecoveryGate &recovery, const std::stri
 
 void Pair(Database &database, const Offer &first, const Offer &second, const std::string &operation) {
   const auto match = detail::RandomIdentifier();
-  database.Parameters("INSERT INTO platinumwt.matches VALUES ($1::uuid,$2::uuid,"
+  database.Parameters("INSERT INTO dswt.matches VALUES ($1::uuid,$2::uuid,"
       "least($3::uuid,$4::uuid),greatest($3::uuid,$4::uuid))",
       {HexBytes(match), HexBytes(operation), HexBytes(first.trade), HexBytes(second.trade)});
   for (const auto &owners : {std::pair{&first, &second}, std::pair{&second, &first}}) {
     const auto &owner = *owners.first, &peer = *owners.second;
     const auto receipt = detail::RandomIdentifier();
     const auto sequence = std::to_string(owner.highwater + 1);
-    database.Parameters("INSERT INTO platinumwt.receipts VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,1,$5::uuid)",
+    database.Parameters("INSERT INTO dswt.receipts VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,1,$5::uuid)",
         {HexBytes(receipt), HexBytes(owner.trade), HexBytes(owner.owner), HexBytes(peer.asset), HexBytes(match)});
-    auto changed = database.Parameters("UPDATE platinumwt.offers SET state=2,receipt_id=$2::uuid,last_event=$3::numeric "
+    auto changed = database.Parameters("UPDATE dswt.offers SET state=2,receipt_id=$2::uuid,last_event=$3::numeric "
         "WHERE trade_id=$1::uuid AND state=1 RETURNING trade_id", {HexBytes(owner.trade), HexBytes(receipt), sequence});
     if (PQntuples(changed.get()) != 1) throw std::runtime_error("queued offer changed");
-    changed = database.Parameters("UPDATE platinumwt.ownership SET location=2,save_id=$2::uuid,trade_id=$3::uuid,last_event=$4::numeric "
+    changed = database.Parameters("UPDATE dswt.ownership SET location=2,save_id=$2::uuid,trade_id=$3::uuid,last_event=$4::numeric "
         "WHERE asset_id=$1::uuid AND save_id=$5::uuid AND trade_id=$6::uuid AND location=1 RETURNING asset_id",
         {HexBytes(peer.asset), HexBytes(owner.owner), HexBytes(owner.trade), sequence, HexBytes(peer.owner), HexBytes(peer.trade)});
     if (PQntuples(changed.get()) != 1) throw std::runtime_error("queued ownership changed");
-    database.Parameters("INSERT INTO platinumwt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,receipt_id,state) "
-        "SELECT $1::uuid,$2::numeric,3,$3::uuid,asset_id,sha256,$5::uuid,2 FROM platinumwt.payloads WHERE asset_id=$4::uuid",
+    database.Parameters("INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,receipt_id,state) "
+        "SELECT $1::uuid,$2::numeric,3,$3::uuid,asset_id,sha256,$5::uuid,2 FROM dswt.payloads WHERE asset_id=$4::uuid",
         {HexBytes(owner.owner), sequence, HexBytes(owner.trade), HexBytes(peer.asset), HexBytes(receipt)});
   }
-  database.Parameters("INSERT INTO platinumwt.matcher_attempts VALUES ($1::uuid,$2::uuid)", {HexBytes(operation), HexBytes(match)});
+  database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,$2::uuid)", {HexBytes(operation), HexBytes(match)});
 }
 
 bool Retry(const detail::DatabaseError &error) {
@@ -118,7 +118,7 @@ MatcherService::MatcherService(std::string connection_info, RecoveryBarrier reco
 bool MatcherService::PairAvailable() const {
   try {
     Database database(connection_info_);
-    auto row = database.Execute("SELECT count(*) >= 2 FROM platinumwt.offers WHERE state=1");
+    auto row = database.Execute("SELECT count(*) >= 2 FROM dswt.offers WHERE state=1");
     return std::string(PQgetvalue(row.get(), 0, 0)) == "t";
   } catch (const std::exception &) { return false; }
 }
@@ -155,7 +155,7 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
           }
           Pair(database, *first, *second, request->operation_id());
         } else {
-          database.Parameters("INSERT INTO platinumwt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(request->operation_id())});
+          database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(request->operation_id())});
         }
         transaction.Commit();
         Publish(database, *recovery_, request->operation_id(), *reply);
@@ -174,4 +174,4 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
   return {grpc::StatusCode::UNAVAILABLE, "matcher unavailable"};
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

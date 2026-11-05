@@ -25,7 +25,7 @@ identity in both journal banks before submitting anything. Device/MAC/trainer
 IDs, emulator hints, game PRNG output and copied save counters are not secrets.
 TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 
-The server stores SHA-256 of ASCII `PlatinumWT save credential v1`, one zero byte,
+The server stores SHA-256 of ASCII `DSWT save credential v1`, one zero byte,
 the 16 save-ID bytes and the 32 credential bytes, and compares verifiers in
 constant time. This scheme is for CSPRNG credentials, not human passwords. The
 identity module returns local database records; endpoint integration must still
@@ -197,7 +197,7 @@ journal magic and unsupported versions without writing. Europe needs its own
 layout validation before it can join this list.
 
 Each bank begins with one explicitly serialized 4096-byte record. Header:
-`PWTJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,
+`DSWJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,
 generation u64, reserved-zero 8 bytes. Remaining section offsets are in the JSON:
 identity holds save ID/credential/enrollment ID (16/32/16); progress holds next
 counter u64, event cursor u64, last applied receipt (16), last finalized operation

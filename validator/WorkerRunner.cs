@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using Grpc.Core;
-using Platinumwt.V1;
+using Dswt.V1;
 
-namespace PlatinumWT.Validator;
+namespace DSWT.Validator;
 
 // The core is synchronous and cannot be interrupted safely within a thread.
 // Keep its lifetime, pipe buffers and admission bound inside this module.

@@ -27,7 +27,7 @@ import oci
 import patcher
 
 CONTENTS = HERE / "contents.json"
-KIND = "platinumwt-private-candidate"
+KIND = "dswt-private-candidate"
 MANIFEST = "CANDIDATE.json"
 MAX_DOCUMENT = 1024 * 1024
 MAX_ARCHIVE = 256 * 1024 * 1024
@@ -116,7 +116,7 @@ def assemble(bundle, output, contents=CONTENTS, root=ROOT):
     for role in ("instructions", "notices"):
         for path in listing[role]:
             files[f"{role}/{path}"] = tracked(path, root)
-    prefix = "platinumwt-" + manifest["version"]
+    prefix = "dswt-" + manifest["version"]
     inventory = [{"path": relative, "size": len(data), "sha256": sha256(data)} for relative, data in sorted(files.items())]
     record = {
         "schema_version": 1, "kind": KIND, "version": manifest["version"],
@@ -165,7 +165,7 @@ def _verify(path, contents, root):
         member_name(prefix, name[len(prefix) + 1:])
     record = json.loads(members.get(f"{prefix}/{MANIFEST}", b"null"))
     require(isinstance(record, dict) and record.get("schema_version") == 1 and record.get("kind") == KIND
-            and prefix == "platinumwt-" + str(record.get("version")), "Unsupported candidate manifest")
+            and prefix == "dswt-" + str(record.get("version")), "Unsupported candidate manifest")
     require(record.get("publication_permitted") is False and record.get("distribution_blocked") is True,
             "A private candidate must stay blocked from publication and distribution")
     listed = {item["path"]: item for item in record["files"]}

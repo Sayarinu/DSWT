@@ -1,6 +1,6 @@
 {
-  "uid": "platinumwt-local",
-  "title": "Platinum Wonder Trade (local)",
+  "uid": "dswt-local",
+  "title": "DSWT (local)",
   "schemaVersion": 39,
   "version": 1,
   "editable": false,
@@ -10,7 +10,7 @@
   },
   "refresh": "10s",
   "tags": [
-    "platinumwt",
+    "dswt",
     "local"
   ],
   "panels": [
@@ -37,7 +37,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (service, operation, result) (rate(platinumwt_requests_total[1m]))",
+          "expr": "sum by (service, operation, result) (rate(dswt_requests_total[1m]))",
           "legendFormat": "{{service}} {{operation}} {{result}}"
         }
       ]
@@ -65,7 +65,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le, service, operation) (rate(platinumwt_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, service, operation) (rate(dswt_request_duration_seconds_bucket[5m])))",
           "legendFormat": "{{service}} {{operation}}"
         }
       ]
@@ -93,7 +93,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{__name__=~\"platinumwt_oldest_(queue|delivery)_seconds\"}",
+          "expr": "{__name__=~\"dswt_oldest_(queue|delivery)_seconds\"}",
           "legendFormat": "{{__name__}}"
         }
       ]
@@ -121,7 +121,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "platinumwt_database_up or up{job=~\"gateway|backend\"}",
+          "expr": "dswt_database_up or up{job=~\"gateway|backend\"}",
           "legendFormat": "{{__name__}} {{job}}"
         }
       ]
@@ -149,7 +149,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (__name__, service) (rate({__name__=~\"platinumwt_(operation_replays|admission_rejections|dropped_logs)_total\"}[5m]))",
+          "expr": "sum by (__name__, service) (rate({__name__=~\"dswt_(operation_replays|admission_rejections|dropped_logs)_total\"}[5m]))",
           "legendFormat": "{{__name__}} {{service}}"
         }
       ]

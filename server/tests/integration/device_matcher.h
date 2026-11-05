@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platinumwt/server/match_worker.h"
+#include "dswt/server/match_worker.h"
 
 #include <grpcpp/grpcpp.h>
 
@@ -14,7 +14,7 @@
 class DeviceMatcher {
 public:
   explicit DeviceMatcher(const std::string &address)
-      : stub_(platinumwt::v1::TradeMatcher::NewStub(
+      : stub_(dswt::v1::TradeMatcher::NewStub(
             grpc::CreateChannel(address, grpc::InsecureChannelCredentials()))),
         worker_([this](const auto &request, auto *reply) {
           grpc::ClientContext context;
@@ -25,6 +25,6 @@ public:
   std::chrono::milliseconds Poll() { return worker_.Poll(); }
 
 private:
-  std::unique_ptr<platinumwt::v1::TradeMatcher::Stub> stub_;
-  platinumwt::server::MatchWorker worker_;
+  std::unique_ptr<dswt::v1::TradeMatcher::Stub> stub_;
+  dswt::server::MatchWorker worker_;
 };

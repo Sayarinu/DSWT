@@ -1,4 +1,4 @@
-#include "platinumwt/server/wal_archive_barrier.h"
+#include "dswt/server/wal_archive_barrier.h"
 
 #include "bounded_query.h"
 
@@ -10,7 +10,7 @@
 #include <mutex>
 #include <thread>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 struct Segment {
@@ -84,7 +84,7 @@ struct WalArchiveBarrier::Impl {
   };
 
   Observation Observe(const std::string &database, WalCoverage coverage) const {
-    const auto row = detail::BoundedQuery(database, kQuery, "platinumwt-recovery", stopped);
+    const auto row = detail::BoundedQuery(database, kQuery, "dswt-recovery", stopped);
     if (!row || PQntuples(row.get()) != 1) return {};
     for (const int column : {1, 2, 3, 4}) if (PQgetisnull(row.get(), 0, column)) return {};
     std::optional<std::string> last;
@@ -103,7 +103,7 @@ struct WalArchiveBarrier::Impl {
   }
 
   bool Execute(const std::string &database, const char *sql) const {
-    return static_cast<bool>(detail::BoundedQuery(database, sql, "platinumwt-recovery", stopped));
+    return static_cast<bool>(detail::BoundedQuery(database, sql, "dswt-recovery", stopped));
   }
 
   void Run(const std::string &database, std::chrono::milliseconds interval, std::chrono::milliseconds switch_interval,
@@ -128,7 +128,7 @@ struct WalArchiveBarrier::Impl {
           now - last_force >= (force == WalForce::Switch ? switch_interval : unknown_interval)) {
         last_force = now;
         const bool forced =
-            (force == WalForce::Switch || Execute(database, "SELECT pg_logical_emit_message(false,'platinumwt','')")) &&
+            (force == WalForce::Switch || Execute(database, "SELECT pg_logical_emit_message(false,'dswt','')")) &&
             Execute(database, "SELECT pg_switch_wal()");
         if (can_force && !forced && !stopped) std::cerr << "recovery barrier: cannot force WAL out\n";
         can_force = forced;
@@ -165,4 +165,4 @@ RecoveryBarrier WalArchiveBarrier::Barrier() const {
   };
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

@@ -5,7 +5,7 @@
 
 #include <utility>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 RecoveryGate::RecoveryGate(RecoveryBarrier provider) : provider_(std::move(provider)) {}
 
@@ -25,4 +25,4 @@ bool RecoveryGate::Covers(Database &database, const std::string &key, std::uint6
   return provider_(position);
 }
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

@@ -30,11 +30,11 @@ def image(owner, generation):
 
 class PersistenceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='platinumwt-host-save-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='dswt-host-save-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         # ld.so splits LD_PRELOAD on spaces, including spaces in checkout paths.
-        preload = tempfile.TemporaryDirectory(prefix='platinumwt-preload-', dir='/tmp')
+        preload = tempfile.TemporaryDirectory(prefix='dswt-preload-', dir='/tmp')
         self.addCleanup(preload.cleanup)
         alias = Path(preload.name) / 'faults.so'
         alias.symlink_to(self.faults)
@@ -47,7 +47,7 @@ class PersistenceTests(unittest.TestCase):
         self.input.write_bytes(self.after)
         self.tool('prepare')
         self.baseline = self.root / 'baseline'
-        shutil.copytree(str(self.save) + '.platinumwt', self.baseline)
+        shutil.copytree(str(self.save) + '.dswt', self.baseline)
 
     def tool(self, mode, *, save=None, ok=True):
         result = subprocess.run([str(self.store), mode, str(save or self.save)], capture_output=True, timeout=5)
@@ -56,7 +56,7 @@ class PersistenceTests(unittest.TestCase):
 
     def reset(self):
         self.save.write_bytes(self.before)
-        store = Path(str(self.save) + '.platinumwt')
+        store = Path(str(self.save) + '.dswt')
         shutil.rmtree(store)
         shutil.copytree(self.baseline, store)
 
@@ -66,8 +66,8 @@ class PersistenceTests(unittest.TestCase):
             for stage in range(1, 21):
                 with self.subTest(mode=mode, stage=stage):
                     self.reset()
-                    env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_AT=str(stage),
-                               PWT_FAULT_MODE=mode, PWT_FAULT_SAVE=str(self.save))
+                    env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_AT=str(stage),
+                               DSWT_FAULT_MODE=mode, DSWT_FAULT_SAVE=str(self.save))
                     process = subprocess.Popen([str(self.probe), str(self.save), str(self.input)], env=env,
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     try:
@@ -105,7 +105,7 @@ class PersistenceTests(unittest.TestCase):
     def test_optional_journal_phase_waits_for_the_selected_snapshot_before_faulting(self):
         image = bytearray(self.after)
         record = bytearray(4096)
-        struct.pack_into('<4sHHIIQ', record, 0, b'PWTJ', 1, 3, 4096, 0, 1)
+        struct.pack_into('<4sHHIIQ', record, 0, b'DSWJ', 1, 3, 4096, 0, 1)
         record[4060:4092] = hashlib.sha256(record[:4060]).digest()
         record[-4:] = b'CMIT'
         for bank in (0x30000, 0x70000): image[bank:bank + 4096] = record
@@ -113,8 +113,8 @@ class PersistenceTests(unittest.TestCase):
         for phase in (4, 3):
             with self.subTest(phase=phase):
                 self.reset()
-                env = dict(os.environ, LD_PRELOAD=str(self.faults), PWT_FAULT_AT='1', PWT_FAULT_MODE='error',
-                           PWT_FAULT_SAVE=str(self.save), PWT_FAULT_JOURNAL_PHASE=str(phase))
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_AT='1', DSWT_FAULT_MODE='error',
+                           DSWT_FAULT_SAVE=str(self.save), DSWT_FAULT_JOURNAL_PHASE=str(phase))
                 result = subprocess.run([str(self.probe), str(self.save), str(self.input)], env=env,
                                         capture_output=True, timeout=5)
                 self.assertEqual(result.returncode, 74 if phase == 3 else 0, result.stderr)
@@ -124,7 +124,7 @@ class PersistenceTests(unittest.TestCase):
 
     def test_truncated_raw_file_and_one_damaged_snapshot_recover_exact_bytes(self):
         self.save.write_bytes(self.before[:113])
-        (Path(str(self.save) + '.platinumwt') / 'A').write_bytes(b'PWT')
+        (Path(str(self.save) + '.dswt') / 'A').write_bytes(b'DSW')
         self.tool('prepare')
         self.assertEqual(self.save.read_bytes(), self.before)
         self.tool('check')
@@ -134,8 +134,8 @@ class PersistenceTests(unittest.TestCase):
         second.write_bytes(image(b'owner-b', 0))
         second.chmod(0o600)
         self.tool('prepare', save=second)
-        foreign = Path(str(second) + '.platinumwt') / 'A'
-        current = Path(str(self.save) + '.platinumwt') / 'A'
+        foreign = Path(str(second) + '.dswt') / 'A'
+        current = Path(str(self.save) + '.dswt') / 'A'
         current.write_bytes(foreign.read_bytes())
         self.tool('prepare', ok=False)
         self.assertEqual(self.save.read_bytes(), self.before)
@@ -145,7 +145,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(self.save.read_bytes(), second.read_bytes())
 
     def test_unknown_and_foreign_truncated_evidence_is_preserved(self):
-        store = Path(str(self.save) + '.platinumwt')
+        store = Path(str(self.save) + '.dswt')
         for unknown in (b'unknown', image(b'owner-b', 0)[:0x30200]):
             with self.subTest(raw_size=len(unknown)):
                 self.reset()
@@ -154,7 +154,7 @@ class PersistenceTests(unittest.TestCase):
                 self.tool('prepare', ok=False)
                 self.assertEqual(self.save.read_bytes(), unknown)
                 self.assertEqual({name: (store / name).read_bytes() for name in snapshots}, snapshots)
-        for unknown in (b'NEW', b'PWTHS002', b'PWTHS001' + bytes(8) + b'foreign-lineage!'):
+        for unknown in (b'NEW', b'DSWHS002', b'DSWHS001' + bytes(8) + b'foreign-lineage!'):
             with self.subTest(snapshot=unknown):
                 self.reset()
                 (store / 'A').write_bytes(unknown)
@@ -163,7 +163,7 @@ class PersistenceTests(unittest.TestCase):
                 self.assertEqual(self.save.read_bytes(), self.before)
 
     def test_damaged_complete_snapshot_is_preserved_for_investigation(self):
-        snapshot = Path(str(self.save) + '.platinumwt') / 'A'
+        snapshot = Path(str(self.save) + '.dswt') / 'A'
         unknown = bytearray(snapshot.read_bytes())
         unknown[64 + 0x30000] ^= 1
         snapshot.write_bytes(unknown)
@@ -174,7 +174,7 @@ class PersistenceTests(unittest.TestCase):
     def test_stale_snapshot_pair_cannot_move_behind_the_durable_head(self):
         result = subprocess.run([str(self.probe), str(self.save), str(self.input)], capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
-        current = Path(str(self.save) + '.platinumwt')
+        current = Path(str(self.save) + '.dswt')
         for bank in ('A', 'B'):
             (current / bank).write_bytes((self.baseline / bank).read_bytes())
         self.tool('prepare', ok=False)
@@ -189,7 +189,7 @@ class PersistenceTests(unittest.TestCase):
         self.tool('prepare', ok=False)
         alias.unlink()
         import fcntl
-        with open(str(self.save) + '.platinumwt.lock', 'r+b') as lock:
+        with open(str(self.save) + '.dswt.lock', 'r+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             self.tool('prepare', ok=False)
         self.tool('check')
@@ -197,7 +197,7 @@ class PersistenceTests(unittest.TestCase):
     def test_a_memory_backed_save_cannot_advertise_host_durability(self):
         if not Path('/dev/shm').is_dir():
             self.skipTest('Linux shared-memory mount is unavailable')
-        with tempfile.TemporaryDirectory(prefix='platinumwt-volatile-', dir='/dev/shm') as directory:
+        with tempfile.TemporaryDirectory(prefix='dswt-volatile-', dir='/dev/shm') as directory:
             save = Path(directory) / 'volatile.sav'
             save.write_bytes(self.before)
             save.chmod(0o600)

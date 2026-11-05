@@ -14,7 +14,7 @@ import unittest
 class MatcherProcessTests(unittest.TestCase):
     def env(self, **extra):
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("PG", "WT_")) and key != "PLATINUMWT_DATABASE_URL"}
+               if not key.startswith(("PG", "WT_")) and key != "DSWT_DATABASE_URL"}
         env.update(extra)
         return env
 
@@ -26,13 +26,13 @@ class MatcherProcessTests(unittest.TestCase):
         for workers in ("0", "9", "x", ""):
             with self.subTest(workers=workers):
                 result = subprocess.run([str(self.binary)], capture_output=True, timeout=10, env=self.env(
-                    PLATINUMWT_DATABASE_URL="host=/nonexistent", WT_MATCHER_WORKERS=workers))
+                    DSWT_DATABASE_URL="host=/nonexistent", WT_MATCHER_WORKERS=workers))
                 self.assertEqual(result.returncode, 1)
 
     def test_stops_promptly_and_opens_no_ports_without_a_database(self):
         with tempfile.TemporaryDirectory() as directory:
             process = subprocess.Popen([str(self.binary)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self.env(
-                PLATINUMWT_DATABASE_URL=f"host={directory} port=1 dbname=none", WT_MATCHER_WORKERS="3"))
+                DSWT_DATABASE_URL=f"host={directory} port=1 dbname=none", WT_MATCHER_WORKERS="3"))
             try:
                 self.assertIn(b"3 worker(s)", process.stdout.readline())
                 time.sleep(0.5)

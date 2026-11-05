@@ -1,6 +1,6 @@
 # Project Goal
 
-Pokemon Platinum Patch is a project to modify Pokémon Platinum so that it can
+DSWT is a project to modify Pokémon Platinum so that it can
 participate in Wonder Trade. The long-term goal is to pair the game patch with
 a custom Wonder Trade server operated by this project.
 
@@ -41,6 +41,8 @@ Nintendo DS networking constraints and use gRPC for server-side services.
   such as `ABC-123`.
 - Format new commits as `{TicketID-#} - Message`, such as
   `ABC-123 - Fix trade recovery`. Preserve historical messages during migration.
+- Do not add AI or agent attribution anywhere: no `Co-Authored-By` trailers,
+  "Generated with" footers or similar tags in commits, PRs, code or docs.
 - Keep PRs focused and self-contained: problem, changes, validation, material
   risks, and ticket identifier. Omit links to private trackers; use the PR
   template's automation opt-out to suppress private tracker comments.

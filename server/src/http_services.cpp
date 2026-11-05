@@ -1,11 +1,11 @@
 #include "http_services.h"
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <boost/asio/post.hpp>
 
 #include <stdexcept>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
                            boost::asio::thread_pool &recovery,
@@ -49,4 +49,4 @@ bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext
   return true;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

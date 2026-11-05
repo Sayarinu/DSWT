@@ -1,4 +1,4 @@
-# Platinum Wonder Trade
+# DSWT
 
 This project aims to patch Pokémon Platinum with Wonder Trade support and run a
 custom Wonder Trade server.
@@ -37,19 +37,19 @@ ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches
 
 ## Server ledger
 
-`docker build -f server/Dockerfile -t platinumwt-server .` builds the C++ server and runs its
+`docker build -f server/Dockerfile -t dswt-server .` builds the C++ server and runs its
 tests, including a disposable PostgreSQL 16 cluster with synthetic data.
 The [private image audit](tools/image-audit/README.md) checks local OCI artifacts,
 source/notices, SBOMs and scan findings without publishing them.
 Final trading remains gated on off-site recovery. The image also contains an operator tool:
 
 ```sh
-platinumwt-ledger migrate /usr/local/share/platinumwt/migrations
-platinumwt-ledger verify
+dswt-ledger migrate /usr/local/share/dswt/migrations
+dswt-ledger verify
 ```
 
 Configure its database with libpq's `PGSERVICE`/`PGPASSFILE` settings or the
-`PLATINUMWT_DATABASE_URL` environment variable; keep credentials outside Git.
+`DSWT_DATABASE_URL` environment variable; keep credentials outside Git.
 Run migrations as the database owner. They are transactional, ordered and
 checksum-verified. Replay uses a consistent snapshot and temporary row images;
 it checks live state without repairing it. Audit evidence includes private
@@ -57,8 +57,8 @@ verifiers and payloads and stays in the database/backups; the tool prints counts
 and SQLSTATE errors. Local WAL durability does not satisfy the off-site recovery
 barrier required before final trade responses.
 
-`platinumwt-backend` serves enrollment/trading on loopback with
-`PLATINUMWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
+`dswt-backend` serves enrollment/trading on loopback with
+`DSWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
 defaults to `127.0.0.1:50052`. Operations stay `PROCESSING` until their WAL is
 archived, read from `pg_stat_archiver`. That is only sound with
 [`server/wal-archive.sh`](server/wal-archive.sh) as `archive_command`: it refuses
@@ -69,7 +69,7 @@ on `pg_switch_wal()`. It forces WAL out only while a request waits on the open
 segment, with no backlog and no archive failure. Its database URL must use a
 socket path or IP address, because a hostname keeps the barrier closed.
 
-`platinumwt-matcher` pairs queued offers, using the same database URL rules and
+`dswt-matcher` pairs queued offers, using the same database URL rules and
 barrier. It opens no matcher port. `WT_MATCHER_WORKERS` sets 1 to 8 workers
 (default 1), and replicas are safe because a database lock serializes each pair.
 

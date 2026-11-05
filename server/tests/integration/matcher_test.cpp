@@ -1,7 +1,7 @@
-#include "platinumwt/server/match_worker.h"
-#include "platinumwt/server/matcher_service.h"
-#include "platinumwt/server/trade_service.h"
-#include "platinumwt/server/identity_store.h"
+#include "dswt/server/match_worker.h"
+#include "dswt/server/matcher_service.h"
+#include "dswt/server/trade_service.h"
+#include "dswt/server/identity_store.h"
 
 #include "postgres.h"
 #include "trade_encoding.h"
@@ -21,7 +21,7 @@
 
 extern char **environ;
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 std::string Identifier() {
@@ -156,7 +156,7 @@ protected:
 };
 
 TEST_F(MatcherTest, PairAvailabilityNeedsTwoQueuedOwnersAndWritesNothing) {
-  const auto attempts = Scalar("SELECT count(*) FROM platinumwt.matcher_attempts");
+  const auto attempts = Scalar("SELECT count(*) FROM dswt.matcher_attempts");
   const auto position = Scalar("SELECT pg_current_wal_insert_lsn()");
   EXPECT_FALSE(matcher.PairAvailable());
   Queue();
@@ -165,7 +165,7 @@ TEST_F(MatcherTest, PairAvailabilityNeedsTwoQueuedOwnersAndWritesNothing) {
   const auto queued = Scalar("SELECT pg_current_wal_insert_lsn()");
   EXPECT_NE(position, queued);
   EXPECT_TRUE(matcher.PairAvailable());
-  EXPECT_EQ(Scalar("SELECT count(*) FROM platinumwt.matcher_attempts"), attempts);
+  EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.matcher_attempts"), attempts);
   EXPECT_EQ(Scalar("SELECT pg_current_wal_insert_lsn()"), queued);
 }
 
@@ -186,12 +186,12 @@ TEST_F(MatcherTest, InProcessWorkerPairsQueuedOffersWithoutANetworkEndpoint) {
 TEST_F(MatcherTest, InvalidRequestsAndMissingRecoveryDoNotCreateAttempts) {
   for (auto operation : {std::string{}, std::string(16, '\0'), std::string(17, 'x')})
     EXPECT_EQ(Match(operation).result(), v1::RESULT_INVALID_REQUEST);
-  const auto before = Scalar("SELECT count(*) FROM platinumwt.audit_journal");
+  const auto before = Scalar("SELECT count(*) FROM dswt.audit_journal");
   MatcherService closed("");
   const auto reply = Match(Identifier(), &closed);
   EXPECT_EQ(reply.result(), v1::RESULT_PROCESSING);
   EXPECT_TRUE(reply.first_trade_id().empty());
-  EXPECT_EQ(Scalar("SELECT count(*) FROM platinumwt.audit_journal"), before);
+  EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.audit_journal"), before);
 }
 
 TEST_F(MatcherTest, EmptyAndSingleQueuesRetainNoPairWithoutExpiry) {
@@ -249,7 +249,7 @@ TEST_F(MatcherTest, BusyOldestIdentityIsSkippedAndServedAfterRelease) {
   Queue(); Queue(); Queue();
   {
     detail::Transaction transaction(database);
-    database.Parameters("SELECT save_id FROM platinumwt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
+    database.Parameters("SELECT save_id FROM dswt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
         {detail::HexBytes(first.auth.save_id())});
     const auto pair = Match();
     ASSERT_EQ(pair.result(), v1::RESULT_OK);
@@ -343,35 +343,35 @@ TEST_F(MatcherTest, UncoveredDepositsCannotMatchAndCommittedPairWaitsForRecovery
 
 TEST_F(MatcherTest, MidTransactionFailureRollsBackBothOwnersAndRedactsDiagnostics) {
   const auto first = Queue(), second = Queue();
-  const auto before = Scalar("SELECT count(*) FROM platinumwt.audit_journal");
-  database.Execute("CREATE FUNCTION platinumwt.fail_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ "
-      "BEGIN RAISE EXCEPTION 'PRIVATE_SENTINEL'; END $$; CREATE TRIGGER fail_match_test AFTER INSERT ON platinumwt.receipts "
-      "FOR EACH ROW EXECUTE FUNCTION platinumwt.fail_match_test()");
+  const auto before = Scalar("SELECT count(*) FROM dswt.audit_journal");
+  database.Execute("CREATE FUNCTION dswt.fail_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ "
+      "BEGIN RAISE EXCEPTION 'PRIVATE_SENTINEL'; END $$; CREATE TRIGGER fail_match_test AFTER INSERT ON dswt.receipts "
+      "FOR EACH ROW EXECUTE FUNCTION dswt.fail_match_test()");
   v1::MatchRequest request;
   request.set_operation_id(Identifier());
   v1::MatchReply reply;
   const auto status = matcher.MatchNext(nullptr, &request, &reply);
-  database.Execute("DROP TRIGGER fail_match_test ON platinumwt.receipts; DROP FUNCTION platinumwt.fail_match_test()");
+  database.Execute("DROP TRIGGER fail_match_test ON dswt.receipts; DROP FUNCTION dswt.fail_match_test()");
   EXPECT_EQ(status.error_code(), grpc::StatusCode::UNAVAILABLE);
   EXPECT_EQ(status.error_message().find("PRIVATE_SENTINEL"), std::string::npos);
   EXPECT_EQ(reply.ByteSizeLong(), 0U);
   EXPECT_EQ(Status(first.auth).trade().state(), v1::TRADE_QUEUED);
   EXPECT_EQ(Status(second.auth).trade().state(), v1::TRADE_QUEUED);
-  EXPECT_EQ(Scalar("SELECT count(*) FROM platinumwt.audit_journal"), before);
+  EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.audit_journal"), before);
   EXPECT_EQ(Match(request.operation_id()).result(), v1::RESULT_OK);
 }
 
 TEST_F(MatcherTest, SerializationFailureRetriesWithoutDuplicatingThePair) {
   Queue(); Queue();
-  database.Execute("CREATE SEQUENCE platinumwt.match_retry_test; "
-      "CREATE FUNCTION platinumwt.retry_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
-      "IF nextval('platinumwt.match_retry_test')=1 THEN RAISE EXCEPTION 'retry' USING ERRCODE='40001'; END IF; "
-      "RETURN NULL; END $$; CREATE TRIGGER retry_match_test AFTER INSERT ON platinumwt.receipts "
-      "FOR EACH ROW EXECUTE FUNCTION platinumwt.retry_match_test()");
+  database.Execute("CREATE SEQUENCE dswt.match_retry_test; "
+      "CREATE FUNCTION dswt.retry_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+      "IF nextval('dswt.match_retry_test')=1 THEN RAISE EXCEPTION 'retry' USING ERRCODE='40001'; END IF; "
+      "RETURN NULL; END $$; CREATE TRIGGER retry_match_test AFTER INSERT ON dswt.receipts "
+      "FOR EACH ROW EXECUTE FUNCTION dswt.retry_match_test()");
   const auto operation = Identifier();
   const auto reply = Match(operation);
-  database.Execute("DROP TRIGGER retry_match_test ON platinumwt.receipts; DROP FUNCTION platinumwt.retry_match_test(); "
-      "DROP SEQUENCE platinumwt.match_retry_test");
+  database.Execute("DROP TRIGGER retry_match_test ON dswt.receipts; DROP FUNCTION dswt.retry_match_test(); "
+      "DROP SEQUENCE dswt.match_retry_test");
   EXPECT_EQ(reply.result(), v1::RESULT_OK);
   EXPECT_EQ(Match(operation).SerializeAsString(), reply.SerializeAsString());
 }
@@ -390,10 +390,10 @@ TEST_F(MatcherTest, KilledWorkerBetweenReceiptsCannotCommitAHalfMatch) {
   const auto first = Queue(), second = Queue(2);
   const auto operation = Identifier();
   database.Execute("SELECT pg_advisory_lock(578892145199); "
-      "CREATE FUNCTION platinumwt.pause_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+      "CREATE FUNCTION dswt.pause_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
       "PERFORM pg_advisory_xact_lock(578892145199); RETURN NULL; END $$; "
-      "CREATE TRIGGER pause_match_test AFTER INSERT ON platinumwt.receipts "
-      "FOR EACH ROW EXECUTE FUNCTION platinumwt.pause_match_test()");
+      "CREATE TRIGGER pause_match_test AFTER INSERT ON dswt.receipts "
+      "FOR EACH ROW EXECUTE FUNCTION dswt.pause_match_test()");
   std::string executable = "/proc/self/exe", mode = "--match", argument = detail::HexBytes(operation);
   char *arguments[] = {executable.data(), mode.data(), argument.data(), nullptr};
   pid_t child = 0;
@@ -402,7 +402,7 @@ TEST_F(MatcherTest, KilledWorkerBetweenReceiptsCannotCommitAHalfMatch) {
   if (spawned == 0) {
     for (int poll = 0; poll < 300; ++poll) {
       paused = Scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
-          "AND wait_event='advisory' AND query LIKE 'INSERT INTO platinumwt.receipts VALUES%')") == "t";
+          "AND wait_event='advisory' AND query LIKE 'INSERT INTO dswt.receipts VALUES%')") == "t";
       if (paused) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -411,8 +411,8 @@ TEST_F(MatcherTest, KilledWorkerBetweenReceiptsCannotCommitAHalfMatch) {
     EXPECT_EQ(waitpid(child, &status, 0), child);
     EXPECT_TRUE(WIFSIGNALED(status));
   }
-  database.Execute("SELECT pg_advisory_unlock(578892145199); DROP TRIGGER pause_match_test ON platinumwt.receipts; "
-      "DROP FUNCTION platinumwt.pause_match_test()");
+  database.Execute("SELECT pg_advisory_unlock(578892145199); DROP TRIGGER pause_match_test ON dswt.receipts; "
+      "DROP FUNCTION dswt.pause_match_test()");
   ASSERT_EQ(spawned, 0);
   EXPECT_TRUE(paused);
   EXPECT_EQ(Status(first.auth).trade().state(), v1::TRADE_QUEUED);
@@ -451,13 +451,13 @@ TEST_F(MatcherTest, GrpcAndNewProcessReplayTheCommittedPair) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server
 
 int main(int argc, char **argv) {
   if (argc == 3 && std::string(argv[1]) == "--match")
-    std::_Exit(platinumwt::server::RunWorker(platinumwt::server::detail::UnhexBytes(argv[2])));
+    std::_Exit(dswt::server::RunWorker(dswt::server::detail::UnhexBytes(argv[2])));
   if (argc == 2 && std::string(argv[1]) == "--verify-restart")
-    return platinumwt::server::RunWorker(std::string(16, '\xD7'));
+    return dswt::server::RunWorker(std::string(16, '\xD7'));
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

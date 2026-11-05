@@ -1,11 +1,11 @@
 x-server: &server
-  image: ${PWT_LOCAL_PROJECT}-server
-  platform: ${PWT_LOCAL_PLATFORM}
+  image: ${DSWT_LOCAL_PROJECT}-server
+  platform: ${DSWT_LOCAL_PLATFORM}
   build:
     context: ../..
     dockerfile: server/Dockerfile
     target: build
-  user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+  user: ${DSWT_LOCAL_UID}:${DSWT_LOCAL_GID}
   read_only: true
   tmpfs: [/tmp]
   cap_drop: [ALL]
@@ -15,17 +15,17 @@ x-server: &server
 x-database-client: &database-client
   PGHOST: /test/run
   PGPORT: "5432"
-  PGDATABASE: platinumwt_e2e
-  PGUSER: platinumwt_local
+  PGDATABASE: dswt_e2e
+  PGUSER: dswt_local
 
 services:
   database:
     image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
-    platform: ${PWT_LOCAL_PLATFORM}
+    platform: ${DSWT_LOCAL_PLATFORM}
     network_mode: none
     environment:
-      POSTGRES_USER: platinumwt_local
-      POSTGRES_DB: platinumwt_e2e
+      POSTGRES_USER: dswt_local
+      POSTGRES_DB: dswt_e2e
       # Only the explicitly mounted local socket is reachable.
       POSTGRES_HOST_AUTH_METHOD: trust
     command: [postgres, -c, "listen_addresses=", -c, fsync=on, -c, full_page_writes=on, -c, synchronous_commit=on]
@@ -33,7 +33,7 @@ services:
       - data:/var/lib/postgresql/data
       - socket:/var/run/postgresql
     healthcheck:
-      test: [CMD, pg_isready, -h, /var/run/postgresql, -U, platinumwt_local, -d, platinumwt_e2e]
+      test: [CMD, pg_isready, -h, /var/run/postgresql, -U, dswt_local, -d, dswt_e2e]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -45,35 +45,35 @@ services:
     network_mode: none
     environment: *database-client
     volumes: [socket:/test/run]
-    command: [/build/platinumwt-ledger, migrate, /src/migrations]
+    command: [/build/dswt-ledger, migrate, /src/migrations]
 
   gateway:
     <<: *server
-    command: [/build/platinumwt-server]
-    ports: ["127.0.0.1:${PWT_LOCAL_HTTPS_PORT}:8443"]
+    command: [/build/dswt-server]
+    ports: ["127.0.0.1:${DSWT_LOCAL_HTTPS_PORT}:8443"]
     environment:
       WT_HTTP_PORT: "8443"
       WT_METRICS_PORT: "9091"
-      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
+      WT_SUBMISSION_WORKERS: ${DSWT_LOCAL_SUBMISSION_WORKERS:-4}
       WT_TRADE_TARGET: 127.0.0.1:50053
       WT_TLS_CERTIFICATE: /tls/current.pem
       WT_TLS_PRIVATE_KEY: /tls/current.key
     volumes:
       - type: bind
-        source: ${PWT_LOCAL_WORKSPACE}/tls
+        source: ${DSWT_LOCAL_WORKSPACE}/tls
         target: /tls
         read_only: true
         bind: {create_host_path: false}
 
   validator:
-    image: ${PWT_LOCAL_PROJECT}-validator
-    platform: ${PWT_LOCAL_PLATFORM}
+    image: ${DSWT_LOCAL_PROJECT}-validator
+    platform: ${DSWT_LOCAL_PLATFORM}
     build:
       context: ../..
       dockerfile: validator/Dockerfile
     network_mode: service:gateway
     environment:
-      WT_VALIDATOR_WORKERS: ${PWT_LOCAL_VALIDATOR_WORKERS:-2}
+      WT_VALIDATOR_WORKERS: ${DSWT_LOCAL_VALIDATOR_WORKERS:-2}
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
     cap_drop: [ALL]
@@ -91,23 +91,23 @@ services:
       validator: {condition: service_started}
     environment:
       <<: *database-client
-      PLATINUMWT_DISPOSABLE_DEVICE_TEST: "1"
-      PLATINUMWT_DEVICE_MATCHERS: ${PWT_LOCAL_MATCHERS:-1}
+      DSWT_DISPOSABLE_DEVICE_TEST: "1"
+      DSWT_DEVICE_MATCHERS: ${DSWT_LOCAL_MATCHERS:-1}
       WT_METRICS_PORT: "9092"
-      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
+      WT_SUBMISSION_WORKERS: ${DSWT_LOCAL_SUBMISSION_WORKERS:-4}
     volumes:
       - type: bind
-        source: ${PWT_LOCAL_WORKSPACE}/control
+        source: ${DSWT_LOCAL_WORKSPACE}/control
         target: /test
         read_only: true
         bind: {create_host_path: false}
       - socket:/test/run
-    command: [/build/tests/platinumwt-device-fixture]
+    command: [/build/tests/dswt-device-fixture]
 
 volumes:
   data:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-data
+    name: ${DSWT_LOCAL_PROJECT}-data
   socket:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-socket
+    name: ${DSWT_LOCAL_PROJECT}-socket

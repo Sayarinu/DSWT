@@ -9,7 +9,7 @@ game
 **/*.nds
 **/*.sav
 **/*.dsv
-**/*.platinumwt
-**/*.platinumwt.lock
-**/.platinumwt-pending-*
+**/*.dswt
+**/*.dswt.lock
+**/.dswt-pending-*
 **/__pycache__

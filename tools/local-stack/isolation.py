@@ -53,7 +53,7 @@ def volume_contract(local, service):
                   "/textfile": ("bind", str(observe / "textfile"), False),
                   "/monitored/pressure": ("volume", project + "-pressure", False)},
         "grafana": {"/etc/grafana/provisioning": ("bind", str(config / "grafana"), False),
-                    "/run/platinumwt/grafana-admin-password": ("bind", str(observe / "grafana-admin-password"), False)},
+                    "/run/dswt/grafana-admin-password": ("bind", str(observe / "grafana-admin-password"), False)},
         "capture": {"/capture/capture.py": ("bind", str(config / "capture.py"), False),
                     "/alerts": ("bind", str(observe / "alerts"), True), "/monitored/pressure": pressure},
     }[service]
@@ -210,15 +210,15 @@ def listener_evidence(local):
 
 
 def production_files(archive):
-    required = {"usr/local/bin/platinumwt-server", "usr/local/bin/platinumwt-backend", "usr/local/bin/platinumwt-matcher",
-                "usr/local/bin/platinumwt-ledger",
-                "usr/share/platinumwt/LICENSE", "usr/share/platinumwt/NOTICE"}
+    required = {"usr/local/bin/dswt-server", "usr/local/bin/dswt-backend", "usr/local/bin/dswt-matcher",
+                "usr/local/bin/dswt-ledger",
+                "usr/share/dswt/LICENSE", "usr/share/dswt/NOTICE"}
     found, count = {}, 0
     for member in archive:
         path = member.name.removeprefix("./").rstrip("/")
         require(not path.startswith("/") and ".." not in path.split("/"), "Unsafe image path")
         require(not re.match(r"^(build|src|test)(/|$)", path)
-                and not re.search(r"(^|/)(platinumwt-device-fixture|platinumwt-gateway-fixture|platinumwt-.*tests?)(/|$)", path),
+                and not re.search(r"(^|/)(dswt-device-fixture|dswt-gateway-fixture|dswt-.*tests?)(/|$)", path),
                 "Production image contains project tests/build inputs")
         require(not path.startswith("usr/local/bin/") or path in required, "Unexpected production executable")
         count += 1
@@ -254,7 +254,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("policy", "audit"))
     parser.add_argument("--github", action="store_true", help="Read live GitHub settings with gh; never modify them")
-    parser.add_argument("--repository", default="Sayarinu/PlatinumWonderTrade")
+    parser.add_argument("--repository", default="Sayarinu/DSWT")
     parser.add_argument("--workspace", type=Path, default=stack.ROOT / "game/local-e2e")
     parser.add_argument("--production-image", help="Locally built final C++ image; never the build/test stage")
     args = parser.parse_args()
@@ -297,7 +297,7 @@ def main():
                 report["listeners"] = listener_evidence(local)
                 report["database_system_id"] = local.manifest["database_system_id"]
                 report["production"] = production_evidence(local, args.production_image, directory)
-                binaries = local.compose("exec", "-T", "gateway", "sha256sum", "/build/platinumwt-server", "/build/platinumwt-backend", "/build/platinumwt-ledger",
+                binaries = local.compose("exec", "-T", "gateway", "sha256sum", "/build/dswt-server", "/build/dswt-backend", "/build/dswt-ledger",
                                          capture=True, timeout=30).stdout
                 compiled = {}
                 for line in binaries.splitlines():
@@ -307,7 +307,7 @@ def main():
                 expected = {path: checksum for path, checksum in report["production"]["files"].items() if path.startswith("usr/local/bin/")}
                 require(compiled == expected, "Final production programs differ from the tested build image")
                 report["compiled_programs"] = compiled
-                local.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify", capture=True, timeout=60)
+                local.compose("exec", "-T", "backend", "/build/dswt-ledger", "verify", capture=True, timeout=60)
                 report["ledger_replay"] = "pass"
         report["status"] = github_status(report["github"]) if args.github else "pass"
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, policy.yaml.YAMLError) as error:

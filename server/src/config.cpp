@@ -1,11 +1,11 @@
-#include "platinumwt/server/config.h"
+#include "dswt/server/config.h"
 
 #include <cstdlib>
 #include <charconv>
 #include <stdexcept>
 #include <string_view>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 std::string Environment(const char *name, const char *fallback) {
@@ -86,7 +86,7 @@ ServerConfig LoadServerConfig() {
 }
 
 BackendConfig LoadBackendConfig() {
-  BackendConfig config{Environment("WT_BACKEND_ADDRESS", "127.0.0.1:50053"), Required("PLATINUMWT_DATABASE_URL"),
+  BackendConfig config{Environment("WT_BACKEND_ADDRESS", "127.0.0.1:50053"), Required("DSWT_DATABASE_URL"),
       Environment("WT_LEGALITY_TARGET", "127.0.0.1:50052"), Required("WT_LEGALITY_POLICY")};
   PrivateAddress(config.address, true);
   PrivateAddress(config.legality_address, false);
@@ -96,7 +96,7 @@ BackendConfig LoadBackendConfig() {
 }
 
 MatcherConfig LoadMatcherConfig() {
-  MatcherConfig config{Required("PLATINUMWT_DATABASE_URL")};
+  MatcherConfig config{Required("DSWT_DATABASE_URL")};
   config.metrics_port = LoadMetricsPort();
   const auto workers = Environment("WT_MATCHER_WORKERS", "1");
   const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), config.workers);
@@ -105,4 +105,4 @@ MatcherConfig LoadMatcherConfig() {
   return config;
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

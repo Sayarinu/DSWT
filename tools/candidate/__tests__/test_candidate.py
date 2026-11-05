@@ -41,7 +41,7 @@ class CandidateFixture(unittest.TestCase):
             (inputs / f"{key}-wt.nds").write_bytes(TARGETS[key])
             pairs.append((inputs / f"{key}.nds", inputs / f"{key}-wt.nds"))
         catalog = {"variants": [{"id": key, "name": key, "size": len(data), "sha256": candidate.sha256(data),
-                                 "pristine_verified": True, "planned_patch": f"platinum-wonder-trade-{key}.bps"}
+                                 "pristine_verified": True, "planned_patch": f"dswt-{key}.bps"}
                                 for key, data in BASES.items()]}
         self.bundle = self.root / "game/bundle"
         patcher.create(pairs, inputs / "profile.json", self.bundle, "0.1.0-rc1", FakeFlips(),
@@ -68,10 +68,10 @@ class AssemblyTests(CandidateFixture):
         self.assertEqual(data, Path(second["archive"]).read_bytes())
         self.assertEqual(self.verify(Path(first["archive"]))["sha256"], first["sha256"])
         names = sorted(self.members(data))
-        prefix = "platinumwt-0.1.0-rc1/"
+        prefix = "dswt-0.1.0-rc1/"
         self.assertEqual(names, sorted(prefix + name for name in [
-            "CANDIDATE.json", "bundle/manifest.json", "bundle/platinum-wonder-trade-us-rev0.bps",
-            "bundle/platinum-wonder-trade-us-rev1.bps", "instructions/README.md", "notices/LICENSE", "notices/NOTICE"]))
+            "CANDIDATE.json", "bundle/manifest.json", "bundle/dswt-us-rev0.bps",
+            "bundle/dswt-us-rev1.bps", "instructions/README.md", "notices/LICENSE", "notices/NOTICE"]))
         self.assertFalse(any("audit/" in name or name.endswith(".nds") for name in names))
         record = first["manifest"]
         self.assertIs(record["publication_permitted"], False)
@@ -99,9 +99,9 @@ class AssemblyTests(CandidateFixture):
                     self.assertRaisesRegex(candidate.CandidateError, "tracked regular file"):
                 self.assemble()
         with self.assertRaisesRegex(candidate.CandidateError, "prohibited"):
-            candidate.member_name("platinumwt-1", "instructions/game.nds")
+            candidate.member_name("dswt-1", "instructions/game.nds")
         with self.assertRaises(ValueError):
-            candidate.member_name("platinumwt-1", "../escape")
+            candidate.member_name("dswt-1", "../escape")
 
     def test_interrupted_assembly_publishes_nothing_and_keeps_existing_outputs(self):
         output = self.root / "game/candidate.tar"
@@ -122,7 +122,7 @@ class TamperTests(CandidateFixture):
         super().setUp()
         self.archive = Path(self.assemble()["archive"])
         self.original = self.members(self.archive.read_bytes())
-        self.prefix = "platinumwt-0.1.0-rc1/"
+        self.prefix = "dswt-0.1.0-rc1/"
 
     def rejected(self, members, message):
         path = self.root / "game/tampered.tar"
@@ -133,7 +133,7 @@ class TamperTests(CandidateFixture):
             self.verify(path)
 
     def test_modified_extra_missing_or_enabled_members_are_rejected(self):
-        patch_name = self.prefix + "bundle/platinum-wonder-trade-us-rev0.bps"
+        patch_name = self.prefix + "bundle/dswt-us-rev0.bps"
         changed = dict(self.original)
         changed[self.prefix + "notices/NOTICE"] = b"other\n"
         self.rejected(changed, "modified")
@@ -146,7 +146,7 @@ class TamperTests(CandidateFixture):
             dict(record, publication_permitted=True))}), "blocked from publication")
         corrupt = bytearray(self.original[patch_name])
         corrupt[-5] ^= 1
-        entry = next(item for item in record["files"] if item["path"] == "bundle/platinum-wonder-trade-us-rev0.bps")
+        entry = next(item for item in record["files"] if item["path"] == "bundle/dswt-us-rev0.bps")
         entry["sha256"] = candidate.sha256(bytes(corrupt))
         self.rejected(dict(self.original, **{patch_name: bytes(corrupt),
                                              self.prefix + "CANDIDATE.json": candidate.canonical_json(record)}), "invalid")
@@ -177,7 +177,7 @@ class TamperTests(CandidateFixture):
         path.chmod(0o600)
         with self.assertRaisesRegex(candidate.CandidateError, "canonical|Unreadable"):
             self.verify(path)
-        for kind, name in ((tarfile.SYMTYPE, self.prefix + "notices/link"), (tarfile.REGTYPE, "platinumwt-0.1.0-rc1/../x")):
+        for kind, name in ((tarfile.SYMTYPE, self.prefix + "notices/link"), (tarfile.REGTYPE, "dswt-0.1.0-rc1/../x")):
             output = io.BytesIO()
             with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
                 info = tarfile.TarInfo(name)

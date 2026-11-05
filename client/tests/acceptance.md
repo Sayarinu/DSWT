@@ -20,7 +20,7 @@ retail save; the normal ROM is restored after each probe build.
 Durable melonDS 1.1 SHA-256:
 `ba0ff2ff4eda980121b3fe8c18688a4b83b1216dd4bf0fd357175a0dd266e0bd`.
 The C++ gateway/backend/matcher were rebuilt from this checkout. The pinned
-pwt2 validator image's included adapter source was compared with this checkout.
+dswt2 validator image's included adapter source was compared with this checkout.
 A fresh PostgreSQL 16 cluster and separate local TLS files were used; original
 ROM/save assets and the previous acceptance database were kept separate.
 

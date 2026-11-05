@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platinumwt/server/config.h"
+#include "dswt/server/config.h"
 
 #include <boost/asio/ip/address.hpp>
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace platinumwt::server::detail {
+namespace dswt::server::detail {
 
 class ServiceAdmission;
 
@@ -61,4 +61,4 @@ private:
 // Direct peer only: IPv4 addresses and IPv6 /64s, including IPv4-mapped peers.
 std::string NetworkKey(const boost::asio::ip::address &);
 
-} // namespace platinumwt::server::detail
+} // namespace dswt::server::detail

@@ -1,4 +1,4 @@
-#include "platinumwt/server/identity_store.h"
+#include "dswt/server/identity_store.h"
 
 #include "postgres.h"
 
@@ -11,7 +11,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 
 IdentityId NextId() {
@@ -55,25 +55,25 @@ protected:
   IdentityId Offer(const IdentityId &owner) {
     const auto trade = NextId(), asset = NextId(), operation = NextId();
     detail::Transaction transaction(database);
-    database.Parameters("INSERT INTO platinumwt.payloads VALUES ($1::uuid, "
+    database.Parameters("INSERT INTO dswt.payloads VALUES ($1::uuid, "
                         "decode(repeat('00',136),'hex'), "
                         "pg_catalog.sha256(decode(repeat('00',136),'hex')))",
                         {AsHex(asset)});
     database.Parameters(
         "INSERT INTO "
-        "platinumwt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
+        "dswt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
         "VALUES ($1::uuid,$2::uuid,$3::uuid,1,2)",
         {AsHex(trade), AsHex(owner), AsHex(asset)});
-    database.Parameters("INSERT INTO platinumwt.ownership VALUES "
+    database.Parameters("INSERT INTO dswt.ownership VALUES "
                         "($1::uuid,$2::uuid,$3::uuid,1,2)",
                         {AsHex(asset), AsHex(owner), AsHex(trade)});
     database.Parameters(
-        "INSERT INTO platinumwt.operations VALUES ($1::uuid,$2::uuid,1,2,"
+        "INSERT INTO dswt.operations VALUES ($1::uuid,$2::uuid,1,2,"
         "decode(repeat('11',32),'hex'),1,2,decode(repeat('00',146),'hex'))",
         {AsHex(owner), AsHex(operation)});
     database.Parameters(
         "INSERT INTO "
-        "platinumwt.trade_events(save_id,sequence,kind,trade_id,operation_id,"
+        "dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,"
         "asset_id,payload_sha256,state) VALUES "
         "($1::uuid,2,2,$2::uuid,$3::uuid,$4::uuid,"
         "pg_catalog.sha256(decode(repeat('00',136),'hex')),1)",
@@ -131,7 +131,7 @@ TEST_F(IdentityTest, CollisionExhaustionDoesNotLeavePartialIdentity) {
                std::runtime_error);
   EXPECT_EQ(calls, 8);
   auto row =
-      database.Parameters("SELECT count(*) FROM platinumwt.save_identities "
+      database.Parameters("SELECT count(*) FROM dswt.save_identities "
                           "WHERE enrollment_id=$1::uuid",
                           {AsHex(other_enrollment)});
   EXPECT_EQ(std::string(PQgetvalue(row.get(), 0, 0)), "0");
@@ -162,7 +162,7 @@ TEST_F(IdentityTest, UnexpectedUniqueFailureIsNotRetried) {
     return NextId();
   });
   database.Execute("SELECT "
-                   "setval(pg_get_serial_sequence('platinumwt.audit_journal','"
+                   "setval(pg_get_serial_sequence('dswt.audit_journal','"
                    "sequence'),1,false)");
   std::exception_ptr failure;
   try {
@@ -172,8 +172,8 @@ TEST_F(IdentityTest, UnexpectedUniqueFailureIsNotRetried) {
   }
   database.Execute(
       "SELECT "
-      "setval(pg_get_serial_sequence('platinumwt.audit_journal','sequence'),"
-      "(SELECT max(sequence) FROM platinumwt.audit_journal),true)");
+      "setval(pg_get_serial_sequence('dswt.audit_journal','sequence'),"
+      "(SELECT max(sequence) FROM dswt.audit_journal),true)");
   ASSERT_TRUE(failure);
   try {
     std::rethrow_exception(failure);
@@ -189,7 +189,7 @@ TEST_F(IdentityTest, VerifierIsBoundToSaveAndCannotBeUsedAsCredential) {
   ASSERT_TRUE(second);
   auto row = database.Parameters(
       "SELECT encode(credential_verifier,'hex') FROM "
-      "platinumwt.save_identities "
+      "dswt.save_identities "
       "WHERE save_id IN ($1::uuid,$2::uuid) ORDER BY save_id",
       {AsHex(first), AsHex(*second)});
   ASSERT_EQ(PQntuples(row.get()), 2);
@@ -198,7 +198,7 @@ TEST_F(IdentityTest, VerifierIsBoundToSaveAndCannotBeUsedAsCredential) {
               PQgetvalue(row.get(), 1, 0));
   auto binary =
       database.Parameters("SELECT credential_verifier FROM "
-                          "platinumwt.save_identities WHERE save_id=$1::uuid",
+                          "dswt.save_identities WHERE save_id=$1::uuid",
                           {AsHex(first)});
   std::size_t length = 0;
   auto *decoded = PQunescapeBytea(
@@ -263,4 +263,4 @@ TEST_F(IdentityTest, ConflictingConcurrentEnrollmentHasOneAuthorizedWinner) {
 }
 
 } // namespace
-} // namespace platinumwt::server
+} // namespace dswt::server

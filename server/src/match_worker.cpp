@@ -1,10 +1,10 @@
-#include "platinumwt/server/match_worker.h"
+#include "dswt/server/match_worker.h"
 
 #include <openssl/rand.h>
 
 #include <stdexcept>
 
-namespace platinumwt::server {
+namespace dswt::server {
 
 std::chrono::milliseconds MatchWorker::Poll() {
   if (request_.operation_id().empty()) {
@@ -21,4 +21,4 @@ std::chrono::milliseconds MatchWorker::Poll() {
   return std::chrono::milliseconds(result.ok() ? 100 : 500);
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

@@ -57,7 +57,7 @@ class GatewayScenario:
         self.first_enrollment = None
         self.first_submission = None
         self.release = self.directory / 'release-validation'
-        self.backend = self.start(test.gateway_fixture, PLATINUMWT_GATEWAY_FIXTURE_RELEASE=str(self.release))
+        self.backend = self.start(test.gateway_fixture, DSWT_GATEWAY_FIXTURE_RELEASE=str(self.release))
         backend_port = int(self.mark(self.backend, b'TEST_BACKEND ').split()[-1])
         self.gateway, self.port = self.start_gateway(backend_port)
 
@@ -277,7 +277,7 @@ class GatewayScenario:
             connection.sendall(self.http(packet))
             committed = False
             for _ in range(100):
-                committed = self.test.sql("SELECT EXISTS(SELECT 1 FROM platinumwt.operations WHERE operation_id='" +
+                committed = self.test.sql("SELECT EXISTS(SELECT 1 FROM dswt.operations WHERE operation_id='" +
                                           str(uuid.UUID(bytes=packet[8:24])) + "')") == 't'
                 if committed:
                     break
@@ -311,7 +311,7 @@ class GatewayScenario:
         with self.raw() as connection:
             connection.sendall(self.http(truncated)[:-1])
         time.sleep(0.05)
-        self.test.assertEqual(self.test.sql("SELECT EXISTS(SELECT 1 FROM platinumwt.operations WHERE operation_id='" +
+        self.test.assertEqual(self.test.sql("SELECT EXISTS(SELECT 1 FROM dswt.operations WHERE operation_id='" +
                                            str(uuid.UUID(bytes=truncated[8:24])) + "')"), 'f')
         for marker in (0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6):
             self.post(self.frame(3, bytes([marker]) * 16, self.first), status=503)
@@ -367,7 +367,7 @@ class GatewayScenario:
 
     def closed_runtime_and_plaintext(self):
         backend = self.start(self.test.backend_binary, WT_BACKEND_ADDRESS='127.0.0.1:0',
-                             PLATINUMWT_DATABASE_URL=f'dbname={self.test.database}', WT_LEGALITY_POLICY='synthetic-policy')
+                             DSWT_DATABASE_URL=f'dbname={self.test.database}', WT_LEGALITY_POLICY='synthetic-policy')
         port = int(self.mark(backend, b'Trade backend listening on loopback port ').split()[-1])
         _, gateway_port = self.start_gateway(port)
         packet = self.frame(1, struct.pack('<IB', 1, 0))
@@ -418,7 +418,7 @@ class GatewayScenario:
                 self.test.assertEqual(self.post(acknowledgement), acknowledged)
                 self.test.assertLess(time.monotonic() - before, 1.5)
                 self.post(packets[8], status=503)
-                self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE operation_id='" +
+                self.test.assertEqual(self.test.sql("SELECT count(*) FROM dswt.operations WHERE operation_id='" +
                                                    str(uuid.UUID(bytes=packets[8][8:24])) + "'"), '0')
             finally:
                 self.release.touch()
@@ -432,7 +432,7 @@ class GatewayScenario:
             self.test.assertEqual(self.post(packet)[0], 1)
         for packet, owner in zip(packets, owners):
             self.test.assertEqual(self.post(packet)[0], 1)
-            self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE save_id='" +
+            self.test.assertEqual(self.test.sql("SELECT count(*) FROM dswt.operations WHERE save_id='" +
                                                str(uuid.UUID(bytes=owner.save)) + "'"), '1')
 
         # A validator outage leaves the mutation unconsumed and accepted assets
@@ -446,7 +446,7 @@ class GatewayScenario:
             packet, unavailable = self.submit(waiting)
             self.test.assertEqual(unavailable[:3], (11, 1, 1))
             self.test.assertEqual(self.post(self.frame(5, trade, returning))[3][138:], original)
-            self.test.assertEqual(self.test.sql("SELECT count(*) FROM platinumwt.operations WHERE save_id='" +
+            self.test.assertEqual(self.test.sql("SELECT count(*) FROM dswt.operations WHERE save_id='" +
                                                str(uuid.UUID(bytes=waiting.save)) + "'"), '0')
         finally:
             outage.unlink()

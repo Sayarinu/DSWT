@@ -1,4 +1,4 @@
-#include "platinumwt/server/telemetry.h"
+#include "dswt/server/telemetry.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -6,7 +6,7 @@
 #include <locale>
 #include <sstream>
 
-namespace platinumwt::server {
+namespace dswt::server {
 namespace {
 constexpr const char *kOperationNames[] = {"invalid", "enroll", "submit", "status", "cancel", "collect", "acknowledge", "reconcile", "match", "legality"};
 constexpr const char *kResultNames[] = {"transport_error", "ok", "processing", "invalid_request", "unauthenticated", "conflict", "not_found",
@@ -94,28 +94,28 @@ std::string Telemetry::Render() const {
   output.imbue(std::locale::classic());
   output << std::setprecision(12);
   const char *role = RoleName(role_);
-  output << "# HELP platinumwt_requests_total Completed API/legality attempts; not committed trades.\n# TYPE platinumwt_requests_total counter\n";
+  output << "# HELP dswt_requests_total Completed API/legality attempts; not committed trades.\n# TYPE dswt_requests_total counter\n";
   for (unsigned op = 0; op < kOperations; ++op) {
     const std::string labels = std::string("service=\"") + role + "\",operation=\"" + kOperationNames[op] + '"';
     for (unsigned result = 0; result < kResults; ++result)
-      output << "platinumwt_requests_total{" << labels << ",result=\"" << kResultNames[result] << "\"} " << requests_[op][result].load() << '\n';
+      output << "dswt_requests_total{" << labels << ",result=\"" << kResultNames[result] << "\"} " << requests_[op][result].load() << '\n';
   }
-  output << "# HELP platinumwt_request_duration_seconds API/legality latency excluding matchmaking wait.\n# TYPE platinumwt_request_duration_seconds histogram\n";
+  output << "# HELP dswt_request_duration_seconds API/legality latency excluding matchmaking wait.\n# TYPE dswt_request_duration_seconds histogram\n";
   for (unsigned op = 0; op < kOperations; ++op) {
     const std::string labels = std::string("service=\"") + role + "\",operation=\"" + kOperationNames[op] + '"';
     std::uint64_t count = 0;
     for (unsigned bucket = 0; bucket < kBuckets; ++bucket) {
       count += latency_[op][bucket].load();
-      output << "platinumwt_request_duration_seconds_bucket{" << labels << ",le=\"" << kBounds[bucket] / 1000000.0 << "\"} " << count << '\n';
+      output << "dswt_request_duration_seconds_bucket{" << labels << ",le=\"" << kBounds[bucket] / 1000000.0 << "\"} " << count << '\n';
     }
     count += latency_[op][kBuckets].load();
-    output << "platinumwt_request_duration_seconds_bucket{" << labels << ",le=\"+Inf\"} " << count << '\n';
-    output << "platinumwt_request_duration_seconds_count{" << labels << "} " << count << '\n';
-    output << "platinumwt_request_duration_seconds_sum{" << labels << "} " << elapsed_us_[op].load() / 1000000.0 << '\n';
+    output << "dswt_request_duration_seconds_bucket{" << labels << ",le=\"+Inf\"} " << count << '\n';
+    output << "dswt_request_duration_seconds_count{" << labels << "} " << count << '\n';
+    output << "dswt_request_duration_seconds_sum{" << labels << "} " << elapsed_us_[op].load() / 1000000.0 << '\n';
   }
-  output << "# TYPE platinumwt_operation_replays_total counter\nplatinumwt_operation_replays_total{service=\"" << role << "\"} " << replays_.load() << '\n';
-  output << "# TYPE platinumwt_dropped_logs_total counter\nplatinumwt_dropped_logs_total{service=\"" << role << "\"} " << dropped_logs_.load() << '\n';
-  output << "# TYPE platinumwt_admission_rejections_total counter\nplatinumwt_admission_rejections_total{service=\"" << role << "\"} " << refused_.load() << '\n';
+  output << "# TYPE dswt_operation_replays_total counter\ndswt_operation_replays_total{service=\"" << role << "\"} " << replays_.load() << '\n';
+  output << "# TYPE dswt_dropped_logs_total counter\ndswt_dropped_logs_total{service=\"" << role << "\"} " << dropped_logs_.load() << '\n';
+  output << "# TYPE dswt_admission_rejections_total counter\ndswt_admission_rejections_total{service=\"" << role << "\"} " << refused_.load() << '\n';
   if (role_ == TelemetryRole::Backend) {
     std::lock_guard<std::mutex> lock(ledger_mutex_);
     for (const auto &value : {std::pair{"database_up", static_cast<double>(ledger_.up)},
@@ -124,13 +124,13 @@ std::string Telemetry::Render() const {
         std::pair{"matched_pairs", static_cast<double>(ledger_.matched)}, std::pair{"unknown_queue_ages", static_cast<double>(ledger_.unknown_queue_ages)},
         std::pair{"completed_pairs", static_cast<double>(ledger_.completed)}, std::pair{"acknowledged_offers", static_cast<double>(ledger_.acknowledged)},
         std::pair{"unknown_delivery_ages", static_cast<double>(ledger_.unknown_delivery_ages)}}) {
-      output << "# TYPE platinumwt_" << value.first << " gauge\nplatinumwt_" << value.first << ' ';
+      output << "# TYPE dswt_" << value.first << " gauge\ndswt_" << value.first << ' ';
       if (!ledger_.up && std::string_view(value.first) != "database_up" && std::string_view(value.first) != "ledger_sample_success_timestamp_seconds") output << "NaN\n";
       else output << value.second << '\n';
     }
     for (const auto &value : {std::pair{"oldest_queue_age_seconds", std::pair{ledger_.oldest_queue_seconds, ledger_.unknown_queue_ages}},
                               std::pair{"oldest_delivery_age_seconds", std::pair{ledger_.oldest_delivery_seconds, ledger_.unknown_delivery_ages}}}) {
-      output << "# TYPE platinumwt_" << value.first << " gauge\nplatinumwt_" << value.first << ' ';
+      output << "# TYPE dswt_" << value.first << " gauge\ndswt_" << value.first << ' ';
       if (!ledger_.up || value.second.second) output << "NaN\n"; else output << value.second.first << '\n';
     }
   }
@@ -145,7 +145,7 @@ RpcTelemetry::RpcTelemetry(Operation operation, grpc::ServerContext *context, st
     if (trade.size() == 16) trade_id_.assign(trade);
     if (request.size() == 16) request_id_.assign(request);
     if (context) {
-      const auto found = context->client_metadata().find("x-platinumwt-request-id-bin");
+      const auto found = context->client_metadata().find("x-dswt-request-id-bin");
       if (found != context->client_metadata().end() && found->second.size() == 16) request_id_.assign(found->second.data(), 16);
     }
   } catch (...) {}
@@ -158,4 +158,4 @@ RpcTelemetry::~RpcTelemetry() {
   } catch (...) {}
 }
 
-} // namespace platinumwt::server
+} // namespace dswt::server

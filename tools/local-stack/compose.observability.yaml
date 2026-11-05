@@ -1,7 +1,7 @@
 # Optional private observability profile, loaded only for workspaces initialized with --observability.
 # Every collector shares the gateway's private namespace; only Grafana and log ingest are published on loopback.
 x-collector: &collector
-  platform: ${PWT_LOCAL_PLATFORM}
+  platform: ${DSWT_LOCAL_PLATFORM}
   network_mode: service:gateway
   depends_on: [gateway]
   read_only: true
@@ -14,16 +14,16 @@ x-collector: &collector
 x-logging: &logging
   driver: fluentd
   options:
-    fluentd-address: tcp://127.0.0.1:${PWT_OBS_LOG_PORT}
+    fluentd-address: tcp://127.0.0.1:${DSWT_OBS_LOG_PORT}
     # Containers start before the collector; the daemon buffers and retries.
     fluentd-async: "true"
-    tag: platinumwt.{{.Name}}
+    tag: dswt.{{.Name}}
 
 services:
   gateway:
     ports:
-      - 127.0.0.1:${PWT_OBS_GRAFANA_PORT}:3000
-      - 127.0.0.1:${PWT_OBS_LOG_PORT}:24224
+      - 127.0.0.1:${DSWT_OBS_GRAFANA_PORT}:3000
+      - 127.0.0.1:${DSWT_OBS_LOG_PORT}:24224
     logging: *logging
   backend:
     logging: *logging
@@ -74,20 +74,20 @@ services:
   alloy:
     <<: *collector
     image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
-    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    user: ${DSWT_LOCAL_UID}:${DSWT_LOCAL_GID}
     tmpfs: [/tmp]
     # The fluent-forward receiver is "experimental" in this pinned Alloy; it is used only for local log ingest.
     command: [run, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/tmp/alloy, --disable-reporting,
               --stability.level=experimental, /etc/alloy/config.alloy]
     volumes:
       - {type: bind, source: ./observability/config.alloy, target: /etc/alloy/config.alloy, read_only: true}
-      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/textfile", target: /textfile, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${DSWT_LOCAL_WORKSPACE}/observability/textfile", target: /textfile, read_only: true, bind: {create_host_path: false}}
       - pressure:/monitored/pressure:ro
 
   grafana:
     <<: *collector
     image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
-    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    user: ${DSWT_LOCAL_UID}:${DSWT_LOCAL_GID}
     tmpfs: ["/tmp:rw,nosuid,nodev,size=256m"]
     environment:
       GF_SERVER_HTTP_ADDR: 0.0.0.0
@@ -98,7 +98,7 @@ services:
       GF_PATHS_PLUGINS: /tmp
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/platinumwt/grafana-admin-password
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/dswt/grafana-admin-password
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_AUTH_BASIC_ENABLED: "true"
@@ -111,30 +111,30 @@ services:
       GF_UNIFIED_ALERTING_ENABLED: "false"
     volumes:
       - {type: bind, source: ./observability/grafana, target: /etc/grafana/provisioning, read_only: true}
-      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/grafana-admin-password", target: /run/platinumwt/grafana-admin-password, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${DSWT_LOCAL_WORKSPACE}/observability/grafana-admin-password", target: /run/dswt/grafana-admin-password, read_only: true, bind: {create_host_path: false}}
 
   # Local-only Alertmanager webhook capture; no external notification receiver exists.
   capture:
     <<: *collector
-    image: ${PWT_LOCAL_PROJECT}-server
-    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    image: ${DSWT_LOCAL_PROJECT}-server
+    user: ${DSWT_LOCAL_UID}:${DSWT_LOCAL_GID}
     tmpfs: [/tmp]
     command: [python3, /capture/capture.py, /alerts/received.jsonl]
     volumes:
       - {type: bind, source: ./observability/capture.py, target: /capture/capture.py, read_only: true}
-      - {type: bind, source: "${PWT_LOCAL_WORKSPACE}/observability/alerts", target: /alerts, bind: {create_host_path: false}}
+      - {type: bind, source: "${DSWT_LOCAL_WORKSPACE}/observability/alerts", target: /alerts, bind: {create_host_path: false}}
       - pressure:/monitored/pressure
 
 volumes:
   prometheus:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-prometheus
+    name: ${DSWT_LOCAL_PROJECT}-prometheus
   alertmanager:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-alertmanager
+    name: ${DSWT_LOCAL_PROJECT}-alertmanager
   loki:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-loki
+    name: ${DSWT_LOCAL_PROJECT}-loki
   pressure:
     external: true
-    name: ${PWT_LOCAL_PROJECT}-pressure
+    name: ${DSWT_LOCAL_PROJECT}-pressure
