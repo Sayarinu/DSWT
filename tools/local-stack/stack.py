@@ -21,6 +21,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = Path(__file__).with_name("compose.yaml")
 OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
+PRODUCTION = Path(__file__).with_name("compose.production.yaml")
 OBSERVABILITY_CONFIG = Path(__file__).with_name("observability")
 LABEL = "studio.nouvellelune.platinumwt.local-workspace"
 SERVICES = ("database", "gateway", "validator", "backend")
@@ -86,9 +87,11 @@ def valid_ports(port, observability):
     return all(valid_port(item) for item in ports) and len(set(ports)) == len(ports)
 
 
-def initialize(workspace, port=DEFAULT_PORT, observability=None):
+def initialize(workspace, port=DEFAULT_PORT, observability=None, production=False):
     if not valid_ports(port, observability):
         raise ValueError("Use distinct host ports between 1024 and 65535")
+    if production and observability:
+        raise ValueError("The production profile does not include the observability services")
     workspace.parent.mkdir(parents=True, exist_ok=True)
     workspace.mkdir(mode=0o700)  # Exclusive: an existing run is never reinitialized.
     (workspace / "control").mkdir(mode=0o700)
@@ -104,6 +107,8 @@ def initialize(workspace, port=DEFAULT_PORT, observability=None):
     }
     if port != DEFAULT_PORT:
         manifest["https_port"] = port
+    if production:
+        manifest["production"] = True
     if observability:
         observe = workspace / "observability"
         observe.mkdir(mode=0o700)
@@ -135,6 +140,7 @@ def read_manifest(workspace):
             or ("https_port" in manifest and (not valid_port(manifest["https_port"]) or manifest["https_port"] == DEFAULT_PORT))
             or manifest.get("host_endpoint") != f"https://localhost:{https_port(manifest)}/wt/v1"
             or ("observability" in manifest and manifest["observability"] is None)
+            or manifest.get("production", True) is not True
             or not valid_ports(https_port(manifest), manifest.get("observability"))
             or (manifest.get("database_system_id") is not None
                 and (not isinstance(manifest["database_system_id"], str)
@@ -191,20 +197,24 @@ class Stack:
         if self.observability:
             self.env.update(PWT_OBS_GRAFANA_PORT=str(self.observability["grafana_port"]),
                             PWT_OBS_LOG_PORT=str(self.observability["log_port"]))
-        self.services = SERVICES + (OBSERVABILITY_SERVICES if self.observability else ())
+        self.production = manifest.get("production", False)
+        self.services = SERVICES + (OBSERVABILITY_SERVICES if self.observability else ()) + (("matcher",) if self.production else ())
+        self.ledger = "/usr/local/bin/platinumwt-ledger" if self.production else "/build/platinumwt-ledger"
 
     def run(self, arguments, **kwargs):
         return command(self.docker + arguments, env=self.env, **kwargs)
 
     def compose(self, *arguments, **kwargs):
-        files = ["--file", str(COMPOSE)] + (["--file", str(OBSERVABILITY)] if self.observability else [])
+        files = ["--file", str(COMPOSE)] + (["--file", str(OBSERVABILITY)] if self.observability else []) + (
+            ["--file", str(PRODUCTION)] if self.production else [])
         return self.run(["compose", "--env-file", os.devnull, "--project-directory", str(COMPOSE.parent),
                          *files, "--project-name", self.manifest["project"], *arguments], **kwargs)
 
     def volumes(self, create=False):
         listing = self.run(["volume", "ls", "--format", "{{json .}}"], capture=True).stdout
         existing = {json.loads(line)["Name"] for line in listing.splitlines()}
-        for suffix in ("data", "socket") + (OBSERVABILITY_VOLUMES if self.observability else ()):
+        for suffix in ("data", "socket") + (OBSERVABILITY_VOLUMES if self.observability else ()) + (
+                ("archive",) if self.production else ()):
             name = self.manifest["project"] + "-" + suffix
             if name not in existing:
                 if not create or self.manifest["volumes_created"]:
@@ -235,9 +245,34 @@ class Stack:
             self.manifest["database_system_id"] = identity
             save_manifest(self.workspace, self.manifest)
 
-    def ready(self, request_id=b"\x01" * 16):
-        self.compose("exec", "-T", "backend", "/build/tests/platinumwt-device-fixture", "--check",
+    def superuser_sql(self, query):
+        return self.compose("exec", "-T", "database", "psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-U", "platinumwt_local",
+                            "-d", "platinumwt_e2e", "-c", query, capture=True, timeout=30).stdout.strip()
+
+    def prepare_production_database(self):
+        """Serve as an unprivileged owner, and start the archive chain from a base backup."""
+        if self.superuser_sql("SELECT count(*) FROM pg_roles WHERE rolname='platinumwt_service'") == "0":
+            self.superuser_sql("CREATE ROLE platinumwt_service LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE")
+        self.superuser_sql("ALTER DATABASE platinumwt_e2e OWNER TO platinumwt_service")
+        self.superuser_sql("GRANT EXECUTE ON FUNCTION pg_switch_wal() TO platinumwt_service")
+        archive = ["exec", "-T", "--user", "postgres", "database"]
+        if self.compose(*archive, "test", "-e", "/archive/chain.armed", capture=True, timeout=10, check=False).returncode == 0:
+            return
+        self.compose(*archive, "/usr/local/bin/wal-archive.sh", "init", "/archive",
+                     self.superuser_sql("SELECT system_identifier FROM pg_control_system()"),
+                     self.superuser_sql("SELECT pg_walfile_name(pg_current_wal_insert_lsn())"), capture=True, timeout=30)
+        self.compose(*archive, "pg_basebackup", "-h", "/var/run/postgresql", "-U", "platinumwt_local", "-D", "/archive/base",
+                     "-X", "stream", "-c", "fast", capture=True, timeout=120)
+        self.compose(*archive, "/usr/local/bin/wal-archive.sh", "arm", "/archive", capture=True, timeout=30)
+
+    def hold_archive(self, held):
+        self.compose("exec", "-T", "--user", "postgres", "database", *(("touch",) if held else ("rm", "-f")), "/archive/.hold",
                      capture=True, timeout=10)
+
+    def ready(self, request_id=b"\x01" * 16):
+        if not self.production:
+            self.compose("exec", "-T", "backend", "/build/tests/platinumwt-device-fixture", "--check",
+                         capture=True, timeout=10)
         context = ssl.create_default_context(cafile=str(self.workspace / "tls/current.pem"))
         context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE-ECDSA-CHACHA20-POLY1305")
@@ -264,6 +299,8 @@ class Stack:
         self.compose("stop", *reversed(applications))
         self.compose("up", "-d", "--wait", "--wait-timeout", "90", "database")
         self.database_identity()
+        if self.production:
+            self.prepare_production_database()
         self.compose("run", "--rm", "--no-deps", "migrate")
         self.compose("up", "-d", "--force-recreate", *applications)
         deadline = time.monotonic() + 60
@@ -291,7 +328,7 @@ class Stack:
         self.volumes()
         self.database_identity()
         self.ready()
-        self.compose("exec", "-T", "backend", "/build/platinumwt-ledger", "verify")
+        self.compose("exec", "-T", "backend", self.ledger, "verify")
         print("Verified local services and ledger; no off-site durability claim")
 
 
@@ -302,12 +339,14 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init: host loopback HTTPS port")
     parser.add_argument("--observability", nargs=2, type=int, metavar=("GRAFANA_PORT", "LOG_PORT"),
                         help="init: enable the private local observability profile on these loopback ports")
+    parser.add_argument("--production", action="store_true",
+                        help="init: run the final image and production entrypoints with WAL archiving")
     args = parser.parse_args()
     try:
         workspace = workspace_path(args.workspace)
         if args.action == "init":
             initialize(workspace, args.port, args.observability and
-                       {"grafana_port": args.observability[0], "log_port": args.observability[1]})
+                       {"grafana_port": args.observability[0], "log_port": args.observability[1]}, args.production)
             print("Initialized private local workspace:", workspace)
             return 0
         read_manifest(workspace)

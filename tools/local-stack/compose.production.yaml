@@ -1,0 +1,88 @@
+# Runs the final image and production entrypoints, with real WAL archiving, in
+# place of the build-stage test fixture. The archive is a local volume here;
+# production ships to S3.
+x-service-database: &service-database
+  PGHOST: /test/run
+  PGPORT: "5432"
+  PGDATABASE: platinumwt_e2e
+  PGUSER: platinumwt_service
+
+services:
+  database:
+    entrypoint:
+      - sh
+      - -c
+      - install -d -o postgres -g postgres -m 0700 /archive && exec docker-entrypoint.sh "$$@"
+      - --
+    environment:
+      POSTGRES_INITDB_ARGS: --wal-segsize=1
+    command:
+      - postgres
+      - -c
+      - listen_addresses=
+      - -c
+      - fsync=on
+      - -c
+      - full_page_writes=on
+      - -c
+      - synchronous_commit=on
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -e /archive/.hold && /usr/local/bin/wal-archive.sh archive /archive %p %f
+    volumes:
+      - archive:/archive
+      - type: bind
+        source: ../../server/wal-archive.sh
+        target: /usr/local/bin/wal-archive.sh
+        read_only: true
+
+  migrate:
+    environment: *service-database
+    entrypoint: [/usr/local/bin/platinumwt-ledger]
+    command: [migrate, /usr/local/share/platinumwt/migrations]
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+      target: production
+    entrypoint: [/usr/local/bin/platinumwt-server]
+    command: !reset null
+
+  backend:
+    environment:
+      <<: *service-database
+      PLATINUMWT_DATABASE_URL: host=/test/run port=5432 dbname=platinumwt_e2e user=platinumwt_service
+      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-pwt2
+      WT_METRICS_PORT: "9092"
+      WT_SUBMISSION_WORKERS: ${PWT_LOCAL_SUBMISSION_WORKERS:-4}
+      PLATINUMWT_DISPOSABLE_DEVICE_TEST: !reset null
+      PLATINUMWT_DEVICE_MATCHERS: !reset null
+    entrypoint: [/usr/local/bin/platinumwt-backend]
+    command: !reset null
+
+  # No network at all: it only needs the database socket.
+  matcher:
+    image: ${PWT_LOCAL_PROJECT}-server
+    platform: ${PWT_LOCAL_PLATFORM}
+    user: ${PWT_LOCAL_UID}:${PWT_LOCAL_GID}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 15s
+    network_mode: none
+    depends_on:
+      database: {condition: service_healthy}
+    environment:
+      <<: *service-database
+      PLATINUMWT_DATABASE_URL: host=/test/run port=5432 dbname=platinumwt_e2e user=platinumwt_service
+      WT_MATCHER_WORKERS: ${PWT_LOCAL_MATCHERS:-1}
+    volumes: [socket:/test/run]
+    entrypoint: [/usr/local/bin/platinumwt-matcher]
+
+volumes:
+  archive:
+    external: true
+    name: ${PWT_LOCAL_PROJECT}-archive

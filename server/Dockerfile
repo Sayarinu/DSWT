@@ -20,7 +20,7 @@ RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /build --parallel 2 \
     && ctest --test-dir /build --output-on-failure
 
-FROM base
+FROM base AS production
 RUN apt-get -o APT::Update::Error-Mode=any update && apt-get install -y --no-install-recommends \
     ca-certificates libgrpc++1.51t64 libprotobuf32t64 libboost-system1.83.0 libpq5 \
     && rm -rf /var/lib/apt/lists/*
