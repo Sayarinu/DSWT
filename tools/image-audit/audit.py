@@ -301,7 +301,8 @@ class Runner:
         target = service + ("-tests" if test else "")
         args = ["buildx", "build", "--builder", self.name, "--platform", self.platform,
                 "--file", str(self.workspace / "contexts" / service / service / "Dockerfile"),
-                "--provenance=mode=max", "--sbom=false", "--progress=plain",
+                # The test image only runs here, and Docker's classic image store can't load provenance.
+                "--provenance=" + ("false" if test else "mode=max"), "--sbom=false", "--progress=plain",
                 "--label", "org.opencontainers.image.revision=" + git("rev-parse", "HEAD")]
         if test:
             args += ["--target", "validator-tests", "--load", "--tag", self.test_image]

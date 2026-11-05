@@ -80,6 +80,21 @@ class EvidenceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.context = Path(self.temp.name)
 
+    def test_only_published_images_carry_provenance(self):
+        # Docker's classic image store, used on GitHub runners, refuses to load provenance.
+        runner = audit.Runner.__new__(audit.Runner)
+        runner.workspace, runner.platform, runner.name = self.context, "linux/amd64", "owned-test-builder"
+        runner.test_image = "owned-test-image"
+        calls = []
+        runner.run = lambda args, log: calls.append(args)
+        with patch.object(audit, "git", return_value="0" * 40):
+            runner.build("validator")
+            runner.build("validator", test=True)
+        self.assertIn("--provenance=mode=max", calls[0])
+        self.assertNotIn("--load", calls[0])
+        self.assertIn("--provenance=false", calls[1])
+        self.assertIn("--load", calls[1])
+
     def test_failed_builder_removal_can_retry_without_overwriting_failure_log(self):
         runner = audit.Runner.__new__(audit.Runner)
         runner.workspace, runner.docker, runner.env = self.context, ["docker"], {}

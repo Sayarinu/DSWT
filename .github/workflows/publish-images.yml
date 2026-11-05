@@ -27,11 +27,13 @@ jobs:
           python3 tools/image-audit/audit.py run --workspace "$PWD/game/image-audit" --platform linux/amd64
           python3 tools/image-audit/audit.py verify --workspace "$PWD/game/image-audit"
       - name: Keep audit evidence
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-audit
           retention-days: 30
           path: |
+            game/image-audit/*.log
             game/image-audit/report.json
             game/image-audit/*.build.json
             game/image-audit/*.trivy.json
