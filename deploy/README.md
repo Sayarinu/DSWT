@@ -46,6 +46,26 @@ To go back, deploy the older commit, and restore a dump if its schema needs it.
 To roll back, deploy the older commit from a clean worktree. GHCR keeps the newest five
 versions. `--build` builds on your machine instead, if GHCR is down or the commit is older.
 
+## Off-site backups
+
+`backup-uploader` copies each WAL file and base backup to the private R2 bucket
+`dswt-backups`, encrypted before it leaves the server. A WAL file only counts as archived once
+R2 has it, so an R2 outage pauses trade completion. Pokémon stay in escrow, and it resumes by itself.
+The recovery point is the last file R2 confirmed, normally seconds old.
+R2 keeps 30 days of base backups, always including the newest, plus the WAL they need.
+
+`.env` needs `R2_ACCOUNT_ID`, `DSWT_BACKUPS_KEY` (limited to that bucket) and
+`DSWT_BACKUP_PASSWORD`. **Keep a copy of that password outside this machine.** Without it the
+backups cannot be read. The key expires 2027-11-05: replace it in `.env` and deploy before then.
+
+`python3 deploy/dswt.py restore-check` rebuilds the ledger from R2 alone in throwaway volumes and
+prints what it holds. Run it after changing this setup, and from time to time.
+
+To recover: stop trading first. Restore the newest base and all WAL into a new server as
+`restore-check` does, confirm the ledger with `dswt-ledger verify`, compare it to what players
+last saw, and only then serve it. A restore behind what players saw stays paused. It never reissues or
+discards Pokémon. There is no automatic failover.
+
 ## Monitoring
 
 ```sh
@@ -62,7 +82,5 @@ or Prometheus itself is down, so use an outside uptime check before public launc
 
 ## Before public launch
 
-- Ship the WAL archive off the server. It is on the same disk as the database, so a
-  lost server loses both.
-- The WAL archive grows until the next `deploy` or `tidy`. `DiskPressure` warns at 15%
+- The local WAL archive grows until the next `deploy` or `tidy`. `DiskPressure` warns at 15%
   free.

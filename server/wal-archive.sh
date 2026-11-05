@@ -16,6 +16,9 @@
 # restorable start: run init, take a self-contained base backup (pg_basebackup
 # -X stream, because the archive is not shipping yet), then arm.
 #
+# With offsite.required in DESTINATION, archive also waits for backup-uploader.sh to mark
+# the file as copied off the server, so a segment only counts once it has left.
+#
 # rotate makes a verified, self-contained base backup the chain's new start and
 # deletes what it replaces. Every step leaves a restorable archive: if it stops
 # between the two renames, base.old is the valid base until the next rotate.
@@ -97,6 +100,13 @@ archive)
         fi
     fi
     publish "$path" "$destination" "$name"
+    if [[ -e $destination/offsite.required ]]; then
+        for _ in {1..80}; do
+            [[ ! -e $destination/.uploaded/$name ]] || exit 0
+            sleep 0.25
+        done
+        fail "$name is not off the server yet"
+    fi
     ;;
 rotate)
     (($# == 3)) || fail "usage: rotate DESTINATION NEW_BASE"
@@ -122,7 +132,8 @@ rotate)
     for path in "$destination"/*; do
         name=${path##*/}
         if [[ $name =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ && ${name:0:24} < $first ]]; then
-            rm -f "$path"
+            # Never drop a local copy that has not reached the off-site archive.
+            [[ ! -e $destination/offsite.required || -e $destination/.uploaded/$name ]] && rm -f "$path"
         fi
     done
     sync "$destination"
