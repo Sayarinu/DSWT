@@ -83,17 +83,35 @@ def local_secret(name):
     return None
 
 
-def rclone_config(password):
-    """rclone settings for the encrypted R2 remote. R2's S3 credentials derive from the API token."""
-    account, token = local_secret("R2_ACCOUNT_ID"), local_secret("DSWT_BACKUPS_KEY")
-    if not (account and token and password):
-        raise ValueError("Set R2_ACCOUNT_ID, DSWT_BACKUPS_KEY and DSWT_BACKUP_PASSWORD in the ignored .env")
+def r2_credentials(account, token):
+    """R2's S3 access key ID and secret, which Cloudflare derives from an API token."""
     request = urllib.request.Request(f"https://api.cloudflare.com/client/v4/accounts/{account}/tokens/verify",
                                      headers={"Authorization": f"Bearer {token}", "User-Agent": "dswt-deploy"})
     with urllib.request.urlopen(request, timeout=20) as response:
-        token_id = json.load(response)["result"]["id"]
-    return (f"[r2]\ntype = s3\nprovider = Cloudflare\naccess_key_id = {token_id}\n"
-            f"secret_access_key = {hashlib.sha256(token.encode()).hexdigest()}\n"
+        return json.load(response)["result"]["id"], hashlib.sha256(token.encode()).hexdigest()
+
+
+def terraform(arguments):
+    """Run Terraform in deploy/terraform with credentials from the ignored .env, never on a command line."""
+    account, token, hetzner = local_secret("R2_ACCOUNT_ID"), local_secret("DSWT_TERRAFORM_KEY"), local_secret("HETZNER_API_TOKEN")
+    cidrs = local_secret("DSWT_ADMIN_CIDRS")
+    if not (account and token and hetzner and cidrs):
+        raise ValueError("Set R2_ACCOUNT_ID, DSWT_TERRAFORM_KEY, HETZNER_API_TOKEN and DSWT_ADMIN_CIDRS in the ignored .env")
+    key_id, secret = r2_credentials(account, token)
+    environment = dict(os.environ, HCLOUD_TOKEN=hetzner, AWS_ACCESS_KEY_ID=key_id, AWS_SECRET_ACCESS_KEY=secret,
+                       AWS_ENDPOINT_URL_S3=f"https://{account}.r2.cloudflarestorage.com",
+                       TF_VAR_admin_cidrs=json.dumps(cidrs.split(",")))
+    return subprocess.run(["terraform", f"-chdir={ROOT}/deploy/terraform", *arguments], env=environment, check=False).returncode
+
+
+def rclone_config(password):
+    """rclone settings for the encrypted R2 remote."""
+    account, token = local_secret("R2_ACCOUNT_ID"), local_secret("DSWT_BACKUPS_KEY")
+    if not (account and token and password):
+        raise ValueError("Set R2_ACCOUNT_ID, DSWT_BACKUPS_KEY and DSWT_BACKUP_PASSWORD in the ignored .env")
+    key_id, secret = r2_credentials(account, token)
+    return (f"[r2]\ntype = s3\nprovider = Cloudflare\naccess_key_id = {key_id}\n"
+            f"secret_access_key = {secret}\n"
             f"endpoint = https://{account}.r2.cloudflarestorage.com\nno_check_bucket = true\n\n"
             f"[backup]\ntype = crypt\nremote = r2:dswt-backups/dswt\npassword = {password}\n")
 
@@ -343,14 +361,18 @@ def source_version():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy", "restore-check"))
+    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy", "restore-check", "terraform"))
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
     parser.add_argument("--build", action="store_true", help="deploy: build images here instead of pulling published ones")
-    args = parser.parse_args()
+    args, extra = parser.parse_known_args()
+    if extra and args.action != "terraform":
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
     os.umask(0o077)
     try:
+        if args.action == "terraform":
+            return terraform(extra)
         if args.action == "keys":
             if not args.hostname or not args.ipv4:
                 parser.error("keys needs --hostname and --ipv4")

@@ -66,6 +66,21 @@ To recover: stop trading first. Restore the newest base and all WAL into a new s
 last saw, and only then serve it. A restore behind what players saw stays paused. It never reissues or
 discards Pokémon. There is no automatic failover.
 
+## Infrastructure
+
+`deploy/terraform` manages the Hetzner server, firewall and IP addresses, with state in the
+private R2 bucket `dswt-terraform`. Run it through `dswt.py`, which reads credentials from the ignored `.env`:
+
+```sh
+python3 deploy/dswt.py terraform init
+python3 deploy/dswt.py terraform plan
+```
+
+`.env` needs `HETZNER_API_TOKEN`, `R2_ACCOUNT_ID`, `DSWT_TERRAFORM_KEY` and `DSWT_ADMIN_CIDRS`
+(comma-separated). A read-only Hetzner token is enough to plan. To apply, make a Read & Write
+token, read the plan first, and revoke the token afterwards. A plan must never show the server
+or its addresses being replaced. Nothing here runs in CI.
+
 ## Monitoring
 
 ```sh
