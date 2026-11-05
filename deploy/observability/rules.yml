@@ -35,6 +35,14 @@ groups:
         labels: {severity: critical}
         annotations: {summary: The legality validator is failing or unreachable}
       # The WAL archive grows with trades, and trades stop if it cannot ship.
+      # Also fires if no backup has ever run.
+      - alert: BackupStale
+        expr: >-
+          (time() - dswt_backup_last_success_timestamp_seconds > 1800)
+          or absent(dswt_backup_last_success_timestamp_seconds)
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: No successful off-site backup check for 30 minutes; trades may be waiting on it}
       - alert: DiskPressure
         expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.15
         for: 5m

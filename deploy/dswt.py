@@ -2,18 +2,22 @@
 """Build DSWT images here, ship them to the VPS and run them with Docker Compose."""
 
 import argparse
+import base64
 import hashlib
 import http.client
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import ssl
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
+import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL = Path(subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -23,7 +27,8 @@ IMAGES = {"dswt-server": ("server/Dockerfile", "--target", "production"), "dswt-
 REMOTE = "/opt/dswt"
 REMOTE_USER = "dswt"
 ADMIN = "dswt_admin"
-VOLUMES = ("data", "socket", "archive", "prometheus", "alertmanager")
+VOLUMES = ("data", "socket", "archive", "prometheus", "alertmanager", "metrics")
+RESTORE_TABLES = ("save_identities", "payloads", "offers", "ownership", "matches", "receipts", "trade_events", "audit_journal")
 APPLICATIONS = ("netns", "validator", "gateway", "backend", "matcher", "prometheus", "alertmanager",
                 "node-exporter", "grafana")
 
@@ -78,6 +83,69 @@ def local_secret(name):
     return None
 
 
+def rclone_config(password):
+    """rclone settings for the encrypted R2 remote. R2's S3 credentials derive from the API token."""
+    account, token = local_secret("R2_ACCOUNT_ID"), local_secret("DSWT_BACKUPS_KEY")
+    if not (account and token and password):
+        raise ValueError("Set R2_ACCOUNT_ID, DSWT_BACKUPS_KEY and DSWT_BACKUP_PASSWORD in the ignored .env")
+    request = urllib.request.Request(f"https://api.cloudflare.com/client/v4/accounts/{account}/tokens/verify",
+                                     headers={"Authorization": f"Bearer {token}", "User-Agent": "dswt-deploy"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        token_id = json.load(response)["result"]["id"]
+    return (f"[r2]\ntype = s3\nprovider = Cloudflare\naccess_key_id = {token_id}\n"
+            f"secret_access_key = {hashlib.sha256(token.encode()).hexdigest()}\n"
+            f"endpoint = https://{account}.r2.cloudflarestorage.com\nno_check_bucket = true\n\n"
+            f"[backup]\ntype = crypt\nremote = r2:dswt-backups/dswt\npassword = {password}\n")
+
+
+def compose_image(service):
+    match = re.search(rf"^  {service}:\n(?:.*\n)*?    image: (\S+)", (ROOT / "deploy/compose.yaml").read_text(), re.M)
+    return match.group(1)
+
+
+def restore_check():
+    """Rebuild the ledger from R2 alone, in throwaway volumes, and report what it holds."""
+    password = local_secret("DSWT_BACKUP_PASSWORD")
+    uploader, postgres = compose_image("backup-uploader"), compose_image("database")
+    def docker(*arguments, **options):
+        return subprocess.run(["docker", *arguments], text=True, check=True, stdout=subprocess.PIPE, **options).stdout.strip()
+    obscured = docker("run", "--rm", "-i", "--network", "none", uploader, "obscure", "-", input=password)
+    name = "dswt-restore-" + uuid.uuid4().hex
+    with tempfile.TemporaryDirectory(prefix="dswt-restore-") as directory:
+        config = Path(directory) / "rclone.conf"
+        config.write_text(rclone_config(obscured))
+        config.chmod(0o644)
+        os.chmod(directory, 0o755)
+        try:
+            docker("volume", "create", name)
+            docker("run", "--rm", "-v", f"{name}:/r", "--entrypoint", "chown", postgres, "999:999", "/r")
+            copy = ["run", "--rm", "--user", "999:999", "-e", "HOME=/tmp", "-v", f"{name}:/r", "-v", f"{config}:/c:ro", uploader,
+                    "--config", "/c"]
+            base = max(docker(*copy, "lsf", "--files-only", "backup:bases").split())
+            docker(*copy, "copyto", f"backup:bases/{base}", "/r/base.tar.gz")
+            docker(*copy, "copy", "backup:wal", "/r/wal")
+            docker("run", "-d", "--name", name, "--network", "none", "--user", "999:999", "-v", f"{name}:/r", "--entrypoint", "sh", postgres, "-c",
+                   "install -d -m 0700 /r/data && tar -xzf /r/base.tar.gz -C /r/data && touch /r/data/recovery.signal && "
+                   "exec postgres -D /r/data -c listen_addresses= -c archive_mode=off -c restore_command='cp /r/wal/%f %p'")
+            sql = lambda query: docker("exec", name, "psql", "-XAt", "-U", ADMIN, "-d", "dswt", "-c", query)
+            deadline = time.monotonic() + 120
+            while True:
+                try:
+                    if sql("SELECT pg_is_in_recovery()") == "f":
+                        break
+                except subprocess.CalledProcessError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("The restored database did not finish recovering")
+                time.sleep(2)
+            restored = {table: sql(f"SELECT count(*) FROM dswt.{table}") for table in RESTORE_TABLES}
+            restored["replay"] = sql("SELECT dswt.verify_replay()")
+            return base, restored
+        finally:
+            subprocess.run(["docker", "rm", "-f", "-v", name], check=False, capture_output=True)
+            subprocess.run(["docker", "volume", "rm", "-f", name], check=False, capture_output=True)
+
+
 class Target:
     def __init__(self, ssh_key):
         self.profile = json.loads((LOCAL / "tls/connection.json").read_text())
@@ -122,7 +190,7 @@ class Target:
         subprocess.run(["rsync", "-t", "--chmod=F644", "-e", transport, f"{ROOT}/deploy/compose.yaml",
                         f"{self.address}:{REMOTE}/compose.yaml"], check=True)
         subprocess.run(["rsync", "-t", "--chmod=F755", "-e", transport, f"{ROOT}/server/wal-archive.sh",
-                        f"{self.address}:{REMOTE}/wal-archive.sh"], check=True)
+                        f"{ROOT}/deploy/backup-uploader.sh", f"{self.address}:{REMOTE}/"], check=True)
         # Only the current key goes to the server, and an installed key is never overwritten.
         subprocess.run(["rsync", "-t", "--ignore-existing", "--chmod=F600", "-e", transport,
                         str(LOCAL / "tls/current.key"), str(LOCAL / "tls/current.pem"),
@@ -138,10 +206,19 @@ class Target:
             self.install_secret("discord-webhook", webhook)
         elif self.run(f"test -s {REMOTE}/secrets/discord-webhook", check=False).returncode:
             raise ValueError("Set DISCORD_WEBHOOK_URL in the ignored .env: alerts have nowhere to go")
+        password = local_secret("DSWT_BACKUP_PASSWORD")
+        if not password:
+            raise ValueError("Set DSWT_BACKUP_PASSWORD in the ignored .env, and keep a copy outside this machine")
         self.run(f"printf 'DSWT_VERSION={version}\\nDSWT_UID=%s\\nDSWT_GID=%s\\n' \"$(id -u)\" \"$(id -g)\""
                  f" > {REMOTE}/.env.new && mv {REMOTE}/.env.new {REMOTE}/.env")
         for volume in VOLUMES:
             self.run(f"docker volume create dswt-{volume} >/dev/null")
+        self.run(f"touch {REMOTE}/secrets/rclone.conf && chmod 0640 {REMOTE}/secrets/rclone.conf")
+        # rclone keeps this password in its own encoding, which only rclone produces.
+        obscured = subprocess.run([*self.ssh, self.address, f"cd {REMOTE} && docker compose -p dswt run -T --rm --no-deps "
+                                   "--entrypoint rclone backup-uploader obscure -"],
+                                  input=password, text=True, check=True, stdout=subprocess.PIPE).stdout.strip()
+        self.install_secret("rclone.conf", rclone_config(obscured))
 
     def prepare_database(self):
         """Serve as an unprivileged owner, and start the archive chain from a base backup."""
@@ -192,7 +269,9 @@ class Target:
         self.prepare_database()
         self.backup()
         self.compose("run", "--rm", "--no-deps", "migrate")
-        self.compose("up", "-d", "--force-recreate", "--remove-orphans", *APPLICATIONS)
+        self.compose("up", "-d", "--force-recreate", "--remove-orphans", *APPLICATIONS, "backup-uploader")
+        # Trades now wait for R2. Before this, only local archiving was required.
+        self.compose("exec", "-T", "--user", "postgres", "database", "touch", "/archive/offsite.required")
 
     def ready(self):
         """Ask the public endpoint for status over the only TLS suite the ROM offers."""
@@ -264,7 +343,7 @@ def source_version():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy"))
+    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy", "restore-check"))
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
@@ -276,6 +355,10 @@ def main():
             if not args.hostname or not args.ipv4:
                 parser.error("keys needs --hostname and --ipv4")
             create_keys(args.hostname, args.ipv4)
+            return 0
+        if args.action == "restore-check":
+            base, restored = restore_check()
+            print(f"Restored from R2 using base {base}: {restored}")
             return 0
         target = Target(args.ssh_key)
         if args.action == "deploy":

@@ -45,7 +45,7 @@ services:
     entrypoint:
       - sh
       - -c
-      - install -d -o postgres -g postgres -m 0700 /archive && exec docker-entrypoint.sh "$$@"
+      - install -d -o postgres -g postgres -m 0700 /archive && install -d -o postgres -m 0755 /metrics && exec docker-entrypoint.sh "$$@"
       - --
     environment:
       POSTGRES_USER: dswt_admin
@@ -73,6 +73,7 @@ services:
       - data:/var/lib/postgresql/data
       - socket:/var/run/postgresql
       - archive:/archive
+      - metrics:/metrics
       - {type: bind, source: ./wal-archive.sh, target: /usr/local/bin/wal-archive.sh, read_only: true}
     healthcheck:
       test: [CMD, pg_isready, -h, /var/run/postgresql, -U, dswt_admin, -d, dswt]
@@ -80,6 +81,30 @@ services:
       timeout: 3s
       retries: 30
     stop_grace_period: 60s
+
+  # The database has no network, so this copies its archive off the server. It runs as the
+  # postgres user to read the archive, on its own network away from the internal services.
+  backup-uploader:
+    <<: *hardened
+    image: rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
+    user: "999:999"
+    group_add: ["${DSWT_GID}"]
+    networks: [offsite]
+    depends_on:
+      database: {condition: service_healthy}
+    tmpfs: [/tmp]
+    mem_limit: 128m
+    pids_limit: 64
+    entrypoint: [/bin/sh, /usr/local/bin/backup-uploader.sh]
+    environment:
+      HOME: /tmp
+      RCLONE_CONFIG: /run/dswt/rclone.conf
+      RCLONE_CACHE_DIR: /tmp
+    volumes:
+      - archive:/archive
+      - metrics:/metrics
+      - {type: bind, source: ./backup-uploader.sh, target: /usr/local/bin/backup-uploader.sh, read_only: true}
+      - {type: bind, source: ./secrets/rclone.conf, target: /run/dswt/rclone.conf, read_only: true}
 
   migrate:
     <<: *server
@@ -185,8 +210,10 @@ services:
     command:
       - --path.rootfs=/host
       - --web.listen-address=127.0.0.1:9100
+      - --collector.textfile.directory=/textfile
     volumes:
       - {type: bind, source: /, target: /host, read_only: true, bind: {propagation: rslave}}
+      - metrics:/textfile:ro
 
   grafana:
     <<: [*hardened, *private-network]
@@ -227,3 +254,7 @@ volumes:
   archive: {external: true, name: dswt-archive}
   prometheus: {external: true, name: dswt-prometheus}
   alertmanager: {external: true, name: dswt-alertmanager}
+  metrics: {external: true, name: dswt-metrics}
+
+networks:
+  offsite: {}

@@ -124,6 +124,26 @@ class ArchiveScriptTests(unittest.TestCase):
         self.assertEqual(self.ship("000000010000000000000003").returncode, 0)
         self.assertFalse((self.archive / "000000010000000000000003").exists())
 
+    def test_offsite_archive_waits_for_the_uploader_mark(self):
+        self.init()
+        (self.archive / "offsite.required").touch()
+        name = "000000010000000000000003"
+        self.assertEqual(self.ship(name).returncode, 1)
+        (self.archive / ".uploaded").mkdir()
+        (self.archive / ".uploaded" / name).touch()
+        self.assertEqual(self.ship(name).returncode, 0)
+
+    def test_rotate_keeps_files_the_uploader_has_not_confirmed(self):
+        self.init()
+        for name in ("000000010000000000000003", "000000010000000000000004"):
+            self.assertEqual(self.ship(name).returncode, 0)
+        (self.archive / "offsite.required").touch()
+        (self.archive / ".uploaded").mkdir()
+        (self.archive / ".uploaded" / "000000010000000000000003").touch()
+        self.assertEqual(self.run_script("rotate", self.archive, self.base("000000010000000000000005")).returncode, 0)
+        self.assertFalse((self.archive / "000000010000000000000003").exists())
+        self.assertTrue((self.archive / "000000010000000000000004").exists())
+
     def test_rotate_finishes_after_stopping_between_renames(self):
         self.init()
         self.assertEqual(self.ship("000000010000000000000003").returncode, 0)
