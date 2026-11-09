@@ -92,17 +92,17 @@ host key changes, replace `DSWT_KNOWN_HOSTS` after checking the new key at the p
 CI joins the tailnet as an ephemeral `tag:ci` node that can reach only port 22 on the server, so
 SSH stays closed to the internet. Set it up once:
 
-1. Add to the tailnet policy file. If the policy still allows everything, replace that rule with
-   your own access first, or `tag:ci` can reach the whole tailnet. Use your tailnet login, such
-   as `you@github`.
+1. Replace the tailnet policy's default allow-all rule with these rules, or `tag:ci` can reach the
+   whole tailnet. Your own devices keep full access; CI reaches only the server's SSH port.
 
    ```json
    {
      "tagOwners": {
-       "tag:ci": ["you@github"],
-       "tag:dswt-server": ["you@github"]
+       "tag:ci": ["autogroup:admin"],
+       "tag:dswt-server": ["autogroup:admin"]
      },
      "grants": [
+       {"src": ["autogroup:member"], "dst": ["*"], "ip": ["*"]},
        {"src": ["tag:ci"], "dst": ["tag:dswt-server"], "ip": ["tcp:22"]}
      ]
    }
