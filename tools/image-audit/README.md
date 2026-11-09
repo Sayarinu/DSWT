@@ -1,8 +1,8 @@
-# Private service image audit
+# Service image audit
 
 Use a separately installed **Python 3.12+**, Docker with Buildx, and a local Unix
-Docker socket. Keep the repository private. This tool never pushes images,
-uses package credentials, uploads reports, or changes a retained local stack.
+Docker socket. This tool never pushes images, uses package credentials, uploads
+reports, or changes a retained local stack.
 The Publish service images workflow runs it, then pushes the audited bytes to
 private GHCR packages. Public publishing stays blocked as described below.
 

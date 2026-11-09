@@ -45,5 +45,5 @@ output, flush it, then publish it without replacing any existing path. Reject
 input/output aliases (including symlinks and hard links), existing outputs,
 unmatched inputs, malformed bundles, failed checks and interrupted writes while
 preserving the original and removing only the patcher's temporary file. These
-application and artifact checks belong to LUNE-291; the private local
+application and artifact checks belong to LUNE-291; the local
 implementation is [`tools/bps-patch`](../tools/bps-patch/README.md).

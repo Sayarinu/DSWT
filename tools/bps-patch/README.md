@@ -1,7 +1,7 @@
-# Private BPS candidates
+# BPS candidates
 
 Local tooling for checksum-specific BPS patches of the verified US Rev 0 and
-Rev 1 bases. Bundles are private: every manifest has
+Rev 1 bases. Bundles stay local: every manifest has
 `publication_permitted: false` and `distribution_blocked: true`. This does not
 clear redistribution rights, release a patch, or cover Europe or other English bases.
 
