@@ -62,6 +62,7 @@
 !server/src/trade_encoding.cpp
 !server/src/trade_encoding.h
 !server/src/trade_gateway.cpp
+!server/src/wire_layout.h
 !server/src/trade_service.cpp
 !server/src/telemetry.cpp
 !server/src/wal_archive_barrier.cpp

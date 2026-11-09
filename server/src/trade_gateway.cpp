@@ -1,6 +1,7 @@
 #include "dswt/server/trade_gateway.h"
 
 #include "trade_encoding.h"
+#include "wire_layout.h"
 #include "trade.grpc.pb.h"
 #include "dswt/server/telemetry.h"
 
@@ -46,26 +47,34 @@ struct Frame {
 };
 
 Frame Decode(std::string_view packet) {
-  if (packet.size() < 80 || packet.size() > 4096 || packet.substr(0, 5) != std::string_view("WTDS\1", 5) ||
-      Number(packet, 6, 2) != packet.size() - 80) throw InvalidFrame();
-  Frame frame{static_cast<unsigned char>(packet[5]), std::string(packet.substr(8, 16)), {}, Number(packet, 72, 8), packet.substr(80)};
-  frame.auth.set_save_id(std::string(packet.substr(24, 16)));
-  frame.auth.set_credential(std::string(packet.substr(40, 32)));
-  const bool enroll = frame.operation == 1;
-  const bool mutation = frame.operation == 2 || frame.operation == 4 || frame.operation == 6;
-  if (frame.operation < 1 || frame.operation > 7 || !detail::NonzeroBytes(frame.request_id, 16) ||
-      !detail::NonzeroBytes(frame.auth.credential(), 32) ||
-      enroll == detail::NonzeroBytes(frame.auth.save_id(), 16) ||
+  if (packet.size() < wire::kRequestHeaderSize || packet.size() > wire::kMaxPacket ||
+      packet.substr(0, wire::kMagic.size()) != wire::kMagic ||
+      Number(packet, wire::kRequestBodyLength, 2) != packet.size() - wire::kRequestHeaderSize) throw InvalidFrame();
+  Frame frame{static_cast<unsigned char>(packet[wire::kRequestOperation]),
+              std::string(packet.substr(wire::kRequestId, wire::kIdSize)), {}, Number(packet, wire::kRequestCounter, 8),
+              packet.substr(wire::kRequestHeaderSize)};
+  frame.auth.set_save_id(std::string(packet.substr(wire::kRequestSaveId, wire::kIdSize)));
+  frame.auth.set_credential(std::string(packet.substr(wire::kRequestCredential, wire::kCredentialSize)));
+  const bool enroll = frame.operation == wire::kEnroll;
+  const bool mutation = frame.operation == wire::kSubmit || frame.operation == wire::kCancel || frame.operation == wire::kAcknowledge;
+  if (frame.operation < wire::kEnroll || frame.operation > wire::kReconcile || !detail::NonzeroBytes(frame.request_id, wire::kIdSize) ||
+      !detail::NonzeroBytes(frame.auth.credential(), wire::kCredentialSize) ||
+      enroll == detail::NonzeroBytes(frame.auth.save_id(), wire::kIdSize) ||
       mutation != (frame.counter != 0) || frame.counter == std::numeric_limits<std::uint64_t>::max()) throw InvalidFrame();
-  constexpr std::size_t sizes[] = {0, 0, 176, 16, 16, 16, 104, 9};
+  constexpr std::size_t sizes[] = {0, 0, wire::kSubmitSize, wire::kTradeRequestSize, wire::kTradeRequestSize,
+                                   wire::kTradeRequestSize, wire::kAckSize, wire::kReconcileSize};
   if (enroll) {
-    if (frame.body.size() < 5 || frame.body.size() > 69 || Number(frame.body, 4, 1) != frame.body.size() - 5) throw InvalidFrame();
+    if (frame.body.size() < wire::kEnrollHints || frame.body.size() > wire::kEnrollHints + wire::kEnrollHintsMax ||
+        Number(frame.body, wire::kEnrollHintLength, 1) != frame.body.size() - wire::kEnrollHints) throw InvalidFrame();
   } else if (frame.body.size() != sizes[frame.operation]) throw InvalidFrame();
-  if ((frame.operation == 4 || frame.operation == 5 || frame.operation == 6) &&
-      !detail::NonzeroBytes(frame.body.substr(0, 16), 16)) throw InvalidFrame();
-  if (frame.operation == 2 && Number(frame.body, 0, 8) == 0) throw InvalidFrame();
-  if (frame.operation == 6 && (!detail::NonzeroBytes(frame.body.substr(16, 16), 16) || Number(frame.body, 96, 8) == 0)) throw InvalidFrame();
-  if (frame.operation == 7 && (Number(frame.body, 8, 1) < 1 || Number(frame.body, 8, 1) > 8)) throw InvalidFrame();
+  // Cancel, Collect and Acknowledge bodies all start with the trade ID.
+  if ((frame.operation == wire::kCancel || frame.operation == wire::kCollect || frame.operation == wire::kAcknowledge) &&
+      !detail::NonzeroBytes(frame.body.substr(wire::kAckTrade, wire::kIdSize), wire::kIdSize)) throw InvalidFrame();
+  if (frame.operation == wire::kSubmit && Number(frame.body, wire::kSubmitGeneration, 8) == 0) throw InvalidFrame();
+  if (frame.operation == wire::kAcknowledge && (!detail::NonzeroBytes(frame.body.substr(wire::kAckReceipt, wire::kIdSize), wire::kIdSize) ||
+      Number(frame.body, wire::kAckGeneration, 8) == 0)) throw InvalidFrame();
+  if (frame.operation == wire::kReconcile && (Number(frame.body, wire::kReconcileLimit, 1) < 1 ||
+      Number(frame.body, wire::kReconcileLimit, 1) > wire::kReconcileLimitMax)) throw InvalidFrame();
   return frame;
 }
 
@@ -83,12 +92,12 @@ std::string Snapshot(const v1::TradeSnapshot &snapshot, std::uint64_t highwater)
     Require(snapshot.trade_id().empty() && snapshot.offered_asset_id().empty() && snapshot.offered_sha256().empty() &&
         snapshot.last_event() == 0 && kind == v1::DELIVERY_NONE && no_delivery);
   } else {
-    Require(detail::NonzeroBytes(snapshot.trade_id(), 16) && detail::NonzeroBytes(snapshot.offered_asset_id(), 16) &&
-        snapshot.offered_sha256().size() == 32 && snapshot.last_event() > 0 && snapshot.last_event() <= highwater);
+    Require(detail::NonzeroBytes(snapshot.trade_id(), wire::kIdSize) && detail::NonzeroBytes(snapshot.offered_asset_id(), wire::kIdSize) &&
+        snapshot.offered_sha256().size() == wire::kDigestSize && snapshot.last_event() > 0 && snapshot.last_event() <= highwater);
     if (state == v1::TRADE_QUEUED) Require(kind == v1::DELIVERY_NONE && no_delivery);
     else {
-      Require(detail::NonzeroBytes(snapshot.received_asset_id(), 16) && snapshot.received_sha256().size() == 32 &&
-          detail::NonzeroBytes(snapshot.receipt_id(), 16) && kind != v1::DELIVERY_NONE);
+      Require(detail::NonzeroBytes(snapshot.received_asset_id(), wire::kIdSize) && snapshot.received_sha256().size() == wire::kDigestSize &&
+          detail::NonzeroBytes(snapshot.receipt_id(), wire::kIdSize) && kind != v1::DELIVERY_NONE);
       Require(state != v1::TRADE_MATCHED || kind == v1::DELIVERY_MATCH);
       Require(state != v1::TRADE_RETURN_READY || kind == v1::DELIVERY_RETURN);
       if (kind == v1::DELIVERY_RETURN) Require(snapshot.received_asset_id() == snapshot.offered_asset_id() &&
@@ -96,7 +105,7 @@ std::string Snapshot(const v1::TradeSnapshot &snapshot, std::uint64_t highwater)
       else Require(snapshot.received_asset_id() != snapshot.offered_asset_id());
     }
   }
-  return detail::EncodeOutcome(0, snapshot).substr(8);
+  return detail::EncodeOutcome(0, snapshot).substr(wire::kOutcomeSnapshot);
 }
 
 std::string Event(const v1::TradeEvent &event) {
@@ -109,25 +118,26 @@ std::string Event(const v1::TradeEvent &event) {
   } else {
     Require(event.sequence() > 1);
     if (kind == v1::EVENT_REJECTED) {
-      Require(detail::NonzeroBytes(event.operation_id(), 16) && event.asset_id().empty() && event.receipt_id().empty() &&
-          (event.payload_sha256().empty() || event.payload_sha256().size() == 32));
+      Require(detail::NonzeroBytes(event.operation_id(), wire::kIdSize) && event.asset_id().empty() && event.receipt_id().empty() &&
+          (event.payload_sha256().empty() || event.payload_sha256().size() == wire::kDigestSize));
       Require(event.trade_id().empty() ? event.state() == v1::TRADE_NONE :
-          detail::NonzeroBytes(event.trade_id(), 16) && event.state() != v1::TRADE_NONE);
+          detail::NonzeroBytes(event.trade_id(), wire::kIdSize) && event.state() != v1::TRADE_NONE);
     } else {
-      Require(detail::NonzeroBytes(event.trade_id(), 16) && detail::NonzeroBytes(event.asset_id(), 16) && event.payload_sha256().size() == 32);
-      Require(kind == v1::EVENT_MATCHED ? event.operation_id().empty() : detail::NonzeroBytes(event.operation_id(), 16));
-      Require(kind == v1::EVENT_SUBMITTED ? event.receipt_id().empty() : detail::NonzeroBytes(event.receipt_id(), 16));
+      Require(detail::NonzeroBytes(event.trade_id(), wire::kIdSize) && detail::NonzeroBytes(event.asset_id(), wire::kIdSize) && event.payload_sha256().size() == wire::kDigestSize);
+      Require(kind == v1::EVENT_MATCHED ? event.operation_id().empty() : detail::NonzeroBytes(event.operation_id(), wire::kIdSize));
+      Require(kind == v1::EVENT_SUBMITTED ? event.receipt_id().empty() : detail::NonzeroBytes(event.receipt_id(), wire::kIdSize));
       Require(event.state() == static_cast<v1::TradeState>(kind - 1));
     }
   }
   std::string bytes;
   detail::AppendUnsigned(bytes, event.sequence(), 8);
   bytes += static_cast<char>(kind);
-  for (const auto &field : {std::pair{&event.trade_id(), 16U}, std::pair{&event.operation_id(), 16U},
-       std::pair{&event.asset_id(), 16U}, std::pair{&event.payload_sha256(), 32U}, std::pair{&event.receipt_id(), 16U}})
+  for (const auto &field : {std::pair{&event.trade_id(), wire::kIdSize}, std::pair{&event.operation_id(), wire::kIdSize},
+       std::pair{&event.asset_id(), wire::kIdSize}, std::pair{&event.payload_sha256(), wire::kDigestSize},
+       std::pair{&event.receipt_id(), wire::kIdSize}})
     bytes += field.first->empty() ? std::string(field.second, '\0') : *field.first;
   bytes += static_cast<char>(event.state());
-  Require(bytes.size() == 106);
+  Require(bytes.size() == wire::kEventSize);
   return bytes;
 }
 
@@ -138,23 +148,24 @@ std::string Envelope(const Frame &frame, const v1::ReplyContext &context, const 
   else Require(body.empty());
   if (context.result() == v1::RESULT_UNAUTHENTICATED || context.result() == v1::RESULT_PROCESSING)
     Require(context.next_counter() == 0 && context.event_highwater() == 0);
-  std::string bytes = "WTDS";
-  bytes += '\1'; bytes += static_cast<char>(frame.operation);
+  std::string bytes(wire::kMagic);
+  bytes += static_cast<char>(frame.operation);
   detail::AppendUnsigned(bytes, body.size(), 2);
   bytes += frame.request_id;
   detail::AppendUnsigned(bytes, context.result(), 2);
   detail::AppendUnsigned(bytes, 0, 2);
   detail::AppendUnsigned(bytes, context.next_counter(), 8);
   detail::AppendUnsigned(bytes, context.event_highwater(), 8);
+  Require(bytes.size() == wire::kReplyHeaderSize);
   bytes += body;
-  Require(bytes.size() <= 4096);
+  Require(bytes.size() <= wire::kMaxPacket);
   return bytes;
 }
 
 template <typename Reply, typename Encode>
 GatewayReply Finish(const Frame &frame, const grpc::Status &status, const Reply &reply, unsigned &observed, Encode encode) {
   if (!status.ok()) return {};
-  Require(reply.ByteSizeLong() <= 4096 && Known(reply) && reply.has_context());
+  Require(reply.ByteSizeLong() <= wire::kMaxPacket && Known(reply) && reply.has_context());
   std::string body;
   if (reply.context().result() == v1::RESULT_OK) body = encode(reply);
   else {
@@ -170,12 +181,13 @@ GatewayReply Finish(const Frame &frame, const grpc::Status &status, const Reply 
 std::string Outcome(const Frame &frame, const v1::MutationReply &reply) {
   Require(reply.has_outcome() && reply.operation_event() > 0 && reply.operation_event() <= reply.context().event_highwater() &&
       reply.operation_event() == reply.outcome().last_event() && reply.context().next_counter() > frame.counter);
-  const auto expected = frame.operation == 2 ? v1::TRADE_QUEUED : frame.operation == 4 ? v1::TRADE_RETURN_READY : v1::TRADE_ACKNOWLEDGED;
+  const auto expected = frame.operation == wire::kSubmit ? v1::TRADE_QUEUED
+      : frame.operation == wire::kCancel ? v1::TRADE_RETURN_READY : v1::TRADE_ACKNOWLEDGED;
   Require(reply.outcome().state() == expected);
-  if (frame.operation == 2) Require(reply.outcome().offered_sha256() == frame.body.substr(144, 32));
-  else Require(reply.outcome().trade_id() == frame.body.substr(0, 16));
-  if (frame.operation == 6) Require(reply.outcome().receipt_id() == frame.body.substr(16, 16) &&
-      reply.outcome().received_sha256() == frame.body.substr(32, 32));
+  if (frame.operation == wire::kSubmit) Require(reply.outcome().offered_sha256() == frame.body.substr(wire::kSubmitDigest, wire::kDigestSize));
+  else Require(reply.outcome().trade_id() == frame.body.substr(wire::kAckTrade, wire::kIdSize));
+  if (frame.operation == wire::kAcknowledge) Require(reply.outcome().receipt_id() == frame.body.substr(wire::kAckReceipt, wire::kIdSize) &&
+      reply.outcome().received_sha256() == frame.body.substr(wire::kAckDeliveredDigest, wire::kDigestSize));
   std::string bytes;
   detail::AppendUnsigned(bytes, reply.operation_event(), 8);
   return bytes + Snapshot(reply.outcome(), reply.context().event_highwater());
@@ -197,48 +209,50 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
   try {
     const auto frame = Decode(packet);
     unsigned observed = 0;
-    const bool mutation = frame.operation == 1 || frame.operation == 2 || frame.operation == 4 || frame.operation == 6;
-    const auto trade = frame.operation >= 3 && frame.operation <= 6 ? frame.body.substr(0, 16) : std::string_view{};
+    const bool mutation = frame.operation == wire::kEnroll || frame.operation == wire::kSubmit ||
+        frame.operation == wire::kCancel || frame.operation == wire::kAcknowledge;
+    const auto trade = frame.operation >= wire::kStatus && frame.operation <= wire::kAcknowledge
+        ? frame.body.substr(wire::kAckTrade, wire::kIdSize) : std::string_view{};
     RpcTelemetry trace(static_cast<Operation>(frame.operation), nullptr, [&] { return observed; },
                        mutation ? std::string_view(frame.request_id) : std::string_view{}, trade, frame.request_id);
     context.AddMetadata("x-dswt-request-id-bin", frame.request_id);
     context.set_deadline(std::min(context.deadline(), std::chrono::system_clock::now() + std::chrono::seconds(4)));
-    if (frame.operation == 1) {
+    if (frame.operation == wire::kEnroll) {
       v1::EnrollRequest request;
       request.set_enrollment_id(frame.request_id);
       request.set_credential(frame.auth.credential());
-      request.set_client_build(Number(frame.body, 0, 4));
-      request.set_hints(std::string(frame.body.substr(5)));
+      request.set_client_build(Number(frame.body, wire::kEnrollBuild, 4));
+      request.set_hints(std::string(frame.body.substr(wire::kEnrollHints)));
       v1::EnrollReply reply;
       const auto status = impl_->identities->Enroll(&context, request, &reply);
       return Finish(frame, status, reply, observed, [](const auto &value) {
-        Require(detail::NonzeroBytes(value.save_id(), 16));
+        Require(detail::NonzeroBytes(value.save_id(), wire::kIdSize));
         return value.save_id();
       });
     }
-    if (frame.operation == 2) {
+    if (frame.operation == wire::kSubmit) {
       v1::SubmitRequest request;
       *request.mutable_context() = frame.Mutation();
-      request.set_escrow_generation(Number(frame.body, 0, 8));
-      request.mutable_pokemon()->set_pk4(std::string(frame.body.substr(8, 136)));
-      request.mutable_pokemon()->set_sha256(std::string(frame.body.substr(144, 32)));
+      request.set_escrow_generation(Number(frame.body, wire::kSubmitGeneration, 8));
+      request.mutable_pokemon()->set_pk4(std::string(frame.body.substr(wire::kSubmitPokemon, wire::kPk4Size)));
+      request.mutable_pokemon()->set_sha256(std::string(frame.body.substr(wire::kSubmitDigest, wire::kDigestSize)));
       v1::MutationReply reply;
       const auto status = impl_->trades->Submit(&context, request, &reply);
       return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
-    if (frame.operation == 3) {
+    if (frame.operation == wire::kStatus) {
       v1::StatusRequest request;
       *request.mutable_auth() = frame.auth;
-      if (detail::NonzeroBytes(frame.body, 16)) request.set_trade_id(std::string(frame.body));
+      if (detail::NonzeroBytes(frame.body, wire::kIdSize)) request.set_trade_id(std::string(frame.body));
       v1::StatusReply reply;
       const auto status = impl_->trades->Status(&context, request, &reply);
       return Finish(frame, status, reply, observed, [&](const auto &value) {
         Require(value.has_trade());
-        if (detail::NonzeroBytes(frame.body, 16)) Require(value.trade().trade_id() == frame.body);
+        if (detail::NonzeroBytes(frame.body, wire::kIdSize)) Require(value.trade().trade_id() == frame.body);
         return Snapshot(value.trade(), value.context().event_highwater());
       });
     }
-    if (frame.operation == 4) {
+    if (frame.operation == wire::kCancel) {
       v1::CancelRequest request;
       *request.mutable_context() = frame.Mutation();
       request.set_trade_id(std::string(frame.body));
@@ -246,7 +260,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       const auto status = impl_->trades->Cancel(&context, request, &reply);
       return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
-    if (frame.operation == 5) {
+    if (frame.operation == wire::kCollect) {
       v1::CollectRequest request;
       *request.mutable_auth() = frame.auth;
       request.set_trade_id(std::string(frame.body));
@@ -260,22 +274,22 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
         return Snapshot(value.trade(), value.context().event_highwater()) + value.pokemon().pk4();
       });
     }
-    if (frame.operation == 6) {
+    if (frame.operation == wire::kAcknowledge) {
       v1::AcknowledgeRequest request;
       *request.mutable_context() = frame.Mutation();
-      request.set_trade_id(std::string(frame.body.substr(0, 16)));
-      request.set_receipt_id(std::string(frame.body.substr(16, 16)));
-      request.set_delivered_sha256(std::string(frame.body.substr(32, 32)));
-      request.set_applied_sha256(std::string(frame.body.substr(64, 32)));
-      request.set_applied_generation(Number(frame.body, 96, 8));
+      request.set_trade_id(std::string(frame.body.substr(wire::kAckTrade, wire::kIdSize)));
+      request.set_receipt_id(std::string(frame.body.substr(wire::kAckReceipt, wire::kIdSize)));
+      request.set_delivered_sha256(std::string(frame.body.substr(wire::kAckDeliveredDigest, wire::kDigestSize)));
+      request.set_applied_sha256(std::string(frame.body.substr(wire::kAckAppliedDigest, wire::kDigestSize)));
+      request.set_applied_generation(Number(frame.body, wire::kAckGeneration, 8));
       v1::MutationReply reply;
       const auto status = impl_->trades->Acknowledge(&context, request, &reply);
       return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
     v1::ReconcileRequest request;
     *request.mutable_auth() = frame.auth;
-    request.set_after_event(Number(frame.body, 0, 8));
-    request.set_limit(Number(frame.body, 8, 1));
+    request.set_after_event(Number(frame.body, wire::kReconcileAfter, 8));
+    request.set_limit(Number(frame.body, wire::kReconcileLimit, 1));
     v1::ReconcileReply reply;
     const auto status = impl_->trades->Reconcile(&context, request, &reply);
     return Finish(frame, status, reply, observed, [&](const auto &value) {
