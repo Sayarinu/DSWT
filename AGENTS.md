@@ -98,19 +98,18 @@ pull request. The required check names are listed in
 
 ## Workflow
 
-- Every change needs a ticket. Maintainers use Linear issue IDs (`LUNE-123`).
-  Contributors without Linear access open a GitHub issue and use `GH-<number>`,
-  such as `GH-42` for issue #42.
+- Every change needs a ticket in your issue tracker. Its key, such as `ABC-123`,
+  is the ticket ID.
 - Start each branch from the latest `main`. Name it exactly the ticket ID, with
   no prefix or suffix.
-- Commit subjects are `<ticket> - <message>`, such as `GH-42 - Fix trade recovery`.
+- Commit subjects are `<ticket> - <message>`, such as `ABC-123 - Fix trade recovery`.
   The message describes the individual change in the imperative.
 - Commit with your GitHub noreply email address, never a personal one.
 - Do not add AI or tool attribution anywhere: no `Co-Authored-By` trailers,
   "Generated with" lines or tool mentions in commits, PRs, code, comments or docs.
 - One ticket per PR. Keep PRs focused and self-contained, and fill in the PR
   template: problem, changes, validation, material risks and ticket ID. Do not
-  link to the Linear workspace; the ID is enough.
+  link to the tracker; the ID is enough.
 - PRs merge into `main` with a merge commit once the required checks pass and
   review conversations are resolved. Squash and rebase merges are disabled.
 - Change docs and this file only when necessary or beneficial. Keep updates

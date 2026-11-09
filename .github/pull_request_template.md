@@ -1,5 +1,5 @@
-Ticket: LUNE-123 or GH-123
-<!-- Use your branch name. Without Linear access, open a GitHub issue and use GH-<issue number>. -->
+Ticket: ABC-123
+<!-- Use your branch name: the ticket ID, such as ABC-123. -->
 
 Describe the problem and the resulting behavior.
 

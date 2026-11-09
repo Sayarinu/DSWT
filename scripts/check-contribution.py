@@ -9,13 +9,13 @@ import subprocess
 import sys
 
 
-TICKET = r"(?:LUNE|GH)-[1-9][0-9]*"
+TICKET = r"[A-Z][A-Z0-9]*-[1-9][0-9]*"
 
 
 def check_pull_request(pr, subjects):
     ticket = pr["head"]["ref"]
     if not re.fullmatch(TICKET, ticket):
-        return ["Name the branch exactly for its ticket, such as LUNE-123 or GH-123"]
+        return ["Name the branch exactly for its ticket, such as ABC-123"]
     errors = []
     for subject in subjects:
         if not subject.startswith(f"{ticket} - ") or not subject.removeprefix(f"{ticket} - ").strip():
@@ -26,7 +26,7 @@ def check_pull_request(pr, subjects):
         errors.append(f"Fill in the PR template's 'Ticket: {ticket}' line")
     metadata = (pr.get("title") or "") + "\n" + body
     if re.search(r"linear\.app(?:[/\s]|$)", metadata, re.IGNORECASE):
-        errors.append("Keep Linear URLs out of the PR; use the ticket identifier")
+        errors.append("Keep tracker URLs out of the PR; use the ticket identifier")
     return errors
 
 

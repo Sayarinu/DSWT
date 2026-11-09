@@ -20,12 +20,12 @@ class ContributionTests(unittest.TestCase):
         }
 
     def test_maintainer_and_github_issue_tickets_are_accepted_from_forks(self):
-        for ticket in ("LUNE-299", "GH-1", "GH-42"):
+        for ticket in ("ABC-123", "LUNE-299", "GH-42"):
             with self.subTest(ticket=ticket):
                 self.assertEqual(policy.check_pull_request(self.pr(ticket), [f"{ticket} - Fix recovery"]), [])
 
     def test_invalid_branches_and_shell_input_are_rejected(self):
-        for branch in ("feature/LUNE-123", "LUNE-123-description", "lune-123", "gh-42", "GH-0", "ABC-123",
+        for branch in ("feature/LUNE-123", "LUNE-123-description", "lune-123", "abc-123", "GH-0", "ABC-0123",
                        "GH-#42", "LUNE-123;echo unsafe"):
             with self.subTest(branch=branch):
                 self.assertTrue(policy.check_pull_request(self.pr(branch), [f"{branch} - Change"]))
@@ -36,7 +36,7 @@ class ContributionTests(unittest.TestCase):
                 self.assertTrue(policy.check_pull_request(self.pr(), ["LUNE-123 - Good", subject]))
 
     def test_body_must_name_the_branch_ticket(self):
-        for body in ("", "Fix recovery.", "Ticket: LUNE-123 or GH-123", "Ticket: LUNE-1234", "Ticket: GH-123"):
+        for body in ("", "Fix recovery.", "Ticket: ABC-123", "Ticket: LUNE-1234", "Ticket: GH-123"):
             with self.subTest(body=body):
                 self.assertTrue(policy.check_pull_request(self.pr(body=body), ["LUNE-123 - Change"]))
         body = "Ticket: LUNE-123\nFollow-up: LUNE-124 and GH-7"
