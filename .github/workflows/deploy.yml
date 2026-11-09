@@ -1,13 +1,25 @@
 name: Deploy to production
 
-# Every push to main publishes its images and deploys them to the VPS.
-# Only the deploy job, in the production environment, can read secrets, and it
-# can only read source and packages. tools/local-stack/policy.py holds this file
-# to those rules.
+# Each push to main that changes what runs on the VPS publishes its images and
+# deploys them, reaching SSH over Tailscale. Only the deploy job, in the
+# production environment, can read secrets, and it can only read source and
+# packages. tools/local-stack/policy.py holds this file to those rules.
 on:
   push:
     branches:
       - main
+    # What the images, the synced server files or the deploy itself are made of.
+    paths:
+      - server/**
+      - validator/**
+      - LICENSE
+      - NOTICE
+      - deploy/**
+      - "!deploy/README.md"
+      - "!deploy/terraform/**"
+      - protocol/**
+      - .github/workflows/deploy.yml
+      - .github/workflows/publish-images.yml
   workflow_dispatch:
 
 permissions:
@@ -45,6 +57,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      # Joins the tailnet as an ephemeral tag:ci node, which may only reach the server's SSH.
+      - name: Join the tailnet
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
       - name: Write deploy credentials
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -103,8 +122,9 @@ jobs:
       - name: Deploy
         env:
           DSWT_REGISTRY_TOKEN: ${{ github.token }}
+          DSWT_TAILNET_HOST: ${{ secrets.DSWT_TAILNET_HOST }}
         run: |
-          python3 deploy/dswt.py deploy --ssh-key "$RUNNER_TEMP/dswt-deploy/id_ed25519" \
+          DSWT_SSH_HOST="$DSWT_TAILNET_HOST" python3 deploy/dswt.py deploy --ssh-key "$RUNNER_TEMP/dswt-deploy/id_ed25519" \
             --known-hosts "$RUNNER_TEMP/dswt-deploy/known_hosts"
       - name: Remove deploy credentials
         if: always()

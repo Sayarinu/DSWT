@@ -13,7 +13,13 @@ PUBLISHER = "publish-images.yml"
 DEPLOYER = "deploy.yml"
 MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
 DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
-                  "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY")
+                  "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
+# Everything the deployed images, the files synced to the server and the deploy itself are built from.
+DEPLOY_PATHS = ["server/**", "validator/**", "LICENSE", "NOTICE", "deploy/**", "!deploy/README.md", "!deploy/terraform/**",
+                "protocol/**", ".github/workflows/deploy.yml", ".github/workflows/publish-images.yml"]
+TAILSCALE = "tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c"
+TAILSCALE_INPUTS = {"oauth-client-id": "${{ secrets.TS_OAUTH_CLIENT_ID }}", "oauth-secret": "${{ secrets.TS_OAUTH_SECRET }}",
+                    "tags": "tag:ci"}
 
 
 class WorkflowLoader(yaml.BaseLoader):
@@ -95,6 +101,7 @@ def workflow(data):
                 continue
             require(isinstance(action, str) and re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-fA-F]{40}", action),
                     "Pin every action to a full commit")
+            require(not action.lower().startswith("tailscale/"), "Only the deploy job may join the tailnet")
             if action.lower().startswith("actions/checkout@"):
                 options = step.get("with", {})
                 require(isinstance(options, dict) and options.get("persist-credentials") == "false", "Disable persisted checkout credentials")
@@ -126,8 +133,8 @@ def publisher(data):
 
 def deployer(data):
     """Publish then deploy each push to main. Only the production job may read secrets, and only these."""
-    require(data.get("on") == {"push": {"branches": ["main"]}, "workflow_dispatch": ""},
-            "Deploying must only run on pushes to main or by hand")
+    require(data.get("on") == {"push": {"branches": ["main"], "paths": DEPLOY_PATHS}, "workflow_dispatch": ""},
+            "Deploying must only run on pushes to main that change the deployment, or by hand")
     require(data.get("concurrency") == {"group": "production-release", "cancel-in-progress": "false"},
             "Releases must run one at a time, in order")
     jobs = data.get("jobs")
@@ -148,10 +155,18 @@ def deployer(data):
     job = reviewed["jobs"]["deploy"]
     for key in ("if", "needs", "environment", "concurrency", "permissions"):
         del job[key]
-    for step in job.get("steps", []) if isinstance(job.get("steps"), list) else ():
+    steps = job.get("steps") if isinstance(job.get("steps"), list) else []
+    # Tailscale joins once, with only its OAuth client and tag, before any step runs commands.
+    joins = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("uses") == TAILSCALE]
+    require(len(joins) == 1 and set(steps[joins[0]]) == {"name", "uses", "with"}
+            and steps[joins[0]]["with"] == TAILSCALE_INPUTS, "Join the tailnet once, only as tag:ci")
+    require(all(isinstance(step, dict) and "run" not in step for step in steps[:joins[0]]),
+            "Join the tailnet before running commands")
+    del steps[joins[0]]
+    for step in steps:
         if not isinstance(step, dict):
             continue
-        # No third-party code runs beside the secrets: checkout is the only action.
+        # Checkout and the reviewed Tailscale step are the only actions beside the secrets.
         require("uses" not in step or str(step["uses"]).startswith("actions/checkout@"), "Deploying runs no other actions")
         variables = step.get("env")
         if not isinstance(variables, dict) or "uses" in step:
