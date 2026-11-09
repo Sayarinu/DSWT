@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("pins.json")
 PUBLIC_SELFTESTS = Path(__file__).with_name("public-selftests.json")
 SERVICES = ("server", "validator")
+SOURCE_REPOSITORY = "https://github.com/Sayarinu/DSWT"
 
 
 def digest_file(path):
@@ -303,7 +304,9 @@ class Runner:
                 "--file", str(self.workspace / "contexts" / service / service / "Dockerfile"),
                 # The test image only runs here, and Docker's classic image store can't load provenance.
                 "--provenance=" + ("false" if test else "mode=max"), "--sbom=false", "--progress=plain",
-                "--label", "org.opencontainers.image.revision=" + git("rev-parse", "HEAD")]
+                "--label", "org.opencontainers.image.revision=" + git("rev-parse", "HEAD"),
+                # GHCR links a published package to the repository this label names.
+                "--label", "org.opencontainers.image.source=" + SOURCE_REPOSITORY]
         if test:
             args += ["--target", "validator-tests", "--load", "--tag", self.test_image]
         else:
