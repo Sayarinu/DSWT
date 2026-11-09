@@ -14,6 +14,7 @@ COPY client/include/wonder_trade/persistence.h client/include/wonder_trade/persi
 COPY client/include/wonder_trade/journal.h client/include/wonder_trade/journal.h
 COPY client/src/wonder_trade/journal.c client/src/wonder_trade/journal.c
 COPY client/include/wonder_trade/wire.h client/include/wonder_trade/wire.h
+COPY client/include/wonder_trade/wire_layout.h client/include/wonder_trade/wire_layout.h
 COPY client/src/wonder_trade/wire.c client/src/wonder_trade/wire.c
 COPY client/tests/journal_fixture.h client/tests/journal_fixture.h
 COPY emulator/ emulator/
