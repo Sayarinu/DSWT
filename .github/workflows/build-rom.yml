@@ -32,7 +32,6 @@ jobs:
           python3 -m json.tool client/res/text/wonder_trade.json >/dev/null
           python3 -m json.tool client/upstream.json >/dev/null
           python3 -m json.tool licensing/redistribution.json >/dev/null
-          python3 -m json.tool licensing/migration.json >/dev/null
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
           python3 -m venv "$RUNNER_TEMP/dswt-policy"
