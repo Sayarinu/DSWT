@@ -10,6 +10,10 @@ import subprocess
 import yaml
 
 PUBLISHER = "publish-images.yml"
+DEPLOYER = "deploy.yml"
+MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
+DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
+                  "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY")
 
 
 class WorkflowLoader(yaml.BaseLoader):
@@ -101,8 +105,9 @@ def workflow(data):
 
 
 def publisher(data):
-    """The one privileged workflow: run by hand, from main only, able to write packages and nothing else."""
-    require(data.get("on") == "workflow_dispatch", "Publishing must only run by hand")
+    """Run by hand or by the deployer, from main only, able to write packages and nothing else."""
+    require(data.get("on") == {"workflow_dispatch": "", "workflow_call": ""},
+            "Publishing must only run by hand or from the deploy workflow, without inputs or secrets")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and len(jobs) == 1, "Publishing needs exactly one job")
     job = next(iter(jobs.values()))
@@ -110,11 +115,52 @@ def publisher(data):
     require(job.get("permissions") == {"contents": "read", "packages": "write"}, "Publishing may only write packages")
     # What remains must satisfy every contribution rule, without the two exceptions granted here.
     reviewed = copy.deepcopy(data)
+    reviewed["on"] = "workflow_dispatch"
     job = next(iter(reviewed["jobs"].values()))
     del job["permissions"]
     for step in job.get("steps", []):
         if isinstance(step, dict) and isinstance(step.get("env"), dict) and step["env"].get("GH_TOKEN") == "${{ github.token }}":
             del step["env"]["GH_TOKEN"]
+    workflow(reviewed)
+
+
+def deployer(data):
+    """Publish then deploy each push to main. Only the production job may read secrets, and only these."""
+    require(data.get("on") == {"push": {"branches": ["main"]}, "workflow_dispatch": ""},
+            "Deploying must only run on pushes to main or by hand")
+    require(data.get("concurrency") == {"group": "production-release", "cancel-in-progress": "false"},
+            "Releases must run one at a time, in order")
+    jobs = data.get("jobs")
+    require(isinstance(jobs, dict) and set(jobs) == {"publish", "deploy"}, "Deploying needs exactly a publish and a deploy job")
+    require(jobs["publish"] == {"name": "Publish images", "if": MAIN_ONLY,
+                                "permissions": {"contents": "read", "packages": "write"},
+                                "uses": "./.github/workflows/" + PUBLISHER}, "Publish only through the reviewed publisher")
+    job = jobs["deploy"]
+    require(isinstance(job, dict) and job.get("if") == MAIN_ONLY, "Deploying must only run from main of this repository")
+    require(job.get("needs") == "publish", "Deploy only images published for this commit")
+    require(job.get("environment") == "production", "Secrets are only for the production environment")
+    require(job.get("concurrency") == {"group": "production-deploy", "cancel-in-progress": "false"},
+            "Deploys must never overlap or be cancelled midway")
+    require(job.get("permissions") == {"contents": "read", "packages": "read"}, "Deploying may only read source and packages")
+    # What remains must satisfy every contribution rule. Secrets may only be named whole in a step's env.
+    reviewed = copy.deepcopy(data)
+    del reviewed["jobs"]["publish"], reviewed["concurrency"]
+    job = reviewed["jobs"]["deploy"]
+    for key in ("if", "needs", "environment", "concurrency", "permissions"):
+        del job[key]
+    for step in job.get("steps", []) if isinstance(job.get("steps"), list) else ():
+        if not isinstance(step, dict):
+            continue
+        # No third-party code runs beside the secrets: checkout is the only action.
+        require("uses" not in step or str(step["uses"]).startswith("actions/checkout@"), "Deploying runs no other actions")
+        variables = step.get("env")
+        if not isinstance(variables, dict) or "uses" in step:
+            continue
+        for name, value in list(variables.items()):
+            if name in DEPLOY_SECRETS and value == "${{ secrets.%s }}" % name:
+                del variables[name]
+            elif name == "DSWT_REGISTRY_TOKEN" and value == "${{ github.token }}":
+                del variables[name]
     workflow(reviewed)
 
 
@@ -129,6 +175,8 @@ def audit(root):
         loaded = yaml.load(data, Loader=WorkflowLoader)
         if path.name == PUBLISHER:
             publisher(loaded)  # Never a required PR check: it does not run on pull requests.
+        elif path.name == DEPLOYER:
+            deployer(loaded)  # Neither is this one.
         else:
             names.extend(workflow(loaded))
         files[path.name] = hashlib.sha256(data).hexdigest()

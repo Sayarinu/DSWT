@@ -81,6 +81,9 @@ class WorkflowTests(unittest.TestCase):
         changes = [
             lambda d: d.update(on="pull_request"),
             lambda d: d.update(on=["push", "workflow_dispatch"]),
+            lambda d: d.update(on="workflow_dispatch"),
+            lambda d: d["on"].update(push=""),
+            lambda d: d["on"].update(workflow_call={"secrets": {"TOKEN": {"required": "true"}}}),
             lambda d: d.update(permissions={"contents": "write"}),
             lambda d: job(d).pop("if"),
             lambda d: job(d).update({"if": "always()"}),
@@ -100,6 +103,58 @@ class WorkflowTests(unittest.TestCase):
                 change(data)
                 with self.assertRaises(ValueError):
                     policy.publisher(data)
+
+    def test_deployer_may_only_read_listed_secrets_in_production_from_main(self):
+        real = policy.yaml.load((ROOT / ".github/workflows/deploy.yml").read_text(), Loader=policy.WorkflowLoader)
+        policy.deployer(real)
+        job = lambda d: d["jobs"]["deploy"]
+        step = lambda d, name: next(item for item in job(d)["steps"] if item.get("name") == name)
+        changes = [
+            lambda d: d["on"].update(pull_request=""),
+            lambda d: d["on"].update(pull_request_target=""),
+            lambda d: d.update(on=["push", "workflow_dispatch"]),
+            lambda d: d["on"].update(push={"branches": ["main", "release"]}),
+            lambda d: d["on"].update(push=""),
+            lambda d: d["on"].update(workflow_run={"workflows": ["Validate source inputs"]}),
+            lambda d: d.pop("concurrency"),
+            lambda d: d.update(permissions={"contents": "write"}),
+            lambda d: job(d).pop("environment"),
+            lambda d: job(d).update(environment="staging"),
+            lambda d: job(d).update(environment={"name": "production"}),
+            lambda d: job(d).pop("needs"),
+            lambda d: job(d).pop("concurrency"),
+            lambda d: job(d)["concurrency"].update({"cancel-in-progress": "true"}),
+            lambda d: job(d).pop("if"),
+            lambda d: job(d).update({"if": "github.ref == 'refs/heads/main'"}),
+            lambda d: job(d).update(permissions={"contents": "read", "packages": "write"}),
+            lambda d: job(d).update(permissions={"contents": "write", "packages": "read"}),
+            lambda d: job(d).update(permissions={"contents": "read", "packages": "read", "id-token": "write"}),
+            lambda d: job(d).pop("permissions"),
+            lambda d: job(d).update({"runs-on": "self-hosted"}),
+            lambda d: job(d).update(secrets="inherit"),
+            lambda d: job(d).update(env={"KEY": "${{ secrets.DSWT_SSH_KEY }}"}),
+            lambda d: step(d, "Write deploy credentials")["env"].update(EXTRA="${{ secrets.HETZNER_API_TOKEN }}"),
+            lambda d: step(d, "Write deploy credentials")["env"].update(HETZNER_API_TOKEN="${{ secrets.HETZNER_API_TOKEN }}"),
+            lambda d: step(d, "Write deploy credentials")["env"].update(DSWT_SSH_KEY="${{ secrets.DSWT_BACKUPS_KEY }}"),
+            lambda d: step(d, "Write deploy credentials")["env"].update(DSWT_SSH_KEY="${{ toJSON(secrets) }}"),
+            lambda d: step(d, "Write deploy credentials").update(run="echo '${{ secrets.DSWT_SSH_KEY }}'"),
+            lambda d: step(d, "Deploy")["env"].update(OTHER="${{ github.token }}"),
+            lambda d: job(d)["steps"].insert(1, {"uses": "someone/action@" + "1" * 40, "env": {"DSWT_SSH_KEY": "${{ secrets.DSWT_SSH_KEY }}"}}),
+            lambda d: job(d)["steps"].insert(1, {"uses": "someone/action@" + "1" * 40}),
+            lambda d: job(d)["steps"][0].update(uses="actions/checkout@v4"),
+            lambda d: job(d)["steps"][0]["with"].update({"persist-credentials": "true"}),
+            lambda d: d["jobs"]["publish"].update(secrets="inherit"),
+            lambda d: d["jobs"]["publish"].update(uses="./.github/workflows/other.yml"),
+            lambda d: d["jobs"]["publish"].update(permissions={"contents": "write", "packages": "write"}),
+            lambda d: d["jobs"]["publish"].pop("if"),
+            lambda d: d["jobs"].update(second=copy.deepcopy(job(d))),
+        ]
+        for index, change in enumerate(changes):
+            with self.subTest(case=index):
+                data = copy.deepcopy(real)
+                change(data)
+                with self.assertRaises(ValueError):
+                    policy.deployer(data)
 
     def test_duplicate_merged_and_recursive_yaml_are_refused(self):
         for text in (WORKFLOW + "permissions: {contents: write}\n", "jobs: {<<: {test: unsafe}}", "jobs: {test: &job {copy: *job}}"):

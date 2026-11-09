@@ -1,0 +1,111 @@
+name: Deploy to production
+
+# Every push to main publishes its images and deploys them to the VPS.
+# Only the deploy job, in the production environment, can read secrets, and it
+# can only read source and packages. tools/local-stack/policy.py holds this file
+# to those rules.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, in push order. A newer push replaces a waiting one.
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish images
+    if: github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-images.yml
+
+  deploy:
+    name: Deploy to the VPS
+    if: github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Write deploy credentials
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_ALERT_USER_ID: ${{ secrets.DISCORD_ALERT_USER_ID }}
+          DSWT_BACKUP_PASSWORD: ${{ secrets.DSWT_BACKUP_PASSWORD }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          DSWT_BACKUPS_KEY: ${{ secrets.DSWT_BACKUPS_KEY }}
+          DSWT_CONNECTION_JSON: ${{ secrets.DSWT_CONNECTION_JSON }}
+          DSWT_KNOWN_HOSTS: ${{ secrets.DSWT_KNOWN_HOSTS }}
+          DSWT_SSH_KEY: ${{ secrets.DSWT_SSH_KEY }}
+        run: |
+          umask 077
+          python3 - <<'PYTHON'
+          import hashlib, json, os
+          from pathlib import Path
+
+          def secret(name):
+              value = os.environ.get(name, "").strip()
+              if not value:
+                  raise SystemExit(f"The production environment has no {name}")
+              return value
+
+          # rclone's R2 secret is derived from DSWT_BACKUPS_KEY, so GitHub cannot know to hide it.
+          print("::add-mask::" + hashlib.sha256(secret("DSWT_BACKUPS_KEY").encode()).hexdigest())
+          key = secret("DSWT_SSH_KEY")
+          for line in key.splitlines():
+              if line.strip() and not line.startswith("-----"):
+                  print("::add-mask::" + line.strip())
+
+          lines = []
+          for name in ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID",
+                       "DSWT_BACKUPS_KEY"):
+              value = secret(name)
+              if "\n" in value or "\r" in value:
+                  raise SystemExit(f"{name} must be a single line")
+              lines.append(f"{name}={value}\n")
+          env = Path(".env")
+          env.write_text("".join(lines))
+          env.chmod(0o600)
+
+          profile = secret("DSWT_CONNECTION_JSON")
+          if not {"hostname", "ipv4", "port", "current_spki_sha256"} <= json.loads(profile).keys():
+              raise SystemExit("DSWT_CONNECTION_JSON is not a ROM profile")
+          tls = Path("game/dswt-production/tls")
+          tls.mkdir(mode=0o700, parents=True)
+          (tls / "connection.json").write_text(profile + "\n")
+
+          ssh = Path(os.environ["RUNNER_TEMP"]) / "dswt-deploy"
+          ssh.mkdir(mode=0o700)
+          (ssh / "id_ed25519").write_text(key + "\n")
+          (ssh / "known_hosts").write_text(secret("DSWT_KNOWN_HOSTS") + "\n")
+          for path in ssh.iterdir():
+              path.chmod(0o600)
+          PYTHON
+          test -z "$(git status --porcelain)"
+      - name: Deploy
+        env:
+          DSWT_REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          python3 deploy/dswt.py deploy --ssh-key "$RUNNER_TEMP/dswt-deploy/id_ed25519" \
+            --known-hosts "$RUNNER_TEMP/dswt-deploy/known_hosts"
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/dswt-deploy" .env game/dswt-production

@@ -1,9 +1,11 @@
 name: Publish service images
 
-# Run by hand, from main only. It can write packages and nothing else, and it
-# publishes the exact bytes the audit checked. Nothing here can reach the server.
-# tools/local-stack/policy.py holds this file to those rules.
-on: workflow_dispatch
+# Run by hand or by deploy.yml, from main only. It can write packages and nothing
+# else, and it publishes the exact bytes the audit checked. Nothing here can reach
+# the server. tools/local-stack/policy.py holds this file to those rules.
+on:
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
