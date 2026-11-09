@@ -174,10 +174,15 @@ def restore_check():
 
 
 class Target:
-    def __init__(self, ssh_key, known_hosts=None):
+    def __init__(self, ssh_key, known_hosts=None, ssh_host=None):
         self.profile = json.loads((LOCAL / "tls/connection.json").read_text())
-        self.address = f"{REMOTE_USER}@{self.profile['ipv4']}"
+        if ssh_host and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", ssh_host):
+            raise ValueError("The SSH host must be a hostname or IPv4 address")
+        self.address = f"{REMOTE_USER}@{ssh_host or self.profile['ipv4']}"
         self.ssh = ["ssh", "-i", str(ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"]
+        if ssh_host:
+            # Another route to the same server, such as its tailnet address: check the host key recorded for the ROM's.
+            self.ssh += ["-o", f"HostKeyAlias={self.profile['ipv4']}"]
         if known_hosts:
             # Trust only the keys in this file, never one seen for the first time.
             self.ssh += ["-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
@@ -405,6 +410,8 @@ def main():
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
     parser.add_argument("--known-hosts", type=Path, help="trust only the server keys in this file")
+    parser.add_argument("--ssh-host", default=os.environ.get("DSWT_SSH_HOST"),
+                        help="reach SSH at this address instead of the ROM's (default: $DSWT_SSH_HOST)")
     parser.add_argument("--build", action="store_true", help="deploy: build images here instead of pulling published ones")
     args, extra = parser.parse_known_args()
     if extra and args.action != "terraform":
@@ -422,7 +429,7 @@ def main():
             base, restored = restore_check()
             print(f"Restored from R2 using base {base}: {restored}")
             return 0
-        target = Target(args.ssh_key, args.known_hosts)
+        target = Target(args.ssh_key, args.known_hosts, args.ssh_host)
         if args.action == "deploy":
             version = source_version()
             (build_images if args.build else pull_images)(version)

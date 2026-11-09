@@ -70,6 +70,34 @@ class DeployTests(unittest.TestCase):
         self.assertIn("UserKnownHostsFile=/run/known_hosts", strict)
         self.assertIn("GlobalKnownHostsFile=/dev/null", strict)
 
+    def test_ssh_host_changes_only_the_destination_and_keeps_the_host_key(self):
+        default = dswt.Target(Path("/keys/deploy"), Path("/run/known_hosts"))
+        self.assertEqual(default.address, "dswt@192.0.2.1")
+        self.assertFalse([option for option in default.ssh if option.startswith("HostKeyAlias")])
+        routed = dswt.Target(Path("/keys/deploy"), Path("/run/known_hosts"), "dswt-server.example.ts.net")
+        self.assertEqual(routed.address, "dswt@dswt-server.example.ts.net")
+        options = routed.ssh[:]
+        alias = options.index("HostKeyAlias=192.0.2.1")
+        self.assertEqual(options.pop(alias - 1), "-o")
+        options.remove("HostKeyAlias=192.0.2.1")
+        self.assertEqual(options, default.ssh)
+        self.assertEqual(routed.profile["ipv4"], "192.0.2.1")
+        self.assertEqual(dswt.Target(Path("/keys/deploy"), None, "100.64.0.7").address, "dswt@100.64.0.7")
+        for host in ("-oProxyCommand=true", "host name", "host;true", "user@host", "fd7a:115c:a1e0::1"):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                dswt.Target(Path("/keys/deploy"), None, host)
+
+    def test_ssh_host_comes_from_the_flag_or_the_environment(self):
+        for arguments, environment, expected in ((["--ssh-host", "100.64.0.7"], {}, "100.64.0.7"),
+                                                 ([], {"DSWT_SSH_HOST": "dswt-server"}, "dswt-server"),
+                                                 ([], {}, None)):
+            with self.subTest(arguments=arguments), mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch("sys.argv", ["dswt.py", "verify", *arguments]), \
+                    mock.patch.object(dswt, "Target", side_effect=Stop) as target:
+                with self.assertRaises(Stop):
+                    dswt.main()
+                self.assertEqual(target.call_args.args[2], expected)
+
     def test_served_certificate_must_exist_and_match_the_profile(self):
         self.assertEqual(self.target(self.pem).served_certificate(), self.pem)
         with self.assertRaisesRegex(RuntimeError, "no TLS certificate"):
