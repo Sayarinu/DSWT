@@ -1,142 +1,129 @@
+<div align="center">
+
 # DSWT
 
-This project aims to patch Pokémon Platinum with Wonder Trade support and run a
-custom Wonder Trade server.
+**Wonder Trade for Pokémon Platinum.**
 
-The [ROM compatibility and patch contract](patches/README.md) records verified
-inputs and pending targets. No Wonder Trade patch has been released yet.
+DSWT is a patch for your own copy of Pokémon Platinum that adds Wonder Trade to
+the X menu, plus the server that runs it. Offer a party Pokémon, keep playing,
+and come back later to collect whatever another player sent. Trades are checked
+for legality and are designed to survive dropped connections and crashes.
 
-## Build the game ROM
+[![CI](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Project additions and the integration patch are in [`client`](client). The
-upstream game source and build inputs stay in an ignored local workspace.
-The build script prepares pinned source automatically; see
-[`client/UPSTREAM.md`](client/UPSTREAM.md) for provenance and local-edit handling.
+[Features](#features) · [Getting the patch](#getting-the-patch) · [How it works](#how-it-works) · [FAQ](#faq) · [Contributing](#contributing)
 
-The simplest build uses Docker and does not install the cross-compiler on your
-host. Local preparation requires Python 3.12 or newer; set `PYTHON=python3.12`
-when needed to select a separately installed interpreter. Docker uses
-`linux/amd64` for the ROM toolchain, including on Apple Silicon.
-First create a local public endpoint/pins profile using the
-[secure connection test guide](client/tests/README.md), then pass its path:
+</div>
+
+---
+
+## Features
+
+- **Wonder Trade from the X menu.** Pick a party Pokémon and confirm. It waits on
+  the server while you keep playing.
+- **Collect when you're ready.** Choose **Collect result** to receive your match,
+  or **Cancel offer** before a match to get your Pokémon back.
+- **Trade evolutions** happen when you collect, as in a normal trade.
+- **Legality checks.** The server screens every offer with
+  [PKHeX.Core](https://github.com/kwsch/PKHeX) and returns rejected Pokémon to you.
+- **Built for interruptions.** Every step of a trade is saved, so a lost
+  connection resumes the same trade instead of losing or duplicating a Pokémon.
+- **Secure connection.** The game talks to the server over TLS with a pinned
+  server key; no plaintext fallback.
+- **Optional durable emulator build.** A [patched melonDS](emulator/README.md)
+  for Linux also protects trades against emulator or host crashes.
+
+## Getting the patch
+
+No patch has been released yet. When one is, it will be a bundle with one BPS
+patch per supported ROM, installation instructions and a `manifest.json` of
+checksums. You apply it to your own copy of the game; **DSWT never distributes
+ROMs.**
+
+Supported today:
+
+| Game | Revisions | Emulator |
+| --- | --- | --- |
+| Pokémon Platinum, US English | Rev 0 and Rev 1 | melonDS 1.1 |
+
+Europe and physical DS hardware are not supported yet. You need a full,
+decrypted dump; check yours with:
 
 ```sh
-WONDER_TRADE_PROFILE=game/device-test/connection.json ./scripts/build-rom.sh
+python3 scripts/identify-rom.py /path/to/platinum.nds
 ```
 
-The output is `game/pokeplatinum/build/pokeplatinum.us.nds`. To select North
-American revision 0, run `ROM_REVISION=0 ./scripts/build-rom.sh`. The image
-definition is in `tools/rom-builder/Dockerfile`. This project script builds the
-modified ROM. To reproduce and check the unmodified US baseline, run
-`./scripts/build-rom.sh --pristine` (also accepts `ROM_REVISION=0`). This uses
-`game/pokeplatinum-pristine/` and runs all upstream pristine checksum checks.
-Both build modes default to one compiler job; set `ROM_BUILD_JOBS=2` (a positive
-integer without leading zeros) to opt into parallel compilation. Serial builds
-avoid the compiler failures observed with parallel macOS Docker builds.
-ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
+- [Install and trade guide](patches/INSTALL.md): what players do with a released bundle.
+- [ROM compatibility](patches/README.md): the verified inputs and the bundle contract.
+- [BPS patch tooling](tools/bps-patch/README.md): build and apply patches locally (Python and Docker).
+- [Building from source](docs/building.md): build the patched ROM yourself.
 
-## Server ledger
+## How it works
 
-`docker build -f server/Dockerfile -t dswt-server .` builds the C++ server and runs its
-tests, including a disposable PostgreSQL 16 cluster with synthetic data.
-The [private image audit](tools/image-audit/README.md) checks local OCI artifacts,
-source/notices, SBOMs and scan findings without publishing them.
-Final trading remains gated on off-site recovery. The image also contains an operator tool:
+The DS cannot speak gRPC, so the game sends small fixed-layout frames over HTTPS
+to a gateway. Everything behind the gateway talks gRPC on a private network, and
+only HTTPS is exposed.
 
-```sh
-dswt-ledger migrate /usr/local/share/dswt/migrations
-dswt-ledger verify
+```text
+ Patched Platinum (melonDS)
+            │  HTTPS POST /wt/v1, TLS 1.2 with a pinned key
+            ▼
+ HTTPS gateway (C++) ──gRPC──► Trade backend (C++) ──gRPC──► Legality validator
+                                      │                      (.NET, PKHeX.Core)
+                                      ▼
+                   Matcher (C++) ──► PostgreSQL 16 ledger ──► off-site backups
+
+ Prometheus and Grafana monitor the services; critical alerts go to Discord.
 ```
 
-Configure its database with libpq's `PGSERVICE`/`PGPASSFILE` settings or the
-`DSWT_DATABASE_URL` environment variable; keep credentials outside Git.
-Run migrations as the database owner. They are transactional, ordered and
-checksum-verified. Replay uses a consistent snapshot and temporary row images;
-it checks live state without repairing it. Audit evidence includes private
-verifiers and payloads and stays in the database/backups; the tool prints counts
-and SQLSTATE errors. Local WAL durability does not satisfy the off-site recovery
-barrier required before final trade responses.
+- [Wire protocol](protocol/README.md): the DS message layout and recovery rules.
+- [Operating the services](docs/operations.md): configuration, limits and telemetry.
+- [Deployment](deploy/README.md): Docker Compose on a single VPS.
 
-`dswt-backend` serves enrollment/trading on loopback with
-`DSWT_DATABASE_URL` and the pinned `WT_LEGALITY_POLICY`; the validator
-defaults to `127.0.0.1:50052`. Operations stay `PROCESSING` until their WAL is
-archived, read from `pg_stat_archiver`. That is only sound with
-[`server/wal-archive.sh`](server/wal-archive.sh) as `archive_command`: it refuses
-gaps, so the archive stays a contiguous prefix on independently recoverable
-storage. Nothing ships until its `init` and a base backup are done and it is
-armed, so the barrier cannot open without a restorable start. The backend's database role needs `EXECUTE`
-on `pg_switch_wal()`. It forces WAL out only while a request waits on the open
-segment, with no backlog and no archive failure. Its database URL must use a
-socket path or IP address, because a hostname keeps the barrier closed.
+## FAQ
 
-`dswt-matcher` pairs queued offers, using the same database URL rules and
-barrier. It opens no matcher port. `WT_MATCHER_WORKERS` sets 1 to 8 workers
-(default 1), and replicas are safe because a database lock serializes each pair.
+**Do you provide the game?**
+No. DSWT ships no ROMs, BIOS files, saves or game assets. You patch a copy of a
+game you own.
 
-For the HTTPS gateway, set `WT_TRADE_TARGET=127.0.0.1:50053` and provide
-`WT_TLS_CERTIFICATE` / `WT_TLS_PRIVATE_KEY` file paths outside Git. Without TLS,
-`POST /wt/v1` is refused. Keep every internal service in the same private network
-namespace; only HTTPS may be exposed. The gateway bounds connections to 1,024,
-with separate four-worker submission and recovery pools. Admission budgets are:
+**Is my save uploaded?**
+No. The server stores a random ID for your save, a hash-protected credential,
+the Pokémon you trade with their trainer details, and trade history, to prove
+ownership and recover trades. See [Privacy](patches/INSTALL.md#privacy).
 
-| Resource | Total concurrent/queued | Per key concurrent | Burst / refill per second |
-| --- | ---: | ---: | ---: |
-| Gateway connections | 1,024 | 64 | 128 / 64 |
-| Gateway enrollment/submission jobs | 8 | 4 | 64 / 32 |
-| Gateway status/cancel/collect/ack/reconcile jobs | 16 | 8 | 256 / 128 |
-| Backend enrollment/submission calls | 4 | 2 | 16 / 4 |
-| Backend recovery calls | 8 | 2 | 64 / 16 |
+**What happens if the server is down?**
+Your offered Pokémon stays safely in escrow. Choose Retry later; the game keeps
+your place.
 
-Each network may also enroll 16 distinct saves a day, and the gateway allows 200 new
-enrollments an hour overall (`WT_ENROLLMENTS_PER_NETWORK`, `WT_ENROLLMENTS_PER_HOUR`). Repeating a request costs nothing more.
-Saves stay in the immutable ledger once enrolled, so these limits apply before anything is written.
+**Can I use save states or restore an old save?**
+Don't. The server tracks each save's progress, so an older copy stops at
+verification and can lose access to its pending trade.
 
-Gateway keys use the direct IPv4 peer or IPv6 /64; forwarded headers do not
-override them. Backend identity budgets admit only verified credentials, with a
-separate global concurrency lease held throughout each request. Each budget
-holds at most 4,096 keys, evicts inactive keys older than 60 seconds under pressure
-and rejects new keys when full. Limits are per process; account
-for all replicas in database/validator/node capacity and complete the soak gate
-before production. These limits are resource bounds, not throughput guarantees.
+**Can I run my own server?**
+Yes. The server address and key pins are built into the ROM, so you build your
+own patched ROM for your server. See [Deployment](deploy/README.md) and
+[Building from source](docs/building.md).
 
-## Deployment
+## Contributing
 
-[`deploy/README.md`](deploy/README.md) runs DSWT on a VPS with Docker Compose.
+Bug reports and pull requests are welcome. Open an
+[issue](https://github.com/Sayarinu/DSWT/issues) first, then read
+[AGENTS.md](AGENTS.md) for the repository layout, local checks and branch,
+commit and pull request rules. It applies to people and coding agents alike.
 
-## Private telemetry
+## License
 
-Set `WT_METRICS_PORT` to a nonzero port to enable `GET /metrics` on IPv4 loopback;
-zero (the default) disables export. The local stack uses gateway port 9091 and
-backend port 9092 inside their shared namespace, publishing only HTTPS 8443.
-The game endpoint never serves metrics. Scrapes have 1 KiB headers, no body,
-two-second I/O deadlines and at most sixteen concurrent connections.
+Original DSWT work is under the [MIT License](LICENSE). The legality validator
+in [`validator/`](validator/) is GPL-3.0-or-later, and the melonDS patch in
+[`emulator/`](emulator/) carries melonDS's GPL; their own notices apply. Neither
+license covers the game, its assets or other third-party components. See
+[NOTICE](NOTICE) and [`licensing/`](licensing/).
 
-Prometheus labels are fixed service, operation and result enums. Request,
-operation and trade IDs appear only as bounded hexadecimal correlation fields
-in JSON stderr logs. Credentials, save IDs, hints, trainer/device information,
-Pokémon data and payload hashes are excluded. Dropped log records are counted;
-ownership evidence remains in the protected PostgreSQL ledger.
+## Disclaimer
 
-The backend independently samples aggregate queue/delivery counts, ages,
-matches, completed pairs and database health every five seconds through a
-read-only connection with a one-second client connect deadline, 500 ms client
-query deadline and 250 ms server statement timeout. Sampling requires a Unix
-socket, numeric host or explicit numeric `hostaddr`; DNS/service discovery
-configurations report unavailable to keep observation and shutdown bounded.
-Migration 0003 timestamps new audit records without changing ownership images
-or replay. Pre-existing records retain unknown times: affected ages are `NaN`
-with explicit unknown-age counts. Database outages also produce unknown gauges.
-Matched pairs, pairs with both sides acknowledged and acknowledged offers are
-separate gauges. RPC latency excludes Wi-Fi/TLS establishment and HTTP queue
-wait; use client timings for capacity acceptance.
-
-Restrict collector/dashboard access and apply seven-day log and fifteen-day
-metric retention in the storage layer. Operational telemetry cannot authorize
-delivery or replace retained ownership/recovery evidence.
-
-## Upstream source
-
-The pinned upstream revision is recorded in [`client/UPSTREAM.md`](client/UPSTREAM.md).
-Filtered project history preserves the original authors, dates and messages;
-[`licensing/migration.json`](licensing/migration.json) records the source boundary
-and commit mapping. The complete original repository remains private.
+DSWT is an independent, unofficial fan project. It is not affiliated with,
+endorsed by or sponsored by Nintendo, Game Freak, Creatures or The Pokémon
+Company. Pokémon and Nintendo DS are trademarks of their respective owners.
+This repository and its releases contain no ROMs, BIOS files, saves or original
+game assets.

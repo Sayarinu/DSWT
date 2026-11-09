@@ -92,10 +92,10 @@ Then open `http://localhost:3000` and log in as `admin`, with the password from
 `docker compose -p dswt logs SERVICE` in `/opt/dswt`.
 
 Critical alerts go to Discord and ping `DISCORD_ALERT_USER_ID`. `deploy` installs that and
-`DISCORD_WEBHOOK_URL` from the ignored `.env` into `/opt/dswt/secrets/`. To change them, edit `.env` and deploy. Nothing alerts if the server
-or Prometheus itself is down, so use an outside uptime check before public launch.
+`DISCORD_WEBHOOK_URL` from the ignored `.env` into `/opt/dswt/secrets/`. To change them, edit `.env` and deploy.
 
-## Before public launch
+## Known limitations
 
+- Nothing alerts if the server or Prometheus itself is down. Use an outside uptime check.
 - The local WAL archive grows until the next `deploy` or `tidy`. `DiskPressure` warns at 15%
   free.

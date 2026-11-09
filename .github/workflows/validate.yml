@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  build-rom:
+  source-inputs:
     name: Validate source inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 45

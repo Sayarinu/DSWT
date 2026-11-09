@@ -58,6 +58,10 @@
       "category": "project-documentation"
     },
     {
+      "path": "docs",
+      "category": "project-documentation"
+    },
+    {
       "path": "licensing",
       "category": "licensing-record"
     },

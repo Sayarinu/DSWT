@@ -1,6 +1,6 @@
-# Private local candidate
+# Local release candidate
 
-Assemble, audit and bind evidence to a private US Rev 0/1 candidate. Every
+Assemble, audit and bind evidence to a local US Rev 0/1 candidate. Every
 output stays under ignored `game/`; `publication_permitted` is always false.
 Nothing here releases, uploads, deploys or changes repository visibility.
 

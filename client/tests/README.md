@@ -26,9 +26,6 @@ service IP needs a new profile/build. No deployment authority is in the profile.
 
 ## Two-save emulator trade test
 
-The [local acceptance record](acceptance.md) distinguishes actual ROM scenarios
-from host/native tests and lists the remaining release gates.
-
 Start the real local services with Docker Compose and Python 3.9 or newer:
 
 ```sh

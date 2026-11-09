@@ -24,6 +24,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
 | `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
+| `docs/` | Building from source and operating the services |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS ([`deploy/README.md`](deploy/README.md)) |
 | `patches/` | ROM compatibility contract and player install guide |
 | `scripts/` | ROM build, workspace preparation, TLS and contribution tooling |

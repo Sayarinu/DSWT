@@ -5,8 +5,6 @@ file inventory and publication allowlist are in licensing/redistribution.json.
 It does not license the imported game, assets, SDKs, compiler binaries, or
 third-party components; their existing rights and notices remain applicable.
 
-Keep this repository private until the publication audit is complete. The
-original combined repository and excluded history remain private.
 New files, copied code, dependencies and generated artifacts require their own
 review before public distribution. A patch extension is not rights clearance.
 
