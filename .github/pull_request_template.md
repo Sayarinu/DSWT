@@ -1,8 +1,7 @@
 Ticket: ABC-123
-Tracker automation: ignore ABC-123.
-<!-- Add an ignore directive for each additional private ticket you mention. -->
+<!-- Use your branch name: the ticket ID, such as ABC-123. -->
 
-Describe the problem and resulting behavior.
+Describe the problem and the resulting behavior.
 
 Validation: list the relevant checks and results.
 

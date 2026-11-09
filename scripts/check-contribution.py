@@ -9,24 +9,24 @@ import subprocess
 import sys
 
 
+TICKET = r"[A-Z][A-Z0-9]*-[1-9][0-9]*"
+
+
 def check_pull_request(pr, subjects):
     ticket = pr["head"]["ref"]
-    if not re.fullmatch(r"[A-Z][A-Z0-9]*-[1-9][0-9]*", ticket):
-        return ["Use only the ticket identifier for the branch, such as ABC-123"]
+    if not re.fullmatch(TICKET, ticket):
+        return ["Name the branch exactly for its ticket, such as ABC-123"]
     errors = []
     for subject in subjects:
         if not subject.startswith(f"{ticket} - ") or not subject.removeprefix(f"{ticket} - ").strip():
             errors.append(f"Each new commit must use '{ticket} - Message'")
             break
     body = pr.get("body") or ""
+    if not re.search(rf"^Ticket:\s*{re.escape(ticket)}\s*$", body, re.MULTILINE):
+        errors.append(f"Fill in the PR template's 'Ticket: {ticket}' line")
     metadata = (pr.get("title") or "") + "\n" + body
-    key = ticket.rsplit("-", 1)[0]
-    referenced = {ticket, *re.findall(rf"\b{re.escape(key)}-[1-9][0-9]*\b", metadata, re.IGNORECASE)}
-    for reference in sorted(referenced):
-        if not re.search(rf"\b(?:ignore|skip)\s+{re.escape(reference)}\b", body, re.IGNORECASE):
-            errors.append(f"Use the PR template's tracker automation opt-out for {reference}")
     if re.search(r"linear\.app(?:[/\s]|$)", metadata, re.IGNORECASE):
-        errors.append("Keep private tracker URLs out of the PR; use the ticket identifier")
+        errors.append("Keep tracker URLs out of the PR; use the ticket identifier")
     return errors
 
 

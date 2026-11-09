@@ -13,35 +13,39 @@ spec.loader.exec_module(policy)
 
 
 class ContributionTests(unittest.TestCase):
-    def pr(self, ticket="ABC-123", body=None):
+    def pr(self, ticket="LUNE-123", body=None):
         return {
             "head": {"ref": ticket, "repo": {"fork": True}},
-            "body": body if body is not None else f"Ticket: {ticket}\nTracker automation: ignore {ticket}.",
+            "body": body if body is not None else f"Ticket: {ticket}\r\n\r\nFix recovery.",
         }
 
-    def test_ticket_keys_are_generic_and_forks_use_the_same_policy(self):
-        for ticket in ("ABC-123", "LUNE-299", "GAME2-7"):
+    def test_maintainer_and_github_issue_tickets_are_accepted_from_forks(self):
+        for ticket in ("ABC-123", "LUNE-299", "GH-42"):
             with self.subTest(ticket=ticket):
                 self.assertEqual(policy.check_pull_request(self.pr(ticket), [f"{ticket} - Fix recovery"]), [])
 
     def test_invalid_branches_and_shell_input_are_rejected(self):
-        for branch in ("feature/ABC-123", "ABC-123-description", "abc-123", "ABC-0", "ABC-123;echo unsafe"):
+        for branch in ("feature/LUNE-123", "LUNE-123-description", "lune-123", "abc-123", "GH-0", "ABC-0123",
+                       "GH-#42", "LUNE-123;echo unsafe"):
             with self.subTest(branch=branch):
                 self.assertTrue(policy.check_pull_request(self.pr(branch), [f"{branch} - Change"]))
 
     def test_every_new_commit_must_match_the_branch_ticket(self):
-        for subject in ("Other message", "DEF-5 - Wrong ticket", "ABC-123 -   "):
+        for subject in ("Other message", "LUNE-5 - Wrong ticket", "GH-123 - Wrong tracker", "LUNE-123 -   "):
             with self.subTest(subject=subject):
-                self.assertTrue(policy.check_pull_request(self.pr(), ["ABC-123 - Good", subject]))
+                self.assertTrue(policy.check_pull_request(self.pr(), ["LUNE-123 - Good", subject]))
 
-    def test_private_link_and_missing_automation_opt_out_are_rejected(self):
-        self.assertTrue(policy.check_pull_request(self.pr(body="Ticket: ABC-123"), ["ABC-123 - Change"]))
-        body = "ignore ABC-123\nhttps://" + "linear" + ".app/private/issue/ABC-123"
-        self.assertTrue(policy.check_pull_request(self.pr(body=body), ["ABC-123 - Change"]))
-        self.assertTrue(policy.check_pull_request(dict(self.pr(), title=body), ["ABC-123 - Change"]))
-        self.assertTrue(policy.check_pull_request(self.pr(body="ignore ABC-1234"), ["ABC-123 - Change"]))
-        self.assertTrue(policy.check_pull_request(self.pr(body="ignore ABC-123\nFollow-up: ABC-124"), ["ABC-123 - Change"]))
-        self.assertEqual(policy.check_pull_request(self.pr(body="ignore ABC-123\nignore ABC-124"), ["ABC-123 - Change"]), [])
+    def test_body_must_name_the_branch_ticket(self):
+        for body in ("", "Fix recovery.", "Ticket: ABC-123", "Ticket: LUNE-1234", "Ticket: GH-123"):
+            with self.subTest(body=body):
+                self.assertTrue(policy.check_pull_request(self.pr(body=body), ["LUNE-123 - Change"]))
+        body = "Ticket: LUNE-123\nFollow-up: LUNE-124 and GH-7"
+        self.assertEqual(policy.check_pull_request(self.pr(body=body), ["LUNE-123 - Change"]), [])
+
+    def test_linear_links_are_rejected(self):
+        link = "https://" + "linear" + ".app/team/issue/LUNE-123"
+        self.assertTrue(policy.check_pull_request(self.pr(body="Ticket: LUNE-123\n" + link), ["LUNE-123 - Change"]))
+        self.assertTrue(policy.check_pull_request(dict(self.pr(), title=link), ["LUNE-123 - Change"]))
 
     def test_local_inputs_and_build_outputs_are_blocked(self):
         for path in ("game/source.c", "release/game.NDS", "test/save.sav", "bios9.bin", ".env", "ops/state.tfstate.backup", ".aws/credentials"):
@@ -63,12 +67,12 @@ class ContributionTests(unittest.TestCase):
                 initial = "original.c" if renamed else "game/local.c"
                 (root / initial).write_text("synthetic local input\n")
                 git("add", ".")
-                git("commit", "--quiet", "-m", "ABC-123 - Add synthetic input")
+                git("commit", "--quiet", "-m", "LUNE-123 - Add synthetic input")
                 if renamed:
                     git("mv", "original.c", "game/local.c")
-                    git("commit", "--quiet", "-m", "ABC-123 - Rename synthetic input")
+                    git("commit", "--quiet", "-m", "LUNE-123 - Rename synthetic input")
                 git("rm", "--quiet", "game/local.c")
-                git("commit", "--quiet", "-m", "ABC-123 - Remove synthetic input")
+                git("commit", "--quiet", "-m", "LUNE-123 - Remove synthetic input")
                 result = subprocess.run(
                     ["python3", str(script)], cwd=root,
                     env=dict(os.environ, GITHUB_EVENT_NAME="push"), capture_output=True, text=True,
