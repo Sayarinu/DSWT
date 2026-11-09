@@ -1,8 +1,7 @@
-Ticket: ABC-123
-Tracker automation: ignore ABC-123.
-<!-- Add an ignore directive for each additional private ticket you mention. -->
+Ticket: LUNE-123 or GH-123
+<!-- Use your branch name. Without Linear access, open a GitHub issue and use GH-<issue number>. -->
 
-Describe the problem and resulting behavior.
+Describe the problem and the resulting behavior.
 
 Validation: list the relevant checks and results.
 
