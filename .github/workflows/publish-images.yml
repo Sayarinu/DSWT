@@ -60,9 +60,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Pruning is housekeeping: a package this repository can't manage must not block a deploy.
           for service in server validator; do
             versions="/users/$GITHUB_REPOSITORY_OWNER/packages/container/dswt-$service/versions"
-            gh api --paginate "$versions" --jq '.[].id' | tail -n +6 | while read -r id; do
-              gh api --method DELETE "$versions/$id"
+            if ! ids=$(gh api --paginate "$versions" --jq '.[].id'); then
+              echo "::warning title=Old versions kept::Could not list dswt-$service versions; link the package to this repository to prune them."
+              continue
+            fi
+            printf '%s\n' "$ids" | tail -n +6 | while read -r id; do
+              gh api --method DELETE "$versions/$id" || echo "::warning title=Old version kept::Could not delete dswt-$service version $id."
             done
           done
