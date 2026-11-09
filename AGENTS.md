@@ -94,7 +94,9 @@ docker build -f emulator/Dockerfile -t dswt-emulator-builder .
 ```
 
 CI also scans the full history with gitleaks and runs `git diff --check` on the
-pull request. The required check names are listed in
+pull request. Every push to `main` publishes images and deploys them to the VPS
+(`.github/workflows/deploy.yml`, see [`deploy/README.md`](deploy/README.md)), so
+only merge what is ready to serve players. The required check names are listed in
 `.github/repository-settings.json`; renaming a job means updating that file.
 
 ## Workflow

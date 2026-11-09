@@ -1,7 +1,8 @@
 # Deploying DSWT
 
-DSWT runs on one VPS with Docker Compose. `dswt.py` builds images on your machine,
-loads them onto the server, prepares the database and checks the public endpoint.
+DSWT runs on one VPS with Docker Compose. `dswt.py` loads the published images onto the
+server, prepares the database and checks the public endpoint. Every push to `main` runs it
+from CI; you can still run it by hand.
 
 Prepare the server first: Docker, a `dswt` user in the `docker` group, an empty
 `/opt/dswt` it owns, and a firewall allowing 443 from anyone and 22 from your address
@@ -36,15 +37,46 @@ To go back, deploy the older commit, and restore a dump if its schema needs it.
 
 ## Releasing
 
-1. Merge to `main` and wait for its checks.
-2. Run the **Publish service images** workflow on `main`. It builds, tests and audits both
-   images, then publishes those exact bytes to private GHCR packages, tagged with the
-   commit. Read the scan results in its summary. Audit evidence stays for 30 days.
-3. Update `main` here and run `deploy`. It needs `gh` signed in with `read:packages`
-   (`gh auth refresh -s read:packages`). The server holds no registry login.
+Merging to `main` deploys it. The **Deploy to production** workflow runs the **Publish service
+images** workflow for the commit, which builds, tests and audits both images and publishes
+those exact bytes to private GHCR packages tagged with the commit. Then its deploy job, in the
+`production` environment, runs `dswt.py deploy` for that commit. Read the scan results in the
+publish summary. Audit evidence stays for 30 days. Releases run one at a time in push order,
+and a newer push replaces one still waiting. Run the workflow by hand on `main` to redeploy.
+
+The deploy job reads only the `production` environment's secrets: the `.env` values `deploy` uses
+(`DISCORD_WEBHOOK_URL`, `DISCORD_ALERT_USER_ID`, `DSWT_BACKUP_PASSWORD`, `R2_ACCOUNT_ID`,
+`DSWT_BACKUPS_KEY`), `DSWT_CONNECTION_JSON` (`connection.json`), `DSWT_KNOWN_HOSTS` (the
+server's `known_hosts` lines) and `DSWT_SSH_KEY`, a key used only for deploys. It refuses any host
+key not in `DSWT_KNOWN_HOSTS`. It connects from a GitHub-hosted runner, so the SSH firewall rule
+must admit the runner. CI never holds `current.key`: it checks the certificate already on the server
+against the ROM pin instead, so the first deploy to a new server must run by hand. CI deletes its
+pre-migration dump with the runner, so only R2 keeps those copies for CI deploys.
+
+To deploy by hand, update `main` here and run `deploy` from a clean checkout. It needs `gh` signed
+in with `read:packages` (`gh auth refresh -s read:packages`). The server holds no registry login.
 
 To roll back, deploy the older commit from a clean worktree. GHCR keeps the newest five
 versions. `--build` builds on your machine instead, if GHCR is down or the commit is older.
+
+To rotate the deploy key, make a new one (`ssh-keygen -t ed25519 -N '' -f dswt-deploy`), add
+`dswt-deploy.pub` to `~dswt/.ssh/authorized_keys` on the server, replace `DSWT_SSH_KEY`, run the
+workflow, then remove the old line from `authorized_keys` and delete the local copy. If the server's
+host key changes, replace `DSWT_KNOWN_HOSTS` after checking the new key at the provider's console.
+
+### When a deploy fails
+
+Nothing rolls back automatically. What is left depends on where it stopped:
+
+- Before anything reaches the server (publishing, credentials, pulling images): nothing changes.
+- Loading images or syncing files: the previous release keeps serving, but `/opt/dswt` may
+  already hold the new Compose file, configuration, secrets and `DSWT_VERSION`.
+- Starting: the application services stop first, so trading is down until a deploy succeeds.
+  If the backup fails, nothing was migrated. A failed migration rolls back in its transaction.
+  Fix and redeploy, or deploy the previous commit.
+- Verifying: the new release is running but unverified, and `tidy` is skipped, keeping the old
+  WAL archive. Check it, then fix forward or deploy the previous commit.
+- Tidying: the new release is running and verified. Run `tidy` again.
 
 ## Off-site backups
 
@@ -56,7 +88,8 @@ R2 keeps 30 days of base backups, always including the newest, plus the WAL they
 
 `.env` needs `R2_ACCOUNT_ID`, `DSWT_BACKUPS_KEY` (limited to that bucket) and
 `DSWT_BACKUP_PASSWORD`. **Keep a copy of that password outside this machine.** Without it the
-backups cannot be read. The key expires 2027-11-05: replace it in `.env` and deploy before then.
+backups cannot be read. The key expires 2027-11-05: replace it in `.env` and in the `production`
+environment, and deploy before then.
 
 `python3 deploy/dswt.py restore-check` rebuilds the ledger from R2 alone in throwaway volumes and
 prints what it holds. Run it after changing this setup, and from time to time.
@@ -92,7 +125,8 @@ Then open `http://localhost:3000` and log in as `admin`, with the password from
 `docker compose -p dswt logs SERVICE` in `/opt/dswt`.
 
 Critical alerts go to Discord and ping `DISCORD_ALERT_USER_ID`. `deploy` installs that and
-`DISCORD_WEBHOOK_URL` from the ignored `.env` into `/opt/dswt/secrets/`. To change them, edit `.env` and deploy.
+`DISCORD_WEBHOOK_URL` from the ignored `.env` into `/opt/dswt/secrets/`. To change them, edit `.env`
+and the `production` environment, and deploy.
 
 ## Known limitations
 
