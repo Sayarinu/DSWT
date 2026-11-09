@@ -1,0 +1,131 @@
+name: Deploy to production
+
+# Each push to main that changes what runs on the VPS publishes its images and
+# deploys them, reaching SSH over Tailscale. Only the deploy job, in the
+# production environment, can read secrets, and it can only read source and
+# packages. tools/local-stack/policy.py holds this file to those rules.
+on:
+  push:
+    branches:
+      - main
+    # What the images, the synced server files or the deploy itself are made of.
+    paths:
+      - server/**
+      - validator/**
+      - LICENSE
+      - NOTICE
+      - deploy/**
+      - "!deploy/README.md"
+      - "!deploy/terraform/**"
+      - protocol/**
+      - .github/workflows/deploy.yml
+      - .github/workflows/publish-images.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, in push order. A newer push replaces a waiting one.
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish images
+    if: github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-images.yml
+
+  deploy:
+    name: Deploy to the VPS
+    if: github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # Joins the tailnet as an ephemeral tag:ci node, which may only reach the server's SSH.
+      - name: Join the tailnet
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Write deploy credentials
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_ALERT_USER_ID: ${{ secrets.DISCORD_ALERT_USER_ID }}
+          DSWT_BACKUP_PASSWORD: ${{ secrets.DSWT_BACKUP_PASSWORD }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          DSWT_BACKUPS_KEY: ${{ secrets.DSWT_BACKUPS_KEY }}
+          DSWT_CONNECTION_JSON: ${{ secrets.DSWT_CONNECTION_JSON }}
+          DSWT_KNOWN_HOSTS: ${{ secrets.DSWT_KNOWN_HOSTS }}
+          DSWT_SSH_KEY: ${{ secrets.DSWT_SSH_KEY }}
+        run: |
+          umask 077
+          python3 - <<'PYTHON'
+          import hashlib, json, os
+          from pathlib import Path
+
+          def secret(name):
+              value = os.environ.get(name, "").strip()
+              if not value:
+                  raise SystemExit(f"The production environment has no {name}")
+              return value
+
+          # rclone's R2 secret is derived from DSWT_BACKUPS_KEY, so GitHub cannot know to hide it.
+          print("::add-mask::" + hashlib.sha256(secret("DSWT_BACKUPS_KEY").encode()).hexdigest())
+          key = secret("DSWT_SSH_KEY")
+          for line in key.splitlines():
+              if line.strip() and not line.startswith("-----"):
+                  print("::add-mask::" + line.strip())
+
+          lines = []
+          for name in ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID",
+                       "DSWT_BACKUPS_KEY"):
+              value = secret(name)
+              if "\n" in value or "\r" in value:
+                  raise SystemExit(f"{name} must be a single line")
+              lines.append(f"{name}={value}\n")
+          env = Path(".env")
+          env.write_text("".join(lines))
+          env.chmod(0o600)
+
+          profile = secret("DSWT_CONNECTION_JSON")
+          if not {"hostname", "ipv4", "port", "current_spki_sha256"} <= json.loads(profile).keys():
+              raise SystemExit("DSWT_CONNECTION_JSON is not a ROM profile")
+          tls = Path("game/dswt-production/tls")
+          tls.mkdir(mode=0o700, parents=True)
+          (tls / "connection.json").write_text(profile + "\n")
+
+          ssh = Path(os.environ["RUNNER_TEMP"]) / "dswt-deploy"
+          ssh.mkdir(mode=0o700)
+          (ssh / "id_ed25519").write_text(key + "\n")
+          (ssh / "known_hosts").write_text(secret("DSWT_KNOWN_HOSTS") + "\n")
+          for path in ssh.iterdir():
+              path.chmod(0o600)
+          PYTHON
+          test -z "$(git status --porcelain)"
+      - name: Deploy
+        env:
+          DSWT_REGISTRY_TOKEN: ${{ github.token }}
+          DSWT_TAILNET_HOST: ${{ secrets.DSWT_TAILNET_HOST }}
+        run: |
+          DSWT_SSH_HOST="$DSWT_TAILNET_HOST" python3 deploy/dswt.py deploy --ssh-key "$RUNNER_TEMP/dswt-deploy/id_ed25519" \
+            --known-hosts "$RUNNER_TEMP/dswt-deploy/known_hosts"
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/dswt-deploy" .env game/dswt-production

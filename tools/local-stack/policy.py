@@ -10,6 +10,16 @@ import subprocess
 import yaml
 
 PUBLISHER = "publish-images.yml"
+DEPLOYER = "deploy.yml"
+MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
+DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
+                  "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
+# Everything the deployed images, the files synced to the server and the deploy itself are built from.
+DEPLOY_PATHS = ["server/**", "validator/**", "LICENSE", "NOTICE", "deploy/**", "!deploy/README.md", "!deploy/terraform/**",
+                "protocol/**", ".github/workflows/deploy.yml", ".github/workflows/publish-images.yml"]
+TAILSCALE = "tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c"
+TAILSCALE_INPUTS = {"oauth-client-id": "${{ secrets.TS_OAUTH_CLIENT_ID }}", "oauth-secret": "${{ secrets.TS_OAUTH_SECRET }}",
+                    "tags": "tag:ci"}
 
 
 class WorkflowLoader(yaml.BaseLoader):
@@ -91,6 +101,7 @@ def workflow(data):
                 continue
             require(isinstance(action, str) and re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-fA-F]{40}", action),
                     "Pin every action to a full commit")
+            require(not action.lower().startswith("tailscale/"), "Only the deploy job may join the tailnet")
             if action.lower().startswith("actions/checkout@"):
                 options = step.get("with", {})
                 require(isinstance(options, dict) and options.get("persist-credentials") == "false", "Disable persisted checkout credentials")
@@ -101,8 +112,9 @@ def workflow(data):
 
 
 def publisher(data):
-    """The one privileged workflow: run by hand, from main only, able to write packages and nothing else."""
-    require(data.get("on") == "workflow_dispatch", "Publishing must only run by hand")
+    """Run by hand or by the deployer, from main only, able to write packages and nothing else."""
+    require(data.get("on") == {"workflow_dispatch": "", "workflow_call": ""},
+            "Publishing must only run by hand or from the deploy workflow, without inputs or secrets")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and len(jobs) == 1, "Publishing needs exactly one job")
     job = next(iter(jobs.values()))
@@ -110,11 +122,60 @@ def publisher(data):
     require(job.get("permissions") == {"contents": "read", "packages": "write"}, "Publishing may only write packages")
     # What remains must satisfy every contribution rule, without the two exceptions granted here.
     reviewed = copy.deepcopy(data)
+    reviewed["on"] = "workflow_dispatch"
     job = next(iter(reviewed["jobs"].values()))
     del job["permissions"]
     for step in job.get("steps", []):
         if isinstance(step, dict) and isinstance(step.get("env"), dict) and step["env"].get("GH_TOKEN") == "${{ github.token }}":
             del step["env"]["GH_TOKEN"]
+    workflow(reviewed)
+
+
+def deployer(data):
+    """Publish then deploy each push to main. Only the production job may read secrets, and only these."""
+    require(data.get("on") == {"push": {"branches": ["main"], "paths": DEPLOY_PATHS}, "workflow_dispatch": ""},
+            "Deploying must only run on pushes to main that change the deployment, or by hand")
+    require(data.get("concurrency") == {"group": "production-release", "cancel-in-progress": "false"},
+            "Releases must run one at a time, in order")
+    jobs = data.get("jobs")
+    require(isinstance(jobs, dict) and set(jobs) == {"publish", "deploy"}, "Deploying needs exactly a publish and a deploy job")
+    require(jobs["publish"] == {"name": "Publish images", "if": MAIN_ONLY,
+                                "permissions": {"contents": "read", "packages": "write"},
+                                "uses": "./.github/workflows/" + PUBLISHER}, "Publish only through the reviewed publisher")
+    job = jobs["deploy"]
+    require(isinstance(job, dict) and job.get("if") == MAIN_ONLY, "Deploying must only run from main of this repository")
+    require(job.get("needs") == "publish", "Deploy only images published for this commit")
+    require(job.get("environment") == "production", "Secrets are only for the production environment")
+    require(job.get("concurrency") == {"group": "production-deploy", "cancel-in-progress": "false"},
+            "Deploys must never overlap or be cancelled midway")
+    require(job.get("permissions") == {"contents": "read", "packages": "read"}, "Deploying may only read source and packages")
+    # What remains must satisfy every contribution rule. Secrets may only be named whole in a step's env.
+    reviewed = copy.deepcopy(data)
+    del reviewed["jobs"]["publish"], reviewed["concurrency"]
+    job = reviewed["jobs"]["deploy"]
+    for key in ("if", "needs", "environment", "concurrency", "permissions"):
+        del job[key]
+    steps = job.get("steps") if isinstance(job.get("steps"), list) else []
+    # Tailscale joins once, with only its OAuth client and tag, before any step runs commands.
+    joins = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("uses") == TAILSCALE]
+    require(len(joins) == 1 and set(steps[joins[0]]) == {"name", "uses", "with"}
+            and steps[joins[0]]["with"] == TAILSCALE_INPUTS, "Join the tailnet once, only as tag:ci")
+    require(all(isinstance(step, dict) and "run" not in step for step in steps[:joins[0]]),
+            "Join the tailnet before running commands")
+    del steps[joins[0]]
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        # Checkout and the reviewed Tailscale step are the only actions beside the secrets.
+        require("uses" not in step or str(step["uses"]).startswith("actions/checkout@"), "Deploying runs no other actions")
+        variables = step.get("env")
+        if not isinstance(variables, dict) or "uses" in step:
+            continue
+        for name, value in list(variables.items()):
+            if name in DEPLOY_SECRETS and value == "${{ secrets.%s }}" % name:
+                del variables[name]
+            elif name == "DSWT_REGISTRY_TOKEN" and value == "${{ github.token }}":
+                del variables[name]
     workflow(reviewed)
 
 
@@ -129,6 +190,8 @@ def audit(root):
         loaded = yaml.load(data, Loader=WorkflowLoader)
         if path.name == PUBLISHER:
             publisher(loaded)  # Never a required PR check: it does not run on pull requests.
+        elif path.name == DEPLOYER:
+            deployer(loaded)  # Neither is this one.
         else:
             names.extend(workflow(loaded))
         files[path.name] = hashlib.sha256(data).hexdigest()

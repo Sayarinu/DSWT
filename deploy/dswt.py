@@ -46,6 +46,15 @@ def pin(key):
     return hashlib.sha256(public).hexdigest()
 
 
+def certificate_pin(certificate):
+    """The pin of the key a PEM certificate carries, as the ROM checks it."""
+    public = subprocess.run(["openssl", "x509", "-noout", "-pubkey"], input=certificate.encode(), capture_output=True,
+                            check=True).stdout
+    der = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"], input=public, capture_output=True,
+                         check=True).stdout
+    return hashlib.sha256(der).hexdigest()
+
+
 def create_keys(hostname, ipv4):
     """Create both pinned keys once. The ROM builds them in, so they are never replaced."""
     connection = load_module("connection", ROOT / "scripts/configure-connection.py")
@@ -165,10 +174,20 @@ def restore_check():
 
 
 class Target:
-    def __init__(self, ssh_key):
+    def __init__(self, ssh_key, known_hosts=None, ssh_host=None):
         self.profile = json.loads((LOCAL / "tls/connection.json").read_text())
-        self.address = f"{REMOTE_USER}@{self.profile['ipv4']}"
+        if ssh_host and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", ssh_host):
+            raise ValueError("The SSH host must be a hostname or IPv4 address")
+        self.address = f"{REMOTE_USER}@{ssh_host or self.profile['ipv4']}"
         self.ssh = ["ssh", "-i", str(ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"]
+        if ssh_host:
+            # Another route to the same server, such as its tailnet address: check the host key recorded for the ROM's.
+            self.ssh += ["-o", f"HostKeyAlias={self.profile['ipv4']}"]
+        if known_hosts:
+            # Trust only the keys in this file, never one seen for the first time.
+            self.ssh += ["-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
+                         "-o", "GlobalKnownHostsFile=/dev/null"]
+        self.certificate = None
 
     def run(self, script, capture=False, check=True):
         result = subprocess.run([*self.ssh, self.address, script], text=True, check=False,
@@ -210,13 +229,14 @@ class Target:
         subprocess.run(["rsync", "-t", "--chmod=F755", "-e", transport, f"{ROOT}/server/wal-archive.sh",
                         f"{ROOT}/deploy/backup-uploader.sh", f"{self.address}:{REMOTE}/"], check=True)
         # Only the current key goes to the server, and an installed key is never overwritten.
-        subprocess.run(["rsync", "-t", "--ignore-existing", "--chmod=F600", "-e", transport,
-                        str(LOCAL / "tls/current.key"), str(LOCAL / "tls/current.pem"),
-                        f"{self.address}:{REMOTE}/tls/"], check=True)
-        served = self.run(f"openssl x509 -in {REMOTE}/tls/current.pem -pubkey -noout | openssl pkey -pubin -outform DER"
-                          " | sha256sum", capture=True).stdout.split()[0]
-        if served != self.profile["current_spki_sha256"]:
-            raise RuntimeError("The server's certificate does not match the ROM profile")
+        # Without a local copy, as in CI, the server must already hold it.
+        tls = [LOCAL / "tls/current.key", LOCAL / "tls/current.pem"]
+        if any(path.exists() for path in tls):
+            if not all(path.exists() for path in tls):
+                raise ValueError("tls/current.key and tls/current.pem go to the server together")
+            subprocess.run(["rsync", "-t", "--ignore-existing", "--chmod=F600", "-e", transport,
+                            *(str(path) for path in tls), f"{self.address}:{REMOTE}/tls/"], check=True)
+        self.served_certificate()
         self.run(f"test -e {REMOTE}/secrets/grafana-admin-password || "
                  f"(umask 077; openssl rand -hex 32 > {REMOTE}/secrets/grafana-admin-password)")
         webhook = local_secret("DISCORD_WEBHOOK_URL")
@@ -242,6 +262,22 @@ class Target:
                                    "--entrypoint rclone backup-uploader obscure -"],
                                   input=password, text=True, check=True, stdout=subprocess.PIPE).stdout.strip()
         self.install_secret("rclone.conf", rclone_config(obscured))
+
+    def served_certificate(self):
+        """The server's certificate, refused unless it carries the key the ROM pins."""
+        served = self.run(f"cat {REMOTE}/tls/current.pem", capture=True, check=False)
+        if served.returncode or "BEGIN CERTIFICATE" not in served.stdout:
+            raise RuntimeError("The server has no TLS certificate. Deploy once from the machine holding tls/current.key")
+        if certificate_pin(served.stdout) != self.profile["current_spki_sha256"]:
+            raise RuntimeError("The server's certificate does not match the ROM profile")
+        return served.stdout
+
+    def pinned_certificate(self):
+        """The certificate the public endpoint must present: the local copy, or else the verified served one."""
+        if self.certificate is None:
+            local = LOCAL / "tls/current.pem"
+            self.certificate = local.read_text() if local.exists() else self.served_certificate()
+        return self.certificate
 
     def prepare_database(self):
         """Serve as an unprivileged owner, and start the archive chain from a base backup."""
@@ -299,7 +335,7 @@ class Target:
     def ready(self):
         """Ask the public endpoint for status over the only TLS suite the ROM offers."""
         wire = load_module("deploy_wire", ROOT / "protocol/wire.py")
-        context = ssl.create_default_context(cafile=str(LOCAL / "tls/current.pem"))
+        context = ssl.create_default_context(cadata=self.pinned_certificate())
         context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE-ECDSA-CHACHA20-POLY1305")
         request = wire.Request(wire.Operation.STATUS, os.urandom(16), b"\x02" * 16, b"\x03" * 32, 0, bytes(16))
@@ -339,12 +375,15 @@ def build_images(version):
 
 def pull_images(version):
     """Fetch the audited images. The login lasts for this call, and the server never holds one."""
-    token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+    # CI passes its own read-only token; here, gh's login is used.
+    token = os.environ.get("DSWT_REGISTRY_TOKEN") or subprocess.check_output(["gh", "auth", "token"], text=True).strip()
     host = subprocess.check_output(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("DOCKER_")}
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith("DOCKER_") and key != "DSWT_REGISTRY_TOKEN"}
     with tempfile.TemporaryDirectory(prefix="dswt-registry-") as config:
         docker = ["docker", "--config", config, "--host", host]
-        subprocess.run([*docker, "login", "ghcr.io", "--username", "token", "--password-stdin"], input=token, text=True,
+        user = os.environ.get("GITHUB_ACTOR", "token")
+        subprocess.run([*docker, "login", "ghcr.io", "--username", user, "--password-stdin"], input=token, text=True,
                        env=environment, check=True, stdout=subprocess.DEVNULL)
         for image in IMAGES:
             published = f"{REGISTRY}/{image}:{version}"
@@ -370,6 +409,9 @@ def main():
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
+    parser.add_argument("--known-hosts", type=Path, help="trust only the server keys in this file")
+    parser.add_argument("--ssh-host", default=os.environ.get("DSWT_SSH_HOST"),
+                        help="reach SSH at this address instead of the ROM's (default: $DSWT_SSH_HOST)")
     parser.add_argument("--build", action="store_true", help="deploy: build images here instead of pulling published ones")
     args, extra = parser.parse_known_args()
     if extra and args.action != "terraform":
@@ -387,7 +429,7 @@ def main():
             base, restored = restore_check()
             print(f"Restored from R2 using base {base}: {restored}")
             return 0
-        target = Target(args.ssh_key)
+        target = Target(args.ssh_key, args.known_hosts, args.ssh_host)
         if args.action == "deploy":
             version = source_version()
             (build_images if args.build else pull_images)(version)
