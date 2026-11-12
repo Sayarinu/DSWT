@@ -171,6 +171,51 @@ class PrepareGameTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
             prepare_game.prepare(self.root, name="hgss")
 
+    def test_diamond_and_pearl_sources_land_in_the_arm9_tree(self):
+        client = self.root / "client"
+        for name in ("src/wonder_trade/dp/game_save.c", "src/wonder_trade/hgss/game_save.c",
+                     "include/wonder_trade/dp/game_save.h", "files/msgdata/msg/msg_0829.json"):
+            (client / name).parent.mkdir(parents=True, exist_ok=True)
+            (client / name).write_text(name + "\n")
+        upstream = Path(self.temp.name) / "dp-upstream"
+        upstream.mkdir()
+        for name, text in {
+            "arm9/src/main.c": "original\n",
+            "pokediamond.us.sha1": "5" * 40 + "  build/diamond.us/pokediamond.us.nds\n",
+            "pokepearl.us.sha1": "6" * 40 + "  build/pearl.us/pokepearl.us.nds\n",
+        }.items():
+            (upstream / name).parent.mkdir(parents=True, exist_ok=True)
+            (upstream / name).write_text(text)
+        git = ["git", "-C", str(upstream)]
+        subprocess.check_call([*git, "init", "--quiet"])
+        subprocess.check_call([*git, "add", "."])
+        subprocess.check_call([*git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                               "commit", "--quiet", "-m", "Synthetic DP upstream"])
+        pin = {
+            "repository": str(upstream),
+            "revision": subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip(),
+            "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
+            "rom_sha1": {"diamond": "5" * 40, "pearl": "6" * 40},
+        }
+        (client / "upstream-pokediamond.json").write_text(json.dumps(pin))
+        (client / "pokediamond.patch").write_text(
+            "diff --git a/arm9/src/main.c b/arm9/src/main.c\n"
+            "--- a/arm9/src/main.c\n+++ b/arm9/src/main.c\n"
+            "@@ -1 +1 @@\n-original\n+patched\n"
+        )
+        dp = prepare_game.prepare(self.root, name="dp")
+        self.assertEqual(dp, self.root / "game/pokediamond")
+        self.assertEqual((dp / "arm9/src/main.c").read_text(), "patched\n")
+        self.assertEqual((dp / "arm9/src/wonder_trade/application.c").read_text(), "project addition\n")
+        self.assertEqual((dp / "arm9/src/wonder_trade/dp/game_save.c").read_text(), "src/wonder_trade/dp/game_save.c\n")
+        self.assertEqual((dp / "include/wonder_trade/dp/game_save.h").read_text(), "include/wonder_trade/dp/game_save.h\n")
+        for name in ("src", "arm9/src/wonder_trade/hgss", "files/msgdata/msg/msg_0829.json"):
+            self.assertFalse((dp / name).exists(), name)
+        self.assertEqual(prepare_game.prepare(self.root, name="dp"), dp)
+        pristine = prepare_game.prepare(self.root, pristine=True, name="dp")
+        self.assertEqual((pristine / "arm9/src/main.c").read_text(), "original\n")
+        self.assertFalse((pristine / "arm9/src/wonder_trade").exists())
+
     def test_workspace_symlink_does_not_write_outside_project(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

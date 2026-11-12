@@ -30,6 +30,17 @@ GAMES = {
         "resources": ("files",),
         "rom_sha1": "{}.us/rom.sha1",
     },
+    # pret/pokediamond builds Diamond and Pearl with Make; ARM9 sources live
+    # under arm9/, so client/src lands in arm9/src.
+    "dp": {
+        "pin": "client/upstream-pokediamond.json",
+        "patch": "client/pokediamond.patch",
+        "workspace": "pokediamond",
+        "adapter": "dp",
+        "resources": (),
+        "rom_sha1": "poke{}.us.sha1",
+        "destinations": {"src": "arm9/src"},
+    },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
 RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
@@ -86,6 +97,8 @@ def overlay_files(root, workspace, game=GAMES["platinum"]):
                 name = path.relative_to(root / "client").as_posix()
                 if foreign_adapter(name, game):
                     continue
+                if directory in game.get("destinations", {}):
+                    name = game["destinations"][directory] + name[len(directory):]
                 if name in desired:
                     raise RuntimeError(f"Overlay and integration patch overlap: {name}")
                 desired[name] = path.read_bytes()
@@ -163,7 +176,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
-                        help="upstream to prepare: platinum, or hgss for HeartGold and SoulSilver")
+                        help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
+                             "or dp for Diamond and Pearl")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))

@@ -28,8 +28,21 @@ case "$game" in
         fi
         prepare_args=(--game hgss)
         ;;
+    diamond|pearl)
+        # pret/pokediamond builds the US revision 5 of each version.
+        revision="${ROM_REVISION:-5}"
+        if [[ "$revision" != 5 ]]; then
+            echo "ROM_REVISION must be 5 for Diamond and Pearl" >&2
+            exit 2
+        fi
+        if [[ "$build_mode" != pristine ]]; then
+            echo "Diamond and Pearl support only --pristine builds" >&2
+            exit 2
+        fi
+        prepare_args=(--game dp)
+        ;;
     *)
-        echo "ROM_GAME must be platinum, heartgold or soulsilver" >&2
+        echo "ROM_GAME must be platinum, heartgold, soulsilver, diamond or pearl" >&2
         exit 2
         ;;
 esac
@@ -39,6 +52,12 @@ if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 image="dswt-rom-builder"
+builder="$repo_root/tools/rom-builder"
+if [[ "$game" == diamond || "$game" == pearl ]]; then
+    # pokediamond's Make build runs Metrowerks and Nitro SDK 3.2 tools under Wine.
+    image="dswt-rom-builder-dp"
+    builder="$repo_root/tools/rom-builder-dp"
+fi
 if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
     echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see client/tests/README.md)" >&2
     exit 2
@@ -57,12 +76,31 @@ if [[ "$build_mode" == modified ]]; then
     "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/dswt-connection.h"
     docker_args+=(-v "$tls_workspace:/tls:ro")
 fi
-docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile" -t "$image" "$repo_root/tools/rom-builder"
+docker build --platform linux/amd64 -f "$builder/Dockerfile" -t "$image" "$builder"
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
     meson=subprojects/meson-1.12.0/meson.py
     wonder_trade=(-Dwonder_trade_tls_dir=/tls -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h)
+    if [[ "$ROM_GAME" == diamond || "$ROM_GAME" == pearl ]]; then
+        # Install the image'"'"'s pinned compilers and SDK tools into ignored paths.
+        if [[ ! -f tools/mwccarm/license.dat ]]; then
+            mkdir -p tools/mwccarm tools/bin
+            cp -R /opt/pokediamond/mwccarm/. tools/mwccarm/
+            cp -R /opt/pokediamond/sdk-bin/. tools/bin/
+            cp /opt/pokediamond/ARM7-TS.lcf.template arm7/
+            cp /opt/pokediamond/ARM9-TS.lcf.template arm9/
+        fi
+        # Wine needs a prefix owned by the build user, created before parallel
+        # jobs start, and one persistent server for those jobs.
+        WINEPREFIX="$(mktemp -d)"
+        export WINEPREFIX
+        wineserver -p
+        wineboot -i 2>/dev/null
+        # COMPARE=1 checks the ARM9, ARM7 and ROM against upstream'"'"'s SHA-1s.
+        make -j"$ROM_BUILD_JOBS" GAME_VERSION="${ROM_GAME^^}" COMPARE=1
+        exit
+    fi
     # Make exports NINJA; clear its command-with-flags before Meson regeneration.
     if [[ "$ROM_GAME" != platinum ]]; then
         # One HeartGold/SoulSilver workspace keeps a build directory per version.

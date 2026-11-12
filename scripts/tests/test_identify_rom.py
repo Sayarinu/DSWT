@@ -144,6 +144,11 @@ class IdentifyRomTests(unittest.TestCase):
         rows = {row["id"]: row for row in variants}
         self.assertEqual({version: rows[f"{version}-us-rev0"]["sha1"] for version in ("heartgold", "soulsilver")},
                          hgss["rom_sha1"])
+        dp = json.loads((SCRIPT.parent.parent / "client/upstream-pokediamond.json").read_text())
+        self.assertEqual({version: rows[f"{version}-us-rev5"]["sha1"] for version in ("diamond", "pearl")},
+                         dp["rom_sha1"])
+        for version in ("diamond", "pearl"):
+            self.assertIn(dp["revision"], rows[f"{version}-us-rev5"]["reference"])
 
 if __name__ == "__main__":
     unittest.main()

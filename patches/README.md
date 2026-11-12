@@ -24,7 +24,9 @@ US Rev 0 and Rev 1 reproduce the pinned upstream SHA-1 and No-Intro SHA-256.
 Run `ROM_REVISION=0 ./scripts/build-rom.sh --pristine` and repeat with `1`;
 each must pass all five upstream checks. HeartGold and SoulSilver US reproduce
 their pinned pret SHA-1s with `ROM_GAME=heartgold` or `ROM_GAME=soulsilver` and
-`--pristine` (four upstream checks each). European English Platinum is a verified
+`--pristine` (four upstream checks each). Diamond and Pearl US Rev 5 reproduce
+theirs with `ROM_GAME=diamond` or `ROM_GAME=pearl` and `--pristine` (ARM9, ARM7
+and ROM checks each). European English Platinum is a verified
 dump whose header reads `CPUE` revision 10, like the US cartridge, so only its
 SHA-256 tells them apart; it has no compatible build yet (LUNE-325). Diamond, Pearl,
 HeartGold and SoulSilver are verified dumps with no planned patch yet

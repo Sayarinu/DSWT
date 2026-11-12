@@ -75,9 +75,17 @@ if sys.argv[1] == 'run':
                                    cwd=os.environ['TEST_WORKSPACE']).returncode)
 assert sys.argv[1] == 'build'
 ''')
+        for wine in ('wineserver', 'wineboot'):
+            self.tool(binary / wine, f'''
+record({wine!r}, sys.argv[1:])
+assert Path(os.environ['WINEPREFIX']).is_dir()
+''')
         self.tool(binary / 'make', '''
 record('make', sys.argv[1:])
 args, build = sys.argv[1:], Path('build')
+if args[0].startswith('-j'):
+    # pokediamond's Make build.
+    raise SystemExit(0)
 if args[0].startswith('GAME_VERSION='):
     # pokeheartgold keeps one build directory per version.
     build = build / (args.pop(0).removeprefix('GAME_VERSION=').lower() + '.us')
@@ -151,11 +159,11 @@ def record(tool, args):
     def calls_for(self, tool):
         return [args for name, args in self.calls if name == tool]
 
-    def assert_docker(self, mode, revision, jobs='1'):
+    def assert_docker(self, mode, revision, jobs='1', image='dswt-rom-builder', builder='tools/rom-builder'):
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '--platform', 'linux/amd64', '-f',
-                                str(self.root / 'tools/rom-builder/Dockerfile'), '-t',
-                                'dswt-rom-builder', str(self.root / 'tools/rom-builder')])
+                                str(self.root / builder / 'Dockerfile'), '-t',
+                                image, str(self.root / builder)])
         self.assertEqual(run[:3], ['run', '--platform', 'linux/amd64'])
         self.assertIn('ROM_REVISION=' + revision, run)
         self.assertIn('ROM_BUILD_JOBS=' + jobs, run)
@@ -165,7 +173,7 @@ def record(tool, args):
         self.assertEqual(mounts, [str(self.workspace) + ':/workspace'] +
                          ([str(self.tls) + ':/tls:ro'] if mode == 'modified' else []))
         self.assertEqual(run[run.index('-w') + 1], '/workspace')
-        self.assertEqual(run[-4:-1], ['dswt-rom-builder', 'bash', '-c'])
+        self.assertEqual(run[-4:-1], [image, 'bash', '-c'])
 
     def test_modified_fresh_and_incremental_builds_both_revisions(self):
         for revision in ('0', '1'):
@@ -249,8 +257,32 @@ def record(tool, args):
                                      + [[f'GAME_VERSION={version}', 'release', 'NINJA=env -u NINJA ninja -j1']])
                     self.assert_docker('modified', '0')
 
+    def test_diamond_and_pearl_build_pristine_from_one_dp_workspace(self):
+        # The image's toolchain is already installed in this workspace.
+        license = self.workspace / 'tools/mwccarm/license.dat'
+        license.parent.mkdir(parents=True)
+        license.touch()
+        for game in ('diamond', 'pearl'):
+            env = dict(self.env, ROM_GAME=game, ROM_BUILD_JOBS='4')
+            del env['ROM_REVISION']
+            with self.subTest(game=game):
+                result = self.run_build('--pristine', env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'dp', '--pristine']])
+                self.assertEqual(self.calls_for('wineserver'), [['-p']])
+                self.assertEqual(self.calls_for('wineboot'), [['-i']])
+                self.assertEqual(self.calls_for('make'), [['-j4', f'GAME_VERSION={game.upper()}', 'COMPARE=1']])
+                self.assertFalse(self.calls_for('meson') or self.calls_for('ninja'))
+                self.assert_docker('pristine', '5', '4', 'dswt-rom-builder-dp', 'tools/rom-builder-dp')
+                self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
+            with self.subTest(game=game, mode='modified'):
+                result = self.run_build(env=env)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(self.calls, [])
+
     def test_unknown_game_or_hgss_revision_stops_before_preparation(self):
-        for game, revision in (('diamond', '0'), ('HeartGold', '0'), ('heartgold', '1'), ('soulsilver', '01')):
+        for game, revision in (('diamond', '0'), ('pearl', '4'), ('Diamond', '5'), ('HeartGold', '0'),
+                               ('heartgold', '1'), ('soulsilver', '01')):
             with self.subTest(game=game, revision=revision):
                 result = self.run_build(env=dict(self.env, ROM_GAME=game, ROM_REVISION=revision))
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
