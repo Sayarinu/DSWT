@@ -39,7 +39,7 @@ typedef struct WonderTradeTransport {
     BOOL trading;
     int slot;
     unsigned action;
-    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived;
+    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived, refused;
     WtReceivedPokemon received;
     unsigned tradePhase;
     BOOL canLeave;
@@ -185,6 +185,12 @@ static int WonderTradeNetwork_Inventory(void *arg, enum WtInventoryStep step, Wt
     return result;
 }
 
+static int WonderTradeNetwork_CanHold(void *arg, const unsigned char pk4[136])
+{
+    WonderTradeTransport *transport = arg;
+    return WtGame_CanHold(transport->game, pk4);
+}
+
 static void WonderTradeNetwork_DrainSocket(WonderTradeTransport *transport)
 {
     if (transport->socket > 0) {
@@ -264,7 +270,7 @@ static int WonderTradeNetwork_PrepareJournal(WonderTradeTransport *transport, Wt
 static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
 {
     WtJournalIO journal = { &transport->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
-    WtEngineIO inventory = { transport, WonderTradeNetwork_Random, WonderTradeNetwork_Inventory };
+    WtEngineIO inventory = { transport, WonderTradeNetwork_Random, WonderTradeNetwork_Inventory, WonderTradeNetwork_CanHold };
     WtEngine *engine = &transport->engine;
     unsigned count, operation, wireResult, processing = 0, tick;
     int result = -1;
@@ -316,6 +322,8 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         }
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
+        /* Nothing was recorded; the trade stays QUEUED for a later Collect. */
+        if (engine->refused) { transport->refused = TRUE; result = 0; break; }
         wireResult = transport->reply.result;
         if (wireResult == WT_RESULT_PROCESSING && processing < WT_ENGINE_PROCESSING_RETRIES) {
             /* The server keeps this request's outcome until its backup covers it. Nothing
@@ -422,6 +430,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
         network->waiting = transport->waiting; network->superseded = transport->superseded;
+        network->refused = transport->refused;
         network->needsEntropy = transport->needsEntropy;
         network->hasReceived = transport->hasReceived; network->received = transport->received;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);

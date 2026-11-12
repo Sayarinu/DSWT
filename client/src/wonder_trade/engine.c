@@ -156,7 +156,7 @@ int WtEngine_Open(WtEngine *engine, WtJournalIO journal, WtEngineIO io)
 {
     if (!engine) return -1;
     memset(engine, 0, sizeof(*engine)); engine->io = io;
-    if (!io.random || !io.inventory || WtJournal_Open(&engine->journal, journal) != 0
+    if (!io.random || !io.inventory || !io.canHold || WtJournal_Open(&engine->journal, journal) != 0
         || WtJournal_Read(&engine->journal, &engine->entry) != 0
         || engine->entry.generation == UINT64_MAX || !StateKnown(&engine->entry, journal.hash)
         || WtJournal_Repair(&engine->journal) != 0) return Block(engine);
@@ -351,7 +351,7 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
     operation = engine->frame[5];
     if (WtWire_Decode(engine->frame, engine->frameSize, packet, size, engine->journal.io.hash, &reply) != 0) return Block(engine);
     Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
-    engine->lastResult = reply.result;
+    engine->lastResult = reply.result; engine->refused = 0;
     next = engine->entry;
     if (reply.result != WT_RESULT_OK) {
         /* An error, including a validator verdict, is not restoration proof.
@@ -412,6 +412,13 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         if (!DeliveryMatches(&next, snapshot)) goto blocked;
         if (operation == WT_OP_STATUS) { result = 0; goto done; }
         if (operation != WT_OP_COLLECT || (snapshot->state != WT_TRADE_MATCHED && snapshot->state != WT_TRADE_RETURN_READY)) goto blocked;
+        /* The digest and receipt are verified; refuse what this game cannot hold
+         * before recording it. Collect only replays, so the journal stays QUEUED
+         * and nothing is acknowledged. A return is this save's own offer. */
+        if (snapshot->deliveryKind == WT_DELIVERY_MATCH
+            && !engine->io.canHold(engine->io.arg, reply.body.collection.pokemon)) {
+            engine->refused = 1; result = 1; goto done;
+        }
         memcpy(next.receipt, snapshot->receipt, 16); next.deliveryKind = snapshot->deliveryKind;
         memcpy(next.incoming, reply.body.collection.pokemon, 136); memcpy(next.incomingDigest, snapshot->receivedDigest, 32);
         next.phase = WT_JOURNAL_RECEIVED;

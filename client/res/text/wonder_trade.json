@@ -164,6 +164,10 @@
     {
       "id": "WonderTrade_Text_RecoveryAction",
       "en_US": "Connect and retry"
+    },
+    {
+      "id": "WonderTrade_Text_CannotHold",
+      "en_US": "This game cannot hold the\nPokémon you received. It\nstays pending on the server."
     }
   ]
 }

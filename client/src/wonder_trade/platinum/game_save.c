@@ -4,6 +4,9 @@
 #include <mbedtls/private/sha256.h>
 #include <mbedtls/platform_util.h>
 
+#include "constants/forms.h"
+#include "constants/items.h"
+#include "constants/species.h"
 #include "heap.h"
 #include "game_records.h"
 #include "journal.h"
@@ -435,6 +438,47 @@ int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
     BoxPokemon_GetValue(&box, MON_DATA_NICKNAME, received->nickname);
     BoxPokemon_GetValue(&box, MON_DATA_OT_NAME, received->originalTrainer);
     return 0;
+}
+
+/* The species with forms, and their counts, are those Pokemon_SanitizeFormId
+ * (src/pokemon.c) keeps; it resets any other form to 0. Spiky-eared Pichu is
+ * not among them: it is HG/SS-only. */
+static unsigned Forms(unsigned species)
+{
+    switch (species) {
+    case SPECIES_UNOWN: return UNOWN_FORM_COUNT;
+    case SPECIES_CASTFORM: return CASTFORM_FORM_COUNT;
+    case SPECIES_DEOXYS: return DEOXYS_FORM_COUNT;
+    case SPECIES_BURMY: return BURMY_FORM_COUNT;
+    case SPECIES_WORMADAM: return WORMADAM_FORM_COUNT;
+    case SPECIES_CHERRIM: return CHERRIM_FORM_COUNT;
+    case SPECIES_SHELLOS: return SHELLOS_FORM_COUNT;
+    case SPECIES_GASTRODON: return GASTRODON_FORM_COUNT;
+    case SPECIES_ROTOM: return ROTOM_FORM_COUNT;
+    case SPECIES_GIRATINA: return GIRATINA_FORM_COUNT;
+    case SPECIES_SHAYMIN: return SHAYMIN_FORM_COUNT;
+    case SPECIES_ARCEUS: return ARCEUS_FORM_COUNT;
+    default: return 1;
+    }
+}
+
+/* The bag's own rule: an item with preventToss set (key items and HMs)
+ * "can't be held" (Bag_Text_ItemCantBeHeld in src/applications/bag/main.c). */
+static int Holdable(void *arg, unsigned item)
+{
+    const WtGame *game = arg;
+    return !Item_LoadParam((u16)item, ITEM_PARAM_PREVENT_TOSS, game->heapID);
+}
+
+int WtGame_CanHold(void *arg, const unsigned char pk4[136])
+{
+    /* NATIONAL_DEX_COUNT is 493 (Arceus) and NUM_ITEMS 467 (Secret Key; the range
+     * includes Platinum's Griseous Orb, 112). The ball byte holds the ball's
+     * item ID (PokemonDataBlockD.pokeball); the Cherish Ball is the last. */
+    const WtPokemonLimits limits = {
+        NATIONAL_DEX_COUNT, NUM_ITEMS, ITEM_CHERISH_BALL, Forms, Holdable, arg
+    };
+    return WtPokemon_Fits(pk4, &limits);
 }
 
 int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)

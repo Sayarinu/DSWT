@@ -21,11 +21,14 @@ enum WtInventoryStep {
  * VERIFY checks both persistent copies, not merely the game's RAM. Nonzero
  * never authorizes a network mutation or gameplay. A full destination returns
  * 1 from PREPARE_RECEIVE and retains the received payload without an ACK.
+ * canHold returns nonzero when the game can hold a matched delivery's
+ * canonical PK4; zero refuses it before the journal records it.
  * Serialize the entire engine operation with transport and ordinary saves. */
 typedef struct WtEngineIO {
     void *arg;
     int (*random)(void *, unsigned char *, size_t);
     int (*inventory)(void *, enum WtInventoryStep, WtJournalEntry *, unsigned slot);
+    int (*canHold)(void *, const unsigned char[136]);
 } WtEngineIO;
 
 typedef struct WtEngine {
@@ -38,6 +41,9 @@ typedef struct WtEngine {
     /* Recovery state for the pending operation; preparing a new ACK resets
      * this to zero. The decoded reply owns the current wire result. */
     int lastResult;
+    /* Set when the last reply was a Collect whose Pokémon this game cannot
+     * hold: nothing was recorded and the trade stays QUEUED for a later Collect. */
+    int refused;
 } WtEngine;
 
 /* Open repairs supported mirrors. Unknown evidence and generation exhaustion
@@ -50,7 +56,8 @@ int WtEngine_Deposit(WtEngine *, unsigned slot);
  * precedence. Returned frame belongs to the engine and contains a credential. */
 int WtEngine_Request(WtEngine *, unsigned operation);
 /* The exact outstanding frame binds the raw reply. HTTP/TLS success alone
- * cannot advance the journal. A positive return retains a pending operation. */
+ * cannot advance the journal. A positive return retains a pending operation,
+ * including a refused delivery (see refused). */
 int WtEngine_Reply(WtEngine *, const unsigned char *, size_t);
 
 #endif

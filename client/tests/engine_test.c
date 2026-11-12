@@ -7,8 +7,8 @@
 #include <psa/crypto.h>
 
 typedef struct Fixture {
-    unsigned char banks[2][4096], pokemon[136], delivered[136];
-    unsigned random, writes, failWrite, failStep, removed, received, restored, full;
+    unsigned char banks[2][4096], pokemon[136], delivered[136], checked[136];
+    unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks;
     unsigned reads, failRead;
     unsigned char id;
     int rotateSeed;
@@ -99,10 +99,17 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     return -1;
 }
 
+static int CanHold(void *arg, const unsigned char pk4[136])
+{
+    Fixture *fixture = arg;
+    ++fixture->holdChecks; memcpy(fixture->checked, pk4, 136);
+    return !fixture->cannotHold;
+}
+
 static void Open(Fixture *fixture)
 {
     WtJournalIO journal = { fixture, Read, Write, Hash };
-    WtEngineIO io = { fixture, Random, Inventory };
+    WtEngineIO io = { fixture, Random, Inventory, CanHold };
     assert(WtEngine_Open(&fixture->engine, journal, io) == 0);
 }
 
@@ -230,7 +237,42 @@ static void PairAndReturn(void)
     size = Header(&a, packet, WT_RESULT_OK, 3, 3, 146); Put(packet + 44, 3, 8);
     Snapshot(&a, packet + 52, WT_TRADE_RETURN_READY, WT_DELIVERY_RETURN, 3, a.pokemon);
     assert(WtEngine_Reply(&a.engine, packet, size) == 0);
+    /* A return is this save's own offer, so it is not checked against the game. */
+    a.cannotHold = 1; a.holdChecks = 0;
     Collect(&a, a.pokemon, WT_DELIVERY_RETURN, 3, 4);
+    assert(!a.holdChecks);
+}
+
+static void RefusedDelivery(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], incoming[136], before[2][4096];
+    unsigned attempt;
+    size_t size;
+    WtTest_Pokemon(incoming, 2);
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    fixture.cannotHold = 1;
+    for (attempt = 0; attempt < 2; ++attempt) {
+        /* Collect replays the delivery; a refusal records, imports and acknowledges nothing. */
+        assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0 && fixture.engine.frame[5] == WT_OP_COLLECT);
+        size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 274);
+        Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming);
+        memcpy(packet + 182, incoming, 136);
+        memcpy(before, fixture.banks, sizeof(before));
+        assert(WtEngine_Reply(&fixture.engine, packet, size) == 1 && fixture.engine.refused && !fixture.engine.blocked);
+        assert(fixture.holdChecks == attempt + 1 && memcmp(fixture.checked, incoming, 136) == 0);
+        assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.received && fixture.removed);
+        assert(fixture.engine.entry.phase == WT_JOURNAL_QUEUED && !fixture.engine.frameSize);
+        assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.engine.frame[5] == WT_OP_STATUS);
+        /* After a restart the save is still QUEUED with its offer escrowed. */
+        WtEngine_Close(&fixture.engine); Open(&fixture);
+        Mirrored(&fixture, WT_JOURNAL_QUEUED); assert(!fixture.received && fixture.removed);
+        fixture.engine.synchronized = 1;
+    }
+    /* A build that can hold it collects the same pending delivery. */
+    fixture.cannotHold = 0;
+    Collect(&fixture, incoming, WT_DELIVERY_MATCH, 2, 4);
+    assert(fixture.holdChecks == 3 && !fixture.engine.refused);
 }
 
 static void RejectionAndErrors(void)
@@ -394,7 +436,7 @@ static void LoadedStateAndMismatch(void)
     Fixture fixture;
     WtJournalEntry entry;
     WtJournalIO journal = { &fixture, Read, Write, Hash };
-    WtEngineIO io = { &fixture, Random, Inventory };
+    WtEngineIO io = { &fixture, Random, Inventory, CanHold };
     unsigned phase, code;
     const unsigned phases[] = { WT_JOURNAL_ESCROW, WT_JOURNAL_SUBMIT_READY, WT_JOURNAL_APPLIED };
     unsigned char packet[902]; size_t size;
@@ -615,9 +657,9 @@ static void SupersededSubmit(void)
 
 int main(void)
 {
-    PairAndReturn(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
+    PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding();
-    puts("Recoverable engine: paired delivery, match-cancel race, return, rejection, retries, full-storage restart, stale context and failed persistence passed");
+    puts("Recoverable engine: paired delivery, match-cancel race, return, refused delivery, rejection, retries, full-storage restart, stale context and failed persistence passed");
     return 0;
 }
