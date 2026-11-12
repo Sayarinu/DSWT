@@ -392,7 +392,7 @@ static WonderTradeApp *WonderTrade_Create(OverlayManager *man, FieldSystem *fiel
     return app;
 }
 
-static BOOL WonderTrade_Init(OverlayManager *man, int *state)
+BOOL WonderTradeApp_Init(OverlayManager *man, int *state)
 {
     WonderTradeApp *app = WonderTrade_Create(man, OverlayManager_GetArgs(man), WT_APP_CONNECTING, WonderTrade_Text_Connecting, TRUE);
     (void)state;
@@ -410,7 +410,7 @@ static void WonderTrade_BootWorker(void *arg)
     worker->result = WtGameSave_LayoutKnown(worker->game.save) ? WtBoot_Check(&worker->game, io) : -1;
 }
 
-static BOOL WonderTrade_BootInit(OverlayManager *man, int *state)
+BOOL WonderTradeApp_BootInit(OverlayManager *man, int *state)
 {
     WonderTradeApp *app;
     WonderTradeBootWorker *worker;
@@ -545,7 +545,7 @@ static void WonderTrade_HandleInput(WonderTradeApp *app)
     }
 }
 
-static BOOL WonderTrade_Main(OverlayManager *man, int *state)
+BOOL WonderTradeApp_Main(OverlayManager *man, int *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
     BOOL couldLeave;
@@ -597,7 +597,7 @@ static BOOL WonderTrade_Main(OverlayManager *man, int *state)
     return FALSE;
 }
 
-static BOOL WonderTrade_Exit(OverlayManager *man, int *state)
+BOOL WonderTradeApp_Exit(OverlayManager *man, int *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
     (void)state;
@@ -608,11 +608,3 @@ static BOOL WonderTrade_Exit(OverlayManager *man, int *state)
     Heap_Destroy(HEAP_ID_WONDER_TRADE);
     return TRUE;
 }
-
-const OverlayManagerTemplate gWonderTradeAppTemplate = {
-    WonderTrade_Init, WonderTrade_Main, WonderTrade_Exit, FS_OVERLAY_ID_NONE
-};
-
-const OverlayManagerTemplate gWonderTradeBootAppTemplate = {
-    WonderTrade_BootInit, WonderTrade_Main, WonderTrade_Exit, FS_OVERLAY_ID_NONE
-};
