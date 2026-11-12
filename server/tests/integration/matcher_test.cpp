@@ -181,7 +181,8 @@ TEST_F(MatcherTest, PairAvailabilityFailsClosedWithoutADatabase) {
 
 TEST_F(MatcherTest, InProcessWorkerPairsQueuedOffersWithoutANetworkEndpoint) {
   const auto first = Queue(), second = Queue();
-  MatchWorker worker([this](const auto &request, auto *reply) { return matcher.MatchNext(nullptr, &request, reply); });
+  MatchWorker worker([this](const auto &request, auto *reply) { return matcher.MatchNext(nullptr, &request, reply); },
+                     [this] { return matcher.PairAvailable(); });
   EXPECT_EQ(worker.Poll().count(), 0);
   EXPECT_EQ(Collect(first).context().result(), v1::RESULT_OK);
   EXPECT_EQ(Collect(second).context().result(), v1::RESULT_OK);
@@ -273,6 +274,30 @@ constexpr auto kPlatinum = detail::GameVariant(detail::GameFamily::Platinum, 12,
 constexpr auto kSoulSilver = detail::GameVariant(detail::GameFamily::HeartGoldSoulSilver, 8, 2, 0);
 
 std::set<std::string> Traded(const v1::MatchReply &reply) { return {reply.first_trade_id(), reply.second_trade_id()}; }
+
+TEST_F(MatcherTest, IdleWorkerRecordsNoAttemptsUntilACompatiblePairQueues) {
+  int calls = 0;
+  MatchWorker worker([&](const auto &request, auto *reply) { ++calls; return matcher.MatchNext(nullptr, &request, reply); },
+                     [this] { return matcher.PairAvailable(); });
+  const auto attempts = Scalar("SELECT count(*) FROM dswt.matcher_attempts");
+  const auto Idle = [&] {
+    for (int tick = 0; tick < 5; ++tick) EXPECT_EQ(worker.Poll(), MatchWorker::kIdleDelay);
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.matcher_attempts"), attempts);
+  };
+  Idle();
+  const auto form = Queue(1, kPlatinum, kDestinationPt);
+  Idle();
+  Queue(2, kDiamond, kAllDestinations);
+  Idle();
+  const auto platinum = Queue(3, kPlatinum, kDestinationPt);
+  EXPECT_EQ(worker.Poll().count(), 0);
+  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(Collect(form).context().result(), v1::RESULT_OK);
+  EXPECT_EQ(Collect(platinum).context().result(), v1::RESULT_OK);
+  EXPECT_EQ(worker.Poll(), MatchWorker::kIdleDelay) << "only the incompatible Diamond offer remains";
+  EXPECT_EQ(calls, 1);
+}
 
 TEST_F(MatcherTest, PlatinumOnlyOfferNeverMatchesIntoDiamondPearl) {
   // Diamond's offer could go to Platinum, but a Platinum-only form cannot go to Diamond.
