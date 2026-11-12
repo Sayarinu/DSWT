@@ -1,5 +1,6 @@
 #include "dswt/server/identity_store.h"
 
+#include "game_variant.h"
 #include "postgres.h"
 #include "identity_auth.h"
 
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -115,20 +117,26 @@ IdentityStore::~IdentityStore() = default;
 
 std::optional<IdentityId>
 IdentityStore::Enroll(const IdentityId &enrollment_id,
-                      const SaveCredential &credential) {
-  if (!Nonzero(enrollment_id) || !Nonzero(credential))
+                      const SaveCredential &credential,
+                      std::uint32_t variant) {
+  if (!Nonzero(enrollment_id) || !Nonzero(credential) ||
+      !detail::ValidVariant(variant))
     return std::nullopt;
   for (int attempt = 0; attempt < 8; ++attempt) {
     try {
       detail::Transaction transaction(impl_->database);
       auto existing = impl_->database.Parameters(
           "SELECT replace(save_id::text, '-', ''), encode(credential_verifier, "
-          "'hex') "
-          "FROM dswt.save_identities WHERE enrollment_id = $1::uuid",
+          "'hex'), variant "
+          "FROM dswt.save_identities JOIN dswt.identity_variants "
+          "USING (save_id) WHERE enrollment_id = $1::uuid",
           {Hex(enrollment_id)});
       if (PQntuples(existing.get()) == 1) {
         const auto id = Unhex<16>(PQgetvalue(existing.get(), 0, 0));
-        if (!Matches(id, credential, PQgetvalue(existing.get(), 0, 1)))
+        if (!Matches(id, credential, PQgetvalue(existing.get(), 0, 1)) ||
+            !detail::SameVariant(static_cast<std::uint32_t>(std::stoul(
+                                     PQgetvalue(existing.get(), 0, 2))),
+                                 variant))
           return std::nullopt;
         transaction.Commit();
         return id;
@@ -148,6 +156,9 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
           "INSERT INTO dswt.trade_events(save_id, sequence, kind, state) "
           "VALUES ($1::uuid, 1, 1, 0)",
           {Hex(id)});
+      impl_->database.Parameters(
+          "INSERT INTO dswt.identity_variants VALUES ($1::uuid, $2::bigint)",
+          {Hex(id), std::to_string(variant)});
       transaction.Commit();
       return id;
     } catch (const detail::DatabaseError &error) {

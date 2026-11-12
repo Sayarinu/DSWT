@@ -1,5 +1,6 @@
 #include "dswt/server/identity_store.h"
 
+#include "game_variant.h"
 #include "postgres.h"
 
 #include <gtest/gtest.h>
@@ -46,10 +47,17 @@ protected:
   SaveCredential credential = Credential();
 
   IdentityId Enroll() {
-    const auto result = store.Enroll(enrollment, credential);
+    const auto result = store.Enroll(enrollment, credential, detail::kLegacyPlatinum);
     if (!result)
       throw std::runtime_error("fixture enrollment failed");
     return *result;
+  }
+
+  std::string StoredVariant(const IdentityId &id) {
+    auto row = database.Parameters(
+        "SELECT variant FROM dswt.identity_variants WHERE save_id=$1::uuid",
+        {AsHex(id)});
+    return PQntuples(row.get()) == 1 ? PQgetvalue(row.get(), 0, 0) : "";
   }
 
   IdentityId Offer(const IdentityId &owner) {
@@ -85,24 +93,93 @@ protected:
 
 TEST_F(IdentityTest, RetryAndReconnectPreserveIdentity) {
   const auto id = Enroll();
-  EXPECT_EQ(store.Enroll(enrollment, credential), id);
+  EXPECT_EQ(store.Enroll(enrollment, credential, detail::kLegacyPlatinum), id);
   IdentityStore reopened("");
-  EXPECT_EQ(reopened.Enroll(enrollment, credential), id);
+  EXPECT_EQ(reopened.Enroll(enrollment, credential, detail::kLegacyPlatinum), id);
   EXPECT_TRUE(reopened.Authenticate(id, credential));
 }
 
 TEST_F(IdentityTest, ConflictingCredentialRevealsNoIdentity) {
   const auto id = Enroll();
-  EXPECT_FALSE(store.Enroll(enrollment, Credential(0x52)));
+  EXPECT_FALSE(store.Enroll(enrollment, Credential(0x52), detail::kLegacyPlatinum));
   EXPECT_FALSE(store.Authenticate(id, Credential(0x52)));
   EXPECT_TRUE(store.Authenticate(id, credential));
+}
+
+TEST_F(IdentityTest, EveryGameFamilyStoresItsVariant) {
+  using detail::GameFamily;
+  const std::uint32_t variants[] = {
+      detail::kLegacyPlatinum,
+      detail::GameVariant(GameFamily::DiamondPearl, 10, 1, 0),
+      detail::GameVariant(GameFamily::DiamondPearl, 11, 8, 0),
+      detail::GameVariant(GameFamily::Platinum, 12, 2, 1),
+      detail::GameVariant(GameFamily::Platinum, 12, 5, 0),
+      detail::GameVariant(GameFamily::HeartGoldSoulSilver, 7, 3, 0),
+      detail::GameVariant(GameFamily::HeartGoldSoulSilver, 8, 7, 0)};
+  for (const auto variant : variants) {
+    const auto nonce = NextId();
+    const auto id = store.Enroll(nonce, credential, variant);
+    ASSERT_TRUE(id) << variant;
+    EXPECT_EQ(StoredVariant(*id), std::to_string(variant));
+    EXPECT_EQ(store.Enroll(nonce, credential, variant), id);
+  }
+}
+
+TEST_F(IdentityTest, UnknownVariantNeverCreatesIdentity) {
+  using detail::GameFamily;
+  for (const std::uint32_t variant :
+       {0U, 2U, 0xFFFFFFFFU, detail::GameVariant(GameFamily::None, 12, 2, 0),
+        detail::GameVariant(GameFamily::Platinum, 10, 2, 0),
+        detail::GameVariant(GameFamily::DiamondPearl, 12, 2, 0),
+        detail::GameVariant(GameFamily::HeartGoldSoulSilver, 9, 2, 0),
+        detail::GameVariant(GameFamily::Platinum, 12, 0, 0),
+        detail::GameVariant(GameFamily::Platinum, 12, 6, 0),
+        detail::GameVariant(GameFamily::Platinum, 12, 9, 0),
+        detail::GameVariant(static_cast<GameFamily>(4), 12, 2, 0)}) {
+    EXPECT_FALSE(store.Enroll(enrollment, credential, variant)) << variant;
+  }
+  auto row = database.Parameters("SELECT count(*) FROM dswt.save_identities "
+                                 "WHERE enrollment_id=$1::uuid",
+                                 {AsHex(enrollment)});
+  EXPECT_EQ(std::string(PQgetvalue(row.get(), 0, 0)), "0");
+}
+
+TEST_F(IdentityTest, RetryWithAnotherVariantConflictsAndKeepsStoredVariant) {
+  using detail::GameFamily;
+  const auto pearl = detail::GameVariant(GameFamily::DiamondPearl, 11, 2, 0);
+  const auto id = store.Enroll(enrollment, credential, pearl);
+  ASSERT_TRUE(id);
+  for (const auto variant :
+       {detail::kLegacyPlatinum,
+        detail::GameVariant(GameFamily::DiamondPearl, 10, 2, 0),
+        detail::GameVariant(GameFamily::DiamondPearl, 11, 3, 0),
+        detail::GameVariant(GameFamily::DiamondPearl, 11, 2, 1)})
+    EXPECT_FALSE(store.Enroll(enrollment, credential, variant)) << variant;
+  EXPECT_EQ(StoredVariant(*id), std::to_string(pearl));
+  EXPECT_EQ(store.Enroll(enrollment, credential, pearl), id);
+}
+
+TEST_F(IdentityTest, LegacyAliasMatchesEnglishPlatinumWithoutChangingIt) {
+  using detail::GameFamily;
+  const auto english = detail::GameVariant(GameFamily::Platinum, 12, 2, 1);
+  const auto id = Enroll();
+  EXPECT_EQ(store.Enroll(enrollment, credential, english), id);
+  EXPECT_FALSE(store.Enroll(enrollment, credential,
+                            detail::GameVariant(GameFamily::Platinum, 12, 3, 1)));
+  EXPECT_EQ(StoredVariant(id), "1");
+  const auto other = NextId();
+  const auto explicit_id = store.Enroll(other, credential, english);
+  ASSERT_TRUE(explicit_id);
+  EXPECT_EQ(store.Enroll(other, credential, detail::kLegacyPlatinum),
+            explicit_id);
+  EXPECT_EQ(StoredVariant(*explicit_id), std::to_string(english));
 }
 
 TEST_F(IdentityTest, UnknownAndZeroInputsDoNotAuthenticateOrEnroll) {
   EXPECT_FALSE(store.Authenticate(NextId(), credential));
   EXPECT_FALSE(store.Authenticate({}, credential));
-  EXPECT_FALSE(store.Enroll({}, credential));
-  EXPECT_FALSE(store.Enroll(enrollment, {}));
+  EXPECT_FALSE(store.Enroll({}, credential, detail::kLegacyPlatinum));
+  EXPECT_FALSE(store.Enroll(enrollment, {}, detail::kLegacyPlatinum));
   const auto id = Enroll();
   EXPECT_FALSE(store.Authenticate(id, {}));
   EXPECT_FALSE(store.OwnsTrade(id, credential, {}));
@@ -114,7 +191,7 @@ TEST_F(IdentityTest, SaveIdCollisionRetriesWithoutChangingExistingIdentity) {
   int calls = 0;
   IdentityStore colliding(
       "", [&] { return calls++ == 0 ? existing : replacement; });
-  EXPECT_EQ(colliding.Enroll(other_enrollment, Credential(0x52)), replacement);
+  EXPECT_EQ(colliding.Enroll(other_enrollment, Credential(0x52), detail::kLegacyPlatinum), replacement);
   EXPECT_EQ(calls, 2);
   EXPECT_TRUE(store.Authenticate(existing, credential));
   EXPECT_TRUE(store.Authenticate(replacement, Credential(0x52)));
@@ -127,7 +204,7 @@ TEST_F(IdentityTest, CollisionExhaustionDoesNotLeavePartialIdentity) {
     ++calls;
     return existing;
   });
-  EXPECT_THROW(colliding.Enroll(other_enrollment, Credential(0x52)),
+  EXPECT_THROW(colliding.Enroll(other_enrollment, Credential(0x52), detail::kLegacyPlatinum),
                std::runtime_error);
   EXPECT_EQ(calls, 8);
   auto row =
@@ -144,13 +221,13 @@ TEST_F(IdentityTest, ZeroOrFailedRandomnessNeverCreatesIdentity) {
     ++calls;
     return IdentityId{};
   });
-  EXPECT_THROW(zero.Enroll(enrollment, credential), std::runtime_error);
+  EXPECT_THROW(zero.Enroll(enrollment, credential, detail::kLegacyPlatinum), std::runtime_error);
   EXPECT_EQ(calls, 8);
   IdentityStore failed("", []() -> IdentityId {
     throw std::runtime_error("randomness unavailable");
   });
-  EXPECT_THROW(failed.Enroll(enrollment, credential), std::runtime_error);
-  EXPECT_TRUE(store.Enroll(enrollment, credential));
+  EXPECT_THROW(failed.Enroll(enrollment, credential, detail::kLegacyPlatinum), std::runtime_error);
+  EXPECT_TRUE(store.Enroll(enrollment, credential, detail::kLegacyPlatinum));
 }
 
 TEST_F(IdentityTest, UnexpectedUniqueFailureIsNotRetried) {
@@ -166,7 +243,7 @@ TEST_F(IdentityTest, UnexpectedUniqueFailureIsNotRetried) {
                    "sequence'),1,false)");
   std::exception_ptr failure;
   try {
-    allocating.Enroll(other_enrollment, credential);
+    allocating.Enroll(other_enrollment, credential, detail::kLegacyPlatinum);
   } catch (...) {
     failure = std::current_exception();
   }
@@ -185,7 +262,7 @@ TEST_F(IdentityTest, UnexpectedUniqueFailureIsNotRetried) {
 
 TEST_F(IdentityTest, VerifierIsBoundToSaveAndCannotBeUsedAsCredential) {
   const auto first = Enroll();
-  const auto second = store.Enroll(NextId(), credential);
+  const auto second = store.Enroll(NextId(), credential, detail::kLegacyPlatinum);
   ASSERT_TRUE(second);
   auto row = database.Parameters(
       "SELECT encode(credential_verifier,'hex') FROM "
@@ -214,7 +291,7 @@ TEST_F(IdentityTest, VerifierIsBoundToSaveAndCannotBeUsedAsCredential) {
 
 TEST_F(IdentityTest, TradeLookupBindsBothCredentialAndOwner) {
   const auto first = Enroll();
-  const auto second = store.Enroll(NextId(), Credential(0x52));
+  const auto second = store.Enroll(NextId(), Credential(0x52), detail::kLegacyPlatinum);
   ASSERT_TRUE(second);
   const auto trade = Offer(first);
   EXPECT_TRUE(store.OwnsTrade(first, credential, trade));
@@ -229,7 +306,7 @@ TEST_F(IdentityTest, ConcurrentCopiedSaveEnrollmentHasOneIdentity) {
   auto enroll = [&] {
     IdentityStore separate("");
     start.wait();
-    return separate.Enroll(enrollment, credential);
+    return separate.Enroll(enrollment, credential, detail::kLegacyPlatinum);
   };
   auto first = std::async(std::launch::async, enroll);
   auto second = std::async(std::launch::async, enroll);
@@ -250,7 +327,7 @@ TEST_F(IdentityTest, ConflictingConcurrentEnrollmentHasOneAuthorizedWinner) {
   auto enroll = [&](SaveCredential secret) {
     IdentityStore separate("");
     start.wait();
-    return separate.Enroll(enrollment, secret);
+    return separate.Enroll(enrollment, secret, detail::kLegacyPlatinum);
   };
   auto first = std::async(std::launch::async, enroll, credential);
   auto second = std::async(std::launch::async, enroll, Credential(0x52));

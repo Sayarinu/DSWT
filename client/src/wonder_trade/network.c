@@ -9,17 +9,12 @@
 #include <mbedtls/platform_util.h>
 #include <psa/crypto.h>
 
-#include "constants/net.h"
-#include "heap.h"
-#include "system.h"
-#include "unk_02033200.h"
-#include "wifi_overlays.h"
 #include "wonder_trade/http.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/seed.h"
 #include "wonder_trade/entropy.h"
 #include "wonder_trade/entropy_game.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/game_adapter.h"
 #include "wonder_trade/recovery.h"
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
@@ -40,7 +35,7 @@ typedef struct WonderTradeTransport {
     WtTls tls;
     WtSeed seed;
     WtEngine engine;
-    WtGameSave game;
+    WtGame *game;
     BOOL trading;
     int slot;
     unsigned action;
@@ -185,7 +180,7 @@ static int WonderTradeNetwork_Inventory(void *arg, enum WtInventoryStep step, Wt
     int phase = transport->phase;
     int result;
     transport->phase = WT_TRANSPORT_SAVING;
-    result = WtGameSave_Inventory(&transport->game, step, entry, slot);
+    result = WtGame_Inventory(transport->game, step, entry, slot);
     transport->phase = phase;
     return result;
 }
@@ -296,7 +291,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (engine->entry.phase == WT_JOURNAL_IDLE && engine->synchronized) {
             if (transport->slot < 0) { result = 0; break; }
             transport->phase = WT_TRANSPORT_SAVING;
-            result = WtGameSave_Checkpoint(&transport->game);
+            result = WtGame_Checkpoint(transport->game);
             transport->phase = WT_TRANSPORT_CONNECTING;
             if (transport->cancel) { result = -15; break; }
             if (result != 0 || WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
@@ -317,7 +312,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (operation == WT_OP_ACKNOWLEDGE) {
             transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
             /* The ACK retires this journal entry, so read what was saved first. */
-            transport->hasReceived = WtGameSave_Received(&engine->entry, &transport->received) == 0;
+            transport->hasReceived = WtGame_Received(&engine->entry, &transport->received) == 0;
         }
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
@@ -352,7 +347,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     if (count == 24) result = -33;
     transport->tradePhase = engine->entry.phase;
     transport->phase = WT_TRANSPORT_SAVING;
-    transport->canLeave = !engine->blocked && WtGameSave_CanLeave(&transport->game, &engine->entry);
+    transport->canLeave = !engine->blocked && WtGame_CanLeave(transport->game, &engine->entry);
     /* The main thread also checks the worker stack before opening gameplay. */
     WtRecovery_Block();
     return result;
@@ -434,7 +429,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     }
     if (network->error == 0 && transport->requestSize) network->reply = transport->reply;
     mbedtls_platform_zeroize(transport, sizeof(*transport));
-    Heap_Free(transport);
+    WtGame_Free(network->game, transport);
     network->transport = NULL;
     return TRUE;
 }
@@ -450,21 +445,20 @@ static void WonderTradeNetwork_Disconnect(WonderTradeNetwork *network)
     }
 }
 
-void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID)
+void WonderTradeNetwork_Start(WonderTradeNetwork *network, WtGame *game)
 {
     memset(network, 0, sizeof(*network));
-    network->heapID = heapID;
+    network->game = game;
     network->canLeave = WtRecovery_CanWrite();
-    network->heapBuffer = Heap_Alloc(heapID, WT_NETWORK_HEAP_SIZE + 32);
+    network->heapBuffer = WtGame_Alloc(game, WT_NETWORK_HEAP_SIZE + 32);
     network->heap = NNS_FndCreateExpHeap((void *)(((u32)network->heapBuffer + 31) & ~31), WT_NETWORK_HEAP_SIZE);
     sNetworkHeap = network->heap;
-    Overlay_LoadWFCOverlay();
-    WirelessDriver_Init();
+    WtGame_WirelessStart();
     network->state = WT_NET_STARTING;
     network->deadline = OS_GetTick() + OS_SecondsToTicks(30);
 }
 
-static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const unsigned char *frame, size_t size, SaveData *save, int slot, unsigned action)
+static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const unsigned char *frame, size_t size, BOOL trading, int slot, unsigned action)
 {
     WonderTradeTransport *transport;
     void *stackTop;
@@ -477,7 +471,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
         network->state = WT_NET_ERROR;
         return FALSE;
     }
-    transport = Heap_Alloc(network->heapID, sizeof(*transport));
+    transport = WtGame_Alloc(network->game, sizeof(*transport));
     if (transport == NULL) {
         network->error = -1;
         network->state = WT_NET_ERROR;
@@ -485,20 +479,20 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
     }
     memset(transport, 0, sizeof(*transport));
     transport->requestSize = size;
-    transport->trading = save != NULL; transport->game.save = save;
-    transport->game.heapID = network->heapID; transport->slot = slot;
+    transport->trading = trading; transport->game = network->game;
+    transport->slot = slot;
     transport->action = action;
-    if (save) network->canLeave = FALSE;
+    if (trading) network->canLeave = FALSE;
     if (size) memcpy(transport->request, frame, size);
     network->transport = transport;
     network->error = 0;
     network->lastUpdate = OS_GetTick();
-    network->deadline = network->lastUpdate + OS_SecondsToTicks(save ? 180 : 30);
+    network->deadline = network->lastUpdate + OS_SecondsToTicks(trading ? 180 : 30);
     network->requestStarted = FALSE;
     network->timedOut = FALSE;
     network->needsEntropy = FALSE;
     network->maxFrameMs = 0;
-    network->state = size || save ? WT_NET_EXCHANGING : WT_NET_PINGING;
+    network->state = size || trading ? WT_NET_EXCHANGING : WT_NET_PINGING;
     stackTop = (void *)(((u32)transport->stack + WT_STACK_SIZE) & ~7);
     OS_CreateThread(&transport->thread, WonderTradeNetwork_Worker, transport,
         stackTop, WT_STACK_SIZE - 8, OS_GetThreadPriority(OS_GetCurrentThread()) + 1);
@@ -511,7 +505,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
 
 void WonderTradeNetwork_Ping(WonderTradeNetwork *network)
 {
-    WonderTradeNetwork_BeginRequest(network, NULL, 0, NULL, -1, 0);
+    WonderTradeNetwork_BeginRequest(network, NULL, 0, FALSE, -1, 0);
 }
 
 BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size)
@@ -520,17 +514,17 @@ BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned cha
         mbedtls_platform_zeroize(&network->reply, sizeof(network->reply));
         return FALSE;
     }
-    return WonderTradeNetwork_BeginRequest(network, frame, size, NULL, -1, 0);
+    return WonderTradeNetwork_BeginRequest(network, frame, size, FALSE, -1, 0);
 }
 
-BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *network, SaveData *save, int slot)
+BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *network, int slot)
 {
-    return save && WonderTradeNetwork_BeginRequest(network, NULL, 0, save, slot, 0);
+    return WonderTradeNetwork_BeginRequest(network, NULL, 0, TRUE, slot, 0);
 }
 
-BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *network, SaveData *save, BOOL cancel)
+BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *network, BOOL cancel)
 {
-    return save && WonderTradeNetwork_BeginRequest(network, NULL, 0, save, -1, cancel ? WT_OP_CANCEL : WT_OP_COLLECT);
+    return WonderTradeNetwork_BeginRequest(network, NULL, 0, TRUE, -1, cancel ? WT_OP_CANCEL : WT_OP_COLLECT);
 }
 
 void WonderTradeNetwork_Close(WonderTradeNetwork *network)
@@ -561,33 +555,33 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
             network->accessPointStarted = FALSE;
         }
         if (!network->driverStopping) {
-            if (!WirelessDriver_IsReady()) {
+            if (!WtGame_WirelessReady()) {
                 return;
             }
-            WirelessDriver_Shutdown();
+            WtGame_WirelessShutdown();
             network->driverStopping = TRUE;
         }
-        if (WirelessDriver_Initialized()) {
+        if (WtGame_WirelessActive()) {
             return;
         }
         DWC_ClearError();
         DWC_SetMemFunc(NULL, NULL);
         NNS_FndDestroyExpHeap(network->heap);
-        Heap_Free(network->heapBuffer);
+        WtGame_Free(network->game, network->heapBuffer);
         sNetworkHeap = NULL;
-        Overlay_UnloadWFCOverlay();
+        WtGame_WirelessRelease();
         network->state = WT_NET_CLOSED;
         return;
     }
-    if (network->state == WT_NET_STARTING && WirelessDriver_IsReady()) {
+    if (network->state == WT_NET_STARTING && WtGame_WirelessReady()) {
         DWCACConfig config;
         DWC_SetMemFunc(WonderTradeNetwork_Alloc, WonderTradeNetwork_Free);
         DWC_ClearError();
         memset(&config, 0, sizeof(config));
         config.alloc = WonderTradeNetwork_AccessPointAlloc;
         config.free = WonderTradeNetwork_AccessPointFree;
-        config.dmaNo = DEFAULT_DWC_DMA_NUMBER;
-        config.powerMode = DEFAULT_DWC_POWER_MODE;
+        config.dmaNo = gWtGameConfig.wifiDma;
+        config.powerMode = gWtGameConfig.wifiPowerMode;
         config.option.skipNetCheck = TRUE;
         if (!DWC_AC_Create(&config)) {
             network->error = -3;

@@ -47,7 +47,7 @@ BPS patcher; read its `INSTALL.md` first.
 | --- | --- |
 {rows}
 
-Other versions and languages are recognised but not supported yet.
+Other games, versions and languages are recognised but not supported yet.
 The apps are not code-signed: Windows SmartScreen and macOS Gatekeeper ask you to confirm
 the first launch. `SHA256SUMS` lists every file in this release.
 

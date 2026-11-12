@@ -2,6 +2,7 @@
 #include "dswt/server/identity_store.h"
 #include "dswt/server/identity_service.h"
 
+#include "game_variant.h"
 #include "postgres.h"
 #include "trade_encoding.h"
 
@@ -35,7 +36,7 @@ v1::Credentials Enroll(std::string enrollment = Identifier()) {
   std::copy(enrollment.begin(), enrollment.end(), id.begin());
   SaveCredential credential{};
   credential.fill(0x51);
-  const auto result = store.Enroll(id, credential);
+  const auto result = store.Enroll(id, credential, detail::kLegacyPlatinum);
   if (!result) throw std::runtime_error("fixture enrollment failed");
   v1::Credentials auth;
   auth.set_save_id(result->data(), result->size());
@@ -141,6 +142,7 @@ TEST_F(TradeTest, EnrollmentEndpointPublishesOnlyCoveredIdentityAndLiveProgress)
   v1::EnrollRequest request;
   request.set_enrollment_id(Identifier());
   request.set_credential(std::string(32, '\x51'));
+  request.set_client_build(detail::kLegacyPlatinum);
   v1::EnrollReply reply;
   IdentityService closed("");
   ASSERT_TRUE(closed.Enroll(nullptr, &request, &reply).ok());
@@ -163,6 +165,33 @@ TEST_F(TradeTest, EnrollmentEndpointPublishesOnlyCoveredIdentityAndLiveProgress)
   EXPECT_EQ(reply.context().result(), v1::RESULT_CONFLICT);
   EXPECT_TRUE(reply.save_id().empty());
   EXPECT_EQ(reply.context().event_highwater(), 0U);
+}
+
+TEST_F(TradeTest, EnrollmentEndpointRejectsUnknownAndChangedVariants) {
+  IdentityService endpoint("", [](auto) { return true; });
+  v1::EnrollRequest request;
+  request.set_enrollment_id(Identifier());
+  request.set_credential(std::string(32, '\x51'));
+  v1::EnrollReply reply;
+  for (const std::uint32_t build : {0U, 2U, 0x020A0200U, 0x030C0200U, 0x020C0600U, 0xFFFFFFFFU}) {
+    request.set_client_build(build);
+    ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+    EXPECT_EQ(reply.context().result(), v1::RESULT_INVALID_REQUEST) << build;
+    EXPECT_TRUE(reply.save_id().empty());
+  }
+  const auto soulsilver = detail::GameVariant(detail::GameFamily::HeartGoldSoulSilver, 8, 1, 0);
+  request.set_client_build(soulsilver);
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  ASSERT_EQ(reply.context().result(), v1::RESULT_OK);
+  const auto id = reply.save_id();
+  request.set_client_build(detail::kLegacyPlatinum);
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  EXPECT_EQ(reply.context().result(), v1::RESULT_CONFLICT);
+  EXPECT_TRUE(reply.save_id().empty());
+  request.set_client_build(soulsilver);
+  ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
+  EXPECT_EQ(reply.context().result(), v1::RESULT_OK);
+  EXPECT_EQ(reply.save_id(), id);
 }
 
 TEST_F(TradeTest, SubmissionStatusRetryAndImmutableOutcome) {

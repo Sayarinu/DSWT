@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -24,9 +25,12 @@ public:
   IdentityStore &operator=(const IdentityStore &) = delete;
 
   // The client must persist the enrollment ID and CSPRNG credential first.
-  // A conflicting credential returns no identity information.
+  // The variant is the enrollment build code, stored once and never changed.
+  // An invalid variant, or a conflicting credential or variant, returns no
+  // identity information.
   std::optional<IdentityId> Enroll(const IdentityId &enrollment_id,
-                                   const SaveCredential &credential);
+                                   const SaveCredential &credential,
+                                   std::uint32_t variant);
   bool Authenticate(const IdentityId &save_id,
                     const SaveCredential &credential);
   bool OwnsTrade(const IdentityId &save_id, const SaveCredential &credential,
