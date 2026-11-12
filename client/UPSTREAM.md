@@ -30,8 +30,8 @@ Preparation is repeatable and rejects incompatible source or local edits. Keep
 an edited workspace aside before preparing changed project sources. Use
 `--pristine` for a separate unmodified `game/<workspace>-pristine/` workspace.
 Each workspace receives the shared core, its own adapter directory and its own
-resources (`res/` for Platinum, `files/` for HeartGold and SoulSilver), never
-another game's. One HeartGold/SoulSilver workspace builds both versions into
+resources (`res/` for Platinum, `files/` for HeartGold and SoulSilver,
+`files-dp/` installed as `files/` for Diamond and Pearl), never another game's. One HeartGold/SoulSilver workspace builds both versions into
 `build/heartgold.us/` and `build/soulsilver.us/`:
 
 ```sh
@@ -47,6 +47,20 @@ does not ship in source; `tools/rom-builder-dp/Dockerfile` fetches the archives
 upstream's own CI uses, by checksum from a fixed commit of its `assets/workflow`
 branch, and runs them under Wine. They are copied into the workspace's ignored
 `tools/` and `arm*/` paths and stay local.
+
+pokediamond's partial C library lacks the standard headers the shared core and
+Mbed TLS need, so the integration patch builds them with CodeWarrior's MSL C
+headers for the same compiler, which the image takes by checksum from the
+Metroskrew release pokeplatinum pins. Its ARM9 Makefile builds the client
+sources and Mbed TLS (as `libwonder_trade_tls.a`), and `arm9.lsf` links them
+into the static ARM9 binary. The Wi-Fi Connection library exists only as
+assembly in overlay 4, so `include/wonder_trade/dp/sdk/` maps the few calls the
+core makes to its labels; each mapping was read from that assembly.
+
+The start menu is undecompiled assembly (`arm9/asm/unk_02035068.s`). Rather
+than add an entry to it, the patch inserts one call at the top of its input
+handler: pressing Select while the menu is open starts Wonder Trade, the same
+way the menu's Options entry launches its screen, wherever saving is allowed.
 
 Upstream notices stay in the local workspace. Its source, SDKs, toolchain and
 ROM output are excluded from this repository and require their own rights review.

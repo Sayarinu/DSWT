@@ -183,7 +183,8 @@ class PrepareGameTests(unittest.TestCase):
     def test_diamond_and_pearl_sources_land_in_the_arm9_tree(self):
         client = self.root / "client"
         for name in ("src/wonder_trade/dp/game_save.c", "src/wonder_trade/hgss/game_save.c",
-                     "include/wonder_trade/dp/game_save.h", "files/msgdata/msg/msg_0829.json"):
+                     "include/wonder_trade/dp/game_save.h", "files/msgdata/msg/msg_0829.json",
+                     "files-dp/msgdata/msg/narc_0624.gmm"):
             (client / name).parent.mkdir(parents=True, exist_ok=True)
             (client / name).write_text(name + "\n")
         upstream = Path(self.temp.name) / "dp-upstream"
@@ -218,7 +219,8 @@ class PrepareGameTests(unittest.TestCase):
         self.assertEqual((dp / "arm9/src/wonder_trade/application.c").read_text(), "project addition\n")
         self.assertEqual((dp / "arm9/src/wonder_trade/dp/game_save.c").read_text(), "src/wonder_trade/dp/game_save.c\n")
         self.assertEqual((dp / "include/wonder_trade/dp/game_save.h").read_text(), "include/wonder_trade/dp/game_save.h\n")
-        for name in ("src", "arm9/src/wonder_trade/hgss", "files/msgdata/msg/msg_0829.json"):
+        self.assertEqual((dp / "files/msgdata/msg/narc_0624.gmm").read_text(), "files-dp/msgdata/msg/narc_0624.gmm\n")
+        for name in ("src", "files-dp", "arm9/src/wonder_trade/hgss", "files/msgdata/msg/msg_0829.json"):
             self.assertFalse((dp / name).exists(), name)
         self.assertEqual(prepare_game.prepare(self.root, name="dp"), dp)
         pristine = prepare_game.prepare(self.root, pristine=True, name="dp")

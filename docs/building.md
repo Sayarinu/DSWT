@@ -37,7 +37,8 @@ integer without leading zeros) to opt into parallel compilation. Serial builds
 avoid the compiler failures observed with parallel macOS Docker builds.
 HeartGold, SoulSilver, Diamond and Pearl select their workspace with `ROM_GAME`
 ([`client/UPSTREAM.md`](../client/UPSTREAM.md)); Diamond and Pearl use the
-Wine-based image in `tools/rom-builder-dp/Dockerfile`.
+Wine-based image in `tools/rom-builder-dp/Dockerfile` and, like the other games,
+need `WONDER_TRADE_PROFILE` unless built with `--pristine`.
 ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
 
 ## Upstream source

@@ -1,0 +1,213 @@
+diff --git a/arm9/Makefile b/arm9/Makefile
+--- a/arm9/Makefile
++++ b/arm9/Makefile
+@@ -68 +68 @@ LD_TEMPLATE := ARM9-TS.lcf.template
+-SRC_DIRS := src lib lib/libnns/src lib/NitroSDK/src lib/MSL_C/src $(sort $(wildcard overlays/*/src))
++SRC_DIRS := src src/wonder_trade src/wonder_trade/dp lib lib/libnns/src lib/NitroSDK/src lib/MSL_C/src $(sort $(wildcard overlays/*/src))
+@@ -131 +131 @@ MWLDFLAGS = -w off -sym on -proc v5te -interworking -map closure,unused -symtab
+-LIBS := -Llib -lsyscall
++LIBS := -Llib -lsyscall -lwonder_trade_tls
+@@ -133 +133 @@ ARFLAGS = rcS
+-STATIC_LIBS := $(addprefix $(BUILD_DIR)/lib/,libsyscall.a)
++STATIC_LIBS := $(addprefix $(BUILD_DIR)/lib/,libsyscall.a libwonder_trade_tls.a)
+@@ -220,0 +221,41 @@ $(BUILD_DIR)/lib/MSL_C/%.o: MWCFLAGS += -ipa file
++# Wonder Trade: the shared core, the Diamond/Pearl adapter and Mbed TLS build
++# against CodeWarrior's MSL C headers instead of the partial lib/MSL_C copy, and
++# against declaration-only SDK shims from include/wonder_trade/dp/sdk.
++WT_TLS_DIR ?= /tls
++WT_MSL_DIR ?= /opt/pokediamond/msl
++WT_PROFILE_HEADER ?= ../.git/dswt-connection.h
++WT_TLS_SRC_DIRS := library tf-psa-crypto/core tf-psa-crypto/extras tf-psa-crypto/platform \
++	tf-psa-crypto/utilities tf-psa-crypto/drivers/builtin/src
++WT_TLS_INCLUDE_DIRS := include library tf-psa-crypto/include tf-psa-crypto/core tf-psa-crypto/dispatch \
++	tf-psa-crypto/extras tf-psa-crypto/platform tf-psa-crypto/utilities \
++	tf-psa-crypto/drivers/builtin/include tf-psa-crypto/drivers/builtin/src tf-psa-crypto/drivers/p256-m \
++	tf-psa-crypto/drivers/pqcp/include tf-psa-crypto/drivers/everest/include
++WT_TLS_C_FILES := $(foreach dir,$(WT_TLS_SRC_DIRS),$(sort $(wildcard $(WT_TLS_DIR)/$(dir)/*.c)))
++WT_TLS_OBJS := $(WT_TLS_C_FILES:$(WT_TLS_DIR)/%.c=$(BUILD_DIR)/wt_tls/%.o)
++WT_C_OBJS := $(filter $(BUILD_DIR)/src/wonder_trade/%,$(C_OBJS))
++WT_MSL_INCLUDES := $(WT_MSL_DIR)/MSL_C/MSL_Common/Include $(WT_MSL_DIR)/MSL_C/MSL_ARM/Include
++WT_TLS_MWCFLAGS = -O4,p -sym on -gccext,on -proc arm946e -thumb -msgstyle gcc -gccinc -fp soft -lang c99 \
++	-Cpp_exceptions off -inline on,noauto -i ../include -i ../include/wonder_trade/dp/sdk -i ../files -i $(BUILD_DIR) \
++	$(foreach dir,$(WT_TLS_INCLUDE_DIRS),-i $(WT_TLS_DIR)/$(dir)) -ir ../include-mw \
++	$(foreach dir,$(WT_MSL_INCLUDES) lib/libnns/include lib/NitroSDK/include,-ir $(dir)) \
++	-interworking -DFS_IMPLEMENT -enum int -D$(GAME_VERSION) -D$(GAME_LANGUAGE) \
++	'-DMBEDTLS_CONFIG_FILE="wonder_trade/tls_config.h"' '-DTF_PSA_CRYPTO_CONFIG_FILE="wonder_trade/crypto_config.h"' \
++	-W all -W noimpl_signedunsigned -W noimplicitconv -W nounusedarg -W nomissingreturn
++
++WT_MWCFLAGS = $(WT_TLS_MWCFLAGS) -prefix wonder_trade/dp/sdk_prefix.h
++
++$(WT_C_OBJS): MWCFLAGS = $(WT_MWCFLAGS)
++$(WT_TLS_OBJS): MWCFLAGS = $(WT_TLS_MWCFLAGS)
++$(WT_C_OBJS) $(WT_TLS_OBJS): export MWCIncludes := $(WT_MSL_INCLUDES)
++$(WT_C_OBJS): $(BUILD_DIR)/wonder_trade_config.h
++
++$(BUILD_DIR)/wonder_trade_config.h: $(WT_PROFILE_HEADER)
++	cp $< $@
++
++$(WT_TLS_OBJS): $(BUILD_DIR)/wt_tls/%.o: $(WT_TLS_DIR)/%.c
++	@mkdir -p $(dir $@)
++	$(CC) -c $(MWCFLAGS) -o $@ $<
++
++$(BUILD_DIR)/lib/libwonder_trade_tls.a: $(WT_TLS_OBJS)
++	$(AR) $(ARFLAGS) -o $@ $^
++
+diff --git a/arm9/arm9.lsf b/arm9/arm9.lsf
+--- a/arm9/arm9.lsf
++++ b/arm9/arm9.lsf
+@@ -613,0 +614,18 @@ Static arm9
++    Object boot.o
++    Object engine.o
++    Object entropy.o
++    Object entropy_game.o
++    Object flash.o
++    Object http.o
++    Object journal.o
++    Object network.o
++    Object pokemon_codec.o
++    Object recovery.o
++    Object seed.o
++    Object tls.o
++    Object wire.o
++    Object sdk.o
++    Object hooks.o
++    Object game_save.o
++    Object application.o
++    Library libwonder_trade_tls.a
+diff --git a/arm9/asm/unk_02035068.s b/arm9/asm/unk_02035068.s
+--- a/arm9/asm/unk_02035068.s
++++ b/arm9/asm/unk_02035068.s
+@@ -4,0 +5 @@
++	.extern WonderTrade_StartMenuInput
+@@ -1104,0 +1106,8 @@ sub_020358E4: ; 0x020358E4
++	; Wonder Trade: Select opens it while this menu is open (src/wonder_trade/dp/hooks.c).
++	bl WonderTrade_StartMenuInput
++	cmp r0, #0x0
++	beq _020358E4_WonderTradeNotSelected
++	mov r0, #0x1
++	pop {r3-r7, pc}
++_020358E4_WonderTradeNotSelected:
++	add r0, r7, #0x0
+diff --git a/arm9/overlays/52/src/overlay_52.c b/arm9/overlays/52/src/overlay_52.c
+--- a/arm9/overlays/52/src/overlay_52.c
++++ b/arm9/overlays/52/src/overlay_52.c
+@@ -7,0 +8 @@
++#include "wonder_trade/dp/game_hooks.h"
+@@ -280,0 +282,5 @@ BOOL ov52_021D74E0(struct OverlayManager *manager, u32 *status) {
++    // A new game must not replace a party with a trade still pending.
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return FALSE;
++    }
+@@ -307,0 +314,4 @@ BOOL ov52_021D7528(struct OverlayManager *manager, u32 *status) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return FALSE;
++    }
+@@ -407,0 +418,4 @@ void ov52_021D769C(u32 unused, struct SaveData *save) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return;
++    }
+diff --git a/arm9/src/main.c b/arm9/src/main.c
+--- a/arm9/src/main.c
++++ b/arm9/src/main.c
+@@ -25,0 +26 @@
++#include "wonder_trade/dp/game_hooks.h"
+@@ -56,0 +58 @@ __declspec(noreturn) void NitroMain(void) {
++    WonderTradeEntropy_Init();
+@@ -103,0 +106 @@ __declspec(noreturn) void NitroMain(void) {
++        WonderTradeEntropy_Frame();
+@@ -146,2 +149,12 @@ void Main_RunOverlayManager(void) {
+-        if (UNK_02016FA8.queuedMainOverlayId != SDK_OVERLAY_INVALID_ID) {
+-            HandleLoadOverlay(UNK_02016FA8.queuedMainOverlayId, 0);
++        if (!WtRecovery_Started()) {
++            // The save is checked before the first queued application runs.
++            UNK_02016FA8.mainOverlayId = SDK_OVERLAY_INVALID_ID;
++            UNK_02016FA8.overlayManager = OverlayManager_New(&gWonderTradeBootAppTemplate, &UNK_02016FA8.unk10, HEAP_ID_DEFAULT);
++        } else {
++            if (UNK_02016FA8.queuedMainOverlayId != SDK_OVERLAY_INVALID_ID) {
++                HandleLoadOverlay(UNK_02016FA8.queuedMainOverlayId, 0);
++            }
++            UNK_02016FA8.mainOverlayId = UNK_02016FA8.queuedMainOverlayId;
++            UNK_02016FA8.overlayManager = OverlayManager_New(UNK_02016FA8.template, &UNK_02016FA8.unk10, HEAP_ID_DEFAULT);
++            UNK_02016FA8.queuedMainOverlayId = SDK_OVERLAY_INVALID_ID;
++            UNK_02016FA8.template = NULL;
+@@ -149,4 +161,0 @@ void Main_RunOverlayManager(void) {
+-        UNK_02016FA8.mainOverlayId = UNK_02016FA8.queuedMainOverlayId;
+-        UNK_02016FA8.overlayManager = OverlayManager_New(UNK_02016FA8.template, &UNK_02016FA8.unk10, HEAP_ID_DEFAULT);
+-        UNK_02016FA8.queuedMainOverlayId = SDK_OVERLAY_INVALID_ID;
+-        UNK_02016FA8.template = NULL;
+diff --git a/arm9/src/save.c b/arm9/src/save.c
+--- a/arm9/src/save.c
++++ b/arm9/src/save.c
+@@ -10,0 +11 @@
++#include "wonder_trade/dp/game_hooks.h"
+@@ -19,0 +21,2 @@ static SaveData *sSaveDataPtr;
++static BOOL sWonderTradeBlocked;
++static BOOL sWonderTradeRefused;
+@@ -67,0 +71,3 @@ BOOL sub_0202263C(struct SaveData *save) {
++    if (!WtRecovery_Started() || !WtRecovery_CanClear()) {
++        return FALSE;
++    }
+@@ -98,0 +105,3 @@ int SaveGame(struct SaveData *save) {
++    if (!WtRecovery_CanWrite()) {
++        return 3;
++    }
+@@ -163,0 +173,4 @@ void sub_02022840(struct SaveData *save, int a1) {
++    sWonderTradeBlocked = !WtRecovery_CanWrite();
++    if (sWonderTradeBlocked) {
++        return;
++    }
+@@ -167,0 +181,3 @@ int sub_02022854(struct SaveData *save) {
++    if (sWonderTradeBlocked) {
++        return 3;
++    }
+@@ -175,0 +192,3 @@ void sub_0202287C(struct SaveData *save) {
++    if (sWonderTradeBlocked) {
++        return;
++    }
+@@ -640,0 +660,3 @@ int WriteSaveFileToFlash(struct SaveData *save, int idx, u8 *data) {
++    if (!WtRecovery_CanWrite()) {
++        return 3;
++    }
+@@ -734,0 +757,3 @@ int FlashWriteChunk(u32 offset, u8 *data, u32 size) {
++    if (!WtRecovery_CanWrite()) {
++        return FALSE;
++    }
+@@ -762,0 +788,5 @@ int FlashWriteChunkInternal(u32 dest, void *src, u32 size) {
++    // Every retail write ends here; a refused one reports a failed write.
++    sWonderTradeRefused = !WtRecovery_CanWrite();
++    if (sWonderTradeRefused) {
++        return -3;
++    }
+@@ -775,0 +806,4 @@ BOOL WaitFlashWrite(int lock, BOOL *res) {
++    if (sWonderTradeRefused) {
++        *res = FALSE;
++        return TRUE;
++    }
+diff --git a/files/msgdata/msg.mk b/files/msgdata/msg.mk
+--- a/files/msgdata/msg.mk
++++ b/files/msgdata/msg.mk
+@@ -647,0 +648 @@ files/msgdata/msg/narc_0623.bin: MSGENCFLAGS = -k 0x5938
++files/msgdata/msg/narc_0624.bin: MSGENCFLAGS = -k 0x5754
+diff --git a/filesystem.mk b/filesystem.mk
+--- a/filesystem.mk
++++ b/filesystem.mk
+@@ -6075 +6075,2 @@ files/msgdata/msg.narc: \
+-        files/msgdata/msg/narc_0623.bin
++        files/msgdata/msg/narc_0623.bin \
++        files/msgdata/msg/narc_0624.bin
+diff --git a/include/constants/heap.h b/include/constants/heap.h
+--- a/include/constants/heap.h
++++ b/include/constants/heap.h
+@@ -88,0 +89 @@ enum HeapID {
++    HEAP_ID_WONDER_TRADE,
+diff --git a/include/start_menu.h b/include/start_menu.h
+--- a/include/start_menu.h
++++ b/include/start_menu.h
+@@ -34 +34,3 @@ typedef struct StartMenuTaskData {
+-    u8 filler1[0x19C];
++    u8 filler1[0x194];
++    u32 hiddenEntries; // one bit per menu entry, set by sub_02035080
++    u8 filler1C4[0x4];

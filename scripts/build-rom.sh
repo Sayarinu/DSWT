@@ -39,10 +39,6 @@ case "$game" in
             echo "ROM_REVISION must be 5 for Diamond and Pearl" >&2
             exit 2
         fi
-        if [[ "$build_mode" != pristine ]]; then
-            echo "Diamond and Pearl support only --pristine builds" >&2
-            exit 2
-        fi
         prepare_args=(--game dp)
         ;;
     *)
@@ -104,8 +100,16 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
         export WINEPREFIX
         wineserver -p
         wineboot -i 2>/dev/null
-        # COMPARE=1 checks the ARM9, ARM7 and ROM against upstream'"'"'s SHA-1s.
-        make -j"$ROM_BUILD_JOBS" GAME_VERSION="${ROM_GAME^^}" COMPARE=1
+        if [[ "$DSWT_BUILD_MODE" == pristine ]]; then
+            # COMPARE=1 checks the ARM9, ARM7 and ROM against upstream'"'"'s SHA-1s.
+            make -j"$ROM_BUILD_JOBS" GAME_VERSION="${ROM_GAME^^}" COMPARE=1
+        else
+            # The integration patch builds Mbed TLS and the client against the
+            # image'"'"'s MSL C headers and the mounted TLS sources.
+            make -j"$ROM_BUILD_JOBS" GAME_VERSION="${ROM_GAME^^}" COMPARE=0 \
+                WT_TLS_DIR=/tls WT_MSL_DIR=/opt/pokediamond/msl \
+                WT_PROFILE_HEADER=/workspace/.git/dswt-connection.h
+        fi
         exit
     fi
     # Make exports NINJA; clear its command-with-flags before Meson regeneration.

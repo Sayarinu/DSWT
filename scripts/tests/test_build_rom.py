@@ -284,7 +284,7 @@ def record(tool, args):
                                      + [[f'GAME_VERSION={version}', 'release', 'NINJA=env -u NINJA ninja -j1']])
                     self.assert_docker('modified', '0')
 
-    def test_diamond_and_pearl_build_pristine_from_one_dp_workspace(self):
+    def test_diamond_and_pearl_build_from_one_dp_workspace(self):
         # The image's toolchain is already installed in this workspace.
         license = self.workspace / 'tools/mwccarm/license.dat'
         license.parent.mkdir(parents=True)
@@ -304,8 +304,13 @@ def record(tool, args):
                 self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
             with self.subTest(game=game, mode='modified'):
                 result = self.run_build(env=env)
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertEqual(self.calls, [])
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'dp']])
+                self.assertEqual(self.calls_for('make'), [[
+                    '-j4', f'GAME_VERSION={game.upper()}', 'COMPARE=0', 'WT_TLS_DIR=/tls',
+                    'WT_MSL_DIR=/opt/pokediamond/msl', 'WT_PROFILE_HEADER=/workspace/.git/dswt-connection.h']])
+                self.assertFalse(self.calls_for('meson') or self.calls_for('ninja'))
+                self.assert_docker('modified', '5', '4', 'dswt-rom-builder-dp', 'tools/rom-builder-dp')
 
     def test_unknown_game_or_hgss_revision_stops_before_preparation(self):
         for game, revision in (('diamond', '0'), ('pearl', '4'), ('Diamond', '5'), ('HeartGold', '0'),

@@ -37,7 +37,8 @@ GAMES = {
         "rom_sha1": "{}.us/rom.sha1",
     },
     # pret/pokediamond builds Diamond and Pearl with Make; ARM9 sources live
-    # under arm9/, so client/src lands in arm9/src.
+    # under arm9/, so client/src lands in arm9/src, and its own text overlay
+    # client/files-dp lands in files/.
     "dp": {
         "pin": "client/upstream-pokediamond.json",
         "patch": "client/pokediamond.patch",
@@ -45,9 +46,9 @@ GAMES = {
         "staged_revisions": (),
         "workspace": "pokediamond",
         "adapter": "dp",
-        "resources": (),
+        "resources": ("files-dp",),
         "rom_sha1": "poke{}.us.sha1",
-        "destinations": {"src": "arm9/src"},
+        "destinations": {"src": "arm9/src", "files-dp": "files"},
     },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}

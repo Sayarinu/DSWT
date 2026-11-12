@@ -252,7 +252,10 @@ and a 0x1354-byte chunk at 0x23000, each with a 16-byte footer and ending by
 flash: every write goes through `save.c`, and the 0x30000 and 0x70000 sectors
 are unused, so Diamond and Pearl use the same journal banks and record format.
 Deleting the save (`sub_0202263C`) erases all 128 sectors, journals included,
-so it is gated like the other games' delete paths.
+so it is gated like the other games' delete paths. A save writes the box block
+only after the box data changed, so the adapter sets that flag before each of
+its two consecutive retail saves; both halves then hold the full image, and
+whole blocks need no masked digest.
 
 Each bank begins with one explicitly serialized 4096-byte record. Header:
 `DSWJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,
