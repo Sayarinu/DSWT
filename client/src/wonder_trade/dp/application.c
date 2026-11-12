@@ -37,8 +37,11 @@
 #include "wonder_trade/network.h"
 #include "wonder_trade/recovery.h"
 
-/* src/brightness.c; pokediamond declares it only where it is used. */
-extern void SetMasterBrightnessNeutral(BOOL bottomScreen);
+/* asm/unk_0200E1D0_s.s; pokediamond declares these only where they are used.
+ * sub_0200E3A0 sets a screen's master brightness to white (0x7FFF) or black. */
+extern void sub_0200E3A0(PMLCDTarget screen, int color);
+extern void BeginNormalPaletteFade(u32 pattern, u32 typeTop, u32 typeBottom, u16 colour, u32 duration, u32 framesPer, enum HeapID heapID);
+extern BOOL IsPaletteFadeFinished(void);
 
 enum WonderTradeAppState {
     WT_APP_BOOT,
@@ -68,6 +71,12 @@ enum WonderTradeAppState {
 #define WT_TEXT_PALETTE 1
 #define WT_COLOR_TEXT MAKE_TEXT_COLOR(1, 2, 15)
 #define WT_COLOR_SELECTED MAKE_TEXT_COLOR(3, 4, 15)
+/* Both screens fade to or from black over six frames, as the field does
+ * around every start-menu application (ov05_021D7CA4). */
+#define WT_FADE_BOTH_SCREENS 0
+#define WT_FADE_OUT 0
+#define WT_FADE_IN 1
+#define WT_FADE_STEPS 6
 
 typedef struct WonderTradeBootWorker {
     OSThread thread;
@@ -88,6 +97,9 @@ typedef struct WonderTradeApp {
     int cursor;
     int selectedSlot;
     BOOL graphicsReady;
+    BOOL fadeInPending;
+    BOOL fading;
+    BOOL leaving;
     WonderTradeBootWorker *boot;
     int bootFrames;
     WtGame game;
@@ -186,8 +198,18 @@ static void WonderTrade_VBlank(void *arg)
     OS_SetIrqCheckFlag(OS_IE_VBLANK);
 }
 
+static void WonderTrade_Fade(WonderTradeApp *app, u32 type)
+{
+    BeginNormalPaletteFade(WT_FADE_BOTH_SCREENS, type, type, RGB_BLACK, WT_FADE_STEPS, 1, app->game.heapID);
+    app->fading = TRUE;
+}
+
+/* Every screen change happens behind black: the field has already faded out
+ * before launching the application, and the boot check starts in black too. */
 static void WonderTrade_InitGraphics(WonderTradeApp *app)
 {
+    sub_0200E3A0(PM_LCD_TOP, RGB_BLACK);
+    sub_0200E3A0(PM_LCD_BOTTOM, RGB_BLACK);
     Main_SetVBlankIntrCB(NULL, NULL);
     Main_SetHBlankIntrCB(NULL, NULL);
     GfGfx_DisableEngineAPlanes();
@@ -223,14 +245,15 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     GfGfx_EngineATogglePlanes(GX_PLANEMASK_BG0, GX_PLANE_TOGGLE_ON);
     GfGfx_EngineBTogglePlanes(GX_PLANEMASK_BG0, GX_PLANE_TOGGLE_ON);
     GfGfx_BothDispOn();
-    SetMasterBrightnessNeutral(PM_LCD_TOP);
-    SetMasterBrightnessNeutral(PM_LCD_BOTTOM);
+    /* The fade in starts once the next VBlank has uploaded the tilemaps. */
+    app->fadeInPending = TRUE;
 }
 
 static void WonderTrade_FreeGraphics(WonderTradeApp *app)
 {
     if (!app->graphicsReady) return;
     Main_SetVBlankIntrCB(NULL, NULL);
+    Main_SetHBlankIntrCB(NULL, NULL);
     RemoveWindow(&app->title);
     RemoveWindow(&app->body);
     RemoveWindow(&app->list);
@@ -355,6 +378,16 @@ static void WonderTrade_Draw(WonderTradeApp *app)
     ScheduleBgTilemapBufferTransfer(app->bgConfig, GF_BG_LYR_SUB_0);
 }
 
+/* Like every retail application, fade both screens to black before ending,
+ * so the next one (the field, or the title screen at boot) loads unseen. */
+static BOOL WonderTrade_Leave(WonderTradeApp *app)
+{
+    if (!app->graphicsReady) return TRUE;
+    app->leaving = TRUE;
+    WonderTrade_Fade(app, WT_FADE_OUT);
+    return FALSE;
+}
+
 static void WonderTrade_Show(WonderTradeApp *app, int state, int message)
 {
     app->state = state;
@@ -457,7 +490,7 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     if (unused < 256 || OS_GetStackStatus(&worker->thread) != OS_STACK_NO_ERROR || worker->result != 0) WtRecovery_Block();
     mbedtls_platform_zeroize(worker, sizeof(*worker));
     Heap_Free(worker); app->boot = NULL;
-    if (WtRecovery_CanWrite()) return TRUE;
+    if (WtRecovery_CanWrite()) return WonderTrade_Leave(app);
     app->state = WT_APP_RECOVERY;
     app->statusMessage = WonderTrade_Text_RecoveryRequired;
     if (app->graphicsReady) WonderTrade_Draw(app);
@@ -560,6 +593,16 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
     WonderTradeApp *app = OverlayManager_GetData(man);
     BOOL couldLeave;
     (void)state;
+    if (app->fadeInPending) {
+        app->fadeInPending = FALSE;
+        WonderTrade_Fade(app, WT_FADE_IN);
+        return FALSE;
+    }
+    if (app->fading) {
+        if (!IsPaletteFadeFinished()) return FALSE;
+        app->fading = FALSE;
+        if (app->leaving) return TRUE;
+    }
     if (app->state == WT_APP_BOOT) return WonderTrade_BootPoll(app);
     if (app->state == WT_APP_RECOVERY) {
         WonderTrade_HandleInput(app);
@@ -570,7 +613,7 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
     if (couldLeave != app->network.canLeave) WonderTrade_Draw(app);
 
     if (app->state == WT_APP_CLOSING) {
-        return app->network.state == WT_NET_CLOSED;
+        return app->network.state == WT_NET_CLOSED && WonderTrade_Leave(app);
     }
     if (app->state == WT_APP_RESTART) {
         if (app->network.state == WT_NET_CLOSED) {
