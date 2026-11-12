@@ -72,7 +72,7 @@ class TlsToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not blank"):
             provision.provision(result, "us-rev1")
         with self.assertRaises(ValueError):
-            provision.provision(original, "europe")
+            provision.provision(original, "diamond-us-rev5")
         with self.assertRaises(ValueError):
             provision.provision(original[:262144], "us-rev0")
 

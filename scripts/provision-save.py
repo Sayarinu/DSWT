@@ -30,7 +30,7 @@ def seed_record(seed, generation):
 def provision(data, target):
     layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
     if target not in layout["verified_targets"] or len(data) != layout["flash_size"]:
-        raise ValueError("Only a full 512 KiB save for a verified US target is supported")
+        raise ValueError("Only a full 512 KiB save for a verified target is supported")
     # Both retail blocks need at least one valid fallback. Do not rewrite either.
     for block_id, region in enumerate(layout["retail_regions_per_half"][:2]):
         valid = False
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
-    parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True,
+    parser.add_argument("--target", choices=("us-rev0", "us-rev1", "europe"), required=True,
                         help="verified ROM target reported by identify-rom.py")
     args = parser.parse_args()
     try:

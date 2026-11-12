@@ -123,7 +123,7 @@ class JournalSeedTests(unittest.TestCase):
                 self.tool("inspect", ok=False)
                 self.assertEqual(self.save.read_bytes(), data)
                 self.assertFalse(Path(str(self.save) + ".dswt").exists())
-        self.install(1); self.tool("inspect", target="europe", ok=False)
+        self.install(1); self.tool("inspect", target="diamond-us-rev5", ok=False)
 
     def test_a_recognized_torn_mirror_is_repaired_without_losing_active_data(self):
         original = self.install(5)

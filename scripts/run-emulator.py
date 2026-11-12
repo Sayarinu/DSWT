@@ -22,7 +22,7 @@ spec.loader.exec_module(provision)
 def refreshed_record(data, target):
     layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
     if target not in layout["verified_targets"] or len(data) != layout["flash_size"]:
-        raise ValueError("Only full saves for verified US targets are supported")
+        raise ValueError("Only full saves for verified targets are supported")
     blanked = bytearray(data)
     valid = []
     for bank in layout["journal_banks"]:
@@ -130,7 +130,7 @@ def run(save, target, command, store_tool=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", type=Path, required=True)
-    parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
+    parser.add_argument("--target", choices=("us-rev0", "us-rev1", "europe"), required=True)
     parser.add_argument("--store-tool", type=Path, help="Use the built dswt-save-store and durable emulator mode")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
