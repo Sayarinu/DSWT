@@ -115,40 +115,61 @@ diff --git a/include/filesystem_files_def.h b/include/filesystem_files_def.h
 diff --git a/main.lsf.in b/main.lsf.in
 --- a/main.lsf.in
 +++ b/main.lsf.in
-@@ -173,0 +174,17 @@ Static main
+@@ -173,0 +174,5 @@ Static main
++    Object src/wonder_trade/hgss/launch.c
++    Object src/wonder_trade/entropy.c
++    Object src/wonder_trade/entropy_game.c
++    Object src/wonder_trade/recovery.c
++    Object src/wonder_trade/hgss/hooks.c
+@@ -355,0 +361 @@ Static main
++    Library libwonder_trade_tls_resident.a
+@@ -710,0 +717 @@ Overlay OVY_27
++    Object src/wonder_trade/hgss/menu_icon.c
+@@ -1431,0 +1439,23 @@ Overlay OVY_128
++
++# Wonder Trade runs with the field unloaded and the Wi-Fi libraries (OVY_0)
++# loaded, like the other Wi-Fi applications after OVY_0. It must end before
++# OVY_12 does, or the main arena would start later and HGSS's boot heaps would
++# no longer fit. Its templates, the save gates, the entropy hook and SHA-256
++# stay in the static binary.
++Overlay wonder_trade
++{
++    After OVY_0
 +    Object src/wonder_trade/hgss/application.c
 +    Object src/wonder_trade/network.c
 +    Object src/wonder_trade/tls.c
 +    Object src/wonder_trade/http.c
 +    Object src/wonder_trade/wire.c
 +    Object src/wonder_trade/seed.c
-+    Object src/wonder_trade/entropy.c
-+    Object src/wonder_trade/entropy_game.c
 +    Object src/wonder_trade/journal.c
 +    Object src/wonder_trade/engine.c
 +    Object src/wonder_trade/pokemon_codec.c
 +    Object src/wonder_trade/hgss/game_save.c
-+    Object src/wonder_trade/recovery.c
 +    Object src/wonder_trade/flash.c
 +    Object src/wonder_trade/boot.c
-+    Object src/wonder_trade/hgss/hooks.c
-+    Object src/wonder_trade/hgss/menu_icon.c
-@@ -355,0 +373 @@ Static main
 +    Library libwonder_trade_tls.a
++}
 diff --git a/meson.build b/meson.build
 --- a/meson.build
 +++ b/meson.build
 @@ -11,0 +12,2 @@ fs = import('fs')
 +configure_file(input: get_option('wonder_trade_profile_header'), output: 'wonder_trade_config.h', copy: true)
 +
-@@ -139,0 +142 @@ subdir('src')
+@@ -139,0 +142,7 @@ subdir('src')
++# The per-frame entropy hook hashes with SHA-256 for as long as the game runs;
++# the rest of Mbed TLS is loaded with the wonder_trade overlay.
++wt_tls_resident_sources = [
++    'tf-psa-crypto/drivers/builtin/src/sha256.c',
++    'tf-psa-crypto/platform/platform_util.c',
++]
 +subdir('src/wonder_trade')
-@@ -158,0 +162 @@ main = executable('main',
+@@ -158,0 +168 @@ main = executable('main',
 +        wt_tls_args,
-@@ -168,0 +173,2 @@ main = executable('main',
+@@ -168,0 +179,2 @@ main = executable('main',
 +        toplevel_includes,
 +        wt_tls_includes,
-@@ -184,0 +191 @@ main = executable('main',
+@@ -184,0 +197,2 @@ main = executable('main',
++        wt_tls_resident,
 +        wt_tls,
 diff --git a/meson.options b/meson.options
 --- a/meson.options
