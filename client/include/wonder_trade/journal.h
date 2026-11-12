@@ -64,9 +64,9 @@ typedef struct WtJournalEntry {
     unsigned char request[WT_JOURNAL_FRAME_MAX];
 } WtJournalEntry;
 
-typedef int (*WtJournalReadBank)(void *, int, unsigned char[4096]);
+typedef int (*WtJournalReadBank)(void *, int, unsigned char[WT_JOURNAL_RECORD_SIZE]);
 /* Success includes tag-last writes and complete readback at a durable boundary. */
-typedef int (*WtJournalWriteBank)(void *, int, const unsigned char[4096]);
+typedef int (*WtJournalWriteBank)(void *, int, const unsigned char[WT_JOURNAL_RECORD_SIZE]);
 typedef int (*WtJournalHash)(const unsigned char *, size_t, unsigned char[32]);
 
 typedef struct WtJournalIO {

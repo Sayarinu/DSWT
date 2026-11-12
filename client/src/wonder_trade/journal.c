@@ -1,4 +1,6 @@
 #include "wonder_trade/journal.h"
+#include "wonder_trade/wire.h"
+#include "wonder_trade/wire_layout.h"
 
 #include <string.h>
 
@@ -63,7 +65,7 @@ static int LayoutKnown(const unsigned char *record)
     return memcmp(record, "DSWJ\1\0", 6) == 0
         && Get(record + 6, 2) <= WT_JOURNAL_RECOVERY_REQUIRED
         && (Get(record + 6, 2) != WT_JOURNAL_EMPTY || (Zero(record + 32, 1408) && Zero(record + 1952, 264)))
-        && Get(record + 8, 4) == 4096 && Zero(record + 12, 4) && Zero(record + 24, 8)
+        && Get(record + 8, 4) == WT_JOURNAL_RECORD_SIZE && Zero(record + 12, 4) && Zero(record + 24, 8)
         && Zero(record + 152, 8) && Zero(record + 397, 19) && Zero(record + 1396, 44)
         && memcmp(record + 1440, "\1\0\40\0", 4) == 0 && Zero(record + 1476, 476)
         && Zero(record + 1954, 6) && Zero(record + 2216, 1844);
@@ -72,34 +74,51 @@ static int LayoutKnown(const unsigned char *record)
 static int RequestValid(const WtJournalEntry *entry, WtJournalHash hash)
 {
     const unsigned char *frame = entry->request;
+    const unsigned char *body = frame + WT_WIRE_REQUEST_HEADER_SIZE;
     uint16_t length = entry->requestLength;
-    unsigned char digest[32];
+    unsigned char digest[WT_WIRE_DIGEST_SIZE];
     unsigned opcode;
-    if (length == 0) return Zero(frame, 256);
-    if (length < 80 || length > 256 || !Zero(frame + length, 256 - length)
-        || memcmp(frame, "WTDS\1", 5) != 0 || Get(frame + 6, 2) != (unsigned)length - 80
-        || memcmp(frame + 40, entry->credential, 32) != 0) return 0;
-    opcode = frame[5];
-    if (opcode == 1) {
-        return entry->phase == WT_JOURNAL_ENROLLING && length >= 85 && length <= 149
-            && Get(frame + 84, 1) == (unsigned)length - 85 && Zero(frame + 24, 16)
-            && Get(frame + 72, 8) == 0 && memcmp(frame + 8, entry->enrollmentID, 16) == 0;
+    if (length == 0) return Zero(frame, WT_JOURNAL_FRAME_MAX);
+    if (length < WT_WIRE_REQUEST_HEADER_SIZE || length > WT_JOURNAL_FRAME_MAX
+        || !Zero(frame + length, WT_JOURNAL_FRAME_MAX - length)
+        || memcmp(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE) != 0
+        || Get(frame + WT_WIRE_REQUEST_BODY_LENGTH, 2) != (unsigned)length - WT_WIRE_REQUEST_HEADER_SIZE
+        || memcmp(frame + WT_WIRE_REQUEST_CREDENTIAL, entry->credential, WT_WIRE_CREDENTIAL_SIZE) != 0) return 0;
+    opcode = frame[WT_WIRE_REQUEST_OPERATION];
+    if (opcode == WT_OP_ENROLL) {
+        return entry->phase == WT_JOURNAL_ENROLLING
+            && length >= WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_ENROLL_HINTS
+            && length <= WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_ENROLL_HINTS + WT_WIRE_ENROLL_HINTS_MAX
+            && Get(body + WT_WIRE_ENROLL_HINT_LENGTH, 1) == (unsigned)length - (WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_ENROLL_HINTS)
+            && Zero(frame + WT_WIRE_REQUEST_SAVE_ID, WT_WIRE_ID_SIZE)
+            && Get(frame + WT_WIRE_REQUEST_COUNTER, 8) == 0
+            && memcmp(frame + WT_WIRE_REQUEST_ID, entry->enrollmentID, WT_WIRE_ID_SIZE) == 0;
     }
-    if (memcmp(frame + 24, entry->saveID, 16) != 0 || Zero(frame + 8, 16)) return 0;
+    if (memcmp(frame + WT_WIRE_REQUEST_SAVE_ID, entry->saveID, WT_WIRE_ID_SIZE) != 0
+        || Zero(frame + WT_WIRE_REQUEST_ID, WT_WIRE_ID_SIZE)) return 0;
     /* Only mutations require crash-stable packet storage. Reads can be rebuilt. */
-    if (opcode != 2 && opcode != 4 && opcode != 6) return 0;
-    if (memcmp(frame + 8, entry->operation, 16) != 0 || entry->operationCounter == 0 || entry->operationCounter == UINT64_MAX
-        || Get(frame + 72, 8) != entry->operationCounter) return 0;
-    if (opcode == 2) {
-        return length == 256 && Get(frame + 80, 8) != 0 && Get(frame + 80, 8) <= entry->generation
-            && memcmp(frame + 88, entry->outgoing, 136) == 0
-            && hash(entry->outgoing, 136, digest) == 0 && memcmp(frame + 224, digest, 32) == 0;
+    if (opcode != WT_OP_SUBMIT && opcode != WT_OP_CANCEL && opcode != WT_OP_ACKNOWLEDGE) return 0;
+    if (memcmp(frame + WT_WIRE_REQUEST_ID, entry->operation, WT_WIRE_ID_SIZE) != 0
+        || entry->operationCounter == 0 || entry->operationCounter == UINT64_MAX
+        || Get(frame + WT_WIRE_REQUEST_COUNTER, 8) != entry->operationCounter) return 0;
+    if (opcode == WT_OP_SUBMIT) {
+        return length == WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_SUBMIT_SIZE
+            && Get(body + WT_WIRE_SUBMIT_GENERATION, 8) != 0
+            && Get(body + WT_WIRE_SUBMIT_GENERATION, 8) <= entry->generation
+            && memcmp(body + WT_WIRE_SUBMIT_POKEMON, entry->outgoing, WT_WIRE_PK4_SIZE) == 0
+            && hash(entry->outgoing, WT_WIRE_PK4_SIZE, digest) == 0
+            && memcmp(body + WT_WIRE_SUBMIT_DIGEST, digest, WT_WIRE_DIGEST_SIZE) == 0;
     }
-    if (opcode == 4) return length == 96 && !Zero(entry->trade, 16) && memcmp(frame + 80, entry->trade, 16) == 0;
-    return length == 184 && !Zero(entry->trade, 16) && !Zero(entry->receipt, 16)
-        && memcmp(frame + 80, entry->trade, 16) == 0 && memcmp(frame + 96, entry->receipt, 16) == 0
-        && memcmp(frame + 112, entry->incomingDigest, 32) == 0 && memcmp(frame + 144, entry->appliedDigest, 32) == 0
-        && Get(frame + 176, 8) != 0 && Get(frame + 176, 8) <= entry->generation;
+    if (opcode == WT_OP_CANCEL) return length == WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_TRADE_REQUEST_SIZE
+        && !Zero(entry->trade, WT_WIRE_ID_SIZE) && memcmp(body, entry->trade, WT_WIRE_ID_SIZE) == 0;
+    return length == WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_ACK_SIZE
+        && !Zero(entry->trade, WT_WIRE_ID_SIZE) && !Zero(entry->receipt, WT_WIRE_ID_SIZE)
+        && memcmp(body + WT_WIRE_ACK_TRADE, entry->trade, WT_WIRE_ID_SIZE) == 0
+        && memcmp(body + WT_WIRE_ACK_RECEIPT, entry->receipt, WT_WIRE_ID_SIZE) == 0
+        && memcmp(body + WT_WIRE_ACK_DELIVERED_DIGEST, entry->incomingDigest, WT_WIRE_DIGEST_SIZE) == 0
+        && memcmp(body + WT_WIRE_ACK_APPLIED_DIGEST, entry->appliedDigest, WT_WIRE_DIGEST_SIZE) == 0
+        && Get(body + WT_WIRE_ACK_GENERATION, 8) != 0
+        && Get(body + WT_WIRE_ACK_GENERATION, 8) <= entry->generation;
 }
 
 static int DigestMatches(const unsigned char *bytes, size_t length, const unsigned char *expected, WtJournalHash hash)
@@ -148,9 +167,9 @@ static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
 int WtJournal_Encode(const WtJournalEntry *entry, WtJournalHash hash, unsigned char *record)
 {
     if (!entry || !hash || !record || !EntryValid(entry, hash)) return -1;
-    memset(record, 0, 4096);
+    memset(record, 0, WT_JOURNAL_RECORD_SIZE);
     memcpy(record, "DSWJ\1\0", 6); Put(record + 6, entry->phase, 2);
-    Put(record + 8, 4096, 4); Put(record + 16, entry->generation, 8);
+    Put(record + 8, WT_JOURNAL_RECORD_SIZE, 4); Put(record + 16, entry->generation, 8);
     memcpy(record + 32, entry->saveID, 16); memcpy(record + 48, entry->credential, 32);
     memcpy(record + 80, entry->enrollmentID, 16);
     Put(record + 96, entry->nextCounter, 8); Put(record + 104, entry->eventCursor, 8);
@@ -216,7 +235,7 @@ static int Blank(const unsigned char *record)
 {
     size_t i;
     if (record[0] != 0 && record[0] != 255) return 0;
-    for (i = 1; i < 4096; i++) if (record[i] != record[0]) return 0;
+    for (i = 1; i < WT_JOURNAL_RECORD_SIZE; i++) if (record[i] != record[0]) return 0;
     return 1;
 }
 
@@ -330,7 +349,7 @@ static int Follows(const unsigned char *before, const unsigned char *after)
 
 static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
 {
-    unsigned char other[4096], digest[32];
+    unsigned char other[WT_JOURNAL_RECORD_SIZE], digest[32];
     WtJournalEntry entry;
     uint64_t firstGeneration = 0, secondGeneration = 0;
     int firstValid, secondValid;
@@ -351,7 +370,7 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
     if (secondValid) secondGeneration = entry.generation;
     if ((!firstValid && Sealed(store->record, io.hash)) || (!secondValid && Sealed(other, io.hash))) goto failed;
     if (!firstValid && !secondValid) goto failed;
-    if (firstValid && secondValid && firstGeneration == secondGeneration && memcmp(store->record, other, 4096) != 0) {
+    if (firstValid && secondValid && firstGeneration == secondGeneration && memcmp(store->record, other, WT_JOURNAL_RECORD_SIZE) != 0) {
         result = WT_JOURNAL_ERROR_CONFLICT;
         goto failed;
     }
@@ -359,9 +378,9 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
         ? !Follows(store->record, other) : !Follows(other, store->record))) goto failed;
     if ((!firstValid && !TornIdentityKnown(store->record, other))
         || (!secondValid && !TornIdentityKnown(other, store->record))) goto failed;
-    if (io.hash(store->record, 4096, store->observed[0]) != 0 || io.hash(other, 4096, store->observed[1]) != 0) goto failed;
+    if (io.hash(store->record, WT_JOURNAL_RECORD_SIZE, store->observed[0]) != 0 || io.hash(other, WT_JOURNAL_RECORD_SIZE, store->observed[1]) != 0) goto failed;
     if (!firstValid || (secondValid && secondGeneration > firstGeneration)) {
-        memcpy(store->record, other, 4096); store->selected = 1;
+        memcpy(store->record, other, WT_JOURNAL_RECORD_SIZE); store->selected = 1;
     }
     store->io = io; store->usable = 1;
     Clear(&entry, sizeof(entry)); Clear(other, sizeof(other));
@@ -377,7 +396,7 @@ int WtJournal_OpenEmpty(WtJournal *store, WtJournalIO io) { return Open(store, i
 
 int WtJournal_Initialize(WtJournal *store, WtJournalIO io, const unsigned char *seed)
 {
-    unsigned char other[4096], digest[32];
+    unsigned char other[WT_JOURNAL_RECORD_SIZE], digest[32];
     WtJournalEntry entry;
     int bank, result = WT_JOURNAL_ERROR_UNKNOWN;
     if (!store) return -1;
@@ -399,7 +418,7 @@ int WtJournal_Initialize(WtJournal *store, WtJournalIO io, const unsigned char *
         if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
         if (!Blank(other) || io.write(io.arg, bank, store->record) != 0) goto done;
         if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
-        if (memcmp(other, store->record, 4096) != 0) goto done;
+        if (memcmp(other, store->record, WT_JOURNAL_RECORD_SIZE) != 0) goto done;
     }
     result = 0;
 done:
@@ -417,14 +436,14 @@ int WtJournal_Read(const WtJournal *store, WtJournalEntry *entry)
 
 static int Current(const WtJournal *store)
 {
-    unsigned char record[4096], digest[32];
+    unsigned char record[WT_JOURNAL_RECORD_SIZE], digest[32];
     int result = -1;
     int bank;
-    if (store->io.hash(store->record, 4096, digest) != 0
+    if (store->io.hash(store->record, WT_JOURNAL_RECORD_SIZE, digest) != 0
         || memcmp(digest, store->observed[store->selected], 32) != 0) goto done;
     for (bank = 0; bank < 2; bank++) {
         if (store->io.read(store->io.arg, bank, record) != 0
-            || store->io.hash(record, 4096, digest) != 0 || memcmp(digest, store->observed[bank], 32) != 0) goto done;
+            || store->io.hash(record, WT_JOURNAL_RECORD_SIZE, digest) != 0 || memcmp(digest, store->observed[bank], 32) != 0) goto done;
     }
     result = 0;
 done:
@@ -434,10 +453,10 @@ done:
 
 static int WriteBank(WtJournal *store, int bank, const unsigned char *record)
 {
-    unsigned char readback[4096];
+    unsigned char readback[WT_JOURNAL_RECORD_SIZE];
     int result = -1;
     if (store->io.write(store->io.arg, bank, record) == 0
-        && store->io.read(store->io.arg, bank, readback) == 0 && memcmp(readback, record, 4096) == 0) result = 0;
+        && store->io.read(store->io.arg, bank, readback) == 0 && memcmp(readback, record, WT_JOURNAL_RECORD_SIZE) == 0) result = 0;
     Clear(readback, sizeof(readback));
     return result;
 }
@@ -455,18 +474,18 @@ int WtJournal_Repair(WtJournal *store)
 
 int WtJournal_Commit(WtJournal *store, const WtJournalEntry *entry)
 {
-    unsigned char next[4096], fingerprint[32];
+    unsigned char next[WT_JOURNAL_RECORD_SIZE], fingerprint[32];
     uint64_t generation;
     int result = -1;
     if (!store || !store->usable || !entry) return -1;
     generation = Get(store->record + 16, 8);
     if (generation == UINT64_MAX || entry->generation != generation + 1) goto done;
     if (WtJournal_Encode(entry, store->io.hash, next) != 0 || !Follows(store->record, next)
-        || store->io.hash(next, 4096, fingerprint) != 0) goto done;
+        || store->io.hash(next, WT_JOURNAL_RECORD_SIZE, fingerprint) != 0) goto done;
     store->usable = 0;
     if (Current(store) != 0 || WriteBank(store, store->selected ^ 1, next) != 0
         || WriteBank(store, store->selected, next) != 0) goto done;
-    memcpy(store->record, next, 4096); store->usable = 1;
+    memcpy(store->record, next, WT_JOURNAL_RECORD_SIZE); store->usable = 1;
     memcpy(store->observed[0], fingerprint, 32); memcpy(store->observed[1], fingerprint, 32);
     result = 0;
 done:
