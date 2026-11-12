@@ -14,6 +14,8 @@ typedef struct WtGameSave {
 
 typedef struct WtReceivedPokemon {
     u16 species;
+    u8 gender, form, shiny;
+    u32 personality;
     BOOL hasNickname;
     charcode_t nickname[MON_NAME_LEN + 1], originalTrainer[TRAINER_NAME_LEN + 1];
 } WtReceivedPokemon;

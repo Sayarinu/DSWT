@@ -11,6 +11,7 @@
 #include <QTest>
 #include <QTimer>
 #include <QWidget>
+#include <algorithm>
 #include <dlfcn.h>
 
 namespace {
@@ -31,6 +32,17 @@ void Action(const QJsonObject &value) {
         QTest::keyPress(window, key);
         QPointer<QWidget> target(window);
         QTimer::singleShot(100, qApp, [target, key] { if (target) QTest::keyRelease(target, key); });
+    } else if (operation == "touch") {
+        // Disposable profiles use equally sized, vertical screens without a gap.
+        for (auto *panel : window->findChildren<QWidget *>()) {
+            if (!panel->inherits("ScreenPanel")) continue;
+            const auto scale = std::min(panel->width() / 256.0, panel->height() / 384.0);
+            const QPoint position((panel->width() - 256 * scale) / 2 + (value["x"].toInt() + 0.5) * scale,
+                                  (panel->height() - 384 * scale) / 2 + (192 + value["y"].toInt() + 0.5) * scale);
+            if (value["state"] == "press") QTest::mousePress(panel, Qt::LeftButton, Qt::NoModifier, position);
+            else QTest::mouseRelease(panel, Qt::LeftButton, Qt::NoModifier, position);
+            return;
+        }
     } else if (operation == "menu") {
         for (auto *entry : window->findChildren<QAction *>()) {
             auto *menu = qobject_cast<QMenu *>(entry->parent());

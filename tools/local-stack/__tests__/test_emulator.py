@@ -19,6 +19,24 @@ spec.loader.exec_module(emulator)
 
 
 class EmulatorTests(unittest.TestCase):
+    def test_touch_controls_are_bounded_to_the_ds_screen(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local = SimpleNamespace(workspace=Path(temporary).resolve(), manifest={"project": "owned"})
+            runner = emulator.Emulator(local, "touch")
+            runner.directory.mkdir(parents=True)
+            runner.owned_container = lambda: {"State": {"Running": True}}
+            valid = [{"op": "touch", "state": "press", "x": 0, "y": 0},
+                     {"op": "touch", "state": "release", "x": 255, "y": 191, "ms": 100}]
+            runner.events(valid)
+            controls = runner.directory / "control.json"
+            self.assertEqual(json.loads(controls.read_text()), [dict(valid[0], ms=0), valid[1]])
+            controls.unlink()
+            for change in ({"x": -1}, {"x": 256}, {"x": True}, {"y": 192}, {"y": 1.5},
+                           {"state": "move"}, {"ms": -1}, {"path": "/unowned"}):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    runner.events([dict(valid[0], **change)])
+                self.assertFalse(controls.exists())
+
     def image(self, first, second):
         raw = bytearray(524288)
         raw[0x30000:0x31000], raw[0x70000:0x71000] = first, second
