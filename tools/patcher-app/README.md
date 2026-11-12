@@ -1,7 +1,10 @@
 # DSWT Patcher and releases
 
-`dswt_patcher.py` is the player app: a one-window Tkinter patcher with a
-command-line mode (`--input ROM [--output FILE]`, `--self-test`). It embeds one
+`dswt_patcher.py` is the player app: a one-window patcher drawn like a DS-era
+menu, with a command-line mode (`--input ROM [--output FILE]`, `--self-test`).
+[`menu_style.py`](menu_style.py) holds its original pixel font and frames, drawn on a
+256x192 screen scaled by a whole number; nothing comes from any game. Arrow keys
+move the cursor, Enter/Z/Space is A, Escape/X/Backspace is B, and the mouse works. It embeds one
 release bundle and uses the portable [`bundle.py`](../bps-patch/README.md) checks,
 so it needs no Docker or other tools. Run it from source with
 `python3 tools/patcher-app/dswt_patcher.py --bundle DIR`.
@@ -36,3 +39,5 @@ texts.
 ```sh
 python3 -m unittest discover -s tools/patcher-app/__tests__
 ```
+
+Set `DSWT_TEST_WINDOW=1` on a machine with Tk and a display to also drive the window.
