@@ -15,7 +15,6 @@
 
 #include "bag.h"
 #include "bg_window.h"
-#include "character_sprite.h"
 #include "font.h"
 #include "game_options.h"
 #include "graphics.h"
@@ -31,14 +30,11 @@
 #include "save_player.h"
 #include "screen_fade.h"
 #include "sound_playback.h"
-#include "sprite_system.h"
 #include "system.h"
 #include "text.h"
 #include "touch_pad.h"
-#include "vram_transfer.h"
 
 #include "res/text/bank/wonder_trade.h"
-#include "res/graphics/windows/pl_winframe.naix"
 
 enum WonderTradeAppState {
     WT_APP_BOOT,
@@ -71,11 +67,8 @@ typedef struct WonderTradeApp {
     FieldSystem *fieldSystem;
     WonderTradeNetwork network;
     BgConfig *bgConfig;
-    Window title, message, details, body, subTitle, hint;
+    Window title, message, details, body, subTitle, hint, preview;
     Window actions[WT_MENU_MAX_ACTIONS];
-    SpriteSystem *spriteSystem;
-    SpriteManager *spriteManager;
-    ManagedSprite *preview;
     PokemonSpriteTemplate previewTemplate;
     u16 buttonTilemap[32 * 24];
     BOOL previewLoaded;
@@ -96,9 +89,8 @@ typedef struct WonderTradeApp {
 
 static void WonderTrade_Draw(WonderTradeApp *app);
 
-#define WT_FRAME_TILE 900
-#define WT_MESSAGE_TILE 920
-#define WT_PREVIEW_RESOURCE 0
+#define WT_FRAME_TILE 961
+#define WT_MESSAGE_TILE 970
 
 static int WonderTrade_Actions(const WonderTradeApp *app, int labels[WT_MENU_MAX_ACTIONS])
 {
@@ -138,43 +130,8 @@ static int WonderTrade_Actions(const WonderTradeApp *app, int labels[WT_MENU_MAX
 static void WonderTrade_VBlank(void *arg)
 {
     WonderTradeApp *app = arg;
-    VramTransfer_Process();
-    SpriteSystem_TransferOam();
     Bg_RunScheduledUpdates(app->bgConfig);
     OS_SetIrqCheckFlag(OS_IE_V_BLANK);
-}
-
-static void WonderTrade_InitPreview(WonderTradeApp *app)
-{
-    const RenderOamTemplate oam = { 0, 128, 0, 32, 0, 128, 0, 32 };
-    /* Reserve the whole bank so the preview starts within the 32K OAM range. */
-    const CharTransferTemplateWithModes transfer = {
-        1, 0x10000, 0x400, GX_OBJVRAMMODE_CHAR_1D_32K, GX_OBJVRAMMODE_CHAR_1D_32K
-    };
-    const SpriteResourceCapacities capacities = { 1, 1, 1, 1, 0, 0 };
-    const SpriteTemplate sprite = {
-        .x = 208, .y = 72, .z = 0, .animIdx = 0, .priority = 0, .plttIdx = 0,
-        .vramType = NNS_G2D_VRAM_TYPE_2DMAIN,
-        .resources = { WT_PREVIEW_RESOURCE, WT_PREVIEW_RESOURCE, WT_PREVIEW_RESOURCE, WT_PREVIEW_RESOURCE, -1, -1 },
-        .bgPriority = 0, .vramTransfer = FALSE
-    };
-    VramTransfer_New(8, HEAP_ID_WONDER_TRADE);
-    app->spriteSystem = SpriteSystem_Alloc(HEAP_ID_WONDER_TRADE);
-    SpriteSystem_Init(app->spriteSystem, &oam, &transfer, 1);
-    app->spriteManager = SpriteManager_New(app->spriteSystem);
-    SpriteSystem_InitSprites(app->spriteSystem, app->spriteManager, 1);
-    SpriteSystem_InitManagerWithCapacities(app->spriteSystem, app->spriteManager, &capacities);
-    SpriteSystem_LoadCharResObj(app->spriteSystem, app->spriteManager, NARC_INDEX_GRAPHIC__PL_WINFRAME,
-        pokemon_preview_NCGR, FALSE, NNS_G2D_VRAM_TYPE_2DMAIN, WT_PREVIEW_RESOURCE);
-    SpriteSystem_LoadPlttResObj(app->spriteSystem, app->spriteManager, NARC_INDEX_GRAPHIC__PL_WINFRAME,
-        pokemon_preview_NCLR, FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, WT_PREVIEW_RESOURCE);
-    SpriteSystem_LoadCellResObj(app->spriteSystem, app->spriteManager, NARC_INDEX_GRAPHIC__PL_WINFRAME,
-        pokemon_preview_cell_NCER, FALSE, WT_PREVIEW_RESOURCE);
-    SpriteSystem_LoadAnimResObj(app->spriteSystem, app->spriteManager, NARC_INDEX_GRAPHIC__PL_WINFRAME,
-        pokemon_preview_anim_NANR, FALSE, WT_PREVIEW_RESOURCE);
-    app->preview = SpriteSystem_NewSprite(app->spriteSystem, app->spriteManager, &sprite);
-    ManagedSprite_SetDrawFlag(app->preview, FALSE);
-    app->previewLoaded = FALSE;
 }
 
 static void WonderTrade_InitGraphics(WonderTradeApp *app)
@@ -267,13 +224,14 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
             WT_MENU_WIDTH / 8, WT_MENU_HEIGHT / 8, 13, 61 + i * 72);
     }
     Window_Add(app->bgConfig, &app->hint, BG_LAYER_SUB_0, 2, 21, 28, 2, 13, 277);
-    WonderTrade_InitPreview(app);
+    Window_Add(app->bgConfig, &app->preview, BG_LAYER_MAIN_0, 21, 4, 10, 10, 4, 861);
+    app->previewLoaded = FALSE;
     app->graphicsReady = TRUE;
     app->touchBlocked = TRUE;
     app->listingBackground = TRUE; /* Force the first background palette load. */
     WonderTrade_Draw(app);
     SetVBlankCallback(WonderTrade_VBlank, app);
-    GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG0 | GX_PLANEMASK_OBJ, TRUE);
+    GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG0, TRUE);
     GXLayers_EngineBToggleLayers(GX_PLANEMASK_BG0 | GX_PLANEMASK_BG1 | GX_PLANEMASK_BG2, TRUE);
     GXLayers_TurnBothDispOn();
     ResetScreenMasterBrightness(DS_SCREEN_MAIN);
@@ -285,11 +243,7 @@ static void WonderTrade_FreeGraphics(WonderTradeApp *app)
     if (!app->graphicsReady) return;
     SetVBlankCallback(NULL, NULL);
     DisableTouchPad();
-    Sprite_DeleteAndFreeResources(app->preview);
-    SpriteSystem_FreeResourcesAndManager(app->spriteSystem, app->spriteManager);
-    SpriteSystem_Free(app->spriteSystem);
-    VramTransfer_Free();
-    app->spriteSystem = NULL;
+    Window_Remove(&app->preview);
     Window_Remove(&app->title);
     Window_Remove(&app->message);
     Window_Remove(&app->details);
@@ -331,21 +285,28 @@ static void WonderTrade_PrintNumber(Window *window, int value, int y)
     String_Free(number);
 }
 
-static void WonderTrade_Preview(WonderTradeApp *app, PokemonSpriteTemplate *sprite, int species)
+static void WonderTrade_Preview(WonderTradeApp *app, PokemonSpriteTemplate *sprite)
 {
     if (!app->previewLoaded || memcmp(sprite, &app->previewTemplate, sizeof(*sprite)) != 0) {
-        u8 *tiles = Heap_Alloc(HEAP_ID_WONDER_TRADE, 10 * 10 * 32);
-        CharacterSprite_LoadPokemonSprite(sprite->narcID, sprite->character, HEAP_ID_WONDER_TRADE,
-            tiles, sprite->personality, FALSE, FACE_FRONT, species);
-        DC_FlushRange(tiles, 10 * 10 * 32);
-        GX_LoadOBJ(tiles, NNS_G2dGetImageLocation(Sprite_GetImageProxy(app->preview->sprite), NNS_G2D_VRAM_TYPE_2DMAIN), 10 * 10 * 32);
-        Heap_Free(tiles);
-        Graphics_LoadPalette(sprite->narcID, sprite->palette, PAL_LOAD_MAIN_OBJ,
-            SpriteManager_FindPlttResourceOffset(app->spriteManager, WT_PREVIEW_RESOURCE, NNS_G2D_VRAM_TYPE_2DMAIN) * 32, 32, HEAP_ID_WONDER_TRADE);
+        NNSG2dCharacterData *data;
+        void *resource = Graphics_GetCharData(sprite->narcID, sprite->character, FALSE, &data, HEAP_ID_WONDER_TRADE);
+        u8 *source = data->pRawData;
+        u8 *tiles = app->preview.pixels;
+        PokemonSprite_Decrypt(source, sprite->narcID);
+        if (sprite->spindaSpots) PokemonSprite_DrawSpindaSpots(source, sprite->personality, FALSE);
+        /* Copy the first 80x80 frame from the two-frame bitmap into BG tiles. */
+        for (int y = 0; y < 80; y++) {
+            for (int x = 0; x < 10; x++) {
+                memcpy(tiles + ((y / 8) * 10 + x) * 32 + (y % 8) * 4,
+                    source + y * data->W * 4 + x * 4, 4);
+            }
+        }
+        Heap_Free(resource);
+        Graphics_LoadPalette(sprite->narcID, sprite->palette, PAL_LOAD_MAIN_BG, 4 * 32, 32, HEAP_ID_WONDER_TRADE);
         app->previewTemplate = *sprite;
         app->previewLoaded = TRUE;
     }
-    ManagedSprite_SetDrawFlag(app->preview, TRUE);
+    Window_ScheduleCopyToVRAM(&app->preview);
 }
 
 static void WonderTrade_DrawPokemon(WonderTradeApp *app)
@@ -361,7 +322,7 @@ static void WonderTrade_DrawPokemon(WonderTradeApp *app)
         MessageLoader_GetSpeciesName(id, HEAP_ID_WONDER_TRADE, species);
         Pokemon_GetValue(mon, MON_DATA_NICKNAME, nickname);
         Pokemon_BuildSpriteTemplate(&sprite, mon, FACE_FRONT);
-        WonderTrade_Preview(app, &sprite, id);
+        WonderTrade_Preview(app, &sprite);
         WonderTrade_PrintChars(&app->details, species, 0, 0);
         WonderTrade_PrintChars(&app->details, nickname, 0, 16);
     } else {
@@ -369,7 +330,7 @@ static void WonderTrade_DrawPokemon(WonderTradeApp *app)
         MessageLoader_GetSpeciesName(received->species, HEAP_ID_WONDER_TRADE, species);
         BuildPokemonSpriteTemplate(&sprite, received->species, received->gender, FACE_FRONT,
             received->shiny, received->form, received->personality);
-        WonderTrade_Preview(app, &sprite, received->species);
+        WonderTrade_Preview(app, &sprite);
         WonderTrade_Print(app, &app->details, WonderTrade_Text_Received, 0, 0, TEXT_COLOR(15, 2, 0));
         WonderTrade_PrintChars(&app->details, species, 0, 16);
         if (received->hasNickname) WonderTrade_PrintChars(&app->details, received->nickname, 0, 32);
@@ -397,7 +358,6 @@ static void WonderTrade_Draw(WonderTradeApp *app)
     }
     GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG1, !preview);
     GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG2, preview);
-    ManagedSprite_SetDrawFlag(app->preview, FALSE);
     Window_FillTilemap(&app->title, 0);
     WonderTrade_Print(app, &app->title, WonderTrade_Text_Title, 0, 0, TEXT_COLOR(15, 2, 0));
     Window_ScheduleCopyToVRAM(&app->title);
@@ -447,7 +407,6 @@ static void WonderTrade_Draw(WonderTradeApp *app)
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_MAIN_0);
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_SUB_0);
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_SUB_2);
-    SpriteSystem_DrawSprites(app->spriteManager);
 }
 
 static void WonderTrade_Show(WonderTradeApp *app, int state, int message)
@@ -676,7 +635,6 @@ static void WonderTrade_HandleInput(WonderTradeApp *app)
 static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = ApplicationManager_Data(appMan);
-    if (app->graphicsReady) SpriteSystem_DrawSprites(app->spriteManager);
     if (app->state == WT_APP_BOOT) return WonderTrade_BootPoll(app);
     if (app->state == WT_APP_RECOVERY) {
         WonderTrade_HandleInput(app);
