@@ -238,6 +238,19 @@ the PC boxes changed since the last save; the adapter marks every box modified
 before each of its two consecutive retail saves so both halves hold the full
 image, and its digests read the box-modified flags (0x21704 in each half) as zero.
 
+[`save-layout-dp.json`](save-layout-dp.json) records US Diamond and Pearl
+(Rev 5) from the pinned pokediamond source and the size functions linked into
+both pristine (retail-identical) ARM9 binaries, which are the same in each.
+Like Platinum, each half packs general data at 0..0xC100 and boxes at
+0xC100..0x1E2E0 with 20-byte footers, filling exactly the 32 sectors
+`SAVE_PAGE_MAX` allows. Its only extra chunks are the Hall of Fame at 0x20000
+and a 0x1354-byte chunk at 0x23000, each with a 16-byte footer and ending by
+0x24364; the second half mirrors them at +0x40000. Nothing else writes the
+flash: every write goes through `save.c`, and the 0x30000 and 0x70000 sectors
+are unused, so Diamond and Pearl use the same journal banks and record format.
+Deleting the save (`sub_0202263C`) erases all 128 sectors, journals included,
+so it is gated like the other games' delete paths.
+
 Each bank begins with one explicitly serialized 4096-byte record. Header:
 `DSWJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,
 generation u64, reserved-zero 8 bytes. Remaining section offsets are in the JSON:

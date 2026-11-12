@@ -27,8 +27,8 @@ def seed_record(seed, generation):
     return bytes(record)
 
 
-LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json")
-TARGETS = ("us-rev0", "us-rev1", "heartgold-us-rev0", "soulsilver-us-rev0")
+LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json")
+TARGETS = ("us-rev0", "us-rev1", "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-us-rev5", "pearl-us-rev5")
 
 
 def layout_for(target):
