@@ -15,7 +15,8 @@ patch; use the complete SHA-256. Encrypted, corrupt, previously patched and
 unlisted inputs are rejected. The header game code (`ADA`, `APA`, `CPU`, `IPK` or
 `IPG` for Diamond, Pearl, Platinum, HeartGold or SoulSilver, then `J`, `E`, `P`,
 `F`, `D`, `I`, `S` or `K` for Japanese, US English, European English, French,
-German, Italian, Spanish or Korean) only explains a refusal. Every game and
+German, Italian, Spanish or Korean; European English Platinum reads `CPUE`
+revision 10) only explains a refusal. Every game and
 language other than US English Platinum is recognised but not supported until it
 has its own ported and tested target. No BIOS or ROM is bundled.
 
