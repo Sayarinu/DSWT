@@ -25,10 +25,15 @@ TEST(DeviceMatcherTest, UncertainOutcomesReuseIdAndOnlyFinalOutcomesAdvance) {
   builder.RegisterService(&endpoint);
   auto server = builder.BuildAndStart();
   ASSERT_TRUE(server);
-  DeviceMatcher worker("127.0.0.1:" + std::to_string(port));
+  bool available = true;
+  DeviceMatcher worker("127.0.0.1:" + std::to_string(port), [&] { return available; });
   EXPECT_GT(worker.Poll().count(), 0);
+  // An uncertain attempt is resolved with its own ID even once nothing is pairable.
+  available = false;
   EXPECT_GT(worker.Poll().count(), 0);
   EXPECT_EQ(worker.Poll().count(), 0);
+  EXPECT_EQ(worker.Poll(), dswt::server::MatchWorker::kIdleDelay);
+  available = true;
   EXPECT_GT(worker.Poll().count(), 0);
   EXPECT_GT(worker.Poll().count(), 0);
   server->Shutdown();
