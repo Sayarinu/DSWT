@@ -1,4 +1,4 @@
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 
 #include <string.h>
 #include <mbedtls/private/sha256.h>
@@ -96,7 +96,7 @@ done:
     return result;
 }
 
-static int SaveBoth(WtGameSave *game, const unsigned char expected[32])
+static int SaveBoth(WtGame *game, const unsigned char expected[32])
 {
     unsigned char actual[32];
     int result = -1, i;
@@ -114,14 +114,14 @@ done:
     return result;
 }
 
-int WtGameSave_Checkpoint(WtGameSave *game)
+int WtGame_Checkpoint(WtGame *game)
 {
     unsigned char digest[32];
     if (Hash(game->save, digest) != 0) return -1;
     return Verify(game->save, digest) == 0 ? 0 : SaveBoth(game, digest);
 }
 
-static void Counters(WtGameSave *game, WtJournalEntry *entry)
+static void Counters(WtGame *game, WtJournalEntry *entry)
 {
     entry->globalCounter = game->save->globalCounter;
     entry->generalCounter = game->save->blockCounters[0];
@@ -173,7 +173,7 @@ static int Absent(SaveData *save, const unsigned char outgoing[136])
     return 0;
 }
 
-static int Removed(WtGameSave *game, const WtJournalEntry *entry)
+static int Removed(WtGame *game, const WtJournalEntry *entry)
 {
     unsigned char canonical[136];
     if (entry->source.kind != 1 || entry->source.length != sizeof(Pokemon)
@@ -184,7 +184,7 @@ static int Removed(WtGameSave *game, const WtJournalEntry *entry)
         || (u32)(game->save->blockCounters[0] - entry->generalCounter) >= 0x80000000
         || (u32)(game->save->blockCounters[1] - entry->boxCounter) >= 0x80000000
         || Absent(game->save, entry->outgoing) != 0) return -1;
-    return WtGameSave_Checkpoint(game);
+    return WtGame_Checkpoint(game);
 }
 
 static unsigned char *Destination(SaveData *save, WtJournalLocator where)
@@ -198,7 +198,7 @@ static unsigned char *Destination(SaveData *save, WtJournalLocator where)
 
 /* The collection confirmation explicitly keeps the existing move set when
  * trade evolution occurs. No evolution animation can mutate a live save. */
-static int ReceiveEffects(WtGameSave *game, SaveData *save, const WtJournalEntry *entry, Pokemon *mon)
+static int ReceiveEffects(WtGame *game, SaveData *save, const WtJournalEntry *entry, Pokemon *mon)
 {
     BoxPokemon box;
     u8 friendship = BASE_FRIENDSHIP_VALUE;
@@ -242,7 +242,7 @@ static int ReceiveEffects(WtGameSave *game, SaveData *save, const WtJournalEntry
     return 0;
 }
 
-static int BuildReceived(WtGameSave *game, SaveData *save, WtJournalEntry *entry, int prepare)
+static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, int prepare)
 {
     Pokemon mon;
     Party *party = SaveData_GetParty(save);
@@ -309,7 +309,7 @@ static int BuildReceived(WtGameSave *game, SaveData *save, WtJournalEntry *entry
     return 0;
 }
 
-static int VerifyReceived(WtGameSave *game, const WtJournalEntry *entry)
+static int VerifyReceived(WtGame *game, const WtJournalEntry *entry)
 {
     unsigned char digest[32], canonical[136];
     unsigned char *destination = Destination(game->save, entry->destination);
@@ -320,7 +320,7 @@ static int VerifyReceived(WtGameSave *game, const WtJournalEntry *entry)
     return Verify(game->save, entry->inventoryAfter);
 }
 
-static int Receive(WtGameSave *game, enum WtInventoryStep step, WtJournalEntry *entry)
+static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entry)
 {
     SaveData *candidate;
     unsigned char digest[32];
@@ -347,9 +347,9 @@ done:
     return result;
 }
 
-int WtGameSave_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
+int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
-    WtGameSave *game = arg;
+    WtGame *game = arg;
     SaveData *candidate = NULL;
     Party *party = SaveData_GetParty(game->save), *copy;
     unsigned char digest[32], canonical[136];
@@ -421,7 +421,7 @@ BOOL WtGameSave_Unique(SaveData *save, unsigned slot, enum HeapID heapID)
     return unique;
 }
 
-int WtGameSave_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
+int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
 {
     BoxPokemon box;
     if (entry->deliveryKind != WT_DELIVERY_MATCH || entry->destination.length < sizeof(box)) return -1;
@@ -437,23 +437,9 @@ int WtGameSave_Received(const WtJournalEntry *entry, WtReceivedPokemon *received
     return 0;
 }
 
-int WtGameSave_CanLeave(WtGameSave *game, const WtJournalEntry *entry)
+int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 {
     if (entry->phase == WT_JOURNAL_EMPTY || entry->phase == WT_JOURNAL_IDLE) return 1;
     if (entry->phase == WT_JOURNAL_QUEUED || entry->phase == WT_JOURNAL_RECEIVED) return Removed(game, entry) == 0;
     return 0;
-}
-
-int WtGameSave_Boot(WtGameSave *game, WtJournalIO io)
-{
-    WtJournal journal;
-    WtJournalEntry entry;
-    int result = -1;
-    if (WtJournal_Open(&journal, io) != 0) return -1;
-    if (WtJournal_Read(&journal, &entry) == 0 && entry.generation != UINT64_MAX
-        && WtGameSave_CanLeave(game, &entry) && WtJournal_Repair(&journal) == 0) {
-        WtRecovery_Allow(entry.phase); result = 0;
-    }
-    mbedtls_platform_zeroize(&entry, sizeof(entry)); WtJournal_Close(&journal);
-    return result;
 }

@@ -65,11 +65,16 @@ class Fixture(unittest.TestCase):
         self.inputs = self.root / "inputs"
         self.inputs.mkdir()
         self.catalog = {"variants": [
-            {"id": key, "name": key, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+            {"id": key, "game": "Pokémon Platinum", "name": key, "game_code": "CPUE", "revision": data[0x1E],
+             "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
              "pristine_verified": True, "planned_patch": f"dswt-{key}.bps"}
             for key, data in BASES.items()] + [
-            {"id": "europe", "name": "Europe", "size": 4096, "sha256": hashlib.sha256(rom(0, "europe", "CPUP")).hexdigest(),
-             "pristine_verified": False, "planned_patch": "dswt-europe.bps"}]}
+            {"id": "europe", "game": "Pokémon Platinum", "name": "Europe", "game_code": "CPUP", "revision": 0,
+             "size": 4096, "sha256": hashlib.sha256(rom(0, "europe", "CPUP")).hexdigest(),
+             "pristine_verified": False, "planned_patch": "dswt-europe.bps"},
+            {"id": "diamond", "game": "Pokémon Diamond", "name": "Diamond", "game_code": "ADAE", "revision": 5,
+             "size": 4096, "sha256": hashlib.sha256(rom(5, "diamond", "ADAE")).hexdigest(),
+             "pristine_verified": True, "planned_patch": None}]}
         self.source = {"commit": "a" * 40, "dirty": False, "upstream_repository": "upstream", "upstream_revision": "b" * 40}
         self.profile = self.write("profile.json", json.dumps(PROFILE).encode())
         self.pairs = [(self.write(f"{key}.nds", BASES[key]), self.write(f"{key}-wt.nds", TARGETS[key])) for key in BASES]
@@ -140,6 +145,18 @@ class CreateTests(Fixture):
                 self.create(**changes)
             self.assertFalse((self.root / "game/bundle").exists(), name)
             self.assertEqual(self.leftovers(self.root / "game"), [], name)
+
+    def test_only_catalogued_supported_bases_are_used(self):
+        diamond = self.write("diamond.nds", rom(5, "diamond", "ADAE"))
+        relabelled = rom(0, "relabelled", "CPUP")
+        self.catalog["variants"].append(dict(self.catalog["variants"][0], id="relabelled", planned_patch="dswt-x.bps",
+                                             sha256=hashlib.sha256(relabelled).hexdigest()))
+        relabelled = self.write("relabelled.nds", relabelled)
+        for base, message in ((diamond, "Recognized Pokémon Diamond Diamond, but it is not supported yet"),
+                              (relabelled, "does not have its catalogued cartridge header")):
+            with self.subTest(base.name), self.assertRaisesRegex(patcher.PatchError, message):
+                self.create(pairs=[(base, self.pairs[0][1])])
+            self.assertFalse((self.root / "game/bundle").exists())
 
     def leak(self, data, at=0x800):
         target = bytearray(TARGETS["us-rev1"])

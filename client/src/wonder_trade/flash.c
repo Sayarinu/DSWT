@@ -4,7 +4,7 @@
 #include <string.h>
 #include <mbedtls/private/sha256.h>
 
-#include "system.h"
+#include "wonder_trade/game_adapter.h"
 
 enum {
     LOCK_FAILED = -20, UNSUPPORTED_FLASH = -21, READ_FAILED = -22,
@@ -19,7 +19,7 @@ int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
     int blank = -1, result = -1;
     s32 lockID;
     if (!access || !record || bank < 0 || bank > 1) return -1;
-    address = bank == 0 ? 0x30000 : 0x70000;
+    address = gWtGameConfig.journalBank[bank];
     lockID = OS_GetLockID();
     if (lockID == OS_LOCK_ID_ERROR) { access->error = LOCK_FAILED; return -1; }
     CARD_LockBackup(lockID);
@@ -52,10 +52,10 @@ int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[4096])
     int result = -1;
     s32 lockID;
     if (!access || !record || bank < 0 || bank > 1) return -1;
-    address = bank == 0 ? 0x30000 : 0x70000;
+    address = gWtGameConfig.journalBank[bank];
     lockID = OS_GetLockID();
     if (lockID == OS_LOCK_ID_ERROR) { access->error = LOCK_FAILED; return -1; }
-    SleepLock(SLEEP_TYPE_SAVE_DATA);
+    WtGame_HoldAwake(TRUE);
     CARD_LockBackup(lockID);
     if (CARD_GetCurrentBackupType() != CARD_BACKUP_TYPE_FLASH_4MBITS) { access->error = UNSUPPORTED_FLASH; goto done; }
     if (!CARD_WriteAndVerifyFlash(address + 4092, uncommitted, sizeof(uncommitted))
@@ -68,7 +68,7 @@ int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[4096])
 done:
     CARD_UnlockBackup(lockID);
     OS_ReleaseLockID(lockID);
-    SleepUnlock(SLEEP_TYPE_SAVE_DATA);
+    WtGame_HoldAwake(FALSE);
     return result;
 }
 

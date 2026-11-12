@@ -392,8 +392,9 @@ def _match(catalog, data):
         variant = identify_rom.match(len(data), sha256(data), catalog)
     except ValueError as error:
         raise PatchError(f"Base ROM: {error}") from None
-    if bundle.cartridge(data) is None:
-        raise PatchError(f"{variant['name']} does not have a Pokémon Platinum header")
+    info = bundle.cartridge(data)
+    if info is None or (info["game_code"], info["revision"]) != (variant["game_code"], variant["revision"]):
+        raise PatchError(f"{identify_rom.title(variant)} does not have its catalogued cartridge header")
     return variant
 
 
@@ -518,7 +519,10 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
         raise PatchError("Version must be 1-64 characters of [0-9A-Za-z.+-]")
     if source.get("dirty") is not False or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", "")):
         raise PatchError("Generate only from a clean, committed source tree")
-    catalog = catalog or json.loads((root / "patches/compatibility.json").read_text())
+    if catalog is None:
+        catalog = json.loads((root / "patches/compatibility.json").read_text())
+        if catalog.get("schema_version") != identify_rom.SCHEMA_VERSION:
+            raise PatchError("patches/compatibility.json has an unsupported schema version")
     profile_bytes = read_private(profile_path, MAX_PROFILE, "Connection profile")[0]
     authority, pins = _profile_binding(profile_bytes)
     if secret_paths is None:

@@ -1,12 +1,10 @@
-#ifndef POKEPLATINUM_WONDER_TRADE_NETWORK_H
-#define POKEPLATINUM_WONDER_TRADE_NETWORK_H
+#ifndef WONDER_TRADE_NETWORK_H
+#define WONDER_TRADE_NETWORK_H
 
 #include <nitro.h>
 
-#include "constants/heap.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/game_adapter.h"
 #include "wonder_trade/wire.h"
-#include "savedata.h"
 
 enum WonderTradeNetworkState {
     WT_NET_STARTING,
@@ -30,7 +28,7 @@ typedef struct WonderTradeNetwork {
     u32 tlsPeakBytes;
     u32 stackBytes;
     u32 maxFrameMs;
-    enum HeapID heapID;
+    WtGame *game;
     void *transport;
     void *heapBuffer;
     NNSFndHeapHandle heap;
@@ -45,7 +43,8 @@ typedef struct WonderTradeNetwork {
     WtReceivedPokemon received;
 } WonderTradeNetwork;
 
-void WonderTradeNetwork_Start(WonderTradeNetwork *network, enum HeapID heapID);
+/* The game context must outlive the network, through WT_NET_CLOSED. */
+void WonderTradeNetwork_Start(WonderTradeNetwork *network, WtGame *game);
 void WonderTradeNetwork_Update(WonderTradeNetwork *network);
 void WonderTradeNetwork_Ping(WonderTradeNetwork *network);
 /* Copy an exact frame into owned worker storage. TRUE means a job started;
@@ -54,8 +53,8 @@ void WonderTradeNetwork_Ping(WonderTradeNetwork *network);
  * transport does not authorize transfers or retire/rebuild pending packets. */
 BOOL WonderTradeNetwork_Exchange(WonderTradeNetwork *network, const unsigned char *frame, size_t size);
 /* A negative slot resumes/reconciles; a nonnegative slot confirms a deposit. */
-BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *, SaveData *, int slot);
-BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *, SaveData *, BOOL cancel);
+BOOL WonderTradeNetwork_Trade(WonderTradeNetwork *, int slot);
+BOOL WonderTradeNetwork_Collect(WonderTradeNetwork *, BOOL cancel);
 void WonderTradeNetwork_Close(WonderTradeNetwork *network);
 
 #endif
