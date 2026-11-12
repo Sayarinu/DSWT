@@ -40,8 +40,8 @@
       "id": "europe",
       "game": "Pokémon Platinum",
       "name": "Europe (English)",
-      "game_code": "CPUP",
-      "revision": 0,
+      "game_code": "CPUE",
+      "revision": 10,
       "language": "English",
       "size": 134217728,
       "sha256": "7f703c7911864a6a99e63339c6bb7f7a32aabd5fb7d56a902a949a2d8bfccba4",
@@ -49,8 +49,8 @@
       "crc32": "71aca63a",
       "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3797",
       "build_revision": null,
-      "pristine_verified": false,
-      "planned_patch": "dswt-europe.bps"
+      "pristine_verified": true,
+      "planned_patch": null
     },
     {
       "id": "diamond-us-rev5",
