@@ -67,12 +67,11 @@ typedef struct WonderTradeApp {
     FieldSystem *fieldSystem;
     WonderTradeNetwork network;
     BgConfig *bgConfig;
-    Window title, message, details, body, subTitle, hint, preview;
+    Window title, message, details, body, subTitle, preview;
     Window actions[WT_MENU_MAX_ACTIONS];
     PokemonSpriteTemplate previewTemplate;
     u16 buttonTilemap[32 * 24];
     BOOL previewLoaded;
-    BOOL listingBackground;
     BOOL touchBlocked;
     MessageLoader *messages;
     ApplicationManager *picker;
@@ -187,51 +186,55 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     bg.charBase = GX_BG_CHARBASE_0x08000;
     bg.priority = 2;
     Bg_InitFromTemplate(app->bgConfig, BG_LAYER_SUB_1, &bg, BG_TYPE_STATIC);
-    bg.colorMode = GX_BG_COLORMODE_256;
     Bg_InitFromTemplate(app->bgConfig, BG_LAYER_MAIN_1, &bg, BG_TYPE_STATIC);
-    bg.colorMode = GX_BG_COLORMODE_16;
     bg.screenBase = GX_BG_SCRBASE_0xe800;
     bg.priority = 1;
     Bg_InitFromTemplate(app->bgConfig, BG_LAYER_SUB_2, &bg, BG_TYPE_STATIC);
     bg.charBase = GX_BG_CHARBASE_0x0c000;
     Bg_InitFromTemplate(app->bgConfig, BG_LAYER_MAIN_2, &bg, BG_TYPE_STATIC);
 
-    Graphics_LoadTilesToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 15, app->bgConfig, BG_LAYER_MAIN_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
-    Graphics_LoadTilemapToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 31, app->bgConfig, BG_LAYER_MAIN_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
+    Graphics_LoadTilesToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 14, app->bgConfig, BG_LAYER_MAIN_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
+    Graphics_LoadTilemapToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 29, app->bgConfig, BG_LAYER_MAIN_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
+    Bg_ChangeTilemapRectPalette(app->bgConfig, BG_LAYER_MAIN_1, 0, 0, 32, 24, 9);
+    Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_MAIN_1);
     Graphics_LoadTilesToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 17, app->bgConfig, BG_LAYER_MAIN_2, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
     Graphics_LoadTilemapToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 25, app->bgConfig, BG_LAYER_MAIN_2, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
+    /* Keep only the listing card, below the header and above the message frame. */
+    u16 *listing = Bg_GetTilemapBuffer(app->bgConfig, BG_LAYER_MAIN_2);
+    memmove(listing + 3 * 32, listing + 32, 12 * 32 * sizeof(*listing));
+    Bg_FillTilemapRect(app->bgConfig, BG_LAYER_MAIN_2, 0, 0, 0, 32, 3, 0);
+    Bg_FillTilemapRect(app->bgConfig, BG_LAYER_MAIN_2, 0, 0, 15, 32, 9, 0);
+    Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_MAIN_2);
     Graphics_LoadTilesToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 14, app->bgConfig, BG_LAYER_SUB_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
     Graphics_LoadTilemapToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 29, app->bgConfig, BG_LAYER_SUB_1, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
     Graphics_LoadTilemapToBgLayer(NARC_INDEX_GRAPHIC__WORLDTRADE, 30, app->bgConfig, BG_LAYER_SUB_2, 0, 0, TRUE, HEAP_ID_WONDER_TRADE);
     memcpy(app->buttonTilemap, Bg_GetTilemapBuffer(app->bgConfig, BG_LAYER_SUB_2), sizeof(app->buttonTilemap));
-    Graphics_LoadPalette(NARC_INDEX_GRAPHIC__WORLDTRADE, 5, PAL_LOAD_MAIN_BG, 0, 16 * 32, HEAP_ID_WONDER_TRADE);
+    Graphics_LoadPalette(NARC_INDEX_GRAPHIC__WORLDTRADE, 7, PAL_LOAD_MAIN_BG, 0, 3 * 32, HEAP_ID_WONDER_TRADE);
+    Bg_LoadPalette(BG_LAYER_MAIN_1, backgroundPalette, sizeof(backgroundPalette), 9 * 32);
     Bg_LoadPalette(BG_LAYER_SUB_1, backgroundPalette, sizeof(backgroundPalette), 0);
     Bg_LoadPalette(BG_LAYER_SUB_2, buttonPalette, sizeof(buttonPalette), 32);
     Bg_LoadPalette(BG_LAYER_SUB_2, selectedPalette, sizeof(selectedPalette), 3 * 32);
-    /* The 256-color terminal uses banks 9-15; keep text and frames below it. */
     Font_LoadScreenIndicatorsPalette(PAL_LOAD_MAIN_BG, 6 * 32, HEAP_ID_WONDER_TRADE);
     Font_LoadScreenIndicatorsPalette(PAL_LOAD_SUB_BG, 13 * 32, HEAP_ID_WONDER_TRADE);
     LoadStandardWindowGraphics(app->bgConfig, BG_LAYER_MAIN_0, WT_FRAME_TILE, 7, STANDARD_WINDOW_SYSTEM, HEAP_ID_WONDER_TRADE);
     LoadMessageBoxGraphics(app->bgConfig, BG_LAYER_MAIN_0, WT_MESSAGE_TILE, 8, Options_Frame(SaveData_GetOptions(save)), HEAP_ID_WONDER_TRADE);
-    Window_Add(app->bgConfig, &app->title, BG_LAYER_MAIN_0, 1, 1, 30, 2, 6, 1);
+    Window_Add(app->bgConfig, &app->title, BG_LAYER_MAIN_0, 2, 1, 28, 2, 6, 1);
     Window_Add(app->bgConfig, &app->message, BG_LAYER_MAIN_0, 2, 17, 27, 6, 6, 61);
-    Window_Add(app->bgConfig, &app->details, BG_LAYER_MAIN_0, 1, 5, 19, 10, 6, 223);
+    Window_Add(app->bgConfig, &app->details, BG_LAYER_MAIN_0, 2, 4, 18, 10, 6, 223);
     Window_Add(app->bgConfig, &app->body, BG_LAYER_MAIN_0, 2, 5, 28, 16, 6, 413);
-    Window_Add(app->bgConfig, &app->subTitle, BG_LAYER_SUB_0, 1, 1, 30, 2, 13, 1);
+    Window_Add(app->bgConfig, &app->subTitle, BG_LAYER_SUB_0, 2, 1, 28, 2, 13, 1);
     for (int i = 0; i < WT_MENU_MAX_ACTIONS; i++) {
         Window_Add(app->bgConfig, &app->actions[i], BG_LAYER_SUB_0,
             WT_MENU_LEFT / 8, (WT_MENU_TOP + i * WT_MENU_SPACING) / 8,
             WT_MENU_WIDTH / 8, WT_MENU_HEIGHT / 8, 13, 61 + i * 72);
     }
-    Window_Add(app->bgConfig, &app->hint, BG_LAYER_SUB_0, 2, 21, 28, 2, 13, 277);
     Window_Add(app->bgConfig, &app->preview, BG_LAYER_MAIN_0, 21, 4, 10, 10, 4, 861);
     app->previewLoaded = FALSE;
     app->graphicsReady = TRUE;
     app->touchBlocked = TRUE;
-    app->listingBackground = FALSE; /* The terminal palette is already loaded. */
     WonderTrade_Draw(app);
     SetVBlankCallback(WonderTrade_VBlank, app);
-    GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG0, TRUE);
+    GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG0 | GX_PLANEMASK_BG1, TRUE);
     GXLayers_EngineBToggleLayers(GX_PLANEMASK_BG0 | GX_PLANEMASK_BG1 | GX_PLANEMASK_BG2, TRUE);
     GXLayers_TurnBothDispOn();
     ResetScreenMasterBrightness(DS_SCREEN_MAIN);
@@ -249,7 +252,6 @@ static void WonderTrade_FreeGraphics(WonderTradeApp *app)
     Window_Remove(&app->details);
     Window_Remove(&app->body);
     Window_Remove(&app->subTitle);
-    Window_Remove(&app->hint);
     for (int i = 0; i < WT_MENU_MAX_ACTIONS; i++) Window_Remove(&app->actions[i]);
     for (int i = 0; i < 3; i++) {
         Bg_FreeTilemapBuffer(app->bgConfig, BG_LAYER_MAIN_0 + i);
@@ -323,8 +325,8 @@ static void WonderTrade_DrawPokemon(WonderTradeApp *app)
         Pokemon_GetValue(mon, MON_DATA_NICKNAME, nickname);
         Pokemon_BuildSpriteTemplate(&sprite, mon, FACE_FRONT);
         WonderTrade_Preview(app, &sprite);
-        WonderTrade_PrintChars(&app->details, species, 0, 0);
-        WonderTrade_PrintChars(&app->details, nickname, 0, 16);
+        WonderTrade_PrintChars(&app->details, species, 0, 16);
+        WonderTrade_PrintChars(&app->details, nickname, 0, 32);
     } else {
         const WtReceivedPokemon *received = &app->network.received;
         MessageLoader_GetSpeciesName(received->species, HEAP_ID_WONDER_TRADE, species);
@@ -334,8 +336,8 @@ static void WonderTrade_DrawPokemon(WonderTradeApp *app)
         WonderTrade_Print(app, &app->details, WonderTrade_Text_Received, 0, 0, TEXT_COLOR(15, 2, 0));
         WonderTrade_PrintChars(&app->details, species, 0, 16);
         if (received->hasNickname) WonderTrade_PrintChars(&app->details, received->nickname, 0, 32);
-        WonderTrade_Print(app, &app->details, WonderTrade_Text_OriginalTrainer, 0, 56, TEXT_COLOR(15, 2, 0));
-        WonderTrade_PrintChars(&app->details, received->originalTrainer, 40, 56);
+        WonderTrade_Print(app, &app->details, WonderTrade_Text_OriginalTrainer, 0, 64, TEXT_COLOR(15, 2, 0));
+        WonderTrade_PrintChars(&app->details, received->originalTrainer, 40, 64);
     }
     Window_ScheduleCopyToVRAM(&app->details);
 }
@@ -351,15 +353,9 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         || app->statusMessage == WonderTrade_Text_Explanation || app->statusMessage == WonderTrade_Text_Diagnostics;
     Bg_ClearTilemap(app->bgConfig, BG_LAYER_MAIN_0);
     Bg_ClearTilemap(app->bgConfig, BG_LAYER_SUB_0);
-    if (preview != app->listingBackground) {
-        Graphics_LoadPalette(NARC_INDEX_GRAPHIC__WORLDTRADE, preview ? 7 : 5, PAL_LOAD_MAIN_BG,
-            0, 3 * 32, HEAP_ID_WONDER_TRADE);
-        app->listingBackground = preview;
-    }
-    GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG1, !preview);
     GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG2, preview);
     Window_FillTilemap(&app->title, 0);
-    WonderTrade_Print(app, &app->title, WonderTrade_Text_Title, 0, 0, TEXT_COLOR(15, 2, 0));
+    WonderTrade_Print(app, &app->title, WonderTrade_Text_Title, 0, 2, TEXT_COLOR(15, 2, 0));
     Window_ScheduleCopyToVRAM(&app->title);
     if (preview) WonderTrade_DrawPokemon(app);
     if (fullText) {
@@ -379,13 +375,14 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         }
         Window_ScheduleCopyToVRAM(&app->body);
     } else {
+        Window_SetYPos(&app->message, preview ? 17 : 9);
         Window_FillTilemap(&app->message, 15);
         Window_DrawMessageBoxWithScrollCursor(&app->message, TRUE, WT_MESSAGE_TILE, 8);
         WonderTrade_Print(app, &app->message, app->statusMessage, 0, 0, TEXT_COLOR(1, 2, 15));
         Window_ScheduleCopyToVRAM(&app->message);
     }
     Window_FillTilemap(&app->subTitle, 0);
-    WonderTrade_Print(app, &app->subTitle, WonderTrade_Text_Title, 0, 0, TEXT_COLOR(15, 2, 0));
+    WonderTrade_Print(app, &app->subTitle, WonderTrade_Text_Title, 0, 2, TEXT_COLOR(15, 2, 0));
     Window_ScheduleCopyToVRAM(&app->subTitle);
     if (app->cursor >= count) app->cursor = 0;
     Bg_LoadTilemapBuffer(app->bgConfig, BG_LAYER_SUB_2, app->buttonTilemap, sizeof(app->buttonTilemap));
@@ -401,9 +398,6 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         WonderTrade_Print(app, &app->actions[i], labels[i], -1, 8, TEXT_COLOR(1, 2, 0));
         Window_ScheduleCopyToVRAM(&app->actions[i]);
     }
-    Window_FillTilemap(&app->hint, 0);
-    WonderTrade_Print(app, &app->hint, count ? WonderTrade_Text_Controls : WonderTrade_Text_PleaseWait, -1, 0, TEXT_COLOR(1, 2, 0));
-    Window_ScheduleCopyToVRAM(&app->hint);
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_MAIN_0);
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_SUB_0);
     Bg_ScheduleTilemapTransfer(app->bgConfig, BG_LAYER_SUB_2);
