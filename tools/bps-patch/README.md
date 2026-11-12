@@ -29,7 +29,7 @@ python3 tools/bps-patch/patcher.py create --version 0.1.0 \
 python3 tools/bps-patch/patcher.py package game/bundles/0.1.0 --output game/bundles/dswt-0.1.0.zip
 ```
 
-Each base must match a pristine-verified catalogue entry
+Each base must match a pristine-verified catalogue entry with a planned patch
 ([`patches/compatibility.json`](../../patches/compatibility.json)). Each target must
 keep its base's game code and revision and contain both profile pins exactly once.
 Every patch is created twice (bytes must match), walked, and reproduced by both

@@ -24,7 +24,8 @@ class FontTests(unittest.TestCase):
     def test_covers_what_the_app_and_its_messages_say(self):
         text = " ".join([
             *dswt_patcher.Window.ITEMS, dswt_patcher.SAVE_ADVICE, "DSWT PATCHER v0.1.0-rc.1 Checking your ROM...",
-            "Pokémon Platinum (France, French, Rev 1) is not supported yet. Supported: USA Rev 0, USA Rev 1.",
+            "Pokémon HeartGold (France, French, Rev 1) is not supported yet. Supported: Pokémon Platinum USA Rev 0.",
+            f"This file is not a {bundle.GAME_NAMES} ROM.",
             "Trimmed dumps work; encrypted dumps do not. C:\\Users\\Ash\\Platinum [!] (Wonder Trade).nds",
             "/home/ash/roms/platinum_us-rev1.nds already exists; choose a new file name",
             *(describe for code in bundle.CARTRIDGES for describe in bundle.CARTRIDGES[code]),
