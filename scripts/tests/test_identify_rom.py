@@ -140,6 +140,10 @@ class IdentifyRomTests(unittest.TestCase):
         for row in variants:
             if row["build_revision"] is None:
                 self.assertTrue(row["planned_patch"] is None or not row["pristine_verified"], row["id"])
+        hgss = json.loads((SCRIPT.parent.parent / "client/upstream-pokeheartgold.json").read_text())
+        rows = {row["id"]: row for row in variants}
+        self.assertEqual({version: rows[f"{version}-us-rev0"]["sha1"] for version in ("heartgold", "soulsilver")},
+                         hgss["rom_sha1"])
 
 if __name__ == "__main__":
     unittest.main()

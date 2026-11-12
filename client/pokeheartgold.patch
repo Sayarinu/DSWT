@@ -1,0 +1,189 @@
+diff --git a/files/msgdata/NARC_msg.txt b/files/msgdata/NARC_msg.txt
+--- a/files/msgdata/NARC_msg.txt
++++ b/files/msgdata/NARC_msg.txt
+@@ -829 +829,2 @@ NARC_msg_msg_0827_bin
+-NARC_msg_msg_0828_bin
+\ No newline at end of file
++NARC_msg_msg_0828_bin
++NARC_msg_msg_0829_bin
+\ No newline at end of file
+diff --git a/include/constants/heap.h b/include/constants/heap.h
+--- a/include/constants/heap.h
++++ b/include/constants/heap.h
+@@ -165,0 +166 @@ enum HeapID {
++    HEAP_ID_WONDER_TRADE,
+diff --git a/main.lsf.in b/main.lsf.in
+--- a/main.lsf.in
++++ b/main.lsf.in
+@@ -173,0 +174,16 @@ Static main
++    Object src/wonder_trade/hgss/application.c
++    Object src/wonder_trade/network.c
++    Object src/wonder_trade/tls.c
++    Object src/wonder_trade/http.c
++    Object src/wonder_trade/wire.c
++    Object src/wonder_trade/seed.c
++    Object src/wonder_trade/entropy.c
++    Object src/wonder_trade/entropy_game.c
++    Object src/wonder_trade/journal.c
++    Object src/wonder_trade/engine.c
++    Object src/wonder_trade/pokemon_codec.c
++    Object src/wonder_trade/hgss/game_save.c
++    Object src/wonder_trade/recovery.c
++    Object src/wonder_trade/flash.c
++    Object src/wonder_trade/boot.c
++    Object src/wonder_trade/hgss/hooks.c
+@@ -355,0 +372 @@ Static main
++    Library libwonder_trade_tls.a
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -11,0 +12,2 @@ fs = import('fs')
++configure_file(input: get_option('wonder_trade_profile_header'), output: 'wonder_trade_config.h', copy: true)
++
+@@ -139,0 +142 @@ subdir('src')
++subdir('src/wonder_trade')
+@@ -158,0 +162 @@ main = executable('main',
++        wt_tls_args,
+@@ -168,0 +173,2 @@ main = executable('main',
++        toplevel_includes,
++        wt_tls_includes,
+@@ -184,0 +191 @@ main = executable('main',
++        wt_tls,
+diff --git a/meson.options b/meson.options
+--- a/meson.options
++++ b/meson.options
+@@ -1 +1,3 @@
+-option('game_version', type : 'combo', choices : ['HEARTGOLD', 'SOULSILVER'], value : 'HEARTGOLD')
+\ No newline at end of file
++option('game_version', type : 'combo', choices : ['HEARTGOLD', 'SOULSILVER'], value : 'HEARTGOLD')
++option('wonder_trade_tls_dir', type: 'string', value: '')
++option('wonder_trade_profile_header', type: 'string', value: '')
+\ No newline at end of file
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,0 +2,3 @@
++#include "wonder_trade/entropy_game.h"
++#include "wonder_trade/hgss/application.h"
++#include "wonder_trade/recovery.h"
+@@ -90,0 +94 @@ void NitroMain(void) {
++    WonderTradeEntropy_Init();
+@@ -98,0 +103 @@ void NitroMain(void) {
++        WonderTradeEntropy_Frame();
+@@ -145,2 +150,11 @@ static void Main_RunOverlayManager(void) {
+-        if (_02111868.queuedMainOverlayId != FS_OVERLAY_ID_NONE) {
+-            HandleLoadOverlay(_02111868.queuedMainOverlayId, OVY_LOAD_NORMAL);
++        if (!WtRecovery_Started()) {
++            _02111868.mainOverlayId = FS_OVERLAY_ID_NONE;
++            _02111868.overlayManager = OverlayManager_New(&gWonderTradeBootAppTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
++        } else {
++            if (_02111868.queuedMainOverlayId != FS_OVERLAY_ID_NONE) {
++                HandleLoadOverlay(_02111868.queuedMainOverlayId, OVY_LOAD_NORMAL);
++            }
++            _02111868.mainOverlayId = _02111868.queuedMainOverlayId;
++            _02111868.overlayManager = OverlayManager_New(_02111868.queuedMainOverlayTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
++            _02111868.queuedMainOverlayId = FS_OVERLAY_ID_NONE;
++            _02111868.queuedMainOverlayTemplate = NULL;
+@@ -148,4 +161,0 @@ static void Main_RunOverlayManager(void) {
+-        _02111868.mainOverlayId = _02111868.queuedMainOverlayId;
+-        _02111868.overlayManager = OverlayManager_New(_02111868.queuedMainOverlayTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
+-        _02111868.queuedMainOverlayId = FS_OVERLAY_ID_NONE;
+-        _02111868.queuedMainOverlayTemplate = NULL;
+diff --git a/src/overlay_36.c b/src/overlay_36.c
+--- a/src/overlay_36.c
++++ b/src/overlay_36.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -94,0 +96,2 @@ BOOL ov36_TitleScreen_NewGame_AppInit(OverlayManager *man, int *state) {
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return FALSE; }
++
+@@ -118,0 +122,2 @@ BOOL ov36_App_InitGameState_AfterOakSpeech_AppInit(OverlayManager *man, int *sta
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return FALSE; }
++
+@@ -252,0 +258,2 @@ static void NewGame_InitSaveData(enum HeapID heapID, SaveData *saveData) {
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return; }
++
+diff --git a/src/save.c b/src/save.c
+--- a/src/save.c
++++ b/src/save.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -14,0 +16 @@ static BOOL saveWritten;
++static BOOL sWonderTradeBlocked;
+@@ -140,0 +143,2 @@ BOOL Save_DeleteAllData(SaveData *saveData) {
++    if (!WtRecovery_Started() || !WtRecovery_CanClear()) return FALSE;
++
+@@ -181,0 +186,2 @@ int SaveGameNormal(SaveData *saveData) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -264,0 +271,3 @@ void Save_PrepareForAsyncWrite(SaveData *saveData, int a1) {
++    sWonderTradeBlocked = !WtRecovery_CanWrite();
++    if (sWonderTradeBlocked) return;
++
+@@ -270,0 +280,2 @@ int Save_WriteFileAsync(SaveData *saveData) {
++    if (sWonderTradeBlocked) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -282,0 +294,2 @@ void Save_Cancel(SaveData *saveData) {
++    if (sWonderTradeBlocked) return;
++
+@@ -882,0 +896,2 @@ int WriteExtraSaveChunk(SaveData *saveData, int idx, void *data) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -921,0 +937,2 @@ int sub_02028230(SaveData *saveData, int idx, void *data) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -1107,0 +1125,2 @@ static s32 FlashWriteChunk(u32 offset, void *data, u32 size) {
++    if (!WtRecovery_CanWrite()) return FALSE;
++
+diff --git a/src/start_menu.c b/src/start_menu.c
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -47,0 +48 @@
++#include "wonder_trade/hgss/application.h"
+@@ -159,0 +161,4 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager);
++static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu);
++static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager);
++static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager);
++static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager);
+@@ -573,0 +579,6 @@ static BOOL Task_StartMenu_HandleInput(TaskManager *taskManager) {
++        } else if ((gSystem.newKeys & PAD_BUTTON_SELECT) && StartMenu_WonderTradeAvailable(fieldSystem, startMenu)) {
++            PlaySE(SEQ_SE_DP_SELECT);
++            sub_0203DF64(fieldSystem, 0);
++            ov01_021F6B50(fieldSystem);
++            fieldSystem->lastTouchMenuInput = 0;
++            return Task_StartMenu_HandleSelection_WonderTrade(taskManager);
+@@ -1502,0 +1514,34 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
++
++static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu) {
++    // Safari, Bug-Catching Contest, Pal Park, Union Room and similar menus forbid saving.
++    return !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_SAVE))
++        && !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_POKEMON))
++        && Party_GetCount(SaveArray_Party_Get(fieldSystem->saveData)) > 0;
++}
++
++static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager) {
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldMap_FadeScreen(FADE_TYPE_BRIGHTNESS_OUT);
++    startMenu->exitTaskFunc = Task_StartMenu_WonderTrade;
++    startMenu->state = START_MENU_STATE_WAIT_FADE;
++    return TRUE;
++}
++
++static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager) {
++    FieldSystem *fieldSystem = TaskManager_GetFieldSystem(taskManager);
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldSystem_LaunchApplication(fieldSystem, &gWonderTradeAppTemplate, fieldSystem);
++    startMenu->exitTaskFunc = Task_StartMenu_HandleReturn_WonderTrade;
++    return FALSE;
++}
++
++static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager) {
++    FieldSystem *fieldSystem = TaskManager_GetFieldSystem(taskManager);
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldSystem_LoadFieldOverlay(fieldSystem);
++    startMenu->state = START_MENU_STATE_RETURN;
++    return FALSE;
++}

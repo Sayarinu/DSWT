@@ -2,6 +2,7 @@
 #define WONDER_TRADE_NETWORK_H
 
 #include <nitro.h>
+#include <nnsys/fnd.h>
 
 #include "wonder_trade/game_adapter.h"
 #include "wonder_trade/wire.h"

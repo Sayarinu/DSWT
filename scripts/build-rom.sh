@@ -9,15 +9,34 @@ elif [[ $# != 0 ]]; then
     echo "Usage: $0 [--pristine]" >&2
     exit 2
 fi
-revision="${ROM_REVISION:-1}"
-if [[ ! "$revision" =~ ^(0|1|10)$ ]]; then
-    echo "ROM_REVISION must be 0, 1 or 10 (European English)" >&2
-    exit 2
-fi
-if [[ "$revision" == 10 && ! -f "${DSWT_EUROPE_ROM:-}" ]]; then
-    echo "Set DSWT_EUROPE_ROM to your own European English Platinum dump" >&2
-    exit 2
-fi
+game="${ROM_GAME:-platinum}"
+prepare_args=()
+case "$game" in
+    platinum)
+        revision="${ROM_REVISION:-1}"
+        if [[ ! "$revision" =~ ^(0|1|10)$ ]]; then
+            echo "ROM_REVISION must be 0, 1 or 10 (European English)" >&2
+            exit 2
+        fi
+        if [[ "$revision" == 10 && ! -f "${DSWT_EUROPE_ROM:-}" ]]; then
+            echo "Set DSWT_EUROPE_ROM to your own European English Platinum dump" >&2
+            exit 2
+        fi
+        ;;
+    heartgold|soulsilver)
+        # pret/pokeheartgold builds the one US revision of each version.
+        revision="${ROM_REVISION:-0}"
+        if [[ "$revision" != 0 ]]; then
+            echo "ROM_REVISION must be 0 for HeartGold and SoulSilver" >&2
+            exit 2
+        fi
+        prepare_args=(--game hgss)
+        ;;
+    *)
+        echo "ROM_GAME must be platinum, heartgold or soulsilver" >&2
+        exit 2
+        ;;
+esac
 build_jobs="${ROM_BUILD_JOBS-1}"
 if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
     echo "ROM_BUILD_JOBS must be a positive integer without leading zeros" >&2
@@ -35,11 +54,11 @@ if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
     exit 2
 fi
 
-workspace="$("$python" "$repo_root/scripts/prepare-game.py" "$@")"
-if [[ "$revision" == 10 ]]; then
+workspace="$("$python" "$repo_root/scripts/prepare-game.py" ${prepare_args[@]+"${prepare_args[@]}"} "$@")"
+if [[ "$game" == platinum && "$revision" == 10 ]]; then
     "$python" "$repo_root/scripts/prepare-europe.py" "$DSWT_EUROPE_ROM" "$workspace" >/dev/null
 fi
-docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "DSWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
+docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_GAME=$game" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "DSWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
 if [[ "$build_mode" == modified ]]; then
     tls_workspace="$("$python" "$repo_root/scripts/prepare-tls.py")"
     "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/dswt-connection.h"
@@ -49,28 +68,46 @@ docker build --platform linux/amd64 -f "$repo_root/tools/rom-builder/Dockerfile"
 
 exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
+    meson=subprojects/meson-1.12.0/meson.py
+    wonder_trade=(-Dwonder_trade_tls_dir=/tls -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h)
     # Make exports NINJA; clear its command-with-flags before Meson regeneration.
-    if [[ "$DSWT_BUILD_MODE" == pristine ]]; then
+    if [[ "$ROM_GAME" != platinum ]]; then
+        # One HeartGold/SoulSilver workspace keeps a build directory per version.
+        version="${ROM_GAME^^}"
+        build="build/$ROM_GAME.us"
+        if [[ "$DSWT_BUILD_MODE" == pristine ]]; then
+            make GAME_VERSION="$version" setup_rom
+            make GAME_VERSION="$version" release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
+            # Meson checks require NINJA to name one executable, without flags.
+            make GAME_VERSION="$version" check NINJA=ninja
+        else
+            if [[ ! -f "$build/build.ninja" ]]; then
+                make GAME_VERSION="$version" meson skrew "$build/lsfgen.stamp"
+                python3 "$meson" setup "$build" \
+                    --wrap-mode=nopromote \
+                    --native-file=meson/native.ini \
+                    --cross-file=meson/cross_unix.ini \
+                    -Dgame_version="$version" "${wonder_trade[@]}"
+            fi
+            python3 "$meson" configure "$build" -Dgame_version="$version" "${wonder_trade[@]}"
+            make GAME_VERSION="$version" release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
+        fi
+    elif [[ "$DSWT_BUILD_MODE" == pristine ]]; then
         make configure
-        python3 subprojects/meson-1.12.0/meson.py configure build -Drevision="$ROM_REVISION"
+        python3 "$meson" configure build -Drevision="$ROM_REVISION"
         make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
         # Meson checks require NINJA to name one executable, without flags.
         make check NINJA=ninja
     else
         if [[ ! -f build/build.ninja ]]; then
             make meson skrew build/lsfgen.stamp
-            python3 subprojects/meson-1.12.0/meson.py setup build \
+            python3 "$meson" setup build \
                 --wrap-mode=nopromote \
                 --native-file=meson/native.ini \
                 --cross-file=meson/cross_unix.ini \
-                -Drevision="$ROM_REVISION" \
-                -Dwonder_trade_tls_dir=/tls \
-                -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h
+                -Drevision="$ROM_REVISION" "${wonder_trade[@]}"
         fi
-        python3 subprojects/meson-1.12.0/meson.py configure build \
-            -Drevision="$ROM_REVISION" \
-            -Dwonder_trade_tls_dir=/tls \
-            -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h
+        python3 "$meson" configure build -Drevision="$ROM_REVISION" "${wonder_trade[@]}"
         make release NINJA="env -u NINJA ninja -j${ROM_BUILD_JOBS}"
     fi
 '

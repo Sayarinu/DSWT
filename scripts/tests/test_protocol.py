@@ -131,10 +131,41 @@ class WireTests(unittest.TestCase):
 
 
 class SaveLayoutTests(unittest.TestCase):
+    LAYOUTS = (("protocol/save-layout.json", "client/upstream.json"),
+               ("protocol/save-layout-hgss.json", "client/upstream-pokeheartgold.json"))
+
     def test_journal_erase_sectors_do_not_overlap_any_retail_block(self):
-        layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
-        pin = json.loads((ROOT / "client/upstream.json").read_text())
+        for path, pin in self.LAYOUTS:
+            with self.subTest(layout=path):
+                self.check_layout(json.loads((ROOT / path).read_text()),
+                                  json.loads((ROOT / pin).read_text()))
+
+    def test_games_share_one_journal_record_format(self):
+        platinum, hgss = (json.loads((ROOT / path).read_text()) for path, _ in self.LAYOUTS)
+        for key in ("version", "flash_size", "half_size", "journal_banks", "bank_reserved_size",
+                    "record_size", "record_sections"):
+            self.assertEqual(platinum[key], hgss[key], key)
+        self.assertFalse(set(platinum["verified_targets"]) & set(hgss["verified_targets"]))
+
+    def test_hgss_layout_matches_the_pinned_decompilation(self):
+        """Values derived from pokeheartgold's save.c/save_arrays.c and the linked size functions."""
+        layout = json.loads((ROOT / "protocol/save-layout-hgss.json").read_text())
+        regions = {region["name"]: (region["offset"], region["size"]) for region in layout["retail_regions_per_half"]}
+        # Two slots: general then PC boxes, each with a 16-byte footer, aligned to 0x100.
+        self.assertEqual(regions["general"], (0, 0xF628))
+        self.assertEqual(regions["boxes"], (0xF700, 18 * 0x1000 + 0x2FC + 4 + 16))
+        # Extra chunks start at SAVE_PAGE_MAX (35) + {0, 3, 4, 6, 8, 10} sectors with a 16-byte footer;
+        # the mirror copy is 64 sectors (one half) later.
+        self.assertEqual([offset for offset, _ in list(regions.values())[2:]],
+                         [(35 + n) * 0x1000 for n in (0, 3, 4, 6, 8, 10)])
+        self.assertEqual(regions["hall_of_fame"][1], 30 * (6 * 0x3C + 4) + 8 + 16)
+        self.assertEqual(regions["frontier"][1], 0xBA0 + 16)
+        self.assertEqual(max(offset + size for offset, size in regions.values()), 0x2ED60)
+        self.assertEqual(layout["block_footer"]["size"], struct.calcsize(layout["block_footer"]["format"]))
+
+    def check_layout(self, layout, pin):
         self.assertEqual(layout["upstream_revision"], pin["revision"])
+        self.assertEqual(layout["block_footer"]["size"], struct.calcsize(layout["block_footer"]["format"]))
         ranges = []
         for half in (0, layout["half_size"]):
             for region in layout["retail_regions_per_half"]:

@@ -19,7 +19,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
 
 | Path | Contents |
 | --- | --- |
-| `client/` | Game-independent client core, the Platinum adapter (`platinum/` directories, behind `game_adapter.h`), the integration patch and host/native client tests |
+| `client/` | Game-independent client core, the Platinum and HeartGold/SoulSilver adapters (`platinum/` and `hgss/` directories, behind `game_adapter.h`), their integration patches and host/native client tests |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
