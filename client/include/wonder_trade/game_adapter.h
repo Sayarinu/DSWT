@@ -79,6 +79,13 @@ int WtGame_Checkpoint(WtGame *);
 /* Nonzero when gameplay may resume with this journal entry: nothing is
  * pending, or the outgoing Pokémon is provably absent from both copies. */
 int WtGame_CanLeave(WtGame *, const WtJournalEntry *);
+/* The engine's receive check (WtEngineIO.canHold), on a matched delivery's
+ * canonical PK4 before anything is recorded or imported: nonzero when this
+ * game can hold it. Check species, form, held item and ball against the game's
+ * own limits, typically through WtPokemon_Fits (wonder_trade/pokemon_codec.h).
+ * Zero leaves the trade pending on the server and the save unchanged, so a
+ * later build that accepts it can still collect it. The argument is the WtGame. */
+int WtGame_CanHold(void *, const unsigned char pk4[136]);
 /* Read the delivered image as saved, including any trade evolution. Zero on success. */
 int WtGame_Received(const WtJournalEntry *, WtReceivedPokemon *);
 

@@ -22,6 +22,13 @@ static int Random(void *arg, unsigned char *bytes, size_t size)
     return psa_generate_random(bytes, size) == PSA_SUCCESS ? 0 : -1;
 }
 
+/* The synthetic inventory can hold anything the server delivers. */
+static int CanHold(void *arg, const unsigned char pk4[136])
+{
+    (void)arg; (void)pk4;
+    return 1;
+}
+
 static int ParseUnsigned(const char *text, unsigned maximum, unsigned *value)
 {
     char *end;
@@ -46,7 +53,7 @@ static int Run(unsigned port, const char *hostname, const unsigned char pins[2][
 {
     WtEngine *engine = &probe.engine;
     WtJournalIO journal = {&probe, ReadBank, WriteBank, Hash};
-    WtEngineIO inventory = {&probe, Random, Inventory};
+    WtEngineIO inventory = {&probe, Random, Inventory, CanHold};
     unsigned char entropy[32];
     unsigned count, operation, requested = 0, processing = 0;
     int slot = -1, result = -1;

@@ -39,7 +39,7 @@ typedef struct WonderTradeNetwork {
     WtWireReply reply;
     unsigned tradePhase;
     BOOL canLeave;
-    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived;
+    BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived, refused;
     WtReceivedPokemon received;
 } WonderTradeNetwork;
 
