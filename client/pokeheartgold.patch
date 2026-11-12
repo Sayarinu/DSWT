@@ -253,15 +253,22 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 +static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager);
 +static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager);
 +static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager);
-@@ -591,0 +599,3 @@ static BOOL StartMenu_HandleKeyInput(TaskManager *taskManager, FieldSystem *fiel
+@@ -578,0 +586,6 @@ static BOOL Task_StartMenu_HandleInput(TaskManager *taskManager) {
++                } else if (gSystem.newKeys & PAD_BUTTON_SELECT) {
++                    // Fallback for when the sub-screen icon could not be allocated.
++                    if (!StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, FALSE)) {
++                        return FALSE;
++                    }
++                    FieldSystem_ResetGearRingManagerIfNotSelectingSaveOrPokegear(fieldSystem);
+@@ -591,0 +605,3 @@ static BOOL StartMenu_HandleKeyInput(TaskManager *taskManager, FieldSystem *fiel
 +    if (fieldSystem->unkD3 == WT_MENU_ICON_SELECTION) {
 +        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, FALSE);
 +    }
-@@ -652,0 +663,3 @@ static BOOL StartMenu_HandleTouchInput(TaskManager *taskManager, FieldSystem *fi
+@@ -652,0 +669,3 @@ static BOOL StartMenu_HandleTouchInput(TaskManager *taskManager, FieldSystem *fi
 +    case WT_MENU_ICON_SELECTION + 2:
 +        fieldSystem->unkD3 = WT_MENU_ICON_SELECTION;
 +        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, TRUE);
-@@ -1502,0 +1516,46 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
+@@ -1502,0 +1522,46 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
 +
 +static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu) {
 +    // Safari, Bug-Catching Contest, Pal Park, Union Room and similar menus forbid saving.
