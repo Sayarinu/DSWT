@@ -16,8 +16,6 @@
 #include <thread>
 #include <vector>
 
-constexpr std::chrono::milliseconds kIdleDelay{500};
-
 // Pairs queued offers. This process opens no matcher RPC port: workers call the
 // service directly, so nothing on the network can reach matching.
 int main() {
@@ -46,12 +44,12 @@ int main() {
     for (unsigned index = 0; index < config.workers; ++index)
       workers.emplace_back([&] {
         try {
-          MatchWorker worker([&](const auto &request, auto *reply) { return matcher.MatchNext(nullptr, &request, reply); });
+          MatchWorker worker([&](const auto &request, auto *reply) { return matcher.MatchNext(nullptr, &request, reply); },
+                             [&] { return matcher.PairAvailable(); });
           std::unique_lock<std::mutex> lock(mutex);
           while (!stopping) {
             lock.unlock();
-            // Empty polls would retain an attempt row and WAL forever on an idle service.
-            const auto delay = worker.Pending() || matcher.PairAvailable() ? worker.Poll() : kIdleDelay;
+            const auto delay = worker.Poll();
             lock.lock();
             changed.wait_for(lock, delay, [&] { return stopping; });
           }
