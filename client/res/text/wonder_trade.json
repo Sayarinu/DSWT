@@ -23,11 +23,11 @@
     },
     {
       "id": "WonderTrade_Text_Back",
-      "en_US": "A / B: Back"
+      "en_US": "Back"
     },
     {
       "id": "WonderTrade_Text_Cancel",
-      "en_US": "B / X: Cancel"
+      "en_US": "Cancel"
     },
     {
       "id": "WonderTrade_Text_Connecting",
@@ -95,15 +95,15 @@
     },
     {
       "id": "WonderTrade_Text_RecoveryRequired",
-      "en_US": "Trade recovery required.\nA: Connect and retry\n\nKeep this save and its\nrecovery files."
+      "en_US": "Trade recovery required.\nConnect to try again.\n\nKeep this save and its\nrecovery files."
     },
     {
       "id": "WonderTrade_Text_Confirm",
-      "en_US": "Offer the selected Pokémon?\nIt will leave your party.\n\nA: Confirm    B: Back"
+      "en_US": "Offer the selected Pokémon?\nIt will leave your party."
     },
     {
       "id": "WonderTrade_Text_Queued",
-      "en_US": "Your trade is pending.\nChoose Wonder Trade again\nto check its status."
+      "en_US": "Your trade is pending.\nChoose Collect result to\ncheck its status."
     },
     {
       "id": "WonderTrade_Text_Collect",
@@ -115,11 +115,11 @@
     },
     {
       "id": "WonderTrade_Text_ConfirmCollect",
-      "en_US": "Collect your trade result?\nTrade evolution keeps the\ncurrent moves.\n\nA: Confirm    B: Back"
+      "en_US": "Collect your trade result?\nTrade evolution keeps the\ncurrent moves."
     },
     {
       "id": "WonderTrade_Text_ConfirmCancel",
-      "en_US": "Cancel an unmatched offer?\nIf matched, collect instead.\nEvolution keeps current moves.\n\nA: Confirm    B: Back"
+      "en_US": "Cancel an unmatched offer?\nIf matched, collect instead.\nEvolution keeps current moves."
     },
     {
       "id": "WonderTrade_Text_Completed",
@@ -156,6 +156,14 @@
     {
       "id": "WonderTrade_Text_KeepPlaying",
       "en_US": "A little more play is needed\nto prepare Wonder Trade.\nKeep playing, then try again."
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmAction",
+      "en_US": "Confirm"
+    },
+    {
+      "id": "WonderTrade_Text_RecoveryAction",
+      "en_US": "Connect and retry"
     }
   ]
 }

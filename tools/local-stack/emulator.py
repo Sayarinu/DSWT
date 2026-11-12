@@ -154,7 +154,9 @@ class Emulator:
             'LimitFPS = true\nAudioSync = false\nPauseLostFocus = false\n[Emu]\nDirectBoot = true\n'
             'ExternalBIOSEnable = false\n[Screen]\nUseGL = false\n[3D]\nRenderer = 0\n[JIT]\nEnable = true\n'
             '[Instance0]\nSaveFilePath = "/profile"\n[Instance0.Firmware]\nMAC = "' + mac + '"\n'
-            '[Instance0.Keyboard]\n' + "".join(f"{key} = {value}\n" for key, value in KEYS.items()))
+            '[Instance0.Keyboard]\n' + "".join(f"{key} = {value}\n" for key, value in KEYS.items()) +
+            '[Instance0.Window0]\nScreenLayout = 0\nScreenSizing = 0\nScreenRotation = 0\n'
+            'ScreenGap = 0\nScreenSwap = false\nIntegerScaling = false\nScreenAspectTop = 0\nScreenAspectBot = 0\n')
 
     def fork(self, source_name, snapshot_name):
         """Copy a checked snapshot into a new profile to test copied/older enrolled saves.
@@ -317,6 +319,10 @@ class Emulator:
             value = dict(event, ms=event.get("ms", 0))
             if value.get("op") == "key" and set(value) <= {"op", "key", "ms"} and value.get("key") in KEYS:
                 value["key"] = KEYS[value["key"]]
+            elif (value.get("op") == "touch" and set(value) <= {"op", "x", "y", "state", "ms"}
+                  and value.get("state") in ("press", "release")
+                  and type(value.get("x")) is int and 0 <= value["x"] < 256
+                  and type(value.get("y")) is int and 0 <= value["y"] < 192): pass
             elif value.get("op") == "shot" and set(value) <= {"op", "name", "ms"} and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", value.get("name", "")):
                 value["path"] = "/profile/" + value.pop("name") + ".png"
             elif value.get("op") == "quit" and set(value) <= {"op", "ms"}: pass

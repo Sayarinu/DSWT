@@ -18,6 +18,7 @@ static int WtRecovery_ProbeReceiveImage(void)
     WtGameSave game = { save, HEAP_ID_WONDER_TRADE };
     WtJournalEntry *entries;
     Pokemon recorded;
+    WtReceivedPokemon received;
     Mail mail, *poison;
     unsigned char before[32], after[32];
     unsigned pass, i;
@@ -43,6 +44,12 @@ static int WtRecovery_ProbeReceiveImage(void)
         if (WtGameSave_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, entry, 0) != 0
             || entry->destination.kind != 1) goto done;
         memcpy(&recorded, entry->destinationAfter, sizeof(recorded));
+        if (WtGameSave_Received(entry, &received) != 0
+            || received.species != Pokemon_GetValue(&recorded, MON_DATA_SPECIES, NULL)
+            || received.gender != Pokemon_GetGender(&recorded)
+            || received.form != Pokemon_GetForm(&recorded)
+            || received.shiny != Pokemon_IsShiny(&recorded)
+            || received.personality != Pokemon_GetValue(&recorded, MON_DATA_PERSONALITY, NULL)) goto done;
         Pokemon_GetValue(&recorded, MON_DATA_MAIL, &mail);
         for (i = 0; i < MAIL_MAX_SENTENCES; ++i) if (mail.sentences[i].id != 0) goto done;
     }

@@ -427,6 +427,10 @@ int WtGameSave_Received(const WtJournalEntry *entry, WtReceivedPokemon *received
     if (entry->deliveryKind != WT_DELIVERY_MATCH || entry->destination.length < sizeof(box)) return -1;
     memcpy(&box, entry->destinationAfter, sizeof(box));
     received->species = BoxPokemon_GetValue(&box, MON_DATA_SPECIES, NULL);
+    received->gender = BoxPokemon_GetGender(&box);
+    received->form = BoxPokemon_GetForm(&box);
+    received->personality = BoxPokemon_GetValue(&box, MON_DATA_PERSONALITY, NULL);
+    received->shiny = Pokemon_IsPersonalityShiny(BoxPokemon_GetValue(&box, MON_DATA_OT_ID, NULL), received->personality);
     received->hasNickname = BoxPokemon_GetValue(&box, MON_DATA_HAS_NICKNAME, NULL);
     BoxPokemon_GetValue(&box, MON_DATA_NICKNAME, received->nickname);
     BoxPokemon_GetValue(&box, MON_DATA_OT_NAME, received->originalTrainer);
