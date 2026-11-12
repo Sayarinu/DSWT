@@ -5,27 +5,30 @@ Pokémon with a random player through this project's server. No ROM is included.
 
 ## What you need
 
-- A full, decrypted dump of US English Pokémon Platinum, Rev 0 or Rev 1. It must
-  match the size and SHA-256 listed for your revision in `manifest.json`.
-- melonDS 1.1, which is the tested emulator.
-- The patch for your revision from this bundle, and a BPS patcher such as
-  [Flips](https://github.com/Alcaro/Flips).
-
-Europe and physical DS hardware are not supported yet.
+- A decrypted dump of your own US English Pokémon Platinum cartridge, Rev 0 or
+  Rev 1. Trimmed dumps work. Other versions and languages are recognised but not
+  supported yet, and encrypted dumps are refused.
+- melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
+- The DSWT Patcher for your computer from the release page, or the patch archive
+  and a BPS patcher such as [Flips](https://github.com/Alcaro/Flips).
 
 ## Patch your game
 
-1. Copy your ROM and keep the original somewhere safe.
-2. Back up your save file before your first Wonder Trade.
-3. Check that your ROM's SHA-256 matches `manifest.json`. A different value means
-   an unsupported, trimmed, encrypted or already patched ROM, and it will not work.
-4. Apply `dswt-us-rev0.bps` or `dswt-us-rev1.bps`
-   to the copy with your BPS patcher, then
-   check the output against the output SHA-256 in `manifest.json`.
-5. Name the patched ROM so it uses your existing save, then load it in melonDS.
+1. Back up your save file before your first Wonder Trade.
+2. Open DSWT Patcher, choose your ROM and save the patched copy. The patcher
+   checks your ROM, explains any refusal, and verifies the result. It never
+   changes your original file or replaces an existing one.
+3. Name the patched ROM so it uses your existing save, then load it in melonDS.
+   melonDS finds a save by the ROM's file name: `Platinum.nds` uses `Platinum.sav`.
 
-Developers can use [`tools/bps-patch`](../tools/bps-patch/README.md) instead,
-which runs these checks automatically but needs Python and Docker.
+The apps are not code-signed. On Windows, choose **More info**, then **Run
+anyway**. On macOS, Control-click the app, choose **Open**, then confirm. The macOS
+app runs on Apple silicon. On Linux, mark `DSWT Patcher` executable and run it.
+`SHA256SUMS` on the release page lists every file's checksum.
+
+With another BPS patcher, use `dswt-us-rev0.bps` or `dswt-us-rev1.bps` from the
+patch archive. Your ROM must be full size and match the input SHA-256 in
+`manifest.json`; check the output against its output SHA-256.
 
 ## Trade
 

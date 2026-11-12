@@ -43,7 +43,7 @@ jobs:
           provenance=(game/tools/flips-v198-*/provenance.json)
           test "${#provenance[@]}" -eq 1 && test -f "${provenance[0]}"
           DSWT_FLIPS_PROVENANCE="$PWD/${provenance[0]}" python3 -m unittest discover -s tools/bps-patch/__tests__
-          python3 -m unittest discover -s tools/candidate/__tests__
+          python3 -m unittest discover -s tools/patcher-app/__tests__
 
   connectivity-server:
     name: Build and test connectivity server
