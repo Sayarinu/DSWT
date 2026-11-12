@@ -67,8 +67,8 @@ def build():
     text = original.decode()
     replacements = {
         '#include "wonder_trade/recovery.h"': '#include "wonder_trade/recovery.h"\n#include "../../../.git/dswt-entrypoint-probe.inc"',
-        '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }':
-            '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }\n'
+        '    worker->result = WtBoot_Check(&worker->game, io);':
+            '    worker->result = WtBoot_Check(&worker->game, io);\n'
             '    if (worker->result == 0) worker->result = WtRecovery_ProbeEntrypoints() ? 1 : -100;',
         '    u32 size, unused;': '    u32 size, unused;\n    int probeOK;',
         '    OS_JoinThread(&worker->thread);': '    OS_JoinThread(&worker->thread);\n    probeOK = worker->result == 1;',

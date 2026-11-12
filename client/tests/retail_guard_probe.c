@@ -15,7 +15,7 @@ static int WtRecovery_ProbeReceiveImage(void)
 {
     SaveData *save = SaveData_Ptr();
     Party *party = SaveData_GetParty(save);
-    WtGameSave game = { save, HEAP_ID_WONDER_TRADE };
+    WtGame game = { save, HEAP_ID_WONDER_TRADE };
     WtJournalEntry *entries;
     Pokemon recorded;
     WtReceivedPokemon received;
@@ -41,10 +41,10 @@ static int WtRecovery_ProbeReceiveImage(void)
         if (!poison) goto done;
         memset(poison, pass ? 0x55 : 0xaa, sizeof(*poison));
         Heap_Free(poison);
-        if (WtGameSave_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, entry, 0) != 0
+        if (WtGame_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, entry, 0) != 0
             || entry->destination.kind != 1) goto done;
         memcpy(&recorded, entry->destinationAfter, sizeof(recorded));
-        if (WtGameSave_Received(entry, &received) != 0
+        if (WtGame_Received(entry, &received) != 0
             || received.species != Pokemon_GetValue(&recorded, MON_DATA_SPECIES, NULL)
             || received.gender != Pokemon_GetGender(&recorded)
             || received.form != Pokemon_GetForm(&recorded)
