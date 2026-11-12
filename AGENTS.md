@@ -28,7 +28,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS ([`deploy/README.md`](deploy/README.md)) |
 | `patches/` | ROM compatibility contract and player install guide |
 | `scripts/` | ROM build, workspace preparation, TLS and contribution tooling |
-| `tools/` | Local stack, BPS patcher, image audit and release-candidate tooling |
+| `tools/` | Local stack, BPS patcher and release tooling, image audit |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
 
 ## Platform
@@ -68,7 +68,6 @@ game/policy-venv/bin/pip install --require-hashes -r tools/local-stack/requireme
 game/policy-venv/bin/python tools/local-stack/isolation.py policy
 game/policy-venv/bin/python -m unittest discover -s tools/local-stack/__tests__
 python3 -m unittest discover -s tools/image-audit/__tests__
-python3 -m unittest discover -s tools/candidate/__tests__
 python3 tools/bps-patch/patcher.py prepare
 DSWT_FLIPS_PROVENANCE="$(ls "$PWD"/game/tools/flips-v198-*/provenance.json)" \
   python3 -m unittest discover -s tools/bps-patch/__tests__
