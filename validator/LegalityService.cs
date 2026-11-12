@@ -9,7 +9,7 @@ public sealed class LegalityService(WorkerRunner worker) : PokemonLegality.Pokem
     public override async Task<ValidateReply> Validate(ValidateRequest request, ServerCallContext context)
     {
         var pokemon = request.Pokemon;
-        if (pokemon is null || pokemon.Pk4.Length != Policy.PayloadSize || pokemon.Sha256.Length != 32 ||
+        if (pokemon is null || pokemon.Pk4.Length != Policy.PayloadSize || pokemon.Sha256.Length != SHA256.HashSizeInBytes ||
             !CryptographicOperations.FixedTimeEquals(SHA256.HashData(pokemon.Pk4.Span), pokemon.Sha256.Span))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "invalid canonical payload"));
         return await worker.Run(pokemon.Pk4.ToByteArray(), context.CancellationToken);

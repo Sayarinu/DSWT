@@ -26,7 +26,7 @@ public static class ServiceHost
         builder.Services.AddGrpc(options =>
         {
             options.MaxReceiveMessageSize = 256;
-            options.MaxSendMessageSize = 1024;
+            options.MaxSendMessageSize = WorkerRunner.MaxReplyBytes;
             options.EnableDetailedErrors = false;
             options.CompressionProviders.Clear();
         });
