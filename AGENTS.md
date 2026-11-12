@@ -71,6 +71,7 @@ python3 -m unittest discover -s tools/image-audit/__tests__
 python3 tools/bps-patch/patcher.py prepare
 DSWT_FLIPS_PROVENANCE="$(ls "$PWD"/game/tools/flips-v198-*/provenance.json)" \
   python3 -m unittest discover -s tools/bps-patch/__tests__
+python3 -m unittest discover -s tools/patcher-app/__tests__
 
 # Build and test connectivity server
 docker build -f server/Dockerfile -t dswt-server .

@@ -31,6 +31,8 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: pip
-    directory: /tools/local-stack
+    directories:
+      - /tools/local-stack
+      - /tools/patcher-app
     schedule:
       interval: weekly

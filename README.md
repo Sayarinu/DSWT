@@ -36,10 +36,11 @@ for legality and are designed to survive dropped connections and crashes.
 
 ## Getting the patch
 
-No patch has been released yet. When one is, it will be a bundle with one BPS
-patch per supported ROM, installation instructions and a `manifest.json` of
-checksums. You apply it to your own copy of the game; **DSWT never distributes
-ROMs.**
+Download **DSWT Patcher** for Windows, macOS or Linux from the
+[releases](https://github.com/Sayarinu/DSWT/releases), choose your own ROM and
+save the patched copy. It recognises your cartridge, accepts trimmed dumps and
+verifies the result. Each release also has the BPS patches, installation
+instructions and a `manifest.json` of checksums. **DSWT never distributes ROMs.**
 
 Supported today:
 
@@ -47,16 +48,13 @@ Supported today:
 | --- | --- | --- |
 | Pokémon Platinum, US English | Rev 0 and Rev 1 | melonDS 1.1 |
 
-Europe and physical DS hardware are not supported yet. You need a full,
-decrypted dump; check yours with:
-
-```sh
-python3 scripts/identify-rom.py /path/to/platinum.nds
-```
+Other versions and languages (Japanese, Korean, European English, French, German,
+Italian and Spanish) are recognised but each needs its own ported and tested
+target first. Physical DS hardware is not supported yet.
 
 - [Install and trade guide](patches/INSTALL.md): what players do with a released bundle.
 - [ROM compatibility](patches/README.md): the verified inputs and the bundle contract.
-- [BPS patch tooling](tools/bps-patch/README.md): build and apply patches locally (Python and Docker).
+- [BPS patch tooling](tools/bps-patch/README.md) and [player app](tools/patcher-app/README.md): build, check and release patches.
 - [Building from source](docs/building.md): build the patched ROM yourself.
 
 ## How it works
