@@ -38,6 +38,8 @@ GATEWAY_PORT = 8443
 # The LUNE-409 targets; shorter or smaller runs are reported but never qualify.
 SPEC = {"duration": 3600, "clients": 1000, "pairs": 10, "p95_ms": 500}
 PROBE_TIMEOUT = 90
+LOOPBACK_RADIX = 250
+MAX_CLIENTS = LOOPBACK_RADIX ** 2
 DRAIN_TIMEOUT = 600
 CHECKPOINT_SECONDS = 300
 NOTES = [
@@ -82,7 +84,12 @@ def conserved(initial, final):
 
 def source(index):
     """A distinct loopback /32 per client, so per-network admission sees separate players."""
-    return f"127.10.{index // 250}.{1 + index % 250}"
+    return f"127.10.{index // LOOPBACK_RADIX}.{1 + index % LOOPBACK_RADIX}"
+
+
+def settled(state):
+    """An idle journal is settled only after its pending packet is retired."""
+    return bool(state and state["phase"] == SETTLED and not state["pending_sha256"])
 
 
 def verdict(report):
@@ -122,7 +129,7 @@ class Driver:
                 *arguments, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                 env=dict(os.environ, WT_PROBE_SOURCE=client["source"]))
             try:
-                output, _ = await asyncio.wait_for(process.communicate(), 90)
+                output, _ = await asyncio.wait_for(process.communicate(), PROBE_TIMEOUT)
             except TimeoutError:
                 process.kill()
                 await process.wait()
@@ -158,7 +165,7 @@ class Driver:
     async def settle(self, client, action):
         """Run an action, then exact retries/polls, until the client's journal is idle again."""
         state = await self.probe(client, action)
-        while not state or state["phase"] != SETTLED or state["pending_sha256"]:
+        while not settled(state):
             state = await self.poll(client, state)
         return state
 
@@ -180,7 +187,7 @@ class Driver:
                 self.submitted += 1
             state = await self.probe(client, "submit")
             deadline = time.monotonic() + spec["match_timeout"]
-            while not state or state["phase"] != SETTLED or state["pending_sha256"]:
+            while not settled(state):
                 if self.stopping and time.monotonic() > deadline and state and state["phase"] == "queued":
                     await self.settle(client, "cancel")  # Unmatched when the run drains.
                     break
@@ -541,8 +548,8 @@ def main():
     args = parser.parse_args()
     if len(args.restart) != len(args.restart_at) or not set(args.restart) <= set(RESTARTABLE):
         parser.error("give one --restart-at offset per --restart service: " + ", ".join(RESTARTABLE))
-    if not 0 < args.clients + args.illegal <= 62500:
-        parser.error("use 1-62500 clients")
+    if not 0 < args.clients + args.illegal <= MAX_CLIENTS:
+        parser.error(f"use 1-{MAX_CLIENTS} clients")
     args.offer_rate = args.offer_rate or 1.1 * args.pairs
     if sys.version_info < (3, 12):
         parser.error("Python 3.12+ is required for the pinned source preparer; use a separate interpreter")
