@@ -228,7 +228,7 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     app->previewLoaded = FALSE;
     app->graphicsReady = TRUE;
     app->touchBlocked = TRUE;
-    app->listingBackground = TRUE; /* Force the first background palette load. */
+    app->listingBackground = FALSE; /* The terminal palette is already loaded. */
     WonderTrade_Draw(app);
     SetVBlankCallback(WonderTrade_VBlank, app);
     GXLayers_EngineAToggleLayers(GX_PLANEMASK_BG0, TRUE);
