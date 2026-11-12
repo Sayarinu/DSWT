@@ -268,7 +268,13 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
-      if (legality.verdict == LegalityVerdict::Unavailable) { session.Publish(*reply, v1::RESULT_UNAVAILABLE); return; }
+      // A legal verdict must name the games able to hold the Pokémon; the matcher
+      // pairs by them, so an empty or unknown set fails closed.
+      const bool destinations = legality.destinations != 0 && (legality.destinations & ~kAllDestinations) == 0;
+      if (legality.verdict == LegalityVerdict::Unavailable ||
+          (legality.verdict == LegalityVerdict::Legal && !destinations)) {
+        session.Publish(*reply, v1::RESULT_UNAVAILABLE); return;
+      }
       if (legality.verdict == LegalityVerdict::Illegal) {
         Rejected(session, request->context(), 2, hash, v1::RESULT_ILLEGAL_POKEMON, *reply, {}, request->pokemon().sha256());
         return;
@@ -280,6 +286,8 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       session.database.Parameters("INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
           "VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(trade), HexBytes(session.auth.save_id()), HexBytes(asset), sequence});
+      session.database.Parameters("INSERT INTO dswt.offer_destinations VALUES ($1::uuid,$2::smallint)",
+          {HexBytes(trade), std::to_string(legality.destinations)});
       session.database.Parameters("INSERT INTO dswt.ownership VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(asset), HexBytes(session.auth.save_id()), HexBytes(trade), sequence});
       const auto snapshot = session.Snapshot(trade);
