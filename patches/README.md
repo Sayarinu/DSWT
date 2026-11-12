@@ -21,7 +21,9 @@ has its own ported and tested target. No BIOS or ROM is bundled.
 
 US Rev 0 and Rev 1 reproduce the pinned upstream SHA-1 and No-Intro SHA-256.
 Run `ROM_REVISION=0 ./scripts/build-rom.sh --pristine` and repeat with `1`;
-each must pass all five upstream checks. Europe has verified reference digests
+each must pass all five upstream checks. HeartGold and SoulSilver US reproduce
+their pinned pret SHA-1s with `ROM_GAME=heartgold` or `ROM_GAME=soulsilver` and
+`--pristine` (four upstream checks each). Europe has verified reference digests
 but no compatible build yet; LUNE-301 tracks that target. Diamond, Pearl,
 HeartGold and SoulSilver are verified dumps with no planned patch yet
 (`planned_patch` is `null`). Additional regional labels sharing an exact listed

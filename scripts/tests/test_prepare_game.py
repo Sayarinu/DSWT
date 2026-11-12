@@ -117,6 +117,60 @@ class PrepareGameTests(unittest.TestCase):
         self.assertFalse((pristine / "src/wonder_trade/application.c").exists())
         self.assertEqual(prepare_game.prepare(self.root, pristine=True), pristine)
 
+    def test_each_game_overlays_only_its_own_adapter_and_resources(self):
+        client = self.root / "client"
+        for name in ("src/wonder_trade/platinum/game_save.c", "src/wonder_trade/hgss/game_save.c",
+                     "include/wonder_trade/hgss/game_save.h", "res/text/wonder_trade.json",
+                     "files/msgdata/msg/msg_0829.json"):
+            (client / name).parent.mkdir(parents=True, exist_ok=True)
+            (client / name).write_text(name + "\n")
+        upstream = Path(self.temp.name) / "hgss-upstream"
+        upstream.mkdir()
+        for name, text in {
+            "src/start_menu.c": "original\n",
+            "heartgold.us/rom.sha1": "2" * 40 + " *pokeheartgold.us.nds\n",
+            "soulsilver.us/rom.sha1": "3" * 40 + " *pokesoulsilver.us.nds\n",
+        }.items():
+            (upstream / name).parent.mkdir(parents=True, exist_ok=True)
+            (upstream / name).write_text(text)
+        git = ["git", "-C", str(upstream)]
+        subprocess.check_call([*git, "init", "--quiet"])
+        subprocess.check_call([*git, "add", "."])
+        subprocess.check_call([*git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                               "commit", "--quiet", "-m", "Synthetic HGSS upstream"])
+        pin = {
+            "repository": str(upstream),
+            "revision": subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip(),
+            "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
+            "rom_sha1": {"heartgold": "2" * 40, "soulsilver": "3" * 40},
+        }
+        (client / "upstream-pokeheartgold.json").write_text(json.dumps(pin))
+        (client / "pokeheartgold.patch").write_text((client / "pokeplatinum.patch").read_text())
+
+        platinum = prepare_game.prepare(self.root)
+        hgss = prepare_game.prepare(self.root, name="hgss")
+        self.assertEqual(hgss, self.root / "game/pokeheartgold")
+        for workspace, own, foreign in ((platinum, ("src/wonder_trade/platinum/game_save.c", "res/text/wonder_trade.json"),
+                                         ("src/wonder_trade/hgss/game_save.c", "include/wonder_trade/hgss/game_save.h",
+                                          "files/msgdata/msg/msg_0829.json")),
+                                        (hgss, ("src/wonder_trade/hgss/game_save.c", "include/wonder_trade/hgss/game_save.h",
+                                                "files/msgdata/msg/msg_0829.json"),
+                                         ("src/wonder_trade/platinum/game_save.c", "res/text/wonder_trade.json"))):
+            with self.subTest(workspace=workspace.name):
+                self.assertEqual((workspace / "src/start_menu.c").read_text(), "patched\n")
+                self.assertEqual((workspace / "src/wonder_trade/application.c").read_text(), "project addition\n")
+                for name in own:
+                    self.assertEqual((workspace / name).read_text(), name + "\n")
+                for name in foreign:
+                    self.assertFalse((workspace / name).exists())
+        pristine = prepare_game.prepare(self.root, pristine=True, name="hgss")
+        self.assertEqual(pristine, self.root / "game/pokeheartgold-pristine")
+        self.assertEqual((pristine / "src/start_menu.c").read_text(), "original\n")
+        pin["rom_sha1"]["soulsilver"] = "4" * 40
+        (client / "upstream-pokeheartgold.json").write_text(json.dumps(pin))
+        with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
+            prepare_game.prepare(self.root, name="hgss")
+
     def test_workspace_symlink_does_not_write_outside_project(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

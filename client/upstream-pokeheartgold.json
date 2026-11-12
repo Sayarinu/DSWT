@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/pret/pokeheartgold.git",
+  "revision": "6bf138d6035aa6b43d6f8f4132a12df70f86dcec",
+  "tree": "0d689061f72a6544df3b04a66a6ffbb5d98f67ae",
+  "rom_sha1": {
+    "heartgold": "4fcded0e2713dc03929845de631d0932ea2b5a37",
+    "soulsilver": "f8dc38ea20c17541a43b58c5e6d18c1732c7e582"
+  }
+}
