@@ -50,6 +50,9 @@ REGIONS = {
 # Retail cartridges by game code: (game, region, language).
 CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, (game, _) in GAMES.items() for letter in REGIONS}
 GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
+# European English cartridges that reuse the US game code, told apart by their
+# header revision: Platinum Europe reads CPUE revision 10.
+EUROPE_AS_US = {("CPUE", 10)}
 
 
 class BundleError(ValueError):
@@ -75,8 +78,11 @@ def cartridge(data):
     if code not in CARTRIDGES:
         return None
     game, region, language = CARTRIDGES[code]
+    revision = data[ROM_VERSION]
+    if (code, revision) in EUROPE_AS_US:
+        region = "Europe"
     return {"game": game, "game_code": code, "region": region, "language": language,
-            "revision": data[ROM_VERSION], "size": GAMES[code[:3]][1]}
+            "revision": revision, "size": GAMES[code[:3]][1]}
 
 
 def describe(info):
