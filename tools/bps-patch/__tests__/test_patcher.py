@@ -1,3 +1,4 @@
+import base64
 import errno
 import hashlib
 import json
@@ -7,34 +8,25 @@ import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 import patcher
-from support import assemble, literal_patch, source_read, target_copy, target_read
+from support import BASES, PINS, PROFILE, TARGETS, assemble, rom, source_read, target_read
 
-PINS = [bytes([0x11] * 32), bytes([0x22] * 32)]
-PROFILE = {"hostname": "wt.example.test", "ipv4": "192.0.2.10", "port": 443,
-           "current_spki_sha256": PINS[0].hex(), "next_spki_sha256": PINS[1].hex()}
 RECORD = {key: key for key in ("tool", "version", "revision", "archive", "license", "notices", "build", "binary")}
-
-
-def rom(revision, payload=b""):
-    data = bytearray(4096)
-    data[0x0C:0x10] = b"CPUE"
-    data[0x1E] = revision
-    data[0x200:0x200 + len(payload)] = payload
-    return bytes(data)
-
-
-BASES = {"us-rev0": rom(0), "us-rev1": rom(1)}
-TARGETS = {key: rom(value[0x1E], b"wt.example.test:443" + PINS[0] + PINS[1] + key.encode()) for key, value in BASES.items()}
+SCALAR = bytes([0x11] * 32)
+# A P-256 SEC1 private key shape around a known scalar.
+_DER = (bytes.fromhex("30770201010420") + SCALAR + bytes.fromhex("a00a06082a8648ce3d030107a144034200")
+        + b"\x04" + bytes(range(64)))
+KEY = (b"-----BEGIN EC PRIVATE KEY-----\n" + base64.encodebytes(_DER) + b"-----END EC PRIVATE KEY-----\n")
 
 
 class FakeFlips:
-    """Stands in for the container: emits literal-only patches and the expected output."""
+    """Stands in for the container: keeps the header and padding from the source, ships the body."""
 
     record = RECORD
 
@@ -46,20 +38,18 @@ class FakeFlips:
         self.calls.append("create")
         if self.fail:
             raise self.fail
-        data = literal_patch(stage.read(source, bps.MAX_FILE), stage.read(target, bps.MAX_FILE))
-        if not self.deterministic and patch_name.endswith(".b.bps"):
-            data = assemble(stage.read(source, bps.MAX_FILE), stage.read(target, bps.MAX_FILE),
-                            [source_read(1), target_read(stage.read(target, bps.MAX_FILE)[1:])])
-        stage.write(patch_name, data)
+        base, data = stage.read(source, bps.MAX_FILE), stage.read(target, bps.MAX_FILE)
+        split = 0x200 if self.deterministic or not patch_name.endswith(".b.bps") else 0x1FF
+        body_end = len(data) - 0x100
+        stage.write(patch_name, assemble(base, data, [source_read(split), target_read(data[split:body_end]),
+                                                      source_read(0x100)]))
 
     def apply(self, stage, patch_name, source, target):
         self.calls.append("apply")
         if self.fail:
             raise self.fail
-        literal = bps.walk(stage.read(patch_name, bps.MAX_PATCH))["literals"]["items"][0]
-        data = stage.read(patch_name, bps.MAX_PATCH)
-        stage.write(target, self.output if self.output is not None else
-                    data[literal["patch_offset"]:literal["patch_offset"] + literal["length"]])
+        result = bps.apply(stage.read(source, bps.MAX_FILE), stage.read(patch_name, bps.MAX_PATCH))
+        stage.write(target, self.output if self.output is not None else result)
         if self.during_apply:
             self.during_apply(stage)
 
@@ -78,7 +68,7 @@ class Fixture(unittest.TestCase):
             {"id": key, "name": key, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
              "pristine_verified": True, "planned_patch": f"dswt-{key}.bps"}
             for key, data in BASES.items()] + [
-            {"id": "europe", "name": "Europe", "size": 4096, "sha256": hashlib.sha256(rom(9)).hexdigest(),
+            {"id": "europe", "name": "Europe", "size": 4096, "sha256": hashlib.sha256(rom(0, "europe", "CPUP")).hexdigest(),
              "pristine_verified": False, "planned_patch": "dswt-europe.bps"}]}
         self.source = {"commit": "a" * 40, "dirty": False, "upstream_repository": "upstream", "upstream_revision": "b" * 40}
         self.profile = self.write("profile.json", json.dumps(PROFILE).encode())
@@ -91,7 +81,7 @@ class Fixture(unittest.TestCase):
 
     def create(self, flips=None, output=None, pairs=None, **changes):
         arguments = {"pairs": pairs or self.pairs, "profile_path": self.profile,
-                     "output": output or self.root / "game/bundle", "version": "0.1.0-rc1",
+                     "output": output or self.root / "game/bundle", "version": "0.1.0",
                      "flips": flips or FakeFlips(), "source": self.source, "catalog": self.catalog, "root": self.root}
         arguments.update(changes)
         return patcher.create(**arguments)
@@ -101,40 +91,47 @@ class Fixture(unittest.TestCase):
 
 
 class CreateTests(Fixture):
-    def test_bundle_is_complete_private_and_deterministic(self):
+    def test_bundle_is_complete_checked_and_deterministic(self):
         flips = FakeFlips()
         manifest = self.create(flips=flips)
         bundle = self.root / "game/bundle"
         self.assertEqual(flips.calls, ["create", "create", "apply"] * 2)
-        self.assertEqual(manifest["supported_subset"], ["us-rev0", "us-rev1"])
-        self.assertIs(manifest["publication_permitted"], False)
-        self.assertIs(manifest["distribution_blocked"], True)
+        self.assertEqual((manifest["schema_version"], manifest["kind"]), (2, "dswt-bps-bundle"))
+        self.assertNotIn("publication_permitted", manifest)
+        self.assertEqual(manifest["release_checks"]["private_keys_checked"], 0)
         self.assertEqual(manifest["connection_profile_sha256"], hashlib.sha256(self.profile.read_bytes()).hexdigest())
         self.assertEqual(json.loads((bundle / "manifest.json").read_text()), manifest)
         for entry in manifest["entries"]:
+            self.assertEqual((entry["game_code"], entry["language"]), ("CPUE", "English"))
+            self.assertEqual(entry["revision"], BASES[entry["variant"]][0x1E])
             data = (bundle / entry["patch"]["file"]).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), entry["patch"]["sha256"])
+            self.assertEqual(bps.apply(BASES[entry["variant"]], data), TARGETS[entry["variant"]])
             self.assertEqual(entry["output"]["sha256"], hashlib.sha256(TARGETS[entry["variant"]]).hexdigest())
-            self.assertEqual((bundle / f"audit/{entry['variant']}.literals.bin").read_bytes(), TARGETS[entry["variant"]])
+            self.assertEqual((bundle / f"audit/{entry['variant']}.literals.bin").read_bytes(),
+                             TARGETS[entry["variant"]][0x200:-0x100])
         self.assertEqual(self.leftovers(self.root / "game"), [])
         self.create(output=self.root / "game/again")
         for name in ("manifest.json", "dswt-us-rev1.bps"):
             self.assertEqual((bundle / name).read_bytes(), (self.root / "game/again" / name).read_bytes())
 
     def test_rejections_publish_nothing(self):
-        europe = self.write("europe.nds", rom(9))
-        unprofiled = self.write("unprofiled.nds", rom(1, b"other"))
-        other_revision = self.write("other.nds", TARGETS["us-rev0"].replace(b"us-rev0", b"us-rev1"))
+        europe = self.write("europe.nds", rom(0, "europe", "CPUP"))
+        unprofiled = self.write("unprofiled.nds", rom(1, "other"))
+        local = self.write("local.json", json.dumps(dict(PROFILE, hostname="wt.example.test")).encode())
+        private = self.write("private.json", json.dumps(dict(PROFILE, ipv4="10.0.0.2")).encode())
         cases = {
             "nondeterministic": {"flips": FakeFlips(deterministic=False)},
             "dirty": {"source": dict(self.source, dirty=True)},
             "unsupported base": {"pairs": [(europe, self.pairs[0][1])]},
             "unknown base": {"pairs": [(self.pairs[0][1], self.pairs[0][1])]},
             "target without profile": {"pairs": [(self.pairs[1][0], unprofiled)]},
-            "revision mismatch": {"pairs": [(self.pairs[1][0], other_revision)]},
+            "revision mismatch": {"pairs": [(self.pairs[1][0], self.pairs[0][1])]},
             "duplicate variant": {"pairs": [self.pairs[0], self.pairs[0]]},
             "outside game": {"output": self.root / "inputs/bundle"},
             "bad version": {"version": "../x"},
+            "test hostname": {"profile_path": local},
+            "private address": {"profile_path": private},
             "tool failure": {"flips": FakeFlips(fail=patcher.PatchError("boom"))},
             "wrong roundtrip": {"flips": FakeFlips(output=b"wrong")},
         }
@@ -143,6 +140,43 @@ class CreateTests(Fixture):
                 self.create(**changes)
             self.assertFalse((self.root / "game/bundle").exists(), name)
             self.assertEqual(self.leftovers(self.root / "game"), [], name)
+
+    def leak(self, data, at=0x800):
+        target = bytearray(TARGETS["us-rev1"])
+        target[at:at + len(data)] = data
+        return [(self.pairs[1][0], self.write("leak.nds", bytes(target)))]
+
+    def test_release_checks_reject_data_that_does_not_belong(self):
+        (self.inputs / "current.key").write_bytes(KEY)
+        cases = {
+            "private key scalar": (SCALAR, 0x800, "private key current.key"),
+            "pem text": (b"-----BEGIN EC PRIVATE KEY-----", 0x800, "key text"),
+            "build path": (str(self.root).encode(), 0x800, "build-host"),
+            "home path": (b"/home/builder/dswt", 0x800, "build-host"),
+            "retail copy": (BASES["us-rev1"][0x400:0x42F], 0x800, "retail ROM content"),
+            "other base copy": (BASES["us-rev0"][0x600:0x640], 0x900, "retail ROM content"),
+        }
+        for name, (data, at, message) in cases.items():
+            with self.subTest(name):
+                with self.assertRaisesRegex(patcher.PatchError, message):
+                    self.create(pairs=[self.pairs[0], *self.leak(data, at)])
+                self.assertFalse((self.root / "game/bundle").exists())
+                self.assertEqual(self.leftovers(self.root / "game"), [])
+                (self.inputs / "leak.nds").unlink()
+        manifest = self.create(pairs=self.leak(BASES["us-rev1"][0x400:0x41F]))  # 31 bytes: shorter than a window
+        self.assertEqual(manifest["release_checks"]["private_keys_checked"], 1)
+        self.assertEqual(manifest["release_checks"]["verbatim_retail_run_limit"], 47)
+
+    def test_explicit_keys_replace_the_default_and_must_be_pem(self):
+        other = self.inputs / "elsewhere.pem"
+        other.write_bytes(KEY)
+        with self.assertRaisesRegex(patcher.PatchError, "elsewhere.pem"):
+            self.create(pairs=self.leak(SCALAR), secret_paths=[other])
+        (self.inputs / "leak.nds").unlink()
+        other.unlink()
+        other.write_bytes(b"-----BEGIN KEY-----\nnot base64!\n-----END KEY-----\n")
+        with self.assertRaisesRegex(patcher.PatchError, "not a PEM"):
+            self.create(secret_paths=[other])
 
     def test_interrupt_and_existing_output_are_preserved(self):
         with self.assertRaises(KeyboardInterrupt):
@@ -173,143 +207,51 @@ class CreateTests(Fixture):
                          [data for key in BASES for data in (BASES[key], TARGETS[key])])
 
 
-class ApplyTests(Fixture):
+class ReleaseTests(Fixture):
     def setUp(self):
         super().setUp()
         self.create()
         self.bundle = self.root / "game/bundle"
-        self.manifest = self.bundle / "manifest.json"
-        self.base = self.pairs[1][0]
-        self.out = self.root / "out"
-        self.out.mkdir()
+        for name, relative in patcher.RELEASE_DOCUMENTS.items():
+            (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / relative).write_text(name)
 
-    def apply(self, flips=None, manifest=None, source=None, output=None):
-        return patcher.apply(manifest or self.manifest, source or self.base, output or self.out / "wt.nds", flips or FakeFlips())
-
-    def rewrite(self, change):
-        manifest = json.loads(self.manifest.read_text())
-        change(manifest)
-        self.manifest.unlink()
-        self.manifest.write_text(json.dumps(manifest))
-
-    def assert_rejected(self, **arguments):
+    def test_packages_a_reproducible_player_archive_without_audit_data(self):
+        first = patcher.package(self.bundle, self.root / "game/a.zip", root=self.root)
+        second = patcher.package(self.bundle, self.root / "game/b.zip", root=self.root)
+        self.assertEqual(first["sha256"], second["sha256"])
+        with zipfile.ZipFile(first["archive"]) as archive:
+            self.assertEqual(archive.namelist(), [f"dswt-0.1.0/{name}" for name in
+                                                  ("INSTALL.md", "LICENSE", "NOTICE", "dswt-us-rev0.bps",
+                                                   "dswt-us-rev1.bps", "manifest.json")])
+            self.assertEqual(archive.read("dswt-0.1.0/LICENSE"), b"LICENSE")
         with self.assertRaises(patcher.PatchError):
-            self.apply(**arguments)
-        self.assertEqual(list(self.out.iterdir()), [])
-        self.assertEqual(self.base.read_bytes(), BASES["us-rev1"])
-
-    def test_applies_to_a_new_verified_file(self):
-        entry = self.apply()
-        self.assertEqual(entry["variant"], "us-rev1")
-        self.assertEqual((self.out / "wt.nds").read_bytes(), TARGETS["us-rev1"])
-        self.assertEqual((self.out / "wt.nds").stat().st_nlink, 1)
-        self.assertEqual([path.name for path in self.out.iterdir()], ["wt.nds"])
-        self.assertEqual(self.base.read_bytes(), BASES["us-rev1"])
-
-    def test_existing_outputs_and_aliases_are_rejected(self):
-        for kind in ("file", "symlink", "dangling"):
-            with self.subTest(kind):
-                target = self.out / "wt.nds"
-                if kind == "file":
-                    target.write_bytes(b"keep")
-                else:
-                    target.symlink_to(self.base if kind == "symlink" else self.out / "missing")
-                with self.assertRaises(patcher.PatchError):
-                    self.apply()
-                self.assertEqual(os.readlink(target) if target.is_symlink() else target.read_bytes(),
-                                 b"keep" if kind == "file" else str(self.base if kind == "symlink" else self.out / "missing"))
-                target.unlink()
-        link = self.inputs / "link.nds"
-        link.symlink_to(self.base)
-        self.assert_rejected(source=link)
-        hard = self.inputs / "hard.nds"
-        os.link(self.base, hard)
-        self.assert_rejected(source=hard)
-        hard.unlink()
-        self.assert_rejected(output=self.base)
-
-    def test_rejects_modified_inputs_and_patches(self):
-        modified = self.write("modified.nds", BASES["us-rev1"][:-1] + b"\1")
-        self.assert_rejected(source=modified)
-        self.assert_rejected(source=self.pairs[1][1])
-        patch_path = self.bundle / "dswt-us-rev1.bps"
-        original = patch_path.read_bytes()
-        def replace(data, rehash):
-            patch_path.unlink()
-            patch_path.write_bytes(data)
-            if rehash:
-                self.rewrite(lambda m: [e["patch"].update(sha256=hashlib.sha256(data).hexdigest(), size=len(data))
-                                        for e in m["entries"] if e["variant"] == "us-rev1"])
-        corrupt = original[:40] + bytes([original[40] ^ 0xFF]) + original[41:]
-        for name, data, rehash in (("digest", corrupt, False), ("crc", corrupt, True),
-                                   ("crc-valid invalid action", assemble(BASES["us-rev1"], TARGETS["us-rev1"], [target_copy(4096, 0)]), True),
-                                   ("wrong target", literal_patch(BASES["us-rev1"], TARGETS["us-rev0"]), True)):
-            with self.subTest(name):
-                replace(data, rehash)
-                self.assert_rejected()
-        replace(original, True)
-        self.apply()
-
-    def test_rejects_malformed_manifests(self):
-        cases = {
-            "traversal": lambda m: m["entries"][1]["patch"].update(file="../dswt-us-rev1.bps"),
-            "duplicate input": lambda m: m["entries"][0].update(input=m["entries"][1]["input"]),
-            "duplicate file": lambda m: m["entries"][0]["patch"].update(file=m["entries"][1]["patch"]["file"]),
-            "publication": lambda m: m.update(publication_permitted=True),
-            "schema": lambda m: m.update(schema_version=2),
-            "size type": lambda m: m["entries"][1]["output"].update(size="4096"),
-            "output digest": lambda m: m["entries"][1]["output"].update(sha256="0" * 64),
-        }
-        original = self.manifest.read_text()
-        for name, change in cases.items():
-            with self.subTest(name):
-                self.rewrite(change)
-                self.assert_rejected()
-                self.manifest.unlink()
-                self.manifest.write_text(original)
-        self.manifest.unlink()
-        self.manifest.symlink_to(self.inputs / "profile.json")
-        self.assert_rejected()
-
-    def test_tool_failures_interruptions_and_races_publish_nothing(self):
-        def appear(stage):
-            (self.out / "wt.nds").write_bytes(b"other writer")
-        def swap_input(stage):
-            self.base.unlink()
-            self.base.write_bytes(b"replaced")
-        def replace_stage(stage):
-            shutil.rmtree(stage.path)
-            stage.path.mkdir()
-        for name, flips in (("failure", FakeFlips(fail=patcher.PatchError("boom"))),
-                            ("wrong output", FakeFlips(output=TARGETS["us-rev0"]))):
-            with self.subTest(name):
-                self.assert_rejected(flips=flips)
-        with self.assertRaisesRegex(patcher.PatchError, "replaced"):
-            self.apply(flips=FakeFlips(during_apply=replace_stage))
-        [foreign] = self.out.iterdir()
-        self.assertTrue(foreign.name.startswith(".wt.nds.partial-"))
-        foreign.rmdir()
-        with self.assertRaises(KeyboardInterrupt):
-            self.apply(flips=FakeFlips(fail=KeyboardInterrupt()))
-        self.assertEqual(list(self.out.iterdir()), [])
+            patcher.package(self.bundle, self.root / "game/a.zip", root=self.root)
         with self.assertRaises(patcher.PatchError):
-            self.apply(flips=FakeFlips(during_apply=appear))
-        self.assertEqual([p.name for p in self.out.iterdir()], ["wt.nds"])
-        self.assertEqual((self.out / "wt.nds").read_bytes(), b"other writer")
-        (self.out / "wt.nds").unlink()
-        with patch.object(patcher, "_renameat_noreplace", return_value=errno.EXDEV), self.assertRaises(patcher.PatchError):
-            self.apply()
-        self.assertEqual(list(self.out.iterdir()), [])
-        self.apply(flips=FakeFlips(during_apply=swap_input))
-        self.assertEqual((self.out / "wt.nds").read_bytes(), TARGETS["us-rev1"])
+            patcher.package(self.bundle, self.root / "inputs/c.zip", root=self.root)
 
-    def test_cli_interrupt_preserves_inputs(self):
-        with patch.object(patcher, "installed_flips", side_effect=KeyboardInterrupt), \
-                patch("sys.stderr"):
-            code = patcher.main(["apply", "--manifest", str(self.manifest), "--input", str(self.base),
-                                 "--output", str(self.out / "wt.nds")])
-        self.assertEqual(code, 130)
-        self.assertEqual(list(self.out.iterdir()), [])
+    def test_package_rejects_a_changed_patch(self):
+        path = self.bundle / "dswt-us-rev0.bps"
+        data = path.read_bytes()
+        path.unlink()
+        path.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+        with self.assertRaisesRegex(patcher.PatchError, "does not match"):
+            patcher.package(self.bundle, self.root / "game/a.zip", root=self.root)
+        self.assertEqual(self.leftovers(self.root / "game"), [])
+
+    def test_cli_applies_without_docker(self):
+        out = self.root / "out.nds"
+        with patch.object(patcher, "installed_flips", side_effect=AssertionError("Docker is not needed")), \
+                patch("sys.stdout"):
+            code = patcher.main(["apply", "--manifest", str(self.bundle / "manifest.json"),
+                                 "--input", str(self.pairs[1][0]), "--output", str(out)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.read_bytes(), TARGETS["us-rev1"])
+        with patch("sys.stderr"):
+            code = patcher.main(["apply", "--manifest", str(self.bundle / "manifest.json"),
+                                 "--input", str(self.pairs[1][0]), "--output", str(out)])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.read_bytes(), TARGETS["us-rev1"])
 
 
 class AuditTests(Fixture):
@@ -402,10 +344,9 @@ class PinnedFlipsTests(Fixture):
         manifest = self.create(flips=flips)
         self.assertEqual(self.leftovers(self.root / "game"), [])
         out = self.root / "out.nds"
-        self.assertEqual(patcher.apply(self.root / "game/bundle/manifest.json", self.pairs[0][0], out, flips)["variant"], "us-rev0")
+        self.assertEqual(patcher.apply(self.root / "game/bundle/manifest.json", self.pairs[0][0], out)["variant"], "us-rev0")
         self.assertEqual(out.read_bytes(), TARGETS["us-rev0"])
         self.assertEqual(manifest["tool"]["binary"], flips.record["binary"])
-
 
 if __name__ == "__main__":
     unittest.main()

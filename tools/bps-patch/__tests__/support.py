@@ -1,4 +1,4 @@
-"""Test-only BPS byte builders for crafted action streams; not used by the tool."""
+"""Test-only BPS byte builders and ROM-shaped fixtures; not used by the tool."""
 
 import struct
 import zlib
@@ -45,3 +45,28 @@ def recrc(patch):
 
 def literal_patch(source, target):
     return assemble(source, target, [target_read(target)])
+
+
+# ROM-shaped fixtures: a cartridge header, a pseudo-random body and erased-flash padding.
+SIZE, USED = 4096, 4096 - 0x100
+PINS = [bytes([0x31] * 32), bytes([0x32] * 32)]
+PROFILE = {"hostname": "wt.dswt.games", "ipv4": "1.1.1.1", "port": 443,
+           "current_spki_sha256": PINS[0].hex(), "next_spki_sha256": PINS[1].hex()}
+
+
+def rom(revision, seed, code="CPUE", payload=b""):
+    import hashlib
+    data = bytearray(SIZE)
+    data[0x0C:0x10] = code.encode()
+    data[0x1E] = revision
+    data[0x80:0x84] = USED.to_bytes(4, "little")
+    body = b"".join(hashlib.sha256(f"{seed}:{index}".encode()).digest() for index in range((USED - 0x200) // 32 + 1))
+    data[0x200:USED] = body[:USED - 0x200]
+    data[0x200:0x200 + len(payload)] = payload
+    data[USED:] = b"\xff" * (SIZE - USED)
+    return bytes(data)
+
+
+BASES = {"us-rev0": rom(0, "base-0"), "us-rev1": rom(1, "base-1")}
+TARGETS = {key: rom(value[0x1E], f"target-{key}", payload=b"wt.dswt.games:443" + PINS[0] + PINS[1])
+           for key, value in BASES.items()}
