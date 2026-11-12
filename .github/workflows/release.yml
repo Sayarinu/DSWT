@@ -63,6 +63,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends libtk8.6
           python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
           python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
       - name: Keep the app

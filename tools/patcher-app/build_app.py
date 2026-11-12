@@ -120,6 +120,15 @@ def freeze(manifest, members, work):
     return work / "dist" / (f"{APP}.exe" if sys.platform == "win32" else APP)
 
 
+def _has_tk():
+    try:
+        import tkinter
+        tkinter.Tcl()
+        return True
+    except Exception:  # noqa: BLE001 - any failure means no usable Tk
+        return False
+
+
 def executable(app):
     return app / "Contents" / "MacOS" / APP if app.suffix == ".app" else app
 
@@ -156,13 +165,17 @@ def synthetic_bundle(directory):
     return source[:-256], target
 
 
-def smoke_test(app, work):
+def smoke_test(app, work, require_window=True):
     """The frozen app must pass its self-test, patch a trimmed dump and refuse a non-ROM without writing."""
     def run(*arguments):
         return subprocess.run([str(executable(app)), *arguments], capture_output=True, timeout=300)
     result = run("--self-test")
     if result.returncode:
         raise BuildError(f"Frozen app failed its self-test: {result.stderr.decode(errors='replace')[-400:]}")
+    # A windowed Windows build has no stdout; the window check then runs on this interpreter's Tk.
+    window = json.loads(result.stdout)["window"] if result.stdout.strip() else _has_tk()
+    if require_window and not window:
+        raise BuildError("The frozen app has no Tk, so players would get no window; install Tk and rebuild")
     probe = work / "probe"
     probe.mkdir()
     trimmed, target = synthetic_bundle(work / "smoke-bundle")
@@ -221,6 +234,7 @@ def main(argv=None):
     parser.add_argument("--version", help="require this release version")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--check-only", action="store_true", help="verify the archive without building")
+    parser.add_argument("--without-window", action="store_true", help="allow a command-line-only build (local tests)")
     args = parser.parse_args(argv)
     if args.version and not VERSION.fullmatch(args.version):
         parser.error("invalid version")
@@ -232,7 +246,7 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix="dswt-app-") as temporary:
             work = Path(temporary)
             app = freeze(manifest, members, work)
-            smoke_test(app, work)
+            smoke_test(app, work, require_window=not args.without_window)
             target = package(app, manifest, members, args.output)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)

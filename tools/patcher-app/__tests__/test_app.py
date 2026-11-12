@@ -64,7 +64,9 @@ class CommandLineTests(AppFixture):
 
     def test_self_test_checks_every_patch(self):
         code, out, _ = self.run_app("--self-test")
-        self.assertEqual((code, json.loads(out)), (0, {"version": "0.1.0", "variants": ["us-rev0", "us-rev1"]}))
+        result = json.loads(out)
+        self.assertEqual((code, result["version"], result["variants"]), (0, "0.1.0", ["us-rev0", "us-rev1"]))
+        self.assertIsInstance(result["window"], bool)
         path = self.bundle / "dswt-us-rev0.bps"
         data = path.read_bytes()
         path.unlink()

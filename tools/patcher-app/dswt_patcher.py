@@ -49,7 +49,13 @@ def self_test(bundle_dir):
         report = bps.walk(patch)
         if report["target"]["crc32"] != entry["output"]["crc32"]:
             raise bundle.BundleError(f"{entry['patch']['file']} does not produce the recorded output")
-    return {"version": manifest["version"], "variants": [entry["variant"] for entry in manifest["entries"]]}
+    try:
+        import tkinter  # noqa: F401 - a build without Tk would only offer the command line
+        window = True
+    except ImportError:
+        window = False
+    return {"version": manifest["version"], "variants": [entry["variant"] for entry in manifest["entries"]],
+            "window": window}
 
 
 class Window:
