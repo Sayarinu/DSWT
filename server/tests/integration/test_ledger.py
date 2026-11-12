@@ -91,13 +91,17 @@ class LedgerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, "Unexpected successful ledger command")
         return result.stdout + result.stderr
 
-    def enroll(self, owner=1):
+    def enroll(self, owner=1, variant=1, *, ok=True):
+        # Schemas before 0004 have no variant table; their upgrade backfills code 1.
+        if self.sql("SELECT to_regclass('dswt.identity_variants') IS NULL") == "t":
+            variant = None
         self.sql(f"""BEGIN;
             INSERT INTO dswt.save_identities(save_id,enrollment_id,credential_verifier)
                 VALUES ('{identifier(owner)}','{identifier(owner + 100)}',{blob(bytes([owner]) * 32)});
             INSERT INTO dswt.trade_events(save_id,sequence,kind,state)
                 VALUES ('{identifier(owner)}',1,1,0);
-            COMMIT;""")
+            {"" if variant is None else f"INSERT INTO dswt.identity_variants VALUES ('{identifier(owner)}',{variant});"}
+            COMMIT;""", ok=ok)
 
     def submit_sql(self, owner=1, *, trade=None, asset=None, operation=None, sequence=2, counter=1):
         trade = trade or owner + 1000
@@ -238,8 +242,10 @@ class LedgerTests(unittest.TestCase):
         self.enroll(); self.submit()
         images = self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM dswt.audit_journal")
         self.tool("migrate", str(self.migrations))
-        self.assertEqual(self.sql("SELECT count(*) FROM dswt.audit_journal WHERE recorded_at IS NOT NULL"), "0")
-        self.assertEqual(self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM dswt.audit_journal"), images)
+        # Later migrations may journal new rows; the images that existed must not change.
+        old = "FROM dswt.audit_journal WHERE table_name <> 'identity_variants'"
+        self.assertEqual(self.sql(f"SELECT count(*) {old} AND recorded_at IS NOT NULL"), "0")
+        self.assertEqual(self.sql(f"SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) {old}"), images)
         self.tool("verify")
         self.cancel()
         self.assertEqual(self.sql("SELECT recorded_at IS NOT NULL FROM dswt.audit_journal WHERE table_name='offers' AND after_image->>'state'='3'"), "t")
@@ -574,6 +580,43 @@ class LedgerTests(unittest.TestCase):
                  "ALTER TABLE dswt.payloads ENABLE TRIGGER audit_rows; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
+    def test_variant_upgrade_marks_existing_identities_legacy_platinum(self):
+        previous = self.root / "v3_variant_migrations"
+        previous.mkdir()
+        for name in ("0001_ledger.sql", "0002_matcher.sql", "0003_observation_time.sql"):
+            shutil.copy(self.migrations / name, previous)
+        self.database = f"variant_{self.serial}"
+        self.sql(f"CREATE DATABASE {self.database}", database="postgres")
+        self.tool("migrate", str(previous))
+        for owner in (1, 2):
+            self.enroll(owner)
+        self.submit()
+        self.tool("verify")
+        self.tool("migrate", str(self.migrations))
+        self.assertEqual(self.sql("SELECT string_agg(variant::text, ',' ORDER BY save_id) "
+                                  "FROM dswt.identity_variants"), "1,1")
+        self.tool("verify")
+        # Diamond JPN, Platinum ENG Rev 1, SoulSilver KOR: family<<24|version<<16|language<<8|revision.
+        for owner, variant in ((3, 0x010A0100), (4, 0x020C0201), (5, 0x03080800)):
+            self.enroll(owner, variant)
+        before = self.tool("verify")
+        # An identity commits only with one known variant.
+        for variant in (0, 2, 0x020A0200, 0x020C0600, 0x040C0200, 1 << 32, -1):
+            self.enroll(9, variant, ok=False)
+        self.sql(f"""BEGIN; INSERT INTO dswt.save_identities(save_id,enrollment_id,credential_verifier)
+            VALUES ('{identifier(9)}','{identifier(109)}',{blob(bytes([9]) * 32)});
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,state) VALUES ('{identifier(9)}',1,1,0);
+            COMMIT;""", ok=False)
+        self.assertEqual(self.sql("SELECT count(*) FROM dswt.save_identities"), "5")
+        self.sql(f"UPDATE dswt.identity_variants SET variant={0x020C0200}", ok=False)
+        self.sql("DELETE FROM dswt.identity_variants", ok=False)
+        self.sql("TRUNCATE dswt.identity_variants", ok=False)
+        self.assertEqual(self.tool("verify"), before)
+        # A variant removed outside the guards is caught by replay.
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 f"DELETE FROM dswt.identity_variants WHERE save_id='{identifier(4)}'; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
+
     def test_operation_has_exactly_one_outcome_event(self):
         self.enroll()
         self.submit()
@@ -594,7 +637,8 @@ class LedgerTests(unittest.TestCase):
         self.sql("ALTER TABLE dswt.save_identities DISABLE TRIGGER identity_initial")
         try:
             self.sql(f"BEGIN; INSERT INTO dswt.save_identities VALUES ('{identifier(2)}',"
-                     f"'{identifier(102)}',{blob(bytes(32))},1,5);" + self.rejection_sql(2, 6) + "COMMIT;")
+                     f"'{identifier(102)}',{blob(bytes(32))},1,5);" + self.rejection_sql(2, 6) +
+                     f"INSERT INTO dswt.identity_variants VALUES ('{identifier(2)}',1); COMMIT;")
         finally:
             self.sql("ALTER TABLE dswt.save_identities ENABLE TRIGGER identity_initial")
         self.assertIn("23514", self.tool("verify", ok=False))

@@ -25,6 +25,27 @@ identity in both journal banks before submitting anything. Device/MAC/trainer
 IDs, emulator hints, game PRNG output and copied save counters are not secrets.
 TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 
+### Game variants
+
+Enroll's build u32 names the save's game variant as
+`family << 24 | version << 16 | language << 8 | revision`, using the games' own
+version and language IDs and the ROM header revision byte. `code >> 24` is the trade family, except legacy
+code 1, which released clients send for US English Platinum (any revision).
+
+| Field | Values |
+| --- | --- |
+| Family / version | 1 DP: Diamond 10, Pearl 11; 2 Platinum: 12; 3 HGSS: HeartGold 7, SoulSilver 8 |
+| Language | Japanese 1, English 2, French 3, Italian 4, German 5, Spanish 7, Korean 8 |
+| Revision | 0..255 |
+
+For example `0x020C0201` is English Platinum Rev 1. Any other code is
+`INVALID_REQUEST`. The server stores the variant with the new identity and never
+changes it: a retry with the same enrollment ID and credential but another
+variant is `CONFLICT`, like a conflicting credential. Code 1 and an explicit
+English Platinum code are the one exception; they match each other and return
+the identity with its stored variant unchanged. Identities enrolled before
+variants were recorded are code 1.
+
 The server stores SHA-256 of ASCII `DSWT save credential v1`, one zero byte,
 the 16 save-ID bytes and the 32 credential bytes, and compares verifiers in
 constant time. This scheme is for CSPRNG credentials, not human passwords. The
@@ -122,7 +143,7 @@ highwater values; a retried mutation's outcome/event remain its original result.
 
 | Op | Request body in order | Successful response body |
 | --- | --- | --- |
-| 1 Enroll | Build u32, hint length u8, 0..64 hint bytes | Save ID (16) |
+| 1 Enroll | Build u32 (game variant above), hint length u8, 0..64 hint bytes | Save ID (16) |
 | 2 Submit | Escrow generation u64, canonical PK4 (136), digest (32) | Outcome event u64, snapshot (138) |
 | 3 Status | Trade ID (16); zero selects current pending trade | Snapshot (138); all zero when none |
 | 4 Cancel | Nonzero trade ID (16) | Outcome event u64, snapshot (138) |

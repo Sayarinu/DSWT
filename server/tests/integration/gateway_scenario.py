@@ -298,6 +298,9 @@ class GatewayScenario:
                    self.frame(5, ZERO_ID, self.first)]
         for packet in packets:
             self.post(packet, status=400)
+        # Well-formed enrollments with an unknown game variant are bounded protocol rejections.
+        for build in (0, 2, 0x020C0600, 0x040C0200):
+            self.test.assertEqual(self.post(self.frame(1, struct.pack('<IB', build, 0))), (3, 0, 0, b''))
         base = [b'Host: localhost', b'Connection: close', b'Content-Type: application/octet-stream',
                 b'Content-Length: ' + str(len(valid)).encode()]
         for fields in (base + [base[-1]], base + [b'Transfer-Encoding: chunked'], base + [b'Content-Encoding: gzip'],

@@ -90,7 +90,7 @@ message CanonicalPokemon {
 message EnrollRequest {
   bytes enrollment_id = 1; // 16 random bytes durably saved before enrollment.
   bytes credential = 2; // 32 CSPRNG bytes already durable on the client.
-  uint32 client_build = 3;
+  uint32 client_build = 3; // Game variant code; 1 is legacy US English Platinum.
   bytes hints = 4; // At most 64 optional bytes; never authentication evidence.
 }
 

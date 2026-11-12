@@ -75,6 +75,19 @@ class WireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             wire.encode_request(self.request(wire.Operation.ENROLL, save_id=b"x" * 16))
 
+    def test_game_variants(self):
+        self.assertEqual(wire.game_family(1), 2)
+        for family, versions in wire.GAME_FAMILIES.items():
+            for version in versions:
+                for language in wire.LANGUAGES:
+                    for revision in (0, 1, 255):
+                        build = family << 24 | version << 16 | language << 8 | revision
+                        self.assertEqual(wire.game_family(build), family)
+        for build in (0, 2, -1, 1 << 32, 0x000C0200, 0x040C0200, 0x020A0200, 0x020C0000, 0x020C0600, 0x020C0900):
+            with self.subTest(build=hex(build)):
+                with self.assertRaises(ValueError):
+                    wire.game_family(build)
+
     def test_hint_and_page_bounds(self):
         for length in (0, 64):
             request = self.request(wire.Operation.ENROLL, payload=struct.pack("<IB", 1, length) + b"x" * length)

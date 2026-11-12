@@ -3,6 +3,7 @@
 #include "dswt/server/trade_service.h"
 #include "dswt/server/identity_store.h"
 
+#include "game_variant.h"
 #include "postgres.h"
 #include "trade_encoding.h"
 
@@ -51,7 +52,7 @@ protected:
     std::copy(random.begin(), random.end(), nonce.begin());
     SaveCredential credential{};
     credential.fill(0x51);
-    const auto identity = IdentityStore("").Enroll(nonce, credential);
+    const auto identity = IdentityStore("").Enroll(nonce, credential, detail::kLegacyPlatinum);
     if (!identity) throw std::runtime_error("enrollment fixture failed");
     Client client;
     client.auth.set_save_id(identity->data(), identity->size());
