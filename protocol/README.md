@@ -85,6 +85,13 @@ eligible offer by its immutable admission event and randomly chooses a distinct
 unlocked owner. Busy workers return `PROCESSING`; reuse that operation ID. A
 final `NOT_FOUND` records no eligible pair, so later polling needs a new ID.
 Pairs and no-pair outcomes survive retry/restart and require recovery coverage.
+Submit stores, immutably with the offer, the validator's destination set: the
+games able to hold the Pokémon (bit 0 Diamond/Pearl, bit 1 Platinum, bit 2
+HeartGold/SoulSilver). Two offers pair only if each owner's game family is in
+the other offer's set. Offers stored before destination sets are Platinum-only.
+The anchor is the oldest eligible offer that has a compatible counterpart; an
+offer no other queued game can hold waits without blocking younger offers, and
+if every compatible peer of an anchor is locked the next anchor is tried.
 The one-hour capacity gate must measure contention before production promotion.
 
 Retain final operation outcomes, payloads, receipts and contiguous ownership

@@ -42,17 +42,21 @@ struct Client {
 class MatcherTest : public testing::Test {
 protected:
   detail::Database database{""};
-  TradeService trades{"", [](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}}; }, [](auto) { return true; }};
+  // The validator's destination set for the next submission.
+  std::atomic<std::uint32_t> destinations{kAllDestinations};
+  TradeService trades{"", [this](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, destinations.load()}; },
+      [](auto) { return true; }};
   MatcherService matcher{"", [](auto) { return true; }};
   std::vector<v1::Credentials> owners;
 
-  Client Queue(unsigned species = 1) {
+  Client Queue(unsigned species = 1, std::uint32_t variant = detail::kLegacyPlatinum,
+               std::uint32_t holds = kAllDestinations) {
     IdentityId nonce{};
     const auto random = Identifier();
     std::copy(random.begin(), random.end(), nonce.begin());
     SaveCredential credential{};
     credential.fill(0x51);
-    const auto identity = IdentityStore("").Enroll(nonce, credential, detail::kLegacyPlatinum);
+    const auto identity = IdentityStore("").Enroll(nonce, credential, variant);
     if (!identity) throw std::runtime_error("enrollment fixture failed");
     Client client;
     client.auth.set_save_id(identity->data(), identity->size());
@@ -67,6 +71,7 @@ protected:
     client.submission.mutable_pokemon()->set_pk4(data);
     client.submission.mutable_pokemon()->set_sha256(detail::HashBytes(data));
     v1::MutationReply reply;
+    destinations = holds;
     const auto status = trades.Submit(nullptr, &client.submission, &reply);
     if (!status.ok() || reply.context().result() != v1::RESULT_OK) throw std::runtime_error("submission fixture failed");
     client.offer = reply.outcome();
@@ -261,6 +266,86 @@ TEST_F(MatcherTest, BusyOldestIdentityIsSkippedAndServedAfterRelease) {
   const auto pair = Match();
   EXPECT_EQ(pair.result(), v1::RESULT_OK);
   EXPECT_TRUE(pair.first_trade_id() == first.offer.trade_id() || pair.second_trade_id() == first.offer.trade_id());
+}
+
+constexpr auto kDiamond = detail::GameVariant(detail::GameFamily::DiamondPearl, 10, 2, 0);
+constexpr auto kPlatinum = detail::GameVariant(detail::GameFamily::Platinum, 12, 2, 0);
+constexpr auto kSoulSilver = detail::GameVariant(detail::GameFamily::HeartGoldSoulSilver, 8, 2, 0);
+
+std::set<std::string> Traded(const v1::MatchReply &reply) { return {reply.first_trade_id(), reply.second_trade_id()}; }
+
+TEST_F(MatcherTest, PlatinumOnlyOfferNeverMatchesIntoDiamondPearl) {
+  // Diamond's offer could go to Platinum, but a Platinum-only form cannot go to Diamond.
+  const auto form = Queue(1, kPlatinum, kDestinationPt), diamond = Queue(2, kDiamond, kAllDestinations);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_EQ(Status(form.auth).trade().state(), v1::TRADE_QUEUED);
+  EXPECT_EQ(Status(diamond.auth).trade().state(), v1::TRADE_QUEUED);
+  const auto platinum = Queue(3, kPlatinum, kDestinationPt);
+  EXPECT_TRUE(matcher.PairAvailable());
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{form.offer.trade_id(), platinum.offer.trade_id()}));
+  EXPECT_EQ(Status(diamond.auth).trade().state(), v1::TRADE_QUEUED);
+}
+
+TEST_F(MatcherTest, CompatibleCrossGamePairMatches) {
+  const auto diamond = Queue(1, kDiamond, kDestinationDP | kDestinationHGSS);
+  const auto soulsilver = Queue(2, kSoulSilver, kDestinationDP | kDestinationPt);
+  EXPECT_TRUE(matcher.PairAvailable());
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{diamond.offer.trade_id(), soulsilver.offer.trade_id()}));
+  EXPECT_EQ(Collect(diamond).pokemon().pk4(), soulsilver.submission.pokemon().pk4());
+}
+
+TEST_F(MatcherTest, LegacyOffersArePlatinumOnly) {
+  // Migration 0005 stores Platinum only for offers queued before destination sets.
+  const auto legacy = Queue(1, detail::kLegacyPlatinum, kDestinationPt);
+  const auto soulsilver = Queue(2, kSoulSilver, kAllDestinations);
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  const auto platinum = Queue(3, kPlatinum, kAllDestinations);
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{legacy.offer.trade_id(), platinum.offer.trade_id()}));
+  EXPECT_EQ(Status(soulsilver.auth).trade().state(), v1::TRADE_QUEUED);
+}
+
+TEST_F(MatcherTest, IncompatibleOldestOfferDoesNotStallTheQueue) {
+  const auto stranded = Queue(1, kPlatinum, kDestinationPt);
+  const auto first = Queue(2, kDiamond), second = Queue(3, kSoulSilver);
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{first.offer.trade_id(), second.offer.trade_id()}));
+  EXPECT_EQ(Status(stranded.auth).trade().state(), v1::TRADE_QUEUED);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  // The waiting offer keeps its age and anchors once a compatible peer queues.
+  Queue(4, kSoulSilver); Queue(5, kSoulSilver);
+  const auto late = Queue(6, kPlatinum);
+  const auto served = Match();
+  ASSERT_EQ(served.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(served), (std::set<std::string>{stranded.offer.trade_id(), late.offer.trade_id()}));
+}
+
+TEST_F(MatcherTest, AnchorWithOnlyBusyPeersGivesWayToTheNextAnchor) {
+  // The oldest Diamond-only offer pairs only with the other Diamond owner, whose
+  // offer SoulSilver-only players cannot take; they pair with each other.
+  const auto oldest = Queue(1, kDiamond, kDestinationDP);
+  const auto busy = Queue(2, kDiamond, kAllDestinations);
+  const auto first = Queue(3, kSoulSilver, kDestinationHGSS), second = Queue(4, kSoulSilver, kDestinationHGSS);
+  {
+    detail::Transaction transaction(database);
+    database.Parameters("SELECT save_id FROM dswt.save_identities WHERE save_id=$1::uuid FOR UPDATE",
+        {detail::HexBytes(busy.auth.save_id())});
+    const auto pair = Match();
+    ASSERT_EQ(pair.result(), v1::RESULT_OK);
+    EXPECT_EQ(Traded(pair), (std::set<std::string>{first.offer.trade_id(), second.offer.trade_id()}));
+    transaction.Commit();
+  }
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{oldest.offer.trade_id(), busy.offer.trade_id()}));
 }
 
 TEST_F(MatcherTest, IndependentReplicasMatchEveryOfferOnce) {

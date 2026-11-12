@@ -103,16 +103,22 @@ class LedgerTests(unittest.TestCase):
             {"" if variant is None else f"INSERT INTO dswt.identity_variants VALUES ('{identifier(owner)}',{variant});"}
             COMMIT;""", ok=ok)
 
-    def submit_sql(self, owner=1, *, trade=None, asset=None, operation=None, sequence=2, counter=1):
+    def submit_sql(self, owner=1, *, trade=None, asset=None, operation=None, sequence=2, counter=1,
+                   destinations=2):
         trade = trade or owner + 1000
         asset = asset or owner + 2000
         operation = operation or owner + 3000
         payload = bytes(136)
         digest = hashlib.sha256(payload).digest()
+        # Schemas before 0005 have no destination table; their upgrade backfills Platinum only.
+        if self.sql("SELECT to_regclass('dswt.offer_destinations') IS NULL") == "t":
+            destinations = None
         return f"""
             INSERT INTO dswt.payloads VALUES ('{identifier(asset)}',{blob(payload)},{blob(digest)});
             INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,receipt_id,last_event) VALUES
                 ('{identifier(trade)}','{identifier(owner)}','{identifier(asset)}',1,NULL,{sequence});
+            {"" if destinations is None else
+             f"INSERT INTO dswt.offer_destinations VALUES ('{identifier(trade)}',{destinations});"}
             INSERT INTO dswt.ownership VALUES
                 ('{identifier(asset)}','{identifier(owner)}','{identifier(trade)}',1,{sequence});
             INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',
@@ -122,8 +128,8 @@ class LedgerTests(unittest.TestCase):
                 '{identifier(trade)}','{identifier(operation)}','{identifier(asset)}',{blob(digest)},1);
         """
 
-    def submit(self, owner=1):
-        self.sql("BEGIN;" + self.submit_sql(owner) + "COMMIT;")
+    def submit(self, owner=1, **options):
+        self.sql("BEGIN;" + self.submit_sql(owner, **options) + "COMMIT;")
 
     def cancel(self, owner=1):
         trade, asset, operation, receipt = [identifier(owner + delta) for delta in (1000, 2000, 4000, 5000)]
@@ -243,7 +249,7 @@ class LedgerTests(unittest.TestCase):
         images = self.sql("SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) FROM dswt.audit_journal")
         self.tool("migrate", str(self.migrations))
         # Later migrations may journal new rows; the images that existed must not change.
-        old = "FROM dswt.audit_journal WHERE table_name <> 'identity_variants'"
+        old = "FROM dswt.audit_journal WHERE table_name NOT IN ('identity_variants', 'offer_destinations')"
         self.assertEqual(self.sql(f"SELECT count(*) {old} AND recorded_at IS NOT NULL"), "0")
         self.assertEqual(self.sql(f"SELECT md5(string_agg(after_image::text,'|' ORDER BY sequence)) {old}"), images)
         self.tool("verify")
@@ -615,6 +621,41 @@ class LedgerTests(unittest.TestCase):
         # A variant removed outside the guards is caught by replay.
         self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
                  f"DELETE FROM dswt.identity_variants WHERE save_id='{identifier(4)}'; COMMIT;")
+        self.assertIn("23514", self.tool("verify", ok=False))
+
+    def test_destination_upgrade_marks_existing_offers_platinum_only(self):
+        previous = self.root / "v4_destination_migrations"
+        previous.mkdir()
+        for name in ("0001_ledger.sql", "0002_matcher.sql", "0003_observation_time.sql",
+                     "0004_identity_variants.sql"):
+            shutil.copy(self.migrations / name, previous)
+        self.database = f"destination_{self.serial}"
+        self.sql(f"CREATE DATABASE {self.database}", database="postgres")
+        self.tool("migrate", str(previous))
+        for owner in (1, 2):
+            self.enroll(owner)
+        self.submit(1)
+        self.cancel(1)
+        self.submit(2)
+        self.tool("verify")
+        self.tool("migrate", str(self.migrations))
+        self.assertEqual(self.sql("SELECT string_agg(destinations::text, ',' ORDER BY trade_id) "
+                                  "FROM dswt.offer_destinations"), "2,2")
+        self.tool("verify")
+        self.enroll(3)
+        for destinations in (0, 8, -1):
+            self.sql("BEGIN;" + self.submit_sql(3, destinations=destinations) + "COMMIT;", ok=False)
+        # An offer commits only together with its destination set.
+        self.sql("BEGIN;" + self.submit_sql(3, destinations=None) + "COMMIT;", ok=False)
+        self.submit(3, destinations=7)
+        before = self.tool("verify")
+        self.sql("UPDATE dswt.offer_destinations SET destinations=7", ok=False)
+        self.sql("DELETE FROM dswt.offer_destinations", ok=False)
+        self.sql("TRUNCATE dswt.offer_destinations", ok=False)
+        self.assertEqual(self.tool("verify"), before)
+        # A destination set removed outside the guards is caught by replay.
+        self.sql("BEGIN; SET LOCAL session_replication_role=replica; "
+                 f"DELETE FROM dswt.offer_destinations WHERE trade_id='{identifier(1002)}'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
     def test_operation_has_exactly_one_outcome_event(self):
