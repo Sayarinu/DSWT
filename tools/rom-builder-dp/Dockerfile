@@ -47,6 +47,19 @@ RUN cd /opt/pokediamond \
     && rm -rf NitroSDK-3_2-060901 mwccarm.zip NitroSDK-3_2-060901.7z \
     && chmod -R a+rX /opt/pokediamond
 
+# pokediamond carries only the C library headers its own code needs. The
+# Wonder Trade core and Mbed TLS compile against CodeWarrior's MSL C headers
+# for the same 2.0/sp1 compiler, taken from the Metroskrew release that
+# pokeplatinum pins. Only the headers are kept, inside this local image. 7-Zip
+# unpacks the xz stream because the image has no xz tool.
+ADD --checksum=sha256:2fec5ba308690a25157afc532ed87411a413501d43d85892ae4bfb9eb3975790 https://github.com/mid-kid/metroskrew/releases/download/0.1.3/metroskrew-linux.tar.xz /opt/pokediamond/metroskrew.tar.xz
+RUN cd /opt/pokediamond \
+    && 7z x -so metroskrew.tar.xz | tar x --strip-components=7 \
+        metroskrew/lib/metroskrew/sdk/ds/2.0/sp1/msl/MSL_C/MSL_Common/Include \
+        metroskrew/lib/metroskrew/sdk/ds/2.0/sp1/msl/MSL_C/MSL_ARM/Include \
+    && rm metroskrew.tar.xz \
+    && chmod -R a+rX /opt/pokediamond/msl
+
 # Builds run as the invoking host user, who creates a Wine prefix per run.
 ENV WINEDEBUG=-all WINEDLLOVERRIDES=mscoree,mshtml= HOME=/tmp
 WORKDIR /workspace
