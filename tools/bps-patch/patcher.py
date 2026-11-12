@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Generate, audit and safely apply private BPS candidates with pinned Flips v198."""
+"""Generate checked release bundles with pinned Flips v198, audit patches and apply them."""
 
 import argparse
+import base64
 import ctypes
 import errno
 import hashlib
 import importlib.util
+import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -19,26 +22,22 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
+import bundle
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-PATCH_NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,63}\.bps")
 VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}")
-SHA256 = re.compile(r"[0-9a-f]{64}")
-CRC32 = re.compile(r"[0-9a-f]{8}")
-SUPPORTED = ("us-rev0", "us-rev1")
-BLOCKERS = [
-    "Private candidate: publication_permitted is false",
-    "Europe (English) has no compatible target (LUNE-301)",
-    "Redistribution rights for generated patch literals are not cleared",
-]
-# Nintendo DS cartridge header fields shared by a base and its modified build.
-HEADER_SIZE = 0x200
-GAME_CODE = slice(0x0C, 0x10)
-ROM_VERSION = 0x1E
+HEADER_SIZE, GAME_CODE, ROM_VERSION = bundle.HEADER_SIZE, bundle.GAME_CODE, bundle.ROM_VERSION
+# A literal may not hold any window of this many bytes found verbatim in a retail
+# base; with this stride, any copied run of 47 bytes or more is caught.
+VERBATIM_WINDOW, VERBATIM_STRIDE = 32, 16
+RESERVED_SUFFIXES = ("localhost", "local", "test", "example", "invalid", "internal", "lan", "home.arpa", "onion")
+# Release files copied into the player archive beside the manifest and patches.
+RELEASE_DOCUMENTS = {"INSTALL.md": "patches/INSTALL.md", "LICENSE": "LICENSE", "NOTICE": "NOTICE"}
 FLIPS_TIMEOUT = 30 * 60
 MAX_MANIFEST = 1024 * 1024
 MAX_PROFILE = 64 * 1024
@@ -393,8 +392,8 @@ def _match(catalog, data):
         variant = identify_rom.match(len(data), sha256(data), catalog)
     except ValueError as error:
         raise PatchError(f"Base ROM: {error}") from None
-    if variant["id"] not in SUPPORTED:
-        raise PatchError(f"{variant['name']} is outside the supported US Rev 0/1 subset")
+    if bundle.cartridge(data) is None:
+        raise PatchError(f"{variant['name']} does not have a Pokémon Platinum header")
     return variant
 
 
@@ -404,8 +403,57 @@ def _profile_binding(profile_bytes):
         configure_connection.header(profile)
     except (ValueError, TypeError) as error:
         raise PatchError(f"Invalid connection profile: {error}") from None
+    hostname = profile["hostname"].lower().rstrip(".")
+    if (any(hostname == suffix or hostname.endswith("." + suffix) for suffix in RESERVED_SUFFIXES)
+            or not ipaddress.ip_address(profile["ipv4"]).is_global):
+        raise PatchError("A release must use the public production profile, not a local or test endpoint")
     pins = [bytes.fromhex(profile[name]) for name in ("current_spki_sha256", "next_spki_sha256")]
     return f"{profile['hostname']}:{profile['port']}".encode(), pins
+
+
+def forbidden_secrets(paths):
+    """Return (label, bytes) for each private key file: its bytes, DER body and 32-byte scalars."""
+    found = []
+    for path in paths:
+        data = read_private(path, MAX_PROFILE, "Private key")[0]
+        label = Path(path).name
+        found.append((label, data))
+        lines = data.decode("ascii", "replace").splitlines()
+        body = "".join(line.strip() for line in lines if line.strip() and not line.startswith("-----"))
+        if body:
+            found.append((label, body.encode()))
+            try:
+                der = base64.b64decode(body, validate=True)
+            except ValueError:
+                raise PatchError(f"{label} is not a PEM private key") from None
+            found.append((label, der))
+            position = der.find(b"\x04\x20")
+            while position >= 0 and position + 34 <= len(der):
+                found.append((label, der[position + 2:position + 34]))
+                position = der.find(b"\x04\x20", position + 1)
+    return [(label, value) for label, value in found if len(value) >= 16]
+
+
+def release_check(variant, bases, target, patch, report, secrets, root):
+    """Fail if a patch or its target carries anything beyond the project's own build output."""
+    problems = []
+    for label, value in secrets:
+        if value in target or value in patch:
+            problems.append(f"material from private key {label}")
+    for marker in sorted({str(root), str(Path.home()), "/home/", "/Users/", "C:\\Users\\", "-----BEGIN", "PRIVATE KEY"}):
+        encoded = marker.encode()
+        if target.count(encoded) > max(base.count(encoded) for base in bases):
+            problems.append(f"build-host or key text {marker!r}")
+    for item in report["literals"]["items"]:
+        if item["length"] < VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
+            continue
+        literal = patch[item["patch_offset"]:item["patch_offset"] + item["length"]]
+        windows = (literal[k:k + VERBATIM_WINDOW] for k in range(0, len(literal) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE))
+        if any(window in base for window in windows for base in bases):
+            problems.append(f"retail ROM content copied into a literal at target offset {item['target_offset']:#x}")
+            break
+    if problems:
+        raise PatchError(f"Release check failed for {variant['id']}: " + "; ".join(problems))
 
 
 def _new_output(path, root=None):
@@ -439,7 +487,7 @@ def _check_target(variant, base, target, authority, pins):
 
 
 def _generate(stage, flips, variant, base, target):
-    """Create the patch twice, require identical bytes, walk it and round-trip it to the target."""
+    """Create the patch twice, require identical bytes, walk it and round-trip it with both appliers."""
     prefix = variant["id"]
     stage.write(f"{prefix}.source", base)
     stage.write(f"{prefix}.target", target)
@@ -454,12 +502,18 @@ def _generate(stage, flips, variant, base, target):
     flips.apply(stage, f"{prefix}.a.bps", f"{prefix}.source", f"{prefix}.roundtrip")
     if stage.read(f"{prefix}.roundtrip", bps.MAX_FILE) != target:
         raise PatchError(f"Round trip for {prefix} did not reproduce the target")
+    try:
+        portable = bps.apply(base, patches[0])
+    except bps.BPSError as error:
+        raise PatchError(f"Portable applier rejected the patch for {prefix}: {error}") from None
+    if portable != target:
+        raise PatchError(f"Portable applier did not reproduce the target for {prefix}")
     stage.remove(*(f"{prefix}.{suffix}" for suffix in ("source", "target", "a.bps", "b.bps", "roundtrip")))
     return patches[0], report
 
 
-def create(pairs, profile_path, output, version, flips, source, catalog=None, root=ROOT):
-    """Generate one private bundle and publish its directory atomically without replacement."""
+def create(pairs, profile_path, output, version, flips, source, catalog=None, root=ROOT, secret_paths=None):
+    """Generate one checked release bundle and publish its directory atomically without replacement."""
     if not VERSION.fullmatch(version):
         raise PatchError("Version must be 1-64 characters of [0-9A-Za-z.+-]")
     if source.get("dirty") is not False or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", "")):
@@ -467,115 +521,113 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
     catalog = catalog or json.loads((root / "patches/compatibility.json").read_text())
     profile_bytes = read_private(profile_path, MAX_PROFILE, "Connection profile")[0]
     authority, pins = _profile_binding(profile_bytes)
+    if secret_paths is None:
+        secret_paths = sorted(Path(profile_path).resolve().parent.glob("*.key"))
+    secrets_found = forbidden_secrets(secret_paths)
     parent, name = _new_output(output, root)
+    inputs = []
+    for base_path, target_path in pairs:
+        base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
+        variant = _match(catalog, base)
+        if any(item[0]["id"] == variant["id"] for item in inputs):
+            raise PatchError(f"{variant['id']} was supplied more than once")
+        target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
+        _check_target(variant, base, target, authority, pins)
+        inputs.append((variant, base, target))
+    bases = [base for _, base, _ in inputs]
     entries, files = [], {}
     with Stage(parent, f"{name}.partial") as stage:
-        for base_path, target_path in pairs:
-            base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
-            variant = _match(catalog, base)
-            if any(entry["variant"] == variant["id"] for entry in entries):
-                raise PatchError(f"{variant['id']} was supplied more than once")
-            target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
-            _check_target(variant, base, target, authority, pins)
+        for variant, base, target in inputs:
             patch, report = _generate(stage, flips, variant, base, target)
+            release_check(variant, bases, target, patch, report, secrets_found, root)
             literals = literal_bytes(patch, report)
             prefix, filename = variant["id"], variant["planned_patch"]
+            cartridge = bundle.cartridge(base)
             files[filename] = (patch, 0o644)
             files[f"audit/{prefix}.json"] = (to_json(report), 0o600)
             files[f"audit/{prefix}.literals.bin"] = (literals, 0o600)
             entries.append({
                 "variant": prefix, "name": variant["name"],
+                "game_code": cartridge["game_code"], "revision": cartridge["revision"], "language": cartridge["language"],
                 "input": {"size": len(base), "sha256": variant["sha256"], "crc32": report["source"]["crc32"]},
                 "patch": {"file": filename, "size": len(patch), "sha256": report["patch"]["sha256"], "crc32": report["patch"]["crc32"]},
                 "output": {"size": len(target), "sha256": sha256(target), "crc32": report["target"]["crc32"]},
                 "actions": report["actions"],
                 "literals": {"count": report["literals"]["count"], "bytes": report["literals"]["bytes"],
-                             "sha256": sha256(literals), "inventory": f"audit/{prefix}.json"},
+                             "sha256": sha256(literals)},
             })
         entries.sort(key=lambda entry: entry["variant"])
         manifest = {
-            "schema_version": 1, "kind": "dswt-private-bps-bundle", "version": version,
+            "schema_version": bundle.SCHEMA_VERSION, "kind": bundle.KIND, "version": version,
             "source": {"commit": source["commit"], "dirty": False},
             "upstream": {"repository": source["upstream_repository"], "revision": source["upstream_revision"]},
             "connection_profile_sha256": sha256(profile_bytes),
             "tool": tool_summary(flips.record),
-            "supported_subset": [entry["variant"] for entry in entries],
-            "publication_permitted": False, "distribution_blocked": True, "distribution_blockers": BLOCKERS,
+            "release_checks": {
+                "private_keys_checked": len(secret_paths),
+                "verbatim_retail_run_limit": VERBATIM_WINDOW + VERBATIM_STRIDE - 1,
+                "build_host_paths": "absent", "public_profile": True,
+                "appliers": ["flips", "bps.py"],
+            },
             "entries": entries,
         }
         files["manifest.json"] = (to_json(manifest), 0o644)
+        bundle.load_manifest(files["manifest.json"][0])
         stage.write_tree("bundle", files)
         stage.publish("bundle", name)
     return manifest
 
 
-def _require(condition, message):
-    if not condition:
-        raise PatchError(f"Malformed manifest: {message}")
-
-
 def load_manifest(data):
     try:
-        manifest = json.loads(data)
-    except ValueError:
-        raise PatchError("Malformed manifest: not JSON") from None
-    _require(isinstance(manifest, dict) and manifest.get("schema_version") == 1
-             and manifest.get("kind") == "dswt-private-bps-bundle", "unsupported schema")
-    _require(manifest.get("publication_permitted") is False and manifest.get("distribution_blocked") is True,
-             "a private bundle must be blocked from publication and distribution")
-    entries = manifest.get("entries")
-    _require(isinstance(entries, list) and entries, "no entries")
-    seen = {"variant": set(), "file": set(), "input": set()}
-    for entry in entries:
-        _require(isinstance(entry, dict) and isinstance(entry.get("variant"), str), "entry without variant")
-        for part, limit in (("input", bps.MAX_FILE), ("patch", bps.MAX_PATCH), ("output", bps.MAX_FILE)):
-            value = entry.get(part)
-            _require(isinstance(value, dict) and type(value.get("size")) is int and 0 < value["size"] <= limit
-                     and isinstance(value.get("sha256"), str) and SHA256.fullmatch(value["sha256"])
-                     and isinstance(value.get("crc32"), str) and CRC32.fullmatch(value["crc32"]), f"invalid {part}")
-        filename = entry["patch"].get("file")
-        _require(isinstance(filename, str) and PATCH_NAME.fullmatch(filename), "unsafe patch filename")
-        for key, value in (("variant", entry["variant"]), ("file", filename),
-                           ("input", (entry["input"]["size"], entry["input"]["sha256"]))):
-            _require(value not in seen[key], f"duplicate {key}")
-            seen[key].add(value)
-    return manifest
+        return bundle.load_manifest(data)
+    except bundle.BundleError as error:
+        raise PatchError(str(error)) from None
 
 
-def apply(manifest_path, input_path, output_path, flips):
-    """Patch one verified input to a new output, published atomically without replacement."""
+def apply(manifest_path, input_path, output_path):
+    """Patch one verified input to a new output with the portable applier."""
     manifest_path = Path(manifest_path)
-    manifest_bytes, manifest_info = read_private(manifest_path, MAX_MANIFEST, "Manifest")
-    manifest = load_manifest(manifest_bytes)
-    source, source_info = read_private(input_path, bps.MAX_FILE, "Input ROM")
-    digest = sha256(source)
-    matches = [e for e in manifest["entries"] if e["input"]["size"] == len(source) and e["input"]["sha256"] == digest]
-    if len(matches) != 1:
-        raise PatchError(f"Input is not a supported unmodified base: size={len(source)}, SHA-256={digest}")
-    entry = matches[0]
-    patch, patch_info = read_private(manifest_path.parent / entry["patch"]["file"], bps.MAX_PATCH, "Patch")
-    identities = {(info.st_dev, info.st_ino) for info in (manifest_info, source_info, patch_info)}
-    if len(identities) != 3:
-        raise PatchError("Manifest, patch and input must be distinct files")
-    if len(patch) != entry["patch"]["size"] or sha256(patch) != entry["patch"]["sha256"]:
-        raise PatchError("Patch does not match the manifest")
-    if crc32_hex(source) != entry["input"]["crc32"]:
-        raise PatchError("Input CRC32 does not match the manifest")
-    report = walk(patch, "Patch")
-    _verify_report(report, source, entry["output"]["size"], entry["output"]["crc32"])
-    parent, name = _new_output(output_path)
-    with Stage(parent, f"{name}.partial") as stage:
-        stage.write("source.bin", source)
-        stage.write("patch.bps", patch)
-        flips.apply(stage, "patch.bps", "source.bin", "target.bin")
-        stage.check()
-        target = stage.read("target.bin", bps.MAX_FILE)
-        if (len(target) != entry["output"]["size"] or crc32_hex(target) != entry["output"]["crc32"]
-                or sha256(target) != entry["output"]["sha256"]):
-            raise PatchError("Patched output failed verification; nothing was published")
-        stage.write("output.nds", target, 0o644)
-        stage.publish("output.nds", name)
+    if manifest_path.name != "manifest.json":
+        raise PatchError("Pass the bundle's manifest.json")
+    try:
+        entry, _ = bundle.patch_file(manifest_path.parent, input_path, output_path)
+    except bundle.BundleError as error:
+        raise PatchError(str(error)) from None
     return entry
+
+
+def _zip_entry(name, data):
+    info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o644 << 16
+    return info, data
+
+
+def package(bundle_dir, output, root=ROOT):
+    """Write the reproducible player archive: manifest, patches and release documents, never audit data."""
+    bundle_dir = Path(bundle_dir)
+    manifest_bytes = read_private(bundle_dir / "manifest.json", MAX_MANIFEST, "Manifest")[0]
+    manifest = load_manifest(manifest_bytes)
+    prefix = f"dswt-{manifest['version']}/"
+    members = {"manifest.json": manifest_bytes}
+    for entry in manifest["entries"]:
+        patch = read_private(bundle_dir / entry["patch"]["file"], bps.MAX_PATCH, entry["patch"]["file"])[0]
+        if len(patch) != entry["patch"]["size"] or sha256(patch) != entry["patch"]["sha256"]:
+            raise PatchError(f"{entry['patch']['file']} does not match the manifest")
+        walk(patch, entry["patch"]["file"])
+        members[entry["patch"]["file"]] = patch
+    for name, relative in RELEASE_DOCUMENTS.items():
+        members[name] = (root / relative).read_bytes()
+    parent, name = _new_output(output, root)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for member in sorted(members):
+            archive.writestr(*_zip_entry(prefix + member, members[member]))
+    with Stage(parent, f"{name}.partial") as stage:
+        stage.write("archive.zip", buffer.getvalue(), 0o644)
+        stage.publish("archive.zip", name)
+    return {"archive": str(parent / name), "sha256": sha256(buffer.getvalue()), "size": len(buffer.getvalue())}
 
 
 def audit(patch_path, evidence=None, root=ROOT):
@@ -612,11 +664,16 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare", help="build and verify the pinned Flips CLI in game/tools")
     prepare_parser.add_argument("--archive", type=Path, help="local copy of the exact pinned source archive")
-    create_parser = commands.add_parser("create", help="generate a private bundle under game/")
+    create_parser = commands.add_parser("create", help="generate a checked release bundle under game/")
     create_parser.add_argument("--pair", nargs=2, action="append", required=True, metavar=("BASE", "TARGET"), type=Path)
     create_parser.add_argument("--profile", required=True, type=Path)
     create_parser.add_argument("--output", required=True, type=Path)
     create_parser.add_argument("--version", required=True)
+    create_parser.add_argument("--forbid-key", action="append", type=Path, dest="keys",
+                               help="private key that must not appear (default: every *.key beside the profile)")
+    package_parser = commands.add_parser("package", help="write the player archive for a bundle under game/")
+    package_parser.add_argument("bundle", type=Path)
+    package_parser.add_argument("--output", required=True, type=Path)
     apply_parser = commands.add_parser("apply", help="patch a verified base to a new file")
     apply_parser.add_argument("--manifest", required=True, type=Path)
     apply_parser.add_argument("--input", required=True, type=Path)
@@ -632,15 +689,18 @@ def main(argv=None):
         elif args.command == "audit":
             result = audit(args.patch, args.evidence)
         elif args.command == "create":
-            manifest = create(args.pair, args.profile, args.output, args.version, Flips(installed_flips()), source_state())
+            manifest = create(args.pair, args.profile, args.output, args.version, Flips(installed_flips()),
+                              source_state(), secret_paths=args.keys)
             result = {"output": str(args.output), "entries": manifest["entries"]}
+        elif args.command == "package":
+            result = package(args.bundle, args.output)
         else:
-            entry = apply(args.manifest, args.input, args.output, Flips(installed_flips()))
+            entry = apply(args.manifest, args.input, args.output)
             result = {"variant": entry["variant"], "output": str(args.output), "sha256": entry["output"]["sha256"]}
     except KeyboardInterrupt:
         print("Interrupted; inputs and any existing output were preserved", file=sys.stderr)
         return 130
-    except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError, zipfile.BadZipFile) as error:
         print(f"{args.command} failed: {error}", file=sys.stderr)
         return 1
     print(to_json(result).decode(), end="")

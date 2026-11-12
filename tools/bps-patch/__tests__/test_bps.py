@@ -78,5 +78,24 @@ class WalkTests(unittest.TestCase):
                 bps.walk(data)
 
 
+class ApplyTests(unittest.TestCase):
+    def test_reproduces_reads_copies_and_overlapping_target_copies(self):
+        self.assertEqual(bps.apply(SOURCE, valid()), TARGET)
+        backwards = TARGET[:8] + TARGET[:8]
+        patch = assemble(SOURCE, backwards, [source_read(8), source_copy(8, 0)])
+        self.assertEqual(bps.apply(SOURCE, patch), backwards)
+
+    def test_rejects_other_sources_and_wrong_outputs(self):
+        with self.assertRaisesRegex(bps.BPSError, "not made for this input"):
+            bps.apply(SOURCE[:-1] + b"x", valid())
+        with self.assertRaisesRegex(bps.BPSError, "not made for this input"):
+            bps.apply(SOURCE + b"x", valid())
+        wrong = assemble(SOURCE, b"other target", [target_read(b"different!!!")])
+        with self.assertRaisesRegex(bps.BPSError, "CRC32 mismatch"):
+            bps.apply(SOURCE, wrong)
+        with self.assertRaisesRegex(bps.BPSError, "unwritten"):
+            bps.apply(SOURCE, assemble(SOURCE, TARGET[:4], [target_copy(4, 0)]))
+
+
 if __name__ == "__main__":
     unittest.main()
