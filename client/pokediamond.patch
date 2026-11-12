@@ -77,10 +77,99 @@ diff --git a/arm9/arm9.lsf b/arm9/arm9.lsf
 diff --git a/arm9/asm/unk_02035068.s b/arm9/asm/unk_02035068.s
 --- a/arm9/asm/unk_02035068.s
 +++ b/arm9/asm/unk_02035068.s
-@@ -4,0 +5 @@
+@@ -4,0 +5,5 @@
++	.extern WonderTrade_StartMenuHidden
++	.extern WonderTrade_StartMenuAddWindow
++	.extern WonderTrade_StartMenuScaleCursor
++	.extern WonderTrade_StartMenuSelect
 +	.extern WonderTrade_StartMenuInput
-@@ -1104,0 +1106,8 @@ sub_020358E4: ; 0x020358E4
-+	; Wonder Trade: Select opens it while this menu is open (src/wonder_trade/dp/hooks.c).
+@@ -39,0 +45,2 @@ UNK_020F2AD0: ; 0x020F2AD0
++	; Wonder Trade (entry 9): label 12, src/wonder_trade/dp/hooks.c
++	.word 0x0000000C, WonderTrade_StartMenuSelect
+@@ -43 +50 @@ UNK_020F2B14: ; 0x020F2B14
+-	.byte 0xCC, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00
++	.byte 0xBC, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00
+@@ -50 +57 @@ UNK_020F2B48: ; 0x020F2B48
+-	.byte 0xAE, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++	.byte 0x8E, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+@@ -300 +307 @@ sub_02035254: ; 0x02035254
+-	mov r1, #0x2
++	mov r1, #0x82
+@@ -302 +309 @@ sub_02035254: ; 0x02035254
+-	lsl r1, r1, #0x8
++	lsl r1, r1, #0x2
+@@ -350,3 +357,5 @@ _020352BC:
+-	mov r0, #0x6
+-	lsl r0, r0, #0x6
+-	orr r0, r4
++	mov r1, #0x6
++	lsl r1, r1, #0x6
++	orr r1, r4
++	add r0, r5, #0x0
++	bl WonderTrade_StartMenuHidden
+@@ -357 +366,2 @@ sub_020352C4: ; 0x020352C4
+-	mov r0, #0x90
++	mov r0, #0xa4
++	lsl r0, r0, #0x2
+@@ -362 +372,2 @@ sub_020352C8: ; 0x020352C8
+-	mov r0, #0x94
++	mov r0, #0xa5
++	lsl r0, r0, #0x2
+@@ -370 +381 @@ sub_020352CC: ; 0x020352CC
+-_020352D0: .word 0x00000195
++_020352D0: .word 0x00000395
+@@ -374 +385 @@ sub_020352D4: ; 0x020352D4
+-	mov r0, #0x11
++	mov r0, #0x31
+@@ -384 +395 @@ sub_020352DC: ; 0x020352DC
+-_020352E0: .word 0x00000191
++_020352E0: .word 0x00000391
+@@ -600,16 +611 @@ sub_0203549C: ; 0x0203549C
+-	mov r0, #0x1
+-	str r0, [sp, #0x0]
+-	mov r0, #0xb
+-	str r0, [sp, #0x4]
+-	ldr r0, [sp, #0x14]
+-	mov r2, #0x3
+-	lsl r1, r0, #0x1
+-	add r0, r0, r1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #0x8]
+-	mov r0, #0xc
+-	str r0, [sp, #0xc]
+-	ldr r0, _02035658 ; =0x0000023B
+-	add r1, r4, #0x0
+-	str r0, [sp, #0x10]
++	add r2, r0, #0x0
+@@ -617,3 +613,2 @@ sub_0203549C: ; 0x0203549C
+-	mov r3, #0x14
+-	ldr r0, [r0, #0x8]
+-	bl AddWindowParameterized
++	add r1, r4, #0x0
++	bl WonderTrade_StartMenuAddWindow
+@@ -739 +734,4 @@ _020355BC:
+-	mov r1, #0x8
++	mov r1, #0x81
++	lsl r1, r1, #0x2
++	ldr r1, [r4, r1]
++	sub r1, #0x10
+@@ -792 +789,0 @@ _02035614:
+-_02035658: .word 0x0000023B
+@@ -841,0 +839,11 @@ _020356B8:
++	mov r3, #0x7
++	lsl r3, r3, #0x6
++	ldr r4, [r0, r3]
++	mov r3, #0x80
++	lsl r3, r3, #0x2
++	tst r3, r4
++	bne _020356B8_WonderTradeHidden
++	mov r3, #0x9
++	strb r3, [r1, r2]
++	add r2, r2, #0x1
++_020356B8_WonderTradeHidden:
+@@ -1104,0 +1113,8 @@ sub_020358E4: ; 0x020358E4
++	; Wonder Trade: Select opens it too, a fallback for its entry (src/wonder_trade/dp/hooks.c).
 +	bl WonderTrade_StartMenuInput
 +	cmp r0, #0x0
 +	beq _020358E4_WonderTradeNotSelected
@@ -88,6 +177,80 @@ diff --git a/arm9/asm/unk_02035068.s b/arm9/asm/unk_02035068.s
 +	pop {r3-r7, pc}
 +_020358E4_WonderTradeNotSelected:
 +	add r0, r7, #0x0
+@@ -1126,0 +1143,3 @@ sub_020358E4: ; 0x020358E4
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r2, [r5, r2]
+@@ -1226 +1245 @@ sub_020359B8: ; 0x020359B8
+-	mov r2, #0x8
++	mov r2, #0x9
+@@ -1276,2 +1295,9 @@ sub_020359B8: ; 0x020359B8
+-	ldr r0, [r0, r2]
+-	ldrh r1, [r1, #0x28]
++	bl WonderTrade_StartMenuScaleCursor
++	ldr r3, [sp, #0xc]
++	mov r0, #0x67
++	lsl r0, r0, #0x2
++	ldr r0, [r3, r0]
++	ldrh r1, [r3, #0x28]
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r2, [r3, r2]
+@@ -1305,0 +1332,10 @@ sub_020359B8: ; 0x020359B8
++	mov r0, #0x1
++	str r0, [sp, #0x0]
++	ldr r0, _02035B6C_WonderTradeIcon ; =0x000034DA
++	mov r1, #0x42
++	str r0, [sp, #0x4]
++	ldr r0, [sp, #0xc]
++	mov r2, #0xb
++	add r0, #0x38
++	mov r3, #0x0
++	bl ov05_021D971C
+@@ -1345,0 +1382,8 @@ _02035AC0:
++	cmp r2, #0x9
++	bne _02035AE0_NotWonderTrade
++	mov r0, #0x0
++	strh r0, [r1, #0x6]
++	ldr r0, _02035B6C_WonderTradeIcon ; =0x000034DA
++	str r0, [r1, #0x14]
++	b _02035AF2
++_02035AE0_NotWonderTrade:
+@@ -1383 +1427,5 @@ _02035AF2:
+-	add r7, #0x18
++	ldr r1, [sp, #0xc]
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r1, [r1, r2]
++	add r7, r7, r1
+@@ -1402 +1450 @@ _02035B2C:
+-	mov r1, #0x6f
++	mov r1, #0x80
+@@ -1416,0 +1465 @@ _02035B6C: .word 0x000034D9
++_02035B6C_WonderTradeIcon: .word 0x000034DA
+@@ -1424 +1473 @@ sub_02035B78: ; 0x02035B78
+-	mov r0, #0x6f
++	mov r0, #0x80
+@@ -1433 +1482 @@ sub_02035B78: ; 0x02035B78
+-	add r6, #0x20
++	add r6, #0x64
+@@ -1455 +1504 @@ sub_02035BB0: ; 0x02035BB0
+-	mov r0, #0x6f
++	mov r0, #0x80
+@@ -1464 +1513 @@ sub_02035BB0: ; 0x02035BB0
+-	add r6, #0x20
++	add r6, #0x64
+@@ -1485 +1534 @@ sub_02035BE8: ; 0x02035BE8
+-	push {r3-r6, lr}
++	push {r3-r7, lr}
+@@ -1488,0 +1538 @@ sub_02035BE8: ; 0x02035BE8
++	add r7, r2, #0x0
+@@ -1498 +1548 @@ sub_02035BE8: ; 0x02035BE8
+-	mov r0, #0x18
++	add r0, r7, #0x0
+@@ -1506 +1556 @@ sub_02035BE8: ; 0x02035BE8
+-	pop {r3-r6, pc}
++	pop {r3-r7, pc}
 diff --git a/arm9/overlays/52/src/overlay_52.c b/arm9/overlays/52/src/overlay_52.c
 --- a/arm9/overlays/52/src/overlay_52.c
 +++ b/arm9/overlays/52/src/overlay_52.c
@@ -191,13 +354,32 @@ diff --git a/files/msgdata/msg.mk b/files/msgdata/msg.mk
 +++ b/files/msgdata/msg.mk
 @@ -647,0 +648 @@ files/msgdata/msg/narc_0623.bin: MSGENCFLAGS = -k 0x5938
 +files/msgdata/msg/narc_0624.bin: MSGENCFLAGS = -k 0x5754
+diff --git a/files/msgdata/msg/narc_0323.gmm b/files/msgdata/msg/narc_0323.gmm
+--- a/files/msgdata/msg/narc_0323.gmm
++++ b/files/msgdata/msg/narc_0323.gmm
+@@ -50,0 +51,4 @@
++	<row id="narc_0323_00012" index="12">
++		<attribute name="window_context_name">used</attribute>
++		<language name="English">WONDER TRADE</language>
++	</row>
 diff --git a/filesystem.mk b/filesystem.mk
 --- a/filesystem.mk
 +++ b/filesystem.mk
-@@ -6075 +6075,2 @@ files/msgdata/msg.narc: \
+@@ -819,0 +820,3 @@ files/wazaeffect/effectclact/wecellanm.narc: \
++files/graphic/menu_gra.narc: \
++        files/graphic/menu_gra/narc_0011.NCGR
++
+@@ -6075 +6078,2 @@ files/msgdata/msg.narc: \
 -        files/msgdata/msg/narc_0623.bin
 +        files/msgdata/msg/narc_0623.bin \
 +        files/msgdata/msg/narc_0624.bin
+diff --git a/graphics_rules.mk b/graphics_rules.mk
+--- a/graphics_rules.mk
++++ b/graphics_rules.mk
+@@ -5 +5,2 @@ CLOBBER_SIZE_NCGR_FILES := files/data/cell0.NCGR
+-CLOBBER_SIZE_VERSION101_NCGR_FILES := files/graphic/bag_gra/narc_0002.NCGR \
++CLOBBER_SIZE_VERSION101_NCGR_FILES := files/graphic/menu_gra/narc_0011.NCGR \
++                                      files/graphic/bag_gra/narc_0002.NCGR \
 diff --git a/include/constants/heap.h b/include/constants/heap.h
 --- a/include/constants/heap.h
 +++ b/include/constants/heap.h
@@ -206,8 +388,19 @@ diff --git a/include/constants/heap.h b/include/constants/heap.h
 diff --git a/include/start_menu.h b/include/start_menu.h
 --- a/include/start_menu.h
 +++ b/include/start_menu.h
-@@ -34 +34,3 @@ typedef struct StartMenuTaskData {
+@@ -3,0 +4 @@
++#include "bg_window.h"
+@@ -32 +33,2 @@ typedef struct StartMenuTaskData {
+-    u8 filler0[0x2A];
++    Window window;
++    u8 filler10[0x1A];
+@@ -34 +36,4 @@ typedef struct StartMenuTaskData {
 -    u8 filler1[0x19C];
-+    u8 filler1[0x194];
-+    u32 hiddenEntries; // one bit per menu entry, set by sub_02035080
++    u8 filler1[0x170];
++    void **sprites[9]; // the cursor, then each entry's icon; each points to its sprite
++    u32 hiddenEntries; // one bit per entry, set by sub_02035080
 +    u8 filler1C4[0x4];
+@@ -39 +44,2 @@ typedef struct StartMenuTaskData {
+-    u8 filler3[0x4];
++    u32 spriteCount; // moved from 0x1BC, which now holds the eighth icon
++    u32 rowSpacing; // pixels from one entry to the next

@@ -57,10 +57,16 @@ into the static ARM9 binary. The Wi-Fi Connection library exists only as
 assembly in overlay 4, so `include/wonder_trade/dp/sdk/` maps the few calls the
 core makes to its labels; each mapping was read from that assembly.
 
-The start menu is undecompiled assembly (`arm9/asm/unk_02035068.s`). Rather
-than add an entry to it, the patch inserts one call at the top of its input
-handler: pressing Select while the menu is open starts Wonder Trade, the same
-way the menu's Options entry launches its screen, wherever saving is allowed.
+The start menu is undecompiled assembly (`arm9/asm/unk_02035068.s`). The
+patch adds Wonder Trade to it as entry 9, after Pokémon, as in Platinum: its
+label is row 12 of the menu's text bank, its action launches the screen the
+way Options does, and it shows only where Platinum's does. Eight entries need
+Platinum's layout, a wider window with rows 20 pixels apart, so the menu's task
+data grows by its sprite count and row spacing. The icon is a project drawing,
+`files-dp/graphic/menu_gra/narc_0011.png`, built into a new member of the menu
+graphics archive and animated with the first icon's cell and animations.
+Pressing Select while the menu is open still starts Wonder Trade as a
+fallback, refused wherever the entry is hidden.
 
 Upstream notices stay in the local workspace. Its source, SDKs, toolchain and
 ROM output are excluded from this repository and require their own rights review.

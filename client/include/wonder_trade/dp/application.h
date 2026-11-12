@@ -7,9 +7,13 @@
 extern const struct OverlayManagerTemplate gWonderTradeAppTemplate;
 extern const struct OverlayManagerTemplate gWonderTradeBootAppTemplate;
 
-/* Called first by the start menu's input handler (sub_020358E4 in
- * asm/unk_02035068.s). Nonzero when Select opened Wonder Trade; the handler
- * then returns at once, as it does after any menu action. */
+/* The start menu's Wonder Trade entry (asm/unk_02035068.s, src/wonder_trade/dp/hooks.c). */
+struct FieldSystem;
+struct StartMenuTaskData;
+BOOL WonderTrade_StartMenuSelect(struct TaskManager *taskManager);
 BOOL WonderTrade_StartMenuInput(struct TaskManager *taskManager);
+u32 WonderTrade_StartMenuHidden(struct FieldSystem *fieldSystem, u32 hidden);
+void WonderTrade_StartMenuAddWindow(struct FieldSystem *fieldSystem, struct StartMenuTaskData *startMenu, u32 count);
+void WonderTrade_StartMenuScaleCursor(struct StartMenuTaskData *startMenu);
 
 #endif
