@@ -30,7 +30,8 @@ TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 Enroll's build u32 names the save's game variant as
 `family << 24 | version << 16 | language << 8 | revision`, using the games' own
 version and language IDs and the ROM header revision byte. `code >> 24` is the trade family, except legacy
-code 1, which released clients send for US English Platinum (any revision).
+code 1, which US English Platinum clients send (any revision). European English
+Platinum builds send `0x020C020A`.
 
 | Field | Values |
 | --- | --- |
