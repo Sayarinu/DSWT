@@ -27,20 +27,34 @@ def seed_record(seed, generation):
     return bytes(record)
 
 
+LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json")
+TARGETS = ("us-rev0", "us-rev1", "heartgold-us-rev0", "soulsilver-us-rev0")
+
+
+def layout_for(target):
+    """The verified save layout of a ROM target; unknown targets have none."""
+    for path in LAYOUTS:
+        layout = json.loads((ROOT / path).read_text())
+        if target in layout["verified_targets"]:
+            return layout
+    raise ValueError("Only a verified target's save layout is supported")
+
+
 def provision(data, target):
-    layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
-    if target not in layout["verified_targets"] or len(data) != layout["flash_size"]:
+    layout = layout_for(target)
+    if len(data) != layout["flash_size"]:
         raise ValueError("Only a full 512 KiB save for a verified US target is supported")
+    footer_format = layout["block_footer"]
+    fields, footer_size = footer_format["fields"], footer_format["size"]
     # Both retail blocks need at least one valid fallback. Do not rewrite either.
     for block_id, region in enumerate(layout["retail_regions_per_half"][:2]):
         valid = False
         for half in (0, layout["half_size"]):
             offset, size = half + region["offset"], region["size"]
-            body = data[offset:offset + size - 20]
-            footer = data[offset + size - 20:offset + size]
-            _, _, length, signature, stored_id, crc = struct.unpack("<IIIIBxH", footer)
-            valid |= (length == size and signature == 0x20060623 and stored_id == block_id
-                      and binascii.crc_hqx(body, 0xffff) == crc)
+            body = data[offset:offset + size - footer_size]
+            footer = dict(zip(fields, struct.unpack(footer_format["format"], data[offset + size - footer_size:offset + size])))
+            valid |= (footer["size"] == size and footer["magic"] == 0x20060623 and footer["block"] == block_id
+                      and binascii.crc_hqx(body, 0xffff) == footer["crc"])
         if not valid:
             raise ValueError("Retail save block has no valid copy; preserve it for recovery")
     for bank in layout["journal_banks"]:
@@ -78,7 +92,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
-    parser.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True,
+    parser.add_argument("--target", choices=TARGETS, required=True,
                         help="verified ROM target reported by identify-rom.py")
     args = parser.parse_args()
     try:

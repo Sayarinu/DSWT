@@ -218,6 +218,16 @@ overlap retail content there. Reject smaller flash, unknown layouts, foreign
 journal magic and unsupported versions without writing. Europe needs its own
 layout validation before it can join this list.
 
+[`save-layout-hgss.json`](save-layout-hgss.json) records US HeartGold and
+SoulSilver from the pinned pokeheartgold source, confirmed against the size
+functions linked into both pristine (retail-identical) ARM9 binaries. Each half
+holds general data at 0..0xF628 and boxes at 0xF700..0x21A10, each with a 16-byte
+footer (counter, size, magic, block u16, CRC u16), then the Hall of Fame at
+0x23000, Battle Frontier data at 0x26000 and four recordings at
+0x27000/29000/2B000/2D000, ending at 0x2ED60; the second half mirrors them at
++0x40000. The same 0x30000 and 0x70000 sectors are unused, so HeartGold and
+SoulSilver use the same journal banks and record format.
+
 Each bank begins with one explicitly serialized 4096-byte record. Header:
 `DSWJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,
 generation u64, reserved-zero 8 bytes. Remaining section offsets are in the JSON:
