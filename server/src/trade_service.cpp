@@ -5,6 +5,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
+#include "wire_layout.h"
 #include "dswt/server/telemetry.h"
 
 #include <algorithm>
@@ -19,7 +20,9 @@ using detail::Database;
 using detail::HexBytes;
 using detail::UnhexBytes;
 using detail::Unsigned;
-constexpr auto kMaximum = std::numeric_limits<std::uint64_t>::max();
+constexpr auto kMaximumSequenceValue = std::numeric_limits<std::uint64_t>::max();
+
+constexpr int kAllocationAttempts = 8;
 
 struct BudgetUnavailable : std::exception {};
 
@@ -48,7 +51,7 @@ grpc::Status Guard(grpc::ServerContext *context, Reply &reply, detail::ServiceAd
 }
 
 bool AuthShape(const v1::Credentials &auth) {
-  return detail::NonzeroBytes(auth.save_id(), 16) && detail::NonzeroBytes(auth.credential(), 32);
+  return detail::NonzeroBytes(auth.save_id(), wire::kIdSize) && detail::NonzeroBytes(auth.credential(), wire::kCredentialSize);
 }
 
 template <typename Reply>
@@ -132,11 +135,11 @@ public:
       Publish(reply, code);
       return false;
     }
-    if (context.counter() == 0 || context.counter() == kMaximum || context.counter() != next) {
+    if (context.counter() == 0 || context.counter() == kMaximumSequenceValue || context.counter() != next) {
       Publish(reply, v1::RESULT_COUNTER_MISMATCH);
       return false;
     }
-    if (highwater == kMaximum) {
+    if (highwater == kMaximumSequenceValue) {
       Publish(reply, v1::RESULT_CAPACITY);
       return false;
     }
@@ -199,7 +202,7 @@ public:
 };
 
 bool MutationShape(const v1::MutationContext &context) {
-  return AuthShape(context.auth()) && detail::NonzeroBytes(context.operation_id(), 16);
+  return AuthShape(context.auth()) && detail::NonzeroBytes(context.operation_id(), wire::kIdSize);
 }
 
 template <typename Reply>
@@ -223,7 +226,7 @@ bool RetryAllocation(const detail::DatabaseError &error) {
 
 template <typename Work>
 void Allocate(Work work) {
-  for (int attempt = 0; attempt < 8; ++attempt) {
+  for (int attempt = 0; attempt < kAllocationAttempts; ++attempt) {
     try { work(); return; }
     catch (const detail::DatabaseError &error) { if (!RetryAllocation(error)) throw; }
   }
@@ -245,7 +248,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
     if (!MutationShape(request->context())) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     if (request->escrow_generation() == 0 || !detail::CanonicalShape(request->pokemon().pk4()) ||
-        request->pokemon().sha256().size() != 32 ||
+        request->pokemon().sha256().size() != wire::kDigestSize ||
         detail::HashBytes(request->pokemon().pk4()) != request->pokemon().sha256()) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
@@ -253,7 +256,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     detail::AppendUnsigned(body, request->escrow_generation(), 8);
     body += request->pokemon().pk4();
     body += request->pokemon().sha256();
-    const auto hash = detail::MutationHash(2, request->context(), body);
+    const auto hash = detail::MutationHash(wire::kSubmit, request->context(), body);
     {
       Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
@@ -261,7 +264,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       session.transaction.Commit();
     }
     // Never hold an identity/database lock while waiting on the validator.
-    std::array<unsigned char, 136> data{};
+    std::array<unsigned char, wire::kPk4Size> data{};
     std::copy(request->pokemon().pk4().begin(), request->pokemon().pk4().end(), data.begin());
     const auto legality = validator_ ? validator_(data) : LegalityDecision{};
     Allocate([&] {
@@ -270,7 +273,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       if (legality.verdict == LegalityVerdict::Unavailable) { session.Publish(*reply, v1::RESULT_UNAVAILABLE); return; }
       if (legality.verdict == LegalityVerdict::Illegal) {
-        Rejected(session, request->context(), 2, hash, v1::RESULT_ILLEGAL_POKEMON, *reply, {}, request->pokemon().sha256());
+        Rejected(session, request->context(), wire::kSubmit, hash, v1::RESULT_ILLEGAL_POKEMON, *reply, {}, request->pokemon().sha256());
         return;
       }
       const auto asset = detail::RandomIdentifier(), trade = detail::RandomIdentifier();
@@ -283,7 +286,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       session.database.Parameters("INSERT INTO dswt.ownership VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(asset), HexBytes(session.auth.save_id()), HexBytes(trade), sequence});
       const auto snapshot = session.Snapshot(trade);
-      session.Record(request->context(), 2, hash, v1::RESULT_OK, v1::EVENT_SUBMITTED, snapshot);
+      session.Record(request->context(), wire::kSubmit, hash, v1::RESULT_OK, v1::EVENT_SUBMITTED, snapshot);
       trace.Trade(trade);
       reply->set_operation_event(session.highwater + 1);
       *reply->mutable_outcome() = snapshot;
@@ -297,7 +300,7 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
   RpcTelemetry trace(Operation::Status, context, [reply] { return reply->context().result(); }, {}, request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
-    if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), 16)) {
+    if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), wire::kIdSize)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
@@ -314,16 +317,16 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
   RpcTelemetry trace(Operation::Cancel, context, [reply] { return reply->context().result(); }, request->context().operation_id(), request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
-    if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16)) {
+    if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), wire::kIdSize)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
-    const auto hash = detail::MutationHash(4, request->context(), request->trade_id());
+    const auto hash = detail::MutationHash(wire::kCancel, request->context(), request->trade_id());
     Allocate([&] {
       Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       auto snapshot = session.Snapshot(request->trade_id());
       if (snapshot.state() != v1::TRADE_QUEUED) {
-        Rejected(session, request->context(), 4, hash, snapshot.state() == v1::TRADE_NONE ?
+        Rejected(session, request->context(), wire::kCancel, hash, snapshot.state() == v1::TRADE_NONE ?
             v1::RESULT_NOT_FOUND : v1::RESULT_CONFLICT, *reply, snapshot); return;
       }
       const auto receipt = detail::RandomIdentifier();
@@ -338,7 +341,7 @@ grpc::Status TradeService::Cancel(grpc::ServerContext *context, const v1::Cancel
           "WHERE asset_id=$1::uuid AND save_id=$2::uuid AND trade_id=$3::uuid",
           {HexBytes(snapshot.offered_asset_id()), HexBytes(session.auth.save_id()), HexBytes(request->trade_id()), sequence});
       snapshot = session.Snapshot(request->trade_id());
-      session.Record(request->context(), 4, hash, v1::RESULT_OK, v1::EVENT_CANCELLED, snapshot);
+      session.Record(request->context(), wire::kCancel, hash, v1::RESULT_OK, v1::EVENT_CANCELLED, snapshot);
       reply->set_operation_event(session.highwater + 1);
       *reply->mutable_outcome() = snapshot;
       session.Publish(*reply, v1::RESULT_OK);
@@ -351,7 +354,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
   RpcTelemetry trace(Operation::Collect, context, [reply] { return reply->context().result(); }, {}, request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
-    if (!detail::NonzeroBytes(request->trade_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
+    if (!detail::NonzeroBytes(request->trade_id(), wire::kIdSize)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     const auto snapshot = session.Snapshot(request->trade_id());
@@ -374,20 +377,20 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
   RpcTelemetry trace(Operation::Acknowledge, context, [reply] { return reply->context().result(); }, request->context().operation_id(), request->trade_id());
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->context().auth(), *reply)) return;
-    if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), 16) ||
-        !detail::NonzeroBytes(request->receipt_id(), 16) || request->delivered_sha256().size() != 32 ||
-        request->applied_sha256().size() != 32 || request->applied_generation() == 0) {
+    if (!MutationShape(request->context()) || !detail::NonzeroBytes(request->trade_id(), wire::kIdSize) ||
+        !detail::NonzeroBytes(request->receipt_id(), wire::kIdSize) || request->delivered_sha256().size() != wire::kDigestSize ||
+        request->applied_sha256().size() != wire::kDigestSize || request->applied_generation() == 0) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
     std::string body = request->trade_id() + request->receipt_id() + request->delivered_sha256() + request->applied_sha256();
     detail::AppendUnsigned(body, request->applied_generation(), 8);
-    const auto hash = detail::MutationHash(6, request->context(), body);
+    const auto hash = detail::MutationHash(wire::kAcknowledge, request->context(), body);
     Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
     if (!session.Begin(request->context(), hash, *reply)) return;
     auto snapshot = session.Snapshot(request->trade_id());
     if ((snapshot.state() != v1::TRADE_MATCHED && snapshot.state() != v1::TRADE_RETURN_READY) ||
         snapshot.receipt_id() != request->receipt_id() || snapshot.received_sha256() != request->delivered_sha256()) {
-      Rejected(session, request->context(), 6, hash, snapshot.state() == v1::TRADE_NONE ?
+      Rejected(session, request->context(), wire::kAcknowledge, hash, snapshot.state() == v1::TRADE_NONE ?
           v1::RESULT_NOT_FOUND : v1::RESULT_CONFLICT, *reply, snapshot); return;
     }
     const auto sequence = std::to_string(session.highwater + 1);
@@ -402,7 +405,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
         "WHERE asset_id=$1::uuid AND save_id=$2::uuid AND trade_id=$3::uuid",
         {HexBytes(snapshot.received_asset_id()), HexBytes(session.auth.save_id()), HexBytes(request->trade_id()), sequence});
     snapshot = session.Snapshot(request->trade_id());
-    session.Record(request->context(), 6, hash, v1::RESULT_OK, v1::EVENT_ACKNOWLEDGED, snapshot);
+    session.Record(request->context(), wire::kAcknowledge, hash, v1::RESULT_OK, v1::EVENT_ACKNOWLEDGED, snapshot);
     reply->set_operation_event(session.highwater + 1);
     *reply->mutable_outcome() = snapshot;
     session.Publish(*reply, v1::RESULT_OK);
