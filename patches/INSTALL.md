@@ -6,8 +6,9 @@ Pokémon with a random player through this project's server. No ROM is included.
 ## What you need
 
 - A decrypted dump of your own US English Pokémon Platinum cartridge, Rev 0 or
-  Rev 1. Trimmed dumps work. Other versions and languages are recognised but not
-  supported yet, and encrypted dumps are refused.
+  Rev 1. Trimmed dumps work. Other games (Diamond, Pearl, HeartGold, SoulSilver),
+  versions and languages are recognised but not supported yet, and encrypted dumps
+  are refused.
 - melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
 - The DSWT Patcher for your computer from the release page, or the patch archive
   and a BPS patcher such as [Flips](https://github.com/Alcaro/Flips).

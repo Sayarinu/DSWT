@@ -48,7 +48,8 @@ class CommandLineTests(AppFixture):
     def test_explains_refusals_without_writing(self):
         for name, data, message in (("french", rom(0, "fr", code="CPUF"), "France, French, Rev 0) is not supported yet"),
                                     ("patched", TARGETS["us-rev0"], "already has DSWT"),
-                                    ("other", b"x" * 1024, "not a Pokémon Platinum ROM")):
+                                    ("heartgold", rom(0, "hg", code="IPKE"), "Pokémon HeartGold (North America, English, Rev 0) is not"),
+                                    ("other", b"x" * 1024, "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM")):
             with self.subTest(name):
                 source = self.write(f"{name}.nds", data)
                 code, _, err = self.run_app("--input", str(source), "--output", str(self.root / "out.nds"))
