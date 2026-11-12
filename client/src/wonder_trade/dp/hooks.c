@@ -23,10 +23,19 @@
 
 /* asm/unk_02088858.s: load and unload overlay 4, which holds the Wi-Fi
  * Connection libraries, exactly as the GTS (overlay 80) does. SOC, SSL and
- * WCM are in the static binary; the ARM7 binary carries the wireless driver,
- * so nothing else needs starting or stopping. */
+ * WCM are in the static binary. */
 extern void sub_02088858(void);
 extern void sub_02088868(void);
+/* src/unk_0202E29C.c: the game's wireless driver control, which the GTS
+ * (overlay 80) and overlay 83 start before any Wi-Fi call. sub_0202E49C holds
+ * sleep bit 4 and starts the ARM7 wireless driver (WVR_StartUpAsync into VRAM
+ * bank D); sub_0202E4C8 reports it started; sub_0202E4F0 terminates it and
+ * releases the sleep bit; sub_0202E4DC reports it is still running. Without
+ * it, WM_Enable answers WM_ERRCODE_WM_DISABLE. */
+extern void sub_0202E49C(void);
+extern BOOL sub_0202E4C8(void);
+extern BOOL sub_0202E4DC(void);
+extern void sub_0202E4F0(void);
 /* overlays/05/asm/ov05_021D74E0.s: start the field's fade to black (0) or
  * back in (1), as every start-menu action does before leaving the field. */
 extern void ov05_021D7CA4(int direction);
@@ -98,20 +107,22 @@ void WtGame_Free(WtGame *game, void *pointer)
 void WtGame_WirelessStart(void)
 {
     sub_02088858();
+    sub_0202E49C();
 }
 
 int WtGame_WirelessReady(void)
 {
-    return TRUE;
+    return sub_0202E4C8();
 }
 
 void WtGame_WirelessShutdown(void)
 {
+    sub_0202E4F0();
 }
 
 int WtGame_WirelessActive(void)
 {
-    return FALSE;
+    return sub_0202E4DC();
 }
 
 void WtGame_WirelessRelease(void)
