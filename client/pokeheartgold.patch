@@ -1,3 +1,91 @@
+diff --git a/asm/include/overlay_27.inc b/asm/include/overlay_27.inc
+--- a/asm/include/overlay_27.inc
++++ b/asm/include/overlay_27.inc
+@@ -169,0 +170,8 @@
++.public WtMenuIcon_Create
++.public WtMenuIcon_Destroy
++.public WtMenuIcon_Update
++.public WtMenuIcon_GetSprite
++.public WtMenuIcon_Highlight
++.public WtMenuIcon_Navigate
++.public WtMenuIcon_SelectionForIndex
++.public WtMenuIcon_Touch
+diff --git a/asm/overlay_27.s b/asm/overlay_27.s
+--- a/asm/overlay_27.s
++++ b/asm/overlay_27.s
+@@ -112,0 +113,2 @@ ov27_02259F80: ; 0x02259F80
++	add r0, r4, #0
++	bl WtMenuIcon_Create
+@@ -245,0 +248 @@ ov27_0225A19C: ; 0x0225A19C
++	bl WtMenuIcon_Destroy
+@@ -465,6 +468,3 @@ _0225A36E:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -568,0 +569,2 @@ _0225A44A:
++	add r0, r5, #0
++	bl WtMenuIcon_Update
+@@ -1035 +1037 @@ ov27_0225A7DC: ; 0x0225A7DC
+-	cmp r0, #7
++	cmp r0, #10
+@@ -1693 +1695 @@ ov27_0225AD0C: ; 0x0225AD0C
+-	mov r0, #0x10
++	mov r0, #0x11
+@@ -2479 +2481 @@ ov27_0225B398: ; 0x0225B398
+-	cmp r1, #7
++	cmp r1, #10
+@@ -2519,0 +2522,3 @@ _0225B3E4:
++	add r0, r6, #0
++	ldr r1, [sp]
++	bl WtMenuIcon_Highlight
+@@ -2567 +2572 @@ _0225B438:
+-	bl ov27_0225B360
++	bl WtMenuIcon_Navigate
+@@ -2582,6 +2587,3 @@ _0225B448:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -2595,6 +2597,3 @@ _0225B478:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -2609 +2608 @@ _0225B490:
+-	bl ov27_0225C170
++	bl WtMenuIcon_SelectionForIndex
+@@ -2712,0 +2712,8 @@ _0225B55A:
++	cmp r4, #10
++	bne _0225B55A_grid
++	add r0, r5, #0
++	bl WtMenuIcon_Touch
++	mov r1, #1
++	eor r0, r1
++	pop {r4, r5, r6, pc}
++_0225B55A_grid:
+@@ -6020,0 +6028 @@ ov27_0225CF68: ; 0x0225CF68
++	.byte 0x8E, 0xAE, 0x60, 0x9C
+diff --git a/files/meson.build b/files/meson.build
+--- a/files/meson.build
++++ b/files/meson.build
+@@ -95,0 +96 @@ subdir('tel')
++subdir('wonder_trade')
 diff --git a/files/msgdata/NARC_msg.txt b/files/msgdata/NARC_msg.txt
 --- a/files/msgdata/NARC_msg.txt
 +++ b/files/msgdata/NARC_msg.txt
@@ -7,15 +95,27 @@ diff --git a/files/msgdata/NARC_msg.txt b/files/msgdata/NARC_msg.txt
 +NARC_msg_msg_0828_bin
 +NARC_msg_msg_0829_bin
 \ No newline at end of file
+diff --git a/heartgold.us/filesystem.csv b/heartgold.us/filesystem.csv
+--- a/heartgold.us/filesystem.csv
++++ b/heartgold.us/filesystem.csv
+@@ -385,0 +386 @@ files/dwc/utility.bin,/dwc/utility.bin
++files/wonder_trade/menu_icon.narc,/wonder_trade/menu_icon.narc
 diff --git a/include/constants/heap.h b/include/constants/heap.h
 --- a/include/constants/heap.h
 +++ b/include/constants/heap.h
 @@ -165,0 +166 @@ enum HeapID {
 +    HEAP_ID_WONDER_TRADE,
+diff --git a/include/filesystem_files_def.h b/include/filesystem_files_def.h
+--- a/include/filesystem_files_def.h
++++ b/include/filesystem_files_def.h
+@@ -273,0 +274 @@ typedef enum NarcId {
++    NARC_wonder_trade_menu_icon = 267,
+@@ -545,0 +547 @@ char *sNarcFileList[] = {
++    "wonder_trade/menu_icon.narc",
 diff --git a/main.lsf.in b/main.lsf.in
 --- a/main.lsf.in
 +++ b/main.lsf.in
-@@ -173,0 +174,16 @@ Static main
+@@ -173,0 +174,17 @@ Static main
 +    Object src/wonder_trade/hgss/application.c
 +    Object src/wonder_trade/network.c
 +    Object src/wonder_trade/tls.c
@@ -32,7 +132,8 @@ diff --git a/main.lsf.in b/main.lsf.in
 +    Object src/wonder_trade/flash.c
 +    Object src/wonder_trade/boot.c
 +    Object src/wonder_trade/hgss/hooks.c
-@@ -355,0 +372 @@ Static main
++    Object src/wonder_trade/hgss/menu_icon.c
+@@ -355,0 +373 @@ Static main
 +    Library libwonder_trade_tls.a
 diff --git a/meson.build b/meson.build
 --- a/meson.build
@@ -59,6 +160,11 @@ diff --git a/meson.options b/meson.options
 +option('wonder_trade_tls_dir', type: 'string', value: '')
 +option('wonder_trade_profile_header', type: 'string', value: '')
 \ No newline at end of file
+diff --git a/soulsilver.us/filesystem.csv b/soulsilver.us/filesystem.csv
+--- a/soulsilver.us/filesystem.csv
++++ b/soulsilver.us/filesystem.csv
+@@ -385,0 +386 @@ files/dwc/utility.bin,/dwc/utility.bin
++files/wonder_trade/menu_icon.narc,/wonder_trade/menu_icon.narc
 diff --git a/src/main.c b/src/main.c
 --- a/src/main.c
 +++ b/src/main.c
@@ -138,27 +244,42 @@ diff --git a/src/save.c b/src/save.c
 diff --git a/src/start_menu.c b/src/start_menu.c
 --- a/src/start_menu.c
 +++ b/src/start_menu.c
-@@ -47,0 +48 @@
+@@ -47,0 +48,2 @@
 +#include "wonder_trade/hgss/application.h"
-@@ -159,0 +161,4 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager);
++#include "wonder_trade/hgss/menu_icon.h"
+@@ -159,0 +162,5 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager);
 +static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu);
++static BOOL StartMenu_SelectWonderTrade(TaskManager *taskManager, FieldSystem *fieldSystem, StartMenuTaskData *startMenu, BOOL touch);
 +static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager);
 +static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager);
 +static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager);
-@@ -573,0 +579,6 @@ static BOOL Task_StartMenu_HandleInput(TaskManager *taskManager) {
-+        } else if ((gSystem.newKeys & PAD_BUTTON_SELECT) && StartMenu_WonderTradeAvailable(fieldSystem, startMenu)) {
-+            PlaySE(SEQ_SE_DP_SELECT);
-+            sub_0203DF64(fieldSystem, 0);
-+            ov01_021F6B50(fieldSystem);
-+            fieldSystem->lastTouchMenuInput = 0;
-+            return Task_StartMenu_HandleSelection_WonderTrade(taskManager);
-@@ -1502,0 +1514,34 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
+@@ -591,0 +599,3 @@ static BOOL StartMenu_HandleKeyInput(TaskManager *taskManager, FieldSystem *fiel
++    if (fieldSystem->unkD3 == WT_MENU_ICON_SELECTION) {
++        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, FALSE);
++    }
+@@ -652,0 +663,3 @@ static BOOL StartMenu_HandleTouchInput(TaskManager *taskManager, FieldSystem *fi
++    case WT_MENU_ICON_SELECTION + 2:
++        fieldSystem->unkD3 = WT_MENU_ICON_SELECTION;
++        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, TRUE);
+@@ -1502,0 +1516,46 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
 +
 +static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu) {
 +    // Safari, Bug-Catching Contest, Pal Park, Union Room and similar menus forbid saving.
 +    return !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_SAVE))
 +        && !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_POKEMON))
 +        && Party_GetCount(SaveArray_Party_Get(fieldSystem->saveData)) > 0;
++}
++
++static BOOL StartMenu_SelectWonderTrade(TaskManager *taskManager, FieldSystem *fieldSystem, StartMenuTaskData *startMenu, BOOL touch) {
++    fieldSystem->lastTouchMenuInput = 0;
++    if (!StartMenu_WonderTradeAvailable(fieldSystem, startMenu)) {
++        return TRUE;
++    }
++    PlaySE(SEQ_SE_DP_SELECT);
++    MenuInputStateMgr_SetState(&fieldSystem->menuInputState, touch ? MENU_INPUT_STATE_TOUCH : MENU_INPUT_STATE_BUTTONS);
++    sub_0203DF64(fieldSystem, touch);
++    ov01_021F6B50(fieldSystem);
++    return Task_StartMenu_HandleSelection_WonderTrade(taskManager);
 +}
 +
 +static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager) {
