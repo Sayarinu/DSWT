@@ -1,4 +1,4 @@
-#include "wonder_trade/application.h"
+#include "wonder_trade/platinum/application.h"
 
 #include <nitro.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 #include "wonder_trade/network.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/recovery.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 #include "wonder_trade/menu_input.h"
 
 #include "bag.h"

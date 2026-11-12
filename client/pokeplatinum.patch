@@ -45,7 +45,7 @@ diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 --- a/platinum.us/main.lsf.in
 +++ b/platinum.us/main.lsf.in
 @@ -179,0 +180,14 @@
-+	Object src/wonder_trade/application.c
++	Object src/wonder_trade/platinum/application.c
 +	Object src/wonder_trade/network.c
 +	Object src/wonder_trade/tls.c
 +	Object src/wonder_trade/http.c
@@ -56,7 +56,7 @@ diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 +	Object src/wonder_trade/journal.c
 +	Object src/wonder_trade/engine.c
 +	Object src/wonder_trade/pokemon_codec.c
-+	Object src/wonder_trade/game_save.c
++	Object src/wonder_trade/platinum/game_save.c
 +	Object src/wonder_trade/recovery.c
 +	Object src/wonder_trade/flash.c
 @@ -372,0 +386 @@
@@ -73,7 +73,7 @@ diff --git a/src/main.c b/src/main.c
 --- a/src/main.c
 +++ b/src/main.c
 @@ -1,0 +2,3 @@
-+#include "wonder_trade/application.h"
++#include "wonder_trade/platinum/application.h"
 +#include "wonder_trade/recovery.h"
 +#include "wonder_trade/entropy_game.h"
 @@ -115,0 +119 @@
@@ -139,7 +139,7 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 --- a/src/start_menu.c
 +++ b/src/start_menu.c
 @@ -26,0 +27 @@
-+#include "wonder_trade/application.h"
++#include "wonder_trade/platinum/application.h"
 @@ -103,0 +105 @@
 +    START_MENU_OPTION_WONDER_TRADE,
 @@ -141 +143 @@

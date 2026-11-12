@@ -61,12 +61,12 @@ def build():
     workspace = ROOT / "game/pokeplatinum"
     production_hash = hashlib.sha256((workspace / "build/pokeplatinum.us.nds").read_bytes()).digest()
     tls = subprocess.check_output(["python3", str(ROOT / "scripts/prepare-tls.py")], cwd=ROOT, text=True).strip()
-    app = workspace / "src/wonder_trade/application.c"
+    app = workspace / "src/wonder_trade/platinum/application.c"
     messages = workspace / "res/text/wonder_trade.json"
-    original = (ROOT / "client/src/wonder_trade/application.c").read_bytes()
+    original = (ROOT / "client/src/wonder_trade/platinum/application.c").read_bytes()
     text = original.decode()
     replacements = {
-        '#include "wonder_trade/recovery.h"': '#include "wonder_trade/recovery.h"\n#include "../../.git/dswt-entrypoint-probe.inc"',
+        '#include "wonder_trade/recovery.h"': '#include "wonder_trade/recovery.h"\n#include "../../../.git/dswt-entrypoint-probe.inc"',
         '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }':
             '        worker->result = WtGameSave_Boot(&worker->game, io);\n    }\n'
             '    if (worker->result == 0) worker->result = WtRecovery_ProbeEntrypoints() ? 1 : -100;',

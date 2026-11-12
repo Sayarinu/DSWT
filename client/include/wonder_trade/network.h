@@ -4,7 +4,7 @@
 #include <nitro.h>
 
 #include "constants/heap.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 #include "wonder_trade/wire.h"
 #include "savedata.h"
 

@@ -7,7 +7,7 @@
 #include "party.h"
 #include "pokemon.h"
 #include "wonder_trade/flash.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
 

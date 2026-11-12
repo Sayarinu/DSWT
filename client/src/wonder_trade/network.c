@@ -19,7 +19,7 @@
 #include "wonder_trade/seed.h"
 #include "wonder_trade/entropy.h"
 #include "wonder_trade/entropy_game.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 #include "wonder_trade/recovery.h"
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
