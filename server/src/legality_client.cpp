@@ -15,7 +15,7 @@ namespace {
 bool KnownReason(std::string_view reason) {
   constexpr std::string_view reasons[] = {
       "EGG_NOT_ALLOWED", "ILLEGAL_DATA", "ILLEGAL_ENCOUNTER", "ILLEGAL_MOVES",
-      "ILLEGAL_RNG", "INCOMPATIBLE_FORM", "INVALID_SPECIES", "INVALID_STRUCTURE",
+      "ILLEGAL_RNG", "INCOMPATIBLE_FORM", "INCOMPATIBLE_GAME", "INVALID_SPECIES", "INVALID_STRUCTURE",
       "MAIL_NOT_ALLOWED"};
   return std::find(std::begin(reasons), std::end(reasons), reason) != std::end(reasons);
 }
@@ -68,14 +68,16 @@ LegalityDecision LegalityClient::CheckNewSubmission(
   context.set_wait_for_ready(false);
   auto status = impl_->stub->Validate(&context, request, &reply);
   if (!status.ok() || reply.policy_version() != impl_->policy || reply.sha256() != hash ||
-      reply.reason_codes_size() > 8)
+      reply.reason_codes_size() > 8 || (reply.destinations() & ~kAllDestinations) != 0)
     return {};
   if (reply.legal()) {
-    if (!reply.reason_codes().empty()) return {};
+    // An empty destination set (as from a validator predating the field) is
+    // malformed, never "every game".
+    if (!reply.reason_codes().empty() || reply.destinations() == 0) return {};
     verdict = 1;
-    return {LegalityVerdict::Legal, {}};
+    return {LegalityVerdict::Legal, {}, reply.destinations()};
   }
-  if (reply.reason_codes().empty())
+  if (reply.reason_codes().empty() || reply.destinations() != 0)
     return {};
   LegalityDecision decision{LegalityVerdict::Illegal, {}};
   for (const auto &reason : reply.reason_codes()) {

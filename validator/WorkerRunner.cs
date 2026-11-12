@@ -68,6 +68,7 @@ public sealed class WorkerRunner : IDisposable
             if (reply.PolicyVersion != Policy.Version ||
                 !reply.Sha256.Span.SequenceEqual(SHA256.HashData(payload)) ||
                 reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > 8 ||
+                reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~(uint)Policy.AllDestinations) != 0 ||
                 reply.ReasonCodes.Any(r => r.Length is 0 or > 32 || r.Any(c => c is not (>= 'A' and <= 'Z' or '_'))))
                 throw new InvalidOperationException();
             return reply;

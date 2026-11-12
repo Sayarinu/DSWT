@@ -11,7 +11,7 @@
 
 namespace dswt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt2";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt3";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
@@ -26,6 +26,7 @@ public:
               std::string("\xb7\x07\x24\x15\x45\xa3\x46\x26\x5a\xab\x1f\xfb\x32\xff\x64\xb5"
                           "\x5b\xf8\xf8\xdc\x1b\x56\xa4\x6e\xf3\x3c\xe3\xd1\x5d\xb1\x1d\x33", 32));
     reply->set_legal(true);
+    reply->set_destinations(kAllDestinations);
     reply->set_policy_version(kPolicy);
     reply->set_sha256(request->pokemon().sha256());
     return respond ? respond(context, reply) : grpc::Status::OK;
@@ -52,12 +53,26 @@ protected:
 
 TEST_F(LegalityClientTest, AcceptsOnlyTheExpectedPolicyAndPayload) {
   LegalityClient client(address, kPolicy);
-  EXPECT_EQ(client.CheckNewSubmission(payload).verdict, LegalityVerdict::Legal);
+  auto result = client.CheckNewSubmission(payload);
+  EXPECT_EQ(result.verdict, LegalityVerdict::Legal);
+  EXPECT_EQ(result.destinations, kAllDestinations);
+}
+
+TEST_F(LegalityClientTest, ReportsGamesThatCanHoldTheOffer) {
+  validator.respond = [](auto *, auto *reply) {
+    reply->set_destinations(kDestinationPt | kDestinationHGSS);
+    return grpc::Status::OK;
+  };
+  LegalityClient client(address, kPolicy);
+  auto result = client.CheckNewSubmission(payload);
+  EXPECT_EQ(result.verdict, LegalityVerdict::Legal);
+  EXPECT_EQ(result.destinations, kDestinationPt | kDestinationHGSS);
 }
 
 TEST_F(LegalityClientTest, RetainsStableRejectionReasons) {
   validator.respond = [](auto *, auto *reply) {
     reply->set_legal(false);
+    reply->clear_destinations();
     reply->add_reason_codes("ILLEGAL_ENCOUNTER");
     reply->add_reason_codes("ILLEGAL_MOVES");
     return grpc::Status::OK;
@@ -66,6 +81,20 @@ TEST_F(LegalityClientTest, RetainsStableRejectionReasons) {
   auto result = client.CheckNewSubmission(payload);
   EXPECT_EQ(result.verdict, LegalityVerdict::Illegal);
   EXPECT_EQ(result.reasons, (std::vector<std::string>{"ILLEGAL_ENCOUNTER", "ILLEGAL_MOVES"}));
+  EXPECT_EQ(result.destinations, 0U);
+}
+
+TEST_F(LegalityClientTest, RejectsLegalOfferThatFitsNoGame) {
+  validator.respond = [](auto *, auto *reply) {
+    reply->set_legal(false);
+    reply->clear_destinations();
+    reply->add_reason_codes("INCOMPATIBLE_GAME");
+    return grpc::Status::OK;
+  };
+  LegalityClient client(address, kPolicy);
+  auto result = client.CheckNewSubmission(payload);
+  EXPECT_EQ(result.verdict, LegalityVerdict::Illegal);
+  EXPECT_EQ(result.reasons, std::vector<std::string>{"INCOMPATIBLE_GAME"});
 }
 
 TEST_F(LegalityClientTest, RejectsMalformedUnboundOrAmbiguousReplies) {
@@ -73,11 +102,16 @@ TEST_F(LegalityClientTest, RejectsMalformedUnboundOrAmbiguousReplies) {
       [](auto *r) { r->clear_sha256(); },
       [](auto *r) { r->set_sha256(std::string(32, 'x')); },
       [](auto *r) { r->set_policy_version("new-policy"); },
-      [](auto *r) { r->set_legal(false); },
+      [](auto *r) { r->set_legal(false); r->clear_destinations(); },
       [](auto *r) { r->add_reason_codes("ILLEGAL_DATA"); },
-      [](auto *r) { r->set_legal(false); r->add_reason_codes("UNKNOWN_REASON"); },
-      [](auto *r) { r->set_legal(false); for (int i = 0; i < 9; ++i) r->add_reason_codes("ILLEGAL_DATA"); },
-      [](auto *r) { r->set_legal(false); r->add_reason_codes("ILLEGAL_RNG"); r->add_reason_codes("ILLEGAL_DATA"); },
+      // Legal without destinations, as an older validator replies: never "all games".
+      [](auto *r) { r->clear_destinations(); },
+      [](auto *r) { r->set_destinations(8); },
+      [](auto *r) { r->set_destinations(kAllDestinations | 0x80000000U); },
+      [](auto *r) { r->set_legal(false); r->add_reason_codes("ILLEGAL_DATA"); },
+      [](auto *r) { r->set_legal(false); r->clear_destinations(); r->add_reason_codes("UNKNOWN_REASON"); },
+      [](auto *r) { r->set_legal(false); r->clear_destinations(); for (int i = 0; i < 9; ++i) r->add_reason_codes("ILLEGAL_DATA"); },
+      [](auto *r) { r->set_legal(false); r->clear_destinations(); r->add_reason_codes("ILLEGAL_RNG"); r->add_reason_codes("ILLEGAL_DATA"); },
       [](auto *r) { r->set_policy_version(std::string(2048, 'x')); }};
   LegalityClient client(address, kPolicy);
   for (const auto &corrupt : corruptions) {

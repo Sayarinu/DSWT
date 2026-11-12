@@ -147,8 +147,9 @@ zero sanity u16, checksum u16, then four 32-byte blocks in A/B/C/D order. The
 checksum is the sum of 64 little-endian u16 values in bytes 8..135 modulo 65536;
 the SHA-256 covers all 136 bytes. Party suffixes, encrypted/shuffled guesses and
 automatic repairs are forbidden. Full original local images remain in escrow.
-The pinned isolated PKHeX service checks strict legality for Platinum and returns
-a verdict, exact payload hash and bounded policy/reason codes, never a replacement payload. RPC
+The pinned isolated PKHeX service checks strict Gen IV legality and returns a
+verdict, exact payload hash, bounded policy/reason codes and, for legal Pokémon,
+the Gen IV games that can hold it, never a replacement payload. RPC
 failure is unavailable, not an illegal verdict. The server rejects Eggs and mail;
 the game rejects attached capsules and protects its last usable party Pokémon
 before escrow, since those facts are outside canonical PK4. The pinned policy,
