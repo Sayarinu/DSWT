@@ -1,7 +1,7 @@
 {
   "version": 1,
   "upstream_revision": "1dc13dcea40c04ab53f1f607de46023dc409ef20",
-  "verified_targets": ["us-rev0", "us-rev1"],
+  "verified_targets": ["us-rev0", "us-rev1", "europe"],
   "flash_size": 524288,
   "half_size": 262144,
   "block_footer": {"size": 20, "format": "<IIIIBxH", "fields": ["counter", "block_counter", "size", "magic", "block", "crc"]},

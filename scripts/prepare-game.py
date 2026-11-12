@@ -12,11 +12,15 @@ import tempfile
 
 # Each upstream decompilation has its own pin, integration patch, adapter and
 # resource overlay. The shared core overlays every workspace; another game's
-# adapter and resources never do.
+# adapter and resources never do. Build patches apply to pristine workspaces too
+# and leave upstream output unchanged. Staged revisions build from inputs staged
+# from a verified local dump, so upstream lists no checksum for them.
 GAMES = {
     "platinum": {
         "pin": "client/upstream.json",
         "patch": "client/pokeplatinum.patch",
+        "build_patches": ("client/europe.patch",),
+        "staged_revisions": ("10",),
         "workspace": "pokeplatinum",
         "adapter": "platinum",
         "resources": ("res",),
@@ -25,6 +29,8 @@ GAMES = {
     "hgss": {
         "pin": "client/upstream-pokeheartgold.json",
         "patch": "client/pokeheartgold.patch",
+        "build_patches": (),
+        "staged_revisions": (),
         "workspace": "pokeheartgold",
         "adapter": "hgss",
         "resources": ("files",),
@@ -35,6 +41,8 @@ GAMES = {
     "dp": {
         "pin": "client/upstream-pokediamond.json",
         "patch": "client/pokediamond.patch",
+        "build_patches": (),
+        "staged_revisions": (),
         "workspace": "pokediamond",
         "adapter": "dp",
         "resources": (),
@@ -56,8 +64,7 @@ def foreign_adapter(name, game):
             and parts[2] in ADAPTERS and parts[2] != game["adapter"])
 
 
-def overlay_files(root, workspace, game=GAMES["platinum"]):
-    patch = root / game["patch"]
+def patched_paths(patch):
     paths = []
     for line in patch.read_text().splitlines():
         if not line.startswith("diff --git "):
@@ -71,7 +78,14 @@ def overlay_files(root, workspace, game=GAMES["platinum"]):
         paths.append(path.as_posix())
     if not paths or len(set(paths)) != len(paths):
         raise RuntimeError("Integration patch must name unique upstream files")
+    return paths
 
+
+def overlay_files(root, workspace, game=GAMES["platinum"], pristine=False):
+    patches = [root / name for name in game["build_patches"]] + ([] if pristine else [root / game["patch"]])
+    if not patches:
+        return {}, {}
+    paths = list(dict.fromkeys(path for patch in patches for path in patched_paths(patch)))
     base = {name: git(workspace, "show", f"HEAD:{name}") for name in paths}
     with tempfile.TemporaryDirectory(prefix="dswt-overlay-") as temp:
         stage = Path(temp)
@@ -79,12 +93,13 @@ def overlay_files(root, workspace, game=GAMES["platinum"]):
             dest = stage / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
-        subprocess.run(
-            ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
-        )
+        for patch in patches:
+            subprocess.run(
+                ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
+            )
         desired = {name: (stage / name).read_bytes() for name in paths}
 
-    for directory in ("include", "src", *RESOURCES):
+    for directory in () if pristine else ("include", "src", *RESOURCES):
         if directory in RESOURCES and directory not in game["resources"]:
             continue
         source = root / "client" / directory
@@ -117,11 +132,13 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
     if git(workspace, "rev-parse", "HEAD^{tree}").decode().strip() != pin["tree"]:
         raise RuntimeError("Game workspace does not match the pinned upstream tree")
     for revision, digest in pin["rom_sha1"].items():
+        if revision in game["staged_revisions"]:
+            continue
         upstream = git(workspace, "show", "HEAD:" + game["rom_sha1"].format(revision))
         if upstream.decode().split()[0] != digest:
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
 
-    base, desired = ({}, {}) if pristine else overlay_files(root, workspace, game)
+    base, desired = overlay_files(root, workspace, game, pristine)
     marker = workspace / ".git/dswt-overlays.json"
     if marker.is_symlink():
         raise RuntimeError("Overlay ownership record must not be a symlink")

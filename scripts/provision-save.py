@@ -28,7 +28,7 @@ def seed_record(seed, generation):
 
 
 LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json")
-TARGETS = ("us-rev0", "us-rev1", "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-us-rev5", "pearl-us-rev5")
+TARGETS = ("us-rev0", "us-rev1", "europe", "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-us-rev5", "pearl-us-rev5")
 
 
 def layout_for(target):
@@ -43,7 +43,7 @@ def layout_for(target):
 def provision(data, target):
     layout = layout_for(target)
     if len(data) != layout["flash_size"]:
-        raise ValueError("Only a full 512 KiB save for a verified US target is supported")
+        raise ValueError("Only a full 512 KiB save for a verified target is supported")
     footer_format = layout["block_footer"]
     fields, footer_size = footer_format["fields"], footer_format["size"]
     # Both retail blocks need at least one valid fallback. Do not rewrite either.

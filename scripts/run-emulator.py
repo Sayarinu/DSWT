@@ -22,7 +22,7 @@ spec.loader.exec_module(provision)
 def refreshed_record(data, target):
     layout = provision.layout_for(target)
     if len(data) != layout["flash_size"]:
-        raise ValueError("Only full saves for verified US targets are supported")
+        raise ValueError("Only full saves for verified targets are supported")
     blanked = bytearray(data)
     valid = []
     for bank in layout["journal_banks"]:

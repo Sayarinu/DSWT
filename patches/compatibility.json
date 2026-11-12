@@ -48,9 +48,9 @@
       "sha1": "8d15cd443d4e83e20493c79d3f9dc408c4f51ae0",
       "crc32": "71aca63a",
       "reference": "https://datomatic.no-intro.org/index.php?page=show_record&s=28&n=3797",
-      "build_revision": null,
+      "build_revision": 10,
       "pristine_verified": true,
-      "planned_patch": null
+      "planned_patch": "dswt-europe.bps"
     },
     {
       "id": "diamond-us-rev5",

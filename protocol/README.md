@@ -30,7 +30,8 @@ TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 Enroll's build u32 names the save's game variant as
 `family << 24 | version << 16 | language << 8 | revision`, using the games' own
 version and language IDs and the ROM header revision byte. `code >> 24` is the trade family, except legacy
-code 1, which released clients send for US English Platinum (any revision).
+code 1, which US English Platinum clients send (any revision). European English
+Platinum builds send `0x020C020A`.
 
 | Field | Values |
 | --- | --- |
@@ -215,15 +216,17 @@ acknowledgement to the immutable delivered asset and revalidates future deposits
 
 ## Journal placement and migration
 
-[`save-layout.json`](save-layout.json) records the pinned US layout. Each 0x40000
+[`save-layout.json`](save-layout.json) records the pinned layout of US Rev 0, Rev 1
+and European English Platinum, whose ARM9 and overlays are byte-identical to US
+Rev 1. Each 0x40000
 half contains general data at 0..0xCF2C, boxes through 0x1F110, Hall of Fame at
 0x20000, Battle Hall at 0x23000 and four recordings at 0x24000/26000/28000/2A000,
 ending at 0x2BD60. Existing GTS data is inside the general block and stays intact.
 Reserve a complete 64 KiB flash sector at 0x30000 and 0x70000 for independent
 journal banks; the SDK's 256-byte programming pages/64 KiB erase sectors do not
 overlap retail content there. Reject smaller flash, unknown layouts, foreign
-journal magic and unsupported versions without writing. Europe needs its own
-layout validation before it can join this list.
+journal magic and unsupported versions without writing. Any other target needs
+its own layout validation before it can join this list.
 
 [`save-layout-hgss.json`](save-layout-hgss.json) records US HeartGold and
 SoulSilver from the pinned pokeheartgold source, confirmed against the size

@@ -10,6 +10,10 @@ workspaces:
 | Diamond, Pearl | [`pret/pokediamond`](https://github.com/pret/pokediamond) | [`upstream-pokediamond.json`](upstream-pokediamond.json) | `game/pokediamond/` |
 
 - Each pin records the upstream revision, tree and pristine US ROM checksums.
+- Platinum revision `10` is European English, which upstream does not build:
+  [`europe.patch`](europe.patch) adds that revision to every Platinum workspace
+  without changing US output, and `scripts/prepare-europe.py` stages its
+  differing inputs from a verified local dump.
 - Upstream build and development instructions: `INSTALL.md` and `CONTRIBUTING.md`
   in each local workspace.
 - Upstream top-level license: none was present at either recorded revision.

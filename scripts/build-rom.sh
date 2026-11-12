@@ -14,8 +14,12 @@ prepare_args=()
 case "$game" in
     platinum)
         revision="${ROM_REVISION:-1}"
-        if [[ ! "$revision" =~ ^[01]$ ]]; then
-            echo "ROM_REVISION must be 0 or 1" >&2
+        if [[ ! "$revision" =~ ^(0|1|10)$ ]]; then
+            echo "ROM_REVISION must be 0, 1 or 10 (European English)" >&2
+            exit 2
+        fi
+        if [[ "$revision" == 10 && ! -f "${DSWT_EUROPE_ROM:-}" ]]; then
+            echo "Set DSWT_EUROPE_ROM to your own European English Platinum dump" >&2
             exit 2
         fi
         ;;
@@ -70,6 +74,9 @@ if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
 fi
 
 workspace="$("$python" "$repo_root/scripts/prepare-game.py" ${prepare_args[@]+"${prepare_args[@]}"} "$@")"
+if [[ "$game" == platinum && "$revision" == 10 ]]; then
+    "$python" "$repo_root/scripts/prepare-europe.py" "$DSWT_EUROPE_ROM" "$workspace" >/dev/null
+fi
 docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_GAME=$game" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "DSWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
 if [[ "$build_mode" == modified ]]; then
     tls_workspace="$("$python" "$repo_root/scripts/prepare-tls.py")"

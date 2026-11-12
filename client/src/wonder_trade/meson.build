@@ -28,3 +28,9 @@ endforeach
 wt_tls = static_library('wonder_trade_tls', tls_sources,
     include_directories: wt_tls_includes, c_args: wt_tls_args + ['-thumb'],
     native: false, pic: false)
+
+# Platinum's enrolled game variant (protocol/README.md): European English is
+# revision 10; US builds keep sending legacy code 1.
+if meson.project_name() == 'pokeplatinum'
+    wt_tls_args += '-DWT_GAME_VARIANT=' + (get_option('revision') == '10' ? '0x020C020Au' : '1u')
+endif

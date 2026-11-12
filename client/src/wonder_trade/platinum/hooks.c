@@ -9,13 +9,18 @@
 #include "wifi_overlays.h"
 #include "wonder_trade/platinum/game_save.h"
 
+/* The build sets the enrolled variant: legacy code 1 for US English Platinum,
+ * 0x020C020A for European English (revision 10). */
+#ifndef WT_GAME_VARIANT
+#error "The build sets WT_GAME_VARIANT, the enrolled game variant"
+#endif
+
 /* Platinum never uses the 64 KiB flash sectors at 0x30000 and 0x70000. */
 const WtGameConfig gWtGameConfig = {
     { 0x30000, 0x70000 },
     DEFAULT_DWC_DMA_NUMBER, DEFAULT_DWC_POWER_MODE,
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
-    /* Released clients enroll US English Platinum as legacy code 1. */
-    1,
+    WT_GAME_VARIANT,
 };
 
 void *WtGame_Alloc(WtGame *game, size_t size)
