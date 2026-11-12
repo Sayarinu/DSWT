@@ -84,6 +84,7 @@ a database advisory lock shared across replicas. It anchors the oldest unlocked
 eligible offer by its immutable admission event and randomly chooses a distinct
 unlocked owner. Busy workers return `PROCESSING`; reuse that operation ID. A
 final `NOT_FOUND` records no eligible pair, so later polling needs a new ID.
+Workers start a new attempt only while a compatible pair is queued.
 Pairs and no-pair outcomes survive retry/restart and require recovery coverage.
 Submit stores, immutably with the offer, the validator's destination set: the
 games able to hold the Pokémon (bit 0 Diamond/Pearl, bit 1 Platinum, bit 2
