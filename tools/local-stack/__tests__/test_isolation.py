@@ -110,6 +110,38 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tailnet"):
             policy.workflow(data)
 
+    def test_releaser_may_only_write_releases_by_hand_from_main(self):
+        real = policy.yaml.load((ROOT / ".github/workflows/release.yml").read_text(), Loader=policy.WorkflowLoader)
+        policy.releaser(real)
+        jobs = lambda d: d["jobs"]
+        changes = [
+            lambda d: d.update(on="push"),
+            lambda d: d.update(on={"workflow_dispatch": "", "push": ""}),
+            lambda d: d["on"]["workflow_dispatch"]["inputs"].update(token={"required": "true"}),
+            lambda d: d.update(permissions={"contents": "write"}),
+            lambda d: jobs(d)["fetch"].pop("if"),
+            lambda d: jobs(d)["publish"].update({"if": "always()"}),
+            lambda d: jobs(d)["publish"].update(permissions={"contents": "write", "packages": "write"}),
+            lambda d: jobs(d)["fetch"].update(permissions={"contents": "write", "id-token": "write"}),
+            lambda d: jobs(d)["linux"].update(permissions={"contents": "write"}),
+            lambda d: jobs(d)["windows"].pop("needs"),
+            lambda d: jobs(d)["publish"].update(needs=["linux", "macos"]),
+            lambda d: jobs(d).update(extra=copy.deepcopy(jobs(d)["linux"])),
+            lambda d: jobs(d).pop("macos"),
+            lambda d: jobs(d)["macos"].update({"runs-on": "self-hosted"}),
+            lambda d: jobs(d)["linux"]["steps"][-2].setdefault("env", {}).update(GH_TOKEN="${{ github.token }}"),
+            lambda d: jobs(d)["publish"]["steps"].append({"uses": "actions/github-script@" + "1" * 40,
+                                                          "env": {"GH_TOKEN": "${{ github.token }}"}}),
+            lambda d: jobs(d)["publish"]["steps"].append({"run": "true", "env": {"KEY": "${{ secrets.PERSONAL_TOKEN }}"}}),
+            lambda d: jobs(d)["fetch"]["steps"][0].update(uses="actions/checkout@v4"),
+        ]
+        for index, change in enumerate(changes):
+            with self.subTest(case=index):
+                data = copy.deepcopy(real)
+                change(data)
+                with self.assertRaises(ValueError):
+                    policy.releaser(data)
+
     def test_deployer_may_only_read_listed_secrets_in_production_from_main(self):
         real = policy.yaml.load((ROOT / ".github/workflows/deploy.yml").read_text(), Loader=policy.WorkflowLoader)
         policy.deployer(real)

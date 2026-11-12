@@ -1,0 +1,165 @@
+name: Release patcher
+
+# Run by hand from main after `tools/patcher-app/release.py draft` has uploaded
+# dswt-VERSION.zip to the draft release vVERSION. Only the fetch and publish jobs
+# can write, and only to releases; the builds read source and nothing else.
+# tools/local-stack/policy.py holds this file to those rules.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, such as 0.1.0, of an existing draft release
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    name: Verify the patch archive
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download and verify the draft's archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: python3 tools/patcher-app/release.py --repo "$GITHUB_REPOSITORY" fetch --version "$VERSION" --output game/release
+      - name: Keep the archive for the builds
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: patch-archive
+          path: game/release/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Build the Linux patcher
+    needs: fetch
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Get the archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: patch-archive
+          path: game/release
+      - name: Build, self-test and package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
+          python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
+      - name: Keep the app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-linux
+          path: game/apps/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: Build the macOS patcher
+    needs: fetch
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Get the archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: patch-archive
+          path: game/release
+      - name: Build, self-test and package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
+          python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
+      - name: Keep the app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-macos
+          path: game/apps/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Build the Windows patcher
+    needs: fetch
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Get the archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: patch-archive
+          path: game/release
+      - name: Build, self-test and package
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
+          python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
+      - name: Keep the app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-windows
+          path: game/apps/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    if: github.ref == 'refs/heads/main'
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Get the archive and apps
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: game/release
+          merge-multiple: true
+      - name: Upload the apps and publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: python3 tools/patcher-app/release.py --repo "$GITHUB_REPOSITORY" publish --version "$VERSION" --directory game/release

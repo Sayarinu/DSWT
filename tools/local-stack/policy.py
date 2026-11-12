@@ -11,6 +11,11 @@ import yaml
 
 PUBLISHER = "publish-images.yml"
 DEPLOYER = "deploy.yml"
+RELEASER = "release.yml"
+RELEASE_INPUTS = {"inputs": {"version": {"description": "Release version, such as 0.1.0, of an existing draft release",
+                                         "required": "true"}}}
+RELEASE_WRITERS = ("fetch", "publish")
+RELEASE_BUILDERS = ("linux", "macos", "windows")
 MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
 DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
                   "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
@@ -131,6 +136,34 @@ def publisher(data):
     workflow(reviewed)
 
 
+def releaser(data):
+    """Run by hand from main with one version input; only fetch and publish may write, and only contents."""
+    require(data.get("on") == {"workflow_dispatch": RELEASE_INPUTS},
+            "Releasing must only run by hand, with only the version input")
+    jobs = data.get("jobs")
+    require(isinstance(jobs, dict) and set(jobs) == {*RELEASE_WRITERS, *RELEASE_BUILDERS},
+            "Releasing needs exactly the fetch, build and publish jobs")
+    for name in RELEASE_WRITERS:
+        job = jobs[name]
+        require(isinstance(job, dict) and job.get("if") == "github.ref == 'refs/heads/main'", "Releases must only run from main")
+        require(job.get("permissions") == {"contents": "write"}, "Release writers may only write contents")
+    for name in RELEASE_BUILDERS:
+        require(isinstance(jobs[name], dict) and "permissions" not in jobs[name] and jobs[name].get("needs") == "fetch",
+                "Builds read source only and start from the verified archive")
+    require(jobs["publish"].get("needs") == list(RELEASE_BUILDERS), "Publish only after every build")
+    # What remains must satisfy every contribution rule, without the exceptions granted here.
+    reviewed = copy.deepcopy(data)
+    reviewed["on"] = "workflow_dispatch"
+    for name in RELEASE_WRITERS:
+        job = reviewed["jobs"][name]
+        del job["permissions"]
+        for step in job.get("steps", []):
+            if isinstance(step, dict) and isinstance(step.get("env"), dict) and step["env"].get("GH_TOKEN") == "${{ github.token }}":
+                require("run" in step, "Only commands may use the release token")
+                del step["env"]["GH_TOKEN"]
+    workflow(reviewed)
+
+
 def deployer(data):
     """Publish then deploy each push to main. Only the production job may read secrets, and only these."""
     require(data.get("on") == {"push": {"branches": ["main"], "paths": DEPLOY_PATHS}, "workflow_dispatch": ""},
@@ -192,6 +225,8 @@ def audit(root):
             publisher(loaded)  # Never a required PR check: it does not run on pull requests.
         elif path.name == DEPLOYER:
             deployer(loaded)  # Neither is this one.
+        elif path.name == RELEASER:
+            releaser(loaded)  # Nor this one.
         else:
             names.extend(workflow(loaded))
         files[path.name] = hashlib.sha256(data).hexdigest()
