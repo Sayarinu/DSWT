@@ -24,7 +24,10 @@ US Rev 0 and Rev 1 reproduce the pinned upstream SHA-1 and No-Intro SHA-256.
 Run `ROM_REVISION=0 ./scripts/build-rom.sh --pristine` and repeat with `1`;
 each must pass all five upstream checks. European English Platinum is a verified
 dump whose header reads `CPUE` revision 10, like the US cartridge, so only its
-SHA-256 tells them apart; it has no compatible build yet (LUNE-325). Diamond, Pearl,
+SHA-256 tells them apart. It runs US Rev 1 code; its header area and five
+differing files are staged from your own dump, so
+`DSWT_EUROPE_ROM=/path/to/europe.nds ROM_REVISION=10 ./scripts/build-rom.sh --pristine`
+must reproduce its SHA-1 and pass the same checks. Diamond, Pearl,
 HeartGold and SoulSilver are verified dumps with no planned patch yet
 (`planned_patch` is `null`). Additional regional labels sharing an exact listed
 checksum use the same input. Any new checksum needs verification. Universal

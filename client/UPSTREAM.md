@@ -4,7 +4,11 @@ Project additions live here. The upstream source from
 [`pret/pokeplatinum`](https://github.com/pret/pokeplatinum) belongs only in the
 ignored local `game/pokeplatinum/` workspace.
 
-- Upstream revision, tree and pristine US ROM checksums: [`upstream.json`](upstream.json).
+- Upstream revision, tree and pristine ROM checksums: [`upstream.json`](upstream.json).
+  Revision `10` is European English Platinum, which upstream does not build:
+  [`europe.patch`](europe.patch) adds that revision to every workspace without
+  changing US output, and `scripts/prepare-europe.py` stages its differing
+  inputs from a verified local dump.
 - Upstream build and development instructions: `INSTALL.md` and `CONTRIBUTING.md`
   in that local workspace.
 - Upstream top-level license: none was present at the recorded revision.

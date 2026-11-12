@@ -14,8 +14,12 @@ def git(workspace, *args):
     return subprocess.check_output(["git", "-C", str(workspace), *args])
 
 
-def overlay_files(root, workspace):
-    patch = root / "client/pokeplatinum.patch"
+# Revision 10 build support applies to every workspace and leaves US builds unchanged.
+EUROPE_PATCH = "client/europe.patch"
+EUROPE_REVISION = "10"
+
+
+def patched_paths(patch):
     paths = []
     for line in patch.read_text().splitlines():
         if not line.startswith("diff --git "):
@@ -29,6 +33,12 @@ def overlay_files(root, workspace):
         paths.append(path.as_posix())
     if not paths or len(set(paths)) != len(paths):
         raise RuntimeError("Integration patch must name unique upstream files")
+    return paths
+
+
+def overlay_files(root, workspace, pristine):
+    patches = [root / EUROPE_PATCH] + ([] if pristine else [root / "client/pokeplatinum.patch"])
+    paths = list(dict.fromkeys(path for patch in patches for path in patched_paths(patch)))
 
     base = {name: git(workspace, "show", f"HEAD:{name}") for name in paths}
     with tempfile.TemporaryDirectory(prefix="dswt-overlay-") as temp:
@@ -37,12 +47,13 @@ def overlay_files(root, workspace):
             dest = stage / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
-        subprocess.run(
-            ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
-        )
+        for patch in patches:
+            subprocess.run(
+                ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
+            )
         desired = {name: (stage / name).read_bytes() for name in paths}
 
-    for directory in ("include", "src", "res"):
+    for directory in () if pristine else ("include", "src", "res"):
         source = root / "client" / directory
         if source.is_symlink():
             raise RuntimeError(f"Client overlays must not contain symlinks: {source}")
@@ -69,11 +80,13 @@ def configure(root, workspace, pin, pristine):
     if git(workspace, "rev-parse", "HEAD^{tree}").decode().strip() != pin["tree"]:
         raise RuntimeError("Game workspace does not match the pinned upstream tree")
     for revision, digest in pin["rom_sha1"].items():
+        if revision == EUROPE_REVISION:
+            continue  # Staged from the verified local dump by prepare-europe.py.
         upstream = git(workspace, "show", f"HEAD:platinum.us/rom_rev{revision}.sha1")
         if upstream.decode().split()[0] != digest:
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
 
-    base, desired = ({}, {}) if pristine else overlay_files(root, workspace)
+    base, desired = overlay_files(root, workspace, pristine)
     marker = workspace / ".git/dswt-overlays.json"
     if marker.is_symlink():
         raise RuntimeError("Overlay ownership record must not be a symlink")

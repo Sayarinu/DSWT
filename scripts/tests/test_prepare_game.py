@@ -25,6 +25,7 @@ class PrepareGameTests(unittest.TestCase):
         for name, text in {
             "src/start_menu.c": "original\n",
             "untouched.txt": "unchanged\n",
+            "meson.options": "revisions 0 1\n",
             "platinum.us/rom_rev0.sha1": "0" * 40 + " *pokeplatinum.us.nds\n",
             "platinum.us/rom_rev1.sha1": "1" * 40 + " *pokeplatinum.us.nds\n",
         }.items():
@@ -37,7 +38,7 @@ class PrepareGameTests(unittest.TestCase):
             "repository": str(self.upstream),
             "revision": self.git("rev-parse", "HEAD").decode().strip(),
             "tree": self.git("rev-parse", "HEAD^{tree}").decode().strip(),
-            "rom_sha1": {"0": "0" * 40, "1": "1" * 40},
+            "rom_sha1": {"0": "0" * 40, "1": "1" * 40, "10": "a" * 40},
         }
         client = self.root / "client"
         (client / "src/wonder_trade").mkdir(parents=True)
@@ -48,6 +49,11 @@ class PrepareGameTests(unittest.TestCase):
             "--- a/src/start_menu.c\n+++ b/src/start_menu.c\n"
             "@@ -1 +1 @@\n-original\n+patched\n"
         )
+        (client / "europe.patch").write_text(
+            "diff --git a/meson.options b/meson.options\n"
+            "--- a/meson.options\n+++ b/meson.options\n"
+            "@@ -1 +1 @@\n-revisions 0 1\n+revisions 0 1 10\n"
+        )
 
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.upstream), *args])
@@ -56,6 +62,7 @@ class PrepareGameTests(unittest.TestCase):
         workspace = prepare_game.prepare(self.root)
         self.assertEqual((workspace / "src/start_menu.c").read_text(), "patched\n")
         self.assertEqual((workspace / "src/wonder_trade/application.c").read_text(), "project addition\n")
+        self.assertEqual((workspace / "meson.options").read_text(), "revisions 0 1 10\n")
         self.assertEqual((self.upstream / "src/start_menu.c").read_text(), "original\n")
         shutil.rmtree(self.upstream)
         self.assertEqual(prepare_game.prepare(self.root), workspace)
@@ -115,6 +122,8 @@ class PrepareGameTests(unittest.TestCase):
         self.assertNotEqual(modified, pristine)
         self.assertEqual((pristine / "src/start_menu.c").read_text(), "original\n")
         self.assertFalse((pristine / "src/wonder_trade/application.c").exists())
+        # Revision 10 build support leaves US builds unchanged, so every workspace has it.
+        self.assertEqual((pristine / "meson.options").read_text(), "revisions 0 1 10\n")
         self.assertEqual(prepare_game.prepare(self.root, pristine=True), pristine)
 
     def test_workspace_symlink_does_not_write_outside_project(self):

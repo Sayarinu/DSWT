@@ -54,6 +54,11 @@ if os.environ.get('TEST_PREPARE_FAIL'):
     raise SystemExit('Preserve local workspace edits')
 print(os.environ['TEST_WORKSPACE'])
 ''')
+        self.tool(self.scripts / 'prepare-europe.py', '''
+record('europe', sys.argv[1:])
+assert Path(sys.argv[1]).is_file() and (Path(sys.argv[2]) / '.git').is_dir()
+print(Path(sys.argv[2]) / '.git/dswt-europe')
+''')
         self.tool(self.scripts / 'prepare-tls.py', '''
 record('tls', sys.argv[1:])
 print(os.environ['TEST_TLS'])
@@ -199,12 +204,34 @@ def record(tool, args):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertTrue((self.workspace / 'built').is_file())
                     self.assertEqual(self.calls_for('prepare'), [['--pristine']])
+                    self.assertFalse(self.calls_for('europe'))
                     self.assertFalse(self.calls_for('tls') or self.calls_for('profile'))
                     self.assertEqual(len(self.calls_for('python')), 2)
                     self.assertEqual(self.calls_for('meson'), [['configure', 'build', '-Drevision=' + revision]])
                     self.assertEqual(self.calls_for('make'),
                                      [['configure'], ['release', 'NINJA=env -u NINJA ninja -j1'], ['check', 'NINJA=ninja']])
                     self.assert_docker('pristine', revision)
+
+    def test_european_builds_stage_the_verified_dump_after_preparation(self):
+        dump = self.root / 'european dump.nds'
+        dump.write_bytes(b'european ROM')
+        for mode in ('modified', 'pristine'):
+            with self.subTest(mode=mode):
+                args = ('--pristine',) if mode == 'pristine' else ()
+                result = self.run_build(*args, env=dict(self.env, ROM_REVISION='10', DSWT_EUROPE_ROM=str(dump)))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('europe'), [[str(dump), str(self.workspace)]])
+                self.assertEqual([name for name, _ in self.calls][1:5], ['python', 'prepare', 'python', 'europe'])
+                self.assert_docker(mode, '10')
+        self.assertEqual(dump.read_bytes(), b'european ROM')
+
+    def test_european_build_requires_a_local_dump(self):
+        for dump in ('', str(self.root / 'missing.nds')):
+            with self.subTest(dump=dump):
+                result = self.run_build('--pristine', env=dict(self.env, ROM_REVISION='10', DSWT_EUROPE_ROM=dump))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('DSWT_EUROPE_ROM', result.stderr)
+                self.assertEqual(self.calls, [])
 
     def test_positive_job_overrides_apply_to_both_build_modes(self):
         for mode in ('modified', 'pristine'):
