@@ -13,6 +13,9 @@
 const WtGameConfig gWtGameConfig = {
     { 0x30000, 0x70000 },
     DEFAULT_DWC_DMA_NUMBER, DEFAULT_DWC_POWER_MODE,
+    { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
+    /* Released clients enroll US English Platinum as legacy code 1. */
+    1,
 };
 
 void *WtGame_Alloc(WtGame *game, size_t size)

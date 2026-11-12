@@ -46,6 +46,11 @@ typedef struct WtGameConfig {
     uint32_t journalBank[2];
     /* Wi-Fi access point DMA channel and power mode the game's SDK use expects. */
     uint8_t wifiDma, wifiPowerMode;
+    /* SDK backup types (CARDBackupType) the game identifies its 4 Mbit save
+     * flash as; journal access refuses any other. List one type twice if needed. */
+    uint32_t flashType[2];
+    /* Enroll's game variant code (protocol/README.md, "Game variants"). */
+    uint32_t enrollVariant;
 } WtGameConfig;
 
 extern const WtGameConfig gWtGameConfig;

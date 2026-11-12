@@ -291,7 +291,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
          * Its NV-seed update uses this same active engine journal handle. */
         if (psa_crypto_init() != PSA_SUCCESS) { result = -31; break; }
         if (WtJournal_Read(&engine->journal, &engine->entry) != 0) { result = -30; break; }
-        if (engine->entry.phase == WT_JOURNAL_EMPTY && WtEngine_Enroll(engine, 1) != 0) { result = -30; break; }
+        if (engine->entry.phase == WT_JOURNAL_EMPTY && WtEngine_Enroll(engine, gWtGameConfig.enrollVariant) != 0) { result = -30; break; }
         /* A restored superseded copy stays fenced behind the other copy's history. */
         if (transport->superseded && engine->entry.phase == WT_JOURNAL_IDLE) { result = 0; break; }
         if (engine->entry.phase == WT_JOURNAL_IDLE && engine->synchronized) {

@@ -1,0 +1,177 @@
+{
+  "key": 22356,
+  "messages": [
+    {
+      "id": "WonderTrade_Text_Title",
+      "en_US": "WONDER TRADE"
+    },
+    {
+      "id": "WonderTrade_Text_Trade",
+      "en_US": "Wonder Trade"
+    },
+    {
+      "id": "WonderTrade_Text_Info",
+      "en_US": "Info"
+    },
+    {
+      "id": "WonderTrade_Text_Exit",
+      "en_US": "Exit"
+    },
+    {
+      "id": "WonderTrade_Text_Retry",
+      "en_US": "Retry"
+    },
+    {
+      "id": "WonderTrade_Text_Back",
+      "en_US": "Back"
+    },
+    {
+      "id": "WonderTrade_Text_Cancel",
+      "en_US": "Cancel"
+    },
+    {
+      "id": "WonderTrade_Text_Connecting",
+      "en_US": "Connecting to Wi-Fi...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_Disconnecting",
+      "en_US": "Disconnecting...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_Choose",
+      "en_US": "Choose a party Pokémon\nto offer for Wonder Trade."
+    },
+    {
+      "id": "WonderTrade_Text_Pinging",
+      "en_US": "Saving and contacting the\nWonder Trade server...\nDo not turn off the power."
+    },
+    {
+      "id": "WonderTrade_Text_ConnectionError",
+      "en_US": "Could not connect to Wi-Fi.\nCheck your WFC settings,\nthen retry."
+    },
+    {
+      "id": "WonderTrade_Text_PingError",
+      "en_US": "Could not verify the server\nor saved connection state.\nCheck the connection code."
+    },
+    {
+      "id": "WonderTrade_Text_Ineligible",
+      "en_US": "Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail, capsules,\nAprijuice or Spiky-eared PICHU."
+    },
+    {
+      "id": "WonderTrade_Text_Duplicate",
+      "en_US": "An identical or damaged\nPokémon in your party or PC\nstops this one being offered."
+    },
+    {
+      "id": "WonderTrade_Text_Explanation",
+      "en_US": "Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save."
+    },
+    {
+      "id": "WonderTrade_Text_Diagnostics",
+      "en_US": "Connection details"
+    },
+    {
+      "id": "WonderTrade_Text_ErrorCode",
+      "en_US": "Connection code"
+    },
+    {
+      "id": "WonderTrade_Text_ConnectMs",
+      "en_US": "Connect ms"
+    },
+    {
+      "id": "WonderTrade_Text_TlsBytes",
+      "en_US": "TLS bytes"
+    },
+    {
+      "id": "WonderTrade_Text_StackBytes",
+      "en_US": "Stack bytes"
+    },
+    {
+      "id": "WonderTrade_Text_FrameMs",
+      "en_US": "Frame gap ms"
+    },
+    {
+      "id": "WonderTrade_Text_CheckingSave",
+      "en_US": "Checking saved game...\nPlease wait."
+    },
+    {
+      "id": "WonderTrade_Text_RecoveryRequired",
+      "en_US": "Trade recovery required.\nConnect to try again.\n\nKeep this save and its\nrecovery files."
+    },
+    {
+      "id": "WonderTrade_Text_Confirm",
+      "en_US": "Offer the selected Pokémon?\nIt will leave your party."
+    },
+    {
+      "id": "WonderTrade_Text_Queued",
+      "en_US": "Your trade is pending.\nChoose Collect result to\ncheck its status."
+    },
+    {
+      "id": "WonderTrade_Text_Collect",
+      "en_US": "Collect result"
+    },
+    {
+      "id": "WonderTrade_Text_CancelOffer",
+      "en_US": "Cancel offer"
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmCollect",
+      "en_US": "Collect your trade result?\nTrade evolution keeps the\ncurrent moves."
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmCancel",
+      "en_US": "Cancel an unmatched offer?\nIf matched, collect instead.\nEvolution keeps current moves."
+    },
+    {
+      "id": "WonderTrade_Text_Completed",
+      "en_US": "Trade completed!\nYour Pokémon is saved in\nyour party or PC."
+    },
+    {
+      "id": "WonderTrade_Text_Received",
+      "en_US": "You received"
+    },
+    {
+      "id": "WonderTrade_Text_OriginalTrainer",
+      "en_US": "From"
+    },
+    {
+      "id": "WonderTrade_Text_Returned",
+      "en_US": "Offer cancelled.\nYour original Pokémon\nis saved in your party or PC."
+    },
+    {
+      "id": "WonderTrade_Text_Rejected",
+      "en_US": "The server rejected the offer.\nYour original Pokémon\nhas been restored."
+    },
+    {
+      "id": "WonderTrade_Text_Superseded",
+      "en_US": "Another copy of this save\ntraded first. Your Pokémon\nhas been restored."
+    },
+    {
+      "id": "WonderTrade_Text_Waiting",
+      "en_US": "No trade partner yet.\nYour Pokémon is still\nwaiting. Check again later."
+    },
+    {
+      "id": "WonderTrade_Text_NoRoom",
+      "en_US": "Your result is kept pending.\nMake space in your party\nor PC, then collect again."
+    },
+    {
+      "id": "WonderTrade_Text_KeepPlaying",
+      "en_US": "A little more play is needed\nto prepare Wonder Trade.\nKeep playing, then try again."
+    },
+    {
+      "id": "WonderTrade_Text_ConfirmAction",
+      "en_US": "Confirm"
+    },
+    {
+      "id": "WonderTrade_Text_RecoveryAction",
+      "en_US": "Connect and retry"
+    },
+    {
+      "id": "WonderTrade_Text_CannotHold",
+      "en_US": "This game cannot hold the\nPokémon you received. It\nstays pending on the server."
+    },
+    {
+      "id": "WonderTrade_Text_Level",
+      "en_US": "Lv."
+    }
+  ]
+}

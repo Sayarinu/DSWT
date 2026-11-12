@@ -4,7 +4,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SDK = re.compile(r"(std\w+|string|stdio)\.h|nitro\.h|nitroWiFi/\w+\.h|dwc\.h|(mbedtls|psa)/[\w/]+\.h")
+SDK = re.compile(r"(std\w+|string|stdio)\.h|nitro\.h|nnsys/fnd\.h|nitroWiFi/\w+\.h|dwc\.h|(mbedtls|psa)/[\w/]+\.h")
 
 
 class SharedCoreTests(unittest.TestCase):
