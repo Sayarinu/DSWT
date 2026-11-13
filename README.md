@@ -2,17 +2,15 @@
 
 # DSWT
 
-**Wonder Trade for Pokémon Platinum.**
+**Wonder Trade for the Pokémon DS games.**
 
-DSWT is a patch for your own copy of Pokémon Platinum that adds Wonder Trade to
-the X menu, plus the server that runs it. Offer a party Pokémon, keep playing,
-and come back later to collect whatever another player sent. Trades are checked
-for legality and are designed to survive dropped connections and crashes.
+Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold or SoulSilver, keep playing, and collect whatever another player sent, from any of those games.
 
 [![CI](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Platforms](https://img.shields.io/badge/patcher-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-[Features](#features) · [Getting the patch](#getting-the-patch) · [How it works](#how-it-works) · [FAQ](#faq) · [Contributing](#contributing)
+[**Download**](#download) · [Features](#features) · [Guide](https://github.com/Sayarinu/DSWT/wiki) · [FAQ](#faq)
 
 </div>
 
@@ -20,107 +18,56 @@ for legality and are designed to survive dropped connections and crashes.
 
 ## Features
 
-- **Wonder Trade from the X menu.** Pick a party Pokémon and confirm. It waits on
-  the server while you keep playing.
-- **Collect when you're ready.** Choose **Collect result** to receive your match,
-  or **Cancel offer** before a match to get your Pokémon back.
-- **Trade evolutions** happen when you collect, as in a normal trade.
-- **Legality checks.** The server screens every offer with
-  [PKHeX.Core](https://github.com/kwsch/PKHeX) and returns rejected Pokémon to you.
-- **Built for interruptions.** Every step of a trade is saved, so a lost
-  connection resumes the same trade instead of losing or duplicating a Pokémon.
-- **Secure connection.** The game talks to the server over TLS with a pinned
-  server key; no plaintext fallback.
-- **Optional durable emulator build.** A [patched melonDS](emulator/README.md)
-  for Linux also protects trades against emulator or host crashes.
+- **Wonder Trade in the game's own menu.** Pick a party Pokémon and confirm.
+- **Trade across games.** Platinum, Diamond, Pearl, HeartGold and SoulSilver all trade with each other, and a Pokémon only goes to a game that can hold it.
+- **Collect when you're ready.** Your offer waits on the server while you play. Cancel any time before a match.
+- **Trade evolutions** happen when you collect.
+- **Legality checks.** Every offer is checked with [PKHeX.Core](https://github.com/kwsch/PKHeX), and refused Pokémon come back to you.
+- **Built for interruptions.** Every step is saved, so a crash or lost connection picks up the same trade instead of losing or duplicating a Pokémon, and the game still starts normally.
+- **Secure connection** over TLS with a pinned server key.
 
-## Getting the patch
+## Download
 
-Download **DSWT Patcher** for Windows, macOS or Linux from the
-[releases](https://github.com/Sayarinu/DSWT/releases), choose your own ROM and
-save the patched copy. It recognises your cartridge, accepts trimmed dumps and
-verifies the result. Each release also has the patch archive DSWT Patcher uses,
-installation instructions and a `manifest.json` of checksums. **DSWT never distributes ROMs.**
+DSWT is a patch: you need a dump of your own cartridge. **DSWT never distributes ROMs.**
 
-Supported today:
+| Game | Version |
+|---|---|
+| Pokémon Platinum | US English, Rev 0 and Rev 1 |
+| Pokémon Diamond and Pearl | US English, Rev 5 |
+| Pokémon HeartGold and SoulSilver | US English |
 
-| Game | Revisions | Emulator |
-| --- | --- | --- |
-| Pokémon Platinum, US English | Rev 0 and Rev 1 | melonDS 1.1 |
-| Pokémon Diamond and Pearl, US English | Rev 5 | melonDS 1.1 |
-| Pokémon HeartGold and SoulSilver, US English | Rev 0 | melonDS 1.1 |
+Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)** once the first release is out, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
 
-Other versions and languages (Japanese, Korean, European English, French, German,
-Italian and Spanish) and the other Gen IV games (Diamond, Pearl, HeartGold and
-SoulSilver) are recognised but each needs its own ported and tested target first. Physical DS hardware is not supported yet.
-
-- [Install and trade guide](patches/INSTALL.md): what players do with a released bundle.
-- [ROM compatibility](patches/README.md): the verified inputs and the bundle contract.
-- [BPS patch tooling](tools/bps-patch/README.md) and [player app](tools/patcher-app/README.md): build, check and release patches.
-
-## How it works
-
-The DS cannot speak gRPC, so the game sends small fixed-layout frames over HTTPS
-to a gateway. Everything behind the gateway talks gRPC on a private network, and
-only HTTPS is exposed.
-
-```text
- Patched Platinum (melonDS)
-            │  HTTPS POST /wt/v1, TLS 1.2 with a pinned key
-            ▼
- HTTPS gateway (C++) ──gRPC──► Trade backend (C++) ──gRPC──► Legality validator
-                                      │                      (.NET, PKHeX.Core)
-                                      ▼
-                   Matcher (C++) ──► PostgreSQL 16 ledger ──► off-site backups
-
- Prometheus and Grafana monitor the services; critical alerts go to Discord.
-```
-
-- [Wire protocol](protocol/README.md): the DS message layout and recovery rules.
-- [Deployment](deploy/README.md): Docker Compose on a single VPS.
+Step-by-step install and trading instructions are in the **[guide](https://github.com/Sayarinu/DSWT/wiki/Install)**.
 
 ## FAQ
 
 **Do you provide the game?**
-No. DSWT ships no ROMs, BIOS files, saves or game assets. You patch a copy of a
-game you own.
+No. DSWT ships no ROMs, BIOS files, saves or game assets. You patch a copy of a game you own.
 
 **Is my save uploaded?**
-No. The server stores a random ID for your save, a hash-protected credential,
-the Pokémon you trade with their trainer details, and trade history, to prove
-ownership and recover trades. See [Privacy](patches/INSTALL.md#privacy).
+No. The server keeps a random ID for your save, a protected credential, the Pokémon you trade with their trainer details, and your trade history, to prove ownership and recover trades.
 
-**What happens if the server is down?**
-Your offered Pokémon stays safely in escrow. Choose Retry later; the game keeps
-your place.
+**What if the server is down, or the game crashes mid-trade?**
+Your Pokémon stays safe. The game finishes what it can when it starts, and the rest finishes the next time you open Wonder Trade. See [Troubleshooting](https://github.com/Sayarinu/DSWT/wiki/Troubleshooting).
 
 **Can I use save states or restore an old save?**
-Don't. The server tracks each save's progress, so an older copy stops at
-verification and can lose access to its pending trade.
+Please don't. The server tracks each save's progress, so an older copy can lose its pending trade.
 
-**Can I run my own server?**
-Yes. The server address and key pins are built into the ROM, so you build your
-own patched ROM for your server. See [Deployment](deploy/README.md).
+**Does it work on a real DS?**
+Not yet. melonDS 1.1 is the tested emulator.
+
+**Can I run my own server or build it myself?**
+Yes. See [Build from Source](https://github.com/Sayarinu/DSWT/wiki/Build-from-Source) and [Deployment](https://github.com/Sayarinu/DSWT/wiki/Deployment).
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Open an
-[issue](https://github.com/Sayarinu/DSWT/issues) first, then read
-[AGENTS.md](AGENTS.md) for the repository layout, local checks and branch,
-commit and pull request rules. It applies to people and coding agents alike.
+Bug reports and pull requests are welcome. Please open an [issue](https://github.com/Sayarinu/DSWT/issues) first, then read [AGENTS.md](AGENTS.md) for the layout, checks and branch, commit and pull request rules. Developer guides are in the [wiki](https://github.com/Sayarinu/DSWT/wiki).
 
 ## License
 
-Original DSWT work is under the [MIT License](LICENSE). The legality validator
-in [`validator/`](validator/) is GPL-3.0-or-later, and the melonDS patch in
-[`emulator/`](emulator/) carries melonDS's GPL; their own notices apply. Neither
-license covers the game, its assets or other third-party components. See
-[NOTICE](NOTICE) and [`licensing/`](licensing/).
+Original DSWT work is under the [MIT License](LICENSE). The legality validator in [`validator/`](validator/) is GPL-3.0-or-later, and the melonDS patch in [`emulator/`](emulator/) carries melonDS's GPL; their own notices apply. Neither covers the games, their assets or other third-party components. See [NOTICE](NOTICE) and [`licensing/`](licensing/).
 
 ## Disclaimer
 
-DSWT is an independent, unofficial fan project. It is not affiliated with,
-endorsed by or sponsored by Nintendo, Game Freak, Creatures or The Pokémon
-Company. Pokémon and Nintendo DS are trademarks of their respective owners.
-This repository and its releases contain no ROMs, BIOS files, saves or original
-game assets.
+DSWT is an independent, unofficial fan project. It is not affiliated with, endorsed by or sponsored by Nintendo, Game Freak, Creatures or The Pokémon Company. Pokémon and Nintendo DS are trademarks of their respective owners.

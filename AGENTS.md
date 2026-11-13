@@ -1,30 +1,31 @@
 # Contributor guide
 
 This guide is for people and coding agents working on DSWT. Read it before
-changing code; [`README.md`](README.md) covers what the project does for players.
+changing code. [`README.md`](README.md) covers what the project does for players,
+and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, build, test, release and deploy it.
 
 ## Project
 
-- DSWT modifies Pokémon Platinum so it can take part in Wonder Trade, paired with
-  a custom Wonder Trade server.
-- The pinned [pret/pokeplatinum](https://github.com/pret/pokeplatinum)
-  decompilation stays local in the ignored `game/pokeplatinum/`. Never commit
+- DSWT modifies Pokémon Diamond, Pearl, Platinum, HeartGold and SoulSilver so
+  they can take part in Wonder Trade, paired with a custom Wonder Trade server.
+- The pinned [pret](https://github.com/pret) decompilations stay local in the
+  ignored `game/` directory. Never commit
   anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file.
 - Project additions and integration changes to the game live in `client/`.
   Preserve upstream notices, and record the new revision in `client/UPSTREAM.md`
-  and `client/upstream.json` when refreshing the workspace.
+  and the matching `client/upstream*.json` when refreshing a workspace.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `client/` | Game-independent client core, the Platinum and HeartGold/SoulSilver adapters (`platinum/` and `hgss/` directories, behind `game_adapter.h`), their integration patches and host/native client tests |
+| `client/` | Game-independent client core, the Platinum, HeartGold/SoulSilver and Diamond/Pearl adapters (`platinum/`, `hgss/` and `dp/`, behind `game_adapter.h`), their integration patches and native client tests |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
 | `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
-| `deploy/` | Docker Compose, Terraform and monitoring for the single VPS ([`deploy/README.md`](deploy/README.md)) |
-| `patches/` | ROM compatibility contract and player install guide |
+| `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
+| `patches/` | Supported cartridges and the install guide shipped in each release |
 | `scripts/` | ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
@@ -91,7 +92,7 @@ docker build -f emulator/Dockerfile -t dswt-emulator-builder .
 CI also scans the full history with gitleaks and runs `git diff --check` on the
 pull request. Pushes to `main` that change the server, validator, `protocol/` or
 deployment files publish images and deploy them to the VPS over Tailscale
-(`.github/workflows/deploy.yml`, see [`deploy/README.md`](deploy/README.md)), so
+(`.github/workflows/deploy.yml`, see the [Deployment](https://github.com/Sayarinu/DSWT/wiki/Deployment) page), so
 only merge what is ready to serve players. The required check names are listed in
 `.github/repository-settings.json`; renaming a job means updating that file.
 
@@ -111,5 +112,10 @@ only merge what is ready to serve players. The required check names are listed i
   link to the tracker; the ID is enough.
 - PRs merge into `main` with a merge commit once the required checks pass and
   review conversations are resolved. Squash and rebase merges are disabled.
-- Change docs and this file only when necessary or beneficial. Keep updates
-  brief and skip routine progress notes.
+- Documentation lives in the [wiki](https://github.com/Sayarinu/DSWT/wiki), written in plain terms. Keep
+  `README.md` short, like a store page, and update the wiki page a change
+  affects. Track only docs something depends on: this file, `README.md`,
+  `patches/INSTALL.md` (shipped in releases), `client/UPSTREAM.md`,
+  `validator/README.md` (in the validator image's GPL source) and license
+  notices. Change docs only when necessary or beneficial, and skip routine
+  progress notes.

@@ -1,87 +1,72 @@
 # Install Wonder Trade
 
-Wonder Trade is a patch for your own copy of Pokémon Platinum, with Diamond,
-Pearl, HeartGold and SoulSilver being tested. It trades a party Pokémon with a
-random player through this project's server. No ROM is included.
+DSWT adds Wonder Trade to your own copy of a Pokémon DS game. It changes your
+game; no game files are included. The full guide is at
+https://github.com/Sayarinu/DSWT/wiki.
 
 ## What you need
 
-- A decrypted dump of your own US English cartridge: Pokémon Platinum (Rev 0 or
-  Rev 1), Diamond or Pearl (Rev 5), or HeartGold or SoulSilver. Trimmed dumps
-  work. Every game trades with every other, and a Pokémon is only sent to a game
-  that can hold it. Other versions and languages are
-  recognised but not supported yet, and encrypted dumps are refused.
-- melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
-- The DSWT Patcher for your computer from the release page. Generic BPS
-  patchers such as Flips are not supported: DSWT Patcher unpacks your ROM's
-  compressed code before patching.
+- A dump of your own US English cartridge: Pokémon Platinum (Rev 0 or Rev 1),
+  Diamond or Pearl (Rev 5), or HeartGold or SoulSilver. Trimmed dumps work.
+  Other versions and languages are recognised but not supported yet.
+- melonDS 1.1. Physical DS hardware isn't supported yet.
+- DSWT Patcher for your computer. Other patching tools such as Flips don't work.
 
 ## Patch your game
 
-1. Back up your save file before your first Wonder Trade.
-2. Open DSWT Patcher, choose your ROM and save the patched copy. The patcher
-   checks your ROM, explains any refusal, and verifies the result. It never
-   changes your original file or replaces an existing one.
-3. Name the patched ROM so it uses your existing save, then load it in melonDS.
-   melonDS finds a save by the ROM's file name: `Platinum.nds` uses `Platinum.sav`.
+1. Back up your save file.
+2. Open DSWT Patcher, choose your ROM and save the patched copy. It checks your
+   ROM, explains any problem and verifies the result. Your original file is
+   never changed.
+3. Give the patched ROM the same name as your save, then open it in melonDS:
+   `Platinum.nds` uses `Platinum.sav`.
 
-The apps are not code-signed. On Windows, choose **More info**, then **Run
-anyway**. On macOS, Control-click the app, choose **Open**, then confirm. The macOS
-app runs on Apple silicon. On Linux, mark `DSWT Patcher` executable and run it.
-`SHA256SUMS` on the release page lists every file's checksum.
+The apps aren't code-signed. On Windows choose **More info**, then **Run
+anyway**. On macOS (Apple silicon) Control-click the app, choose **Open**, then
+confirm. On Linux, mark `DSWT Patcher` as executable. `SHA256SUMS` on the release
+page lists every file's checksum.
 
 ## Trade
 
-Open the X menu and choose **Wonder Trade**. A new save may ask you to keep
-playing first, because the game gathers randomness from your play to secure it.
+Open the menu and choose **Wonder Trade**. A brand-new save may ask you to keep
+playing for a moment first, to gather randomness that secures your connection.
 
-1. Choose **Wonder Trade**, then pick a party Pokémon and confirm. It leaves your
-   party and waits on the server. You can offer one Pokémon at a time per save.
-2. Keep playing, and come back to Wonder Trade whenever you like.
-3. Choose **Collect result**. The game shows what you received and saves it to
-   your party or PC. If no one has matched yet, your Pokémon keeps waiting.
-4. Before a match, **Cancel offer** returns your Pokémon.
+1. Choose **Wonder Trade**, pick a party Pokémon and confirm. It leaves your
+   party and waits on the server. You can offer one Pokémon at a time.
+2. Keep playing, and come back whenever you like.
+3. Choose **Collect result** to receive your Pokémon in your party, or your PC if
+   your party is full. If nobody has matched yet, your Pokémon keeps waiting.
+4. Before a match, **Cancel offer** gives your Pokémon back.
 
-Traded Pokémon that evolve by trade do so when collected, and keep their current
-moves. If your party and PC are full, your result stays pending until you make
-space and collect again.
+Every game trades with every other, and a Pokémon is only sent to a game that can
+hold it. Trade evolutions happen when you collect. If your party and PC are full,
+your result waits until you make space.
 
-You cannot offer an Egg, a Pokémon holding mail, one with a capsule, or your last
-usable Pokémon. The server also refuses Pokémon that fail its legality check, and
-returns them to you. An exact copy of a Pokémon you already hold cannot be offered.
+You can't offer an Egg, a Pokémon holding mail, one with a ball capsule, your last
+Pokémon that can battle, or an exact copy of one you already have. The server
+refuses illegal Pokémon and gives them back. It can't promise every Pokémon you
+receive is legitimate.
 
 ## If something goes wrong
 
-Your trade is saved at each step, so interrupted trades are designed to recover.
+Every step of a trade is saved, so an interrupted trade picks up where it left off.
 
-- **Connection errors:** choose Retry. Your Pokémon and your place are kept. A
-  trade can wait a few seconds while the server secures it, and longer if the
-  server is down.
-- **"Trade recovery required" at startup:** connect and let it finish. Normal
-  saving stays blocked until then, to protect the trade.
-- **Do not** restore an old save, load a savestate, or copy a save to get around
-  an error. The server tracks each save's progress, so an older copy stops at
-  verification and can lose access to its pending trade.
-- **Error -52000 on melonDS:** quit and reopen melonDS completely.
-
-Patching only changes the ROM. Keep your save with any recovery files beside it.
-
-## Known limits
-
-- On a stock emulator, a crash before the emulator writes your save to disk can
-  roll the save back behind the server, which can duplicate or lose a Pokémon.
-  Let the game finish saving, and close the emulator normally. A
-  [durable Linux build](../emulator/README.md) of melonDS guards against this.
-- Copies of a save are outside what the game can protect. Backups taken before
-  your first Wonder Trade enroll as an unrelated player.
-- The legality check screens offers; it does not guarantee every Pokémon you
-  receive is legitimate.
+- **Connection error:** choose Retry. Your Pokémon and your place are kept.
+- **The game closed or crashed mid-trade:** start it normally. It finishes what it
+  can by itself, and the rest finishes the next time you open Wonder Trade. You can
+  play and save as usual meanwhile.
+- **"Trade recovery required" at startup:** choose **Connect and retry**.
+- **Error -52000 on melonDS:** quit melonDS completely and open it again.
+- **Don't** restore an old save, load a savestate or copy a save to get around an
+  error. An older copy can lose its pending trade.
+- Let the game finish saving and close melonDS normally. A crash before your save
+  reaches the disk can put it behind the server.
 
 ## Privacy
 
-The server stores a random ID for your save, a hash-protected credential, the
-Pokémon you trade with their trainer details, and trade history. It keeps these
-to prove ownership and recover trades. Your save file itself is not uploaded.
+The server keeps a random ID for your save, a protected credential, the Pokémon
+you trade with their trainer details, and your trade history, to prove ownership
+and recover trades. Your save file is never uploaded.
 
 ## Notices
 
