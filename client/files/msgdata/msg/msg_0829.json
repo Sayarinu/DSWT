@@ -108,7 +108,7 @@
       "de_DE": "Speichern und verbinden... System\nnicht ausschalten.",
       "it_IT": "Salvataggio e connessione. Non\nspegnere.",
       "es_ES": "Guardando y conectando... No\napagues la consola.",
-      "ja_JP": "レポートを　かいています\nでんげんを　きらないでください",
+      "ja_JP": "レポ－トを　かいています\nでんげんを　きらないでください",
       "ko_KR": "리포트를 작성하고 있습니다\n전원을 끄지 마십시오"
     },
     {
@@ -118,7 +118,7 @@
       "de_DE": "Keine Verbindung zum Internet.\nÜberprüfe die Einstellungen der\nNintendo WFC und ob dein\nZugangspunkt in Reichweite ist, und\nversuche es dann noch einmal.",
       "it_IT": "Impossibile connettersi a Internet.\nControlla le impostazioni della\nNintendo WFC e che il punto di accesso\nsia nel raggio d’azione, poi riprova.",
       "es_ES": "No se ha podido conectar a Internet.\nComprueba la configuración de la CWF\nde Nintendo y que el punto de acceso\nesté cerca, y vuelve a intentarlo.",
-      "ja_JP": "インターネットに\nせつぞく　できませんでした\nニンテンドーWi‐Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください",
+      "ja_JP": "インタ－ネットに\nせつぞく　できませんでした\nニンテンド－Wi-Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください",
       "ko_KR": "인터넷에 접속할 수 없었습니다\n닌텐도 Wi-Fi 커넥션 설정을\n확인하고 다시 시도해 주십시오"
     },
     {
@@ -128,7 +128,7 @@
       "de_DE": "Verbindungsfehler beim Wundertausch.\nBitte versuche es noch einmal. Tritt\nder Fehler erneut auf, notiere den\nCode unten.",
       "it_IT": "Errore di comunicazione con lo Scambio\nProdigioso. Riprova. Se l’errore si\nripete, annota il codice qui sotto.",
       "es_ES": "Error de conexión con el Intercambio\nProdigioso. Vuelve a intentarlo. Si se\nrepite, anota el código de abajo.",
-      "ja_JP": "つうしんエラーが　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コードを　ひかえてください",
+      "ja_JP": "つうしんエラ－が　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コ－ドを　ひかえてください",
       "ko_KR": "통신 에러가 발생했습니다\n다시 시도해 주십시오\n계속 발생하면\n아래 코드를 적어 두십시오"
     },
     {
@@ -138,7 +138,7 @@
       "de_DE": "Dieses Pokémon kann nicht zum Tausch\nangeboten werden. Behalte ein\nanderes kampffähiges Pokémon. Keine\nEier, Briefe, Ballkapseln,\nAprikodrinks oder Strubbelohr-PICHU.",
       "it_IT": "Quel Pokémon non può essere\nscambiato. Tieni un altro Pokémon in\ngrado di lottare. Niente Uova,\nMessaggi, Capsule, Ghicosucco o PICHU\nSpunzorek.",
       "es_ES": "No se puede intercambiar ese\nPokémon. Conserva otro Pokémon que\npueda combatir. Sin huevos, cartas,\ncápsulas, Bongurchata ni PICHU\nPicoreja.",
-      "ja_JP": "その　ポケモンは　だせません！\nたたかえる　ポケモンを\nほかに　のこしてください\nタマゴ　メール　カプセル\nボンドリンク　ギザみみピチューは\nだせません",
+      "ja_JP": "その　ポケモンは　だせません！\nたたかえる　ポケモンを\nほかに　のこしてください\nタマゴ　メ－ル　カプセル\nボンドリンク　ギザみみピチュ－は\nだせません",
       "ko_KR": "그 포켓몬은 내놓을 수 없습니다!\n싸울 수 있는 포켓몬을\n남겨 주십시오\n알, 메일, 캡슐, 규드링크,\n삐쭉귀 피츄는 안 됩니다"
     },
     {
@@ -158,7 +158,7 @@
       "de_DE": "Tausche ein Pokémon aus deinem Team\nmit einem zufälligen Trainer. Es\nwartet sicher auf dem Server. Komm\nzurück, um das Ergebnis abzuholen,\noder brich vorher ab. Ein Angebot pro\nSpielstand.",
       "it_IT": "Scambia un Pokémon della squadra con\nun Allenatore a caso. Attende al\nsicuro sul server. Torna a ritirare il\nrisultato o annulla prima dello\nscambio. Un’offerta per salvataggio.",
       "es_ES": "Intercambia un Pokémon de tu equipo\ncon un Entrenador al azar. Espera\nseguro en el servidor. Vuelve para\nrecoger el resultado o cancela antes\ndel intercambio. Una oferta por\npartida.",
-      "ja_JP": "てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサーバーで　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポートに　ひとつまで",
+      "ja_JP": "てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサ－バ－で　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポ－トに　ひとつまで",
       "ko_KR": "지닌 포켓몬을\n누군가와 교환합니다\n상대가 정해질 때까지\n서버에서 맡아 둡니다\n나중에 받거나\n그 전에 취소해 주십시오\n리포트 하나에 하나까지"
     },
     {
@@ -178,7 +178,7 @@
       "de_DE": "Support-Code",
       "it_IT": "Codice assistenza",
       "es_ES": "Código de asistencia",
-      "ja_JP": "サポートコード",
+      "ja_JP": "サポ－トコ－ド",
       "ko_KR": "지원 코드"
     },
     {
@@ -218,7 +218,7 @@
       "de_DE": "Bildlücke ms",
       "it_IT": "Pausa frame ms",
       "es_ES": "Pausa fotograma ms",
-      "ja_JP": "フレーム　ms",
+      "ja_JP": "フレ－ム　ms",
       "ko_KR": "프레임 ms"
     },
     {
@@ -228,7 +228,7 @@
       "de_DE": "Spielstand wird geprüft... Bitte\nwarte.",
       "it_IT": "Verifica del salvataggio...\nAttendi.",
       "es_ES": "Comprobando la partida... Espera\nun momento.",
-      "ja_JP": "レポートを　かくにん　しています\nしばらく　おまちください",
+      "ja_JP": "レポ－トを　かくにん　しています\nしばらく　おまちください",
       "ko_KR": "리포트를 확인하고 있습니다\n잠시만 기다려주십시오"
     },
     {
@@ -238,7 +238,7 @@
       "de_DE": "Der Tausch muss wiederhergestellt\nwerden. Verbinde dich, um es noch\neinmal zu versuchen.\n\nBehalte diesen Spielstand und seine\nWiederherstellungsdateien.",
       "it_IT": "Lo scambio deve essere ripristinato.\nConnettiti per riprovare.\n\nConserva questo salvataggio e i suoi\nfile di ripristino.",
       "es_ES": "Hay que recuperar el intercambio.\nConéctate para volver a intentarlo.\n\nConserva esta partida y sus archivos\nde recuperación.",
-      "ja_JP": "こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポートと\nふっきゅうファイルを\nのこしてください",
+      "ja_JP": "こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポ－トと\nふっきゅうファイルを\nのこしてください",
       "ko_KR": "교환 복구가 필요합니다\n접속해서 다시 시도해 주십시오\n\n이 리포트와\n복구 파일을 보관해 주십시오"
     },
     {
@@ -348,7 +348,7 @@
       "de_DE": "Vom Server abgelehnt. Dein\nPokémon ist zurück.",
       "it_IT": "Offerta rifiutata. Il Pokémon è\ntornato.",
       "es_ES": "Oferta rechazada. Tu Pokémon ha\nvuelto.",
-      "ja_JP": "サーバーが　ことわりました\nポケモンは　もどりました",
+      "ja_JP": "サ－バ－が　ことわりました\nポケモンは　もどりました",
       "ko_KR": "서버가 거부했습니다\n포켓몬이 돌아왔습니다"
     },
     {
@@ -358,7 +358,7 @@
       "de_DE": "Eine Spielstand-Kopie war\nschneller. Pokémon zurück.",
       "it_IT": "Una copia del salvataggio ha\nscambiato prima. Pokémon reso.",
       "es_ES": "Otra copia de la partida fue\nantes. Pokémon devuelto.",
-      "ja_JP": "べつの　コピーが　さきに　こうかん\nポケモンは　もどりました",
+      "ja_JP": "べつの　コピ－が　さきに　こうかん\nポケモンは　もどりました",
       "ko_KR": "다른 사본이 먼저 교환했습니다\n포켓몬이 돌아왔습니다"
     },
     {
@@ -418,7 +418,7 @@
       "de_DE": "Hier nicht empfangbar. Es bleibt\nauf dem Server.",
       "it_IT": "Questo gioco non può riceverlo.\nResta sul server.",
       "es_ES": "Este juego no puede tenerlo. Se\nqueda en el servidor.",
-      "ja_JP": "この　ソフトでは　あずかれません\nサーバーに　のこります",
+      "ja_JP": "この　ソフトでは　あずかれません\nサ－バ－に　のこります",
       "ko_KR": "이 소프트로는 받을 수 없습니다\n서버에 남습니다"
     },
     {
@@ -438,7 +438,7 @@
       "de_DE": "Speichere, bevor du den\nWundertausch nutzt.",
       "it_IT": "Salva prima di usare lo Scambio\nProdigioso.",
       "es_ES": "Guarda antes de usar el\nIntercambio Prodigioso.",
-      "ja_JP": "つかう　まえに\nレポートを　かいてください",
+      "ja_JP": "つかう　まえに\nレポ－トを　かいてください",
       "ko_KR": "쓰기 전에\n리포트를 작성해 주십시오"
     }
   ]

@@ -78,7 +78,7 @@
       "de_DE": "Verbindung zur Nintendo WFC... Bitte\nwarte einen Moment.",
       "it_IT": "Connessione alla Nintendo Wi-Fi\nConnection... Attendi un momento.",
       "es_ES": "Conectando con la CWF de Nintendo...\nPor favor, espera un momento.",
-      "ja_JP": "Wi‐Fiに　せつぞく　しています\nしばらく　おまちください",
+      "ja_JP": "Wi-Fiに　せつぞく　しています\nしばらく　おまちください",
       "ko_KR": "Wi-Fi 커넥션에 접속하고 있습니다\n잠시만 기다려주십시오"
     },
     {
@@ -108,7 +108,7 @@
       "de_DE": "Speichervorgang und Verbindung zum\nServer... Bitte das System nicht\nausschalten.",
       "it_IT": "Salvataggio e connessione al server in\ncorso. Non spegnere la console.",
       "es_ES": "Guardando y conectando con el\nservidor... No apagues la consola.",
-      "ja_JP": "レポートを　かいて　サーバーに\nせつぞく　しています\nでんげんを　きらないでください",
+      "ja_JP": "レポ－トを　かいて　サ－バ－に\nせつぞく　しています\nでんげんを　きらないでください",
       "ko_KR": "리포트를 작성하고\n서버에 접속하고 있습니다\n전원을 끄지 마십시오"
     },
     {
@@ -118,7 +118,7 @@
       "de_DE": "Keine Verbindung. Überprüfe die\nEinstellungen der Nintendo WFC und\nversuche es noch einmal.",
       "it_IT": "Connessione non riuscita. Controlla le\nimpostazioni della Nintendo WFC e\nriprova.",
       "es_ES": "No se ha podido conectar. Comprueba la\nconfiguración de la CWF de Nintendo y\nvuelve a intentarlo.",
-      "ja_JP": "せつぞく　できませんでした\nWi‐Fiコネクションの　せっていを\nかくにんしてください",
+      "ja_JP": "せつぞく　できませんでした\nWi-Fiコネクションの　せっていを\nかくにんしてください",
       "ko_KR": "접속할 수 없었습니다\nWi-Fi 커넥션 설정을\n확인해 주십시오"
     },
     {
@@ -128,7 +128,7 @@
       "de_DE": "Server oder gespeicherte Verbindung\nkonnten nicht geprüft werden. Prüfe den\nVerbindungscode.",
       "it_IT": "Impossibile verificare il server o la\nconnessione salvata. Controlla il codice\ndi connessione.",
       "es_ES": "No se ha podido verificar el servidor ni\nla conexión guardada. Comprueba el\ncódigo de conexión.",
-      "ja_JP": "サーバーか　せつぞくの　きろくを\nかくにん　できませんでした\nせつぞくコードを　みてください",
+      "ja_JP": "サ－バ－か　せつぞくの　きろくを\nかくにん　できませんでした\nせつぞくコ－ドを　みてください",
       "ko_KR": "서버나 접속 기록을\n확인할 수 없었습니다\n접속 코드를 확인해 주십시오"
     },
     {
@@ -138,7 +138,7 @@
       "de_DE": "Nicht tauschbar. Behalte ein anderes\nkampffähiges Pokémon. Keine Eier, Briefe\noder Ballkapseln.",
       "it_IT": "Non puoi scambiarlo. Tieni un altro\nPokémon che lotta. Niente Uova,\nMessaggi o Capsule.",
       "es_ES": "No se puede intercambiar. Conserva\notro Pokémon apto. Sin huevos, cartas\nni cápsulas.",
-      "ja_JP": "その　ポケモンは　だせません！　たたかえる\nポケモンを　ほかに　のこしてください　タマゴ\nメール　カプセルは　だせません",
+      "ja_JP": "その　ポケモンは　だせません！　たたかえる\nポケモンを　ほかに　のこしてください　タマゴ\nメ－ル　カプセルは　だせません",
       "ko_KR": "그 포켓몬은 내놓을 수 없습니다! 싸울 수 있는\n포켓몬을 남겨 주십시오 알, 메일, 캡슐은 안 됩니다"
     },
     {
@@ -158,7 +158,7 @@
       "de_DE": "Tausche ein Pokémon aus deinem Team mit\neinem zufälligen Trainer. Es wartet\nsicher auf dem Server. Komm zurück, um\ndas Ergebnis abzuholen, oder brich\nvorher ab. Ein Angebot pro Spielstand.",
       "it_IT": "Scambia un Pokémon della squadra con un\nAllenatore a caso. Attende al sicuro sul\nserver. Torna a ritirare il risultato o\nannulla prima dello scambio. Un’offerta\nper salvataggio.",
       "es_ES": "Intercambia un Pokémon de tu equipo con\nun Entrenador al azar. Espera seguro en\nel servidor. Vuelve para recoger el\nresultado o cancela antes del\nintercambio. Una oferta por partida.",
-      "ja_JP": "てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサーバーで　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポートに　ひとつまで",
+      "ja_JP": "てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサ－バ－で　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポ－トに　ひとつまで",
       "ko_KR": "지닌 포켓몬을\n누군가와 교환합니다\n상대가 정해질 때까지\n서버에서 맡아 둡니다\n나중에 받거나\n그 전에 취소해 주십시오\n리포트 하나에 하나까지"
     },
     {
@@ -178,7 +178,7 @@
       "de_DE": "Verbindungscode",
       "it_IT": "Codice connessione",
       "es_ES": "Código de conexión",
-      "ja_JP": "せつぞくコード",
+      "ja_JP": "せつぞくコ－ド",
       "ko_KR": "접속 코드"
     },
     {
@@ -218,7 +218,7 @@
       "de_DE": "Bildlücke ms",
       "it_IT": "Pausa frame ms",
       "es_ES": "Pausa fotograma ms",
-      "ja_JP": "フレーム　ms",
+      "ja_JP": "フレ－ム　ms",
       "ko_KR": "프레임 ms"
     },
     {
@@ -228,7 +228,7 @@
       "de_DE": "Spielstand wird geprüft... Bitte warte\neinen Moment.",
       "it_IT": "Verifica del salvataggio in corso.\nAttendi un momento.",
       "es_ES": "Comprobando la partida... Por favor,\nespera un momento.",
-      "ja_JP": "レポートを　かくにん　しています\nしばらく　おまちください",
+      "ja_JP": "レポ－トを　かくにん　しています\nしばらく　おまちください",
       "ko_KR": "리포트를 확인하고 있습니다\n잠시만 기다려주십시오"
     },
     {
@@ -238,7 +238,7 @@
       "de_DE": "Der Tausch muss wiederhergestellt\nwerden. Verbinde dich, um es noch einmal\nzu versuchen.\n\nBehalte diesen Spielstand und seine\nWiederherstellungsdateien.",
       "it_IT": "Lo scambio deve essere ripristinato.\nConnettiti per riprovare.\n\nConserva questo salvataggio e i suoi file\ndi ripristino.",
       "es_ES": "Hay que recuperar el intercambio.\nConéctate para volver a intentarlo.\n\nConserva esta partida y sus archivos de\nrecuperación.",
-      "ja_JP": "こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポートと\nふっきゅうファイルを\nのこしてください",
+      "ja_JP": "こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポ－トと\nふっきゅうファイルを\nのこしてください",
       "ko_KR": "교환 복구가 필요합니다\n접속해서 다시 시도해 주십시오\n\n이 리포트와\n복구 파일을 보관해 주십시오"
     },
     {
@@ -348,7 +348,7 @@
       "de_DE": "Der Server hat das Angebot abgelehnt.\nDu hast dein Pokémon zurückbekommen.",
       "it_IT": "Il server ha rifiutato l’offerta. Il\nPokémon ti è stato restituito.",
       "es_ES": "El servidor ha rechazado la oferta. Has\nrecuperado tu Pokémon.",
-      "ja_JP": "サーバーが　こうかんを\nことわりました\nポケモンは　もどりました",
+      "ja_JP": "サ－バ－が　こうかんを\nことわりました\nポケモンは　もどりました",
       "ko_KR": "서버가 교환을 거부했습니다\n포켓몬이 돌아왔습니다"
     },
     {
@@ -358,7 +358,7 @@
       "de_DE": "Eine andere Kopie dieses Spielstands hat\nzuerst getauscht. Du hast dein Pokémon\nzurückbekommen.",
       "it_IT": "Un’altra copia di questo salvataggio ha\nscambiato per prima. Il Pokémon ti è\nstato restituito.",
       "es_ES": "Otra copia de esta partida intercambió\nprimero. Has recuperado tu Pokémon.",
-      "ja_JP": "この　レポートの　べつの　コピーが\nさきに　こうかん　しました\nポケモンは　もどりました",
+      "ja_JP": "この　レポ－トの　べつの　コピ－が\nさきに　こうかん　しました\nポケモンは　もどりました",
       "ko_KR": "이 리포트의 다른 사본이\n먼저 교환했습니다\n포켓몬이 돌아왔습니다"
     },
     {
@@ -418,7 +418,7 @@
       "de_DE": "Dieses Spiel kann das erhaltene Pokémon\nnicht aufnehmen. Es bleibt auf dem\nServer.",
       "it_IT": "Questo gioco non può accogliere il\nPokémon ricevuto. Resta sul server.",
       "es_ES": "Este juego no puede tener el Pokémon\nrecibido. Se queda en el servidor.",
-      "ja_JP": "この　ソフトでは　うけとった\nポケモンを　あずかれません\nサーバーに　のこります",
+      "ja_JP": "この　ソフトでは　うけとった\nポケモンを　あずかれません\nサ－バ－に　のこります",
       "ko_KR": "이 소프트로는 받은\n포켓몬을 맡을 수 없습니다\n서버에 남습니다"
     }
   ]
