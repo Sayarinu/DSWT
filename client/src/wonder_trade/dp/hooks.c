@@ -74,7 +74,8 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
 #define AFFINE_OVERWRITE_MODE_DOUBLE 2
 
 /* Family 1 (Diamond and Pearl), the game's version ID (10 Diamond, 11 Pearl),
- * English (2), revision 5 (wiki Protocol, "Game variants"). */
+ * English (2) and revision 5 (wiki Protocol, "Game variants"). Enrollment
+ * takes the revision from the running cartridge (WtGame_EnrollVariant). */
 #if defined(PEARL)
 #define WT_VARIANT 0x010B0205
 #else
@@ -92,6 +93,13 @@ const WtGameConfig gWtGameConfig = {
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_VARIANT,
 };
+
+/* The European English cartridge runs the same code as the US one, so the
+ * revision comes from the running cartridge's header (offset 0x1E). */
+uint32_t WtGame_EnrollVariant(void)
+{
+    return (gWtGameConfig.enrollVariant & ~0xFFu) | *(const u8 *)(HW_ROM_HEADER_BUF + 0x1E);
+}
 
 void *WtGame_Alloc(WtGame *game, size_t size)
 {

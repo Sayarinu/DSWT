@@ -23,6 +23,12 @@ const WtGameConfig gWtGameConfig = {
     WT_GAME_VARIANT,
 };
 
+/* Each Platinum revision is a separate build with its own variant code. */
+uint32_t WtGame_EnrollVariant(void)
+{
+    return gWtGameConfig.enrollVariant;
+}
+
 void *WtGame_Alloc(WtGame *game, size_t size)
 {
     return Heap_Alloc(game->heapID, size);

@@ -18,7 +18,8 @@ extern void sub_02034DE0(void);
 
 #define SLEEP_SAVE_DATA 1
 
-/* Family 3 (HG/SS), the game's version ID, English (2), revision 0. */
+/* Family 3 (HG/SS), the game's version ID, English (2) and revision 0. Enrollment
+ * takes the revision from the running cartridge (WtGame_EnrollVariant). */
 #if defined(SOULSILVER)
 #define WT_VARIANT 0x03080200
 #else
@@ -34,6 +35,13 @@ const WtGameConfig gWtGameConfig = {
     { CARD_BACKUP_TYPE_FLASH_4MBITS_EX, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_VARIANT,
 };
+
+/* The European English cartridge runs the same code as the US one, so the
+ * revision comes from the running cartridge's header (offset 0x1E). */
+uint32_t WtGame_EnrollVariant(void)
+{
+    return (gWtGameConfig.enrollVariant & ~0xFFu) | *(const u8 *)(HW_ROM_HEADER_BUF + 0x1E);
+}
 
 void *WtGame_Alloc(WtGame *game, size_t size)
 {
