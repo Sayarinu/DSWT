@@ -9,8 +9,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
   a custom Wonder Trade server.
 - The pinned [pret/pokeplatinum](https://github.com/pret/pokeplatinum)
   decompilation stays local in the ignored `game/pokeplatinum/`. Never commit
-  anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file;
-  the contribution check rejects them, even in deleted history.
+  anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file.
 - Project additions and integration changes to the game live in `client/`.
   Preserve upstream notices, and record the new revision in `client/UPSTREAM.md`
   and `client/upstream.json` when refreshing the workspace.
@@ -27,7 +26,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
 | `docs/` | Building from source and operating the services |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS ([`deploy/README.md`](deploy/README.md)) |
 | `patches/` | ROM compatibility contract and player install guide |
-| `scripts/` | ROM build, workspace preparation, TLS and contribution tooling |
+| `scripts/` | ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
 
@@ -58,9 +57,6 @@ opening it. Commands run from the repository root with Python 3.12 or newer and
 Docker. Workflows are in `.github/workflows/`.
 
 ```sh
-# Check contribution policy
-python3 scripts/check-contribution.py
-
 # Validate source inputs
 python3 -m unittest discover -s scripts/tests
 python3 -m venv game/policy-venv
