@@ -173,6 +173,7 @@ class BundleTests(Fixture):
                 info = bundle.cartridge(rom(5, code, code=code))
                 self.assertEqual((info["game"], info["size"], info["region"]), (game, size * 1024 * 1024, "North America"))
                 self.assertEqual(bundle.describe(info), f"{game} (North America, English, Rev 5)")
+                self.assertEqual(bundle.title({"game_code": code, "name": "USA Rev 5"}), f"{game} USA Rev 5")
         europe = bundle.cartridge(rom(10, "eu", code="CPUE"))
         self.assertEqual(bundle.describe(europe), "Pokémon Platinum (Europe, English, Rev 10)")
         self.assertIsNone(bundle.cartridge(b"\xff" * 0x200))
