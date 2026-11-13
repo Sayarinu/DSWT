@@ -78,7 +78,6 @@ enum WonderTradeAppState {
 /* The GTS reserves the same for itself and its Wi-Fi heap (overlay 80). */
 #define WT_HEAP_SIZE 0x70000
 #define WT_BOOT_STACK_SIZE 0x8000
-#define WT_BOOT_SILENT_FRAMES 30
 #define WT_FONT_SYSTEM 0
 #define WT_FONT_MESSAGE 1
 /* A pressed button blinks this long before it acts, as touch menus do. */
@@ -715,7 +714,7 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     const unsigned char *stack;
     u32 size, unused;
     if (!OS_IsThreadTerminated(&worker->thread)) {
-        /* Usually this finishes unseen. A longer check may be writing, so ask for patience. */
+        /* Usually this finishes unseen; only a slow check opens the screen early. */
         if (!app->graphicsReady && ++app->bootFrames == WT_BOOT_SILENT_FRAMES) WonderTrade_InitGraphics(app);
         return FALSE;
     }

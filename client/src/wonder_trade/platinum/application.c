@@ -55,7 +55,6 @@ enum WonderTradeAppState {
 };
 
 #define WT_BOOT_STACK_SIZE 0x8000
-#define WT_BOOT_SILENT_FRAMES 30
 typedef struct WonderTradeBootWorker {
     OSThread thread;
     WtFlashAccess flash;
@@ -522,7 +521,7 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     const unsigned char *stack;
     u32 size, unused;
     if (!OS_IsThreadTerminated(&worker->thread)) {
-        /* Usually this finishes unseen. A longer check may be writing, so ask for patience. */
+        /* Usually this finishes unseen; only a slow check opens the screen early. */
         if (!app->graphicsReady && ++app->bootFrames == WT_BOOT_SILENT_FRAMES) WonderTrade_InitGraphics(app);
         return FALSE;
     }

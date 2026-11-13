@@ -73,7 +73,6 @@ enum WonderTradeAppState {
 
 #define WT_HEAP_SIZE 0x80000
 #define WT_BOOT_STACK_SIZE 0x8000
-#define WT_BOOT_SILENT_FRAMES 30
 #define WT_FADE_FRAMES 6
 #define WT_PRESS_FRAMES 8
 
@@ -701,7 +700,7 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     u32 size, unused;
     if (worker == NULL) return WonderTrade_Leave(app);
     if (!OS_IsThreadTerminated(&worker->thread)) {
-        /* Usually this finishes unseen. A longer check may be writing, so ask for patience. */
+        /* Usually this finishes unseen; only a slow check opens the screen early. */
         if (!app->graphicsReady && ++app->bootFrames == WT_BOOT_SILENT_FRAMES) WonderTrade_InitGraphics(app);
         else if (app->redraw) WonderTrade_Draw(app);
         return FALSE;
