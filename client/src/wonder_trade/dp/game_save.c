@@ -65,6 +65,11 @@ int WtGameSave_LayoutKnown(const SaveData *save)
     return gWtGameConfig.journalBank[0] == 0x30000 && gWtGameConfig.journalBank[1] == 0x70000;
 }
 
+int WtGameSave_Written(const SaveData *save)
+{
+    return !save->isNewGame && save->saveFileExists;
+}
+
 /* SHA-256 of both blocks' bodies in RAM, the bytes a save writes before each footer. */
 static int Hash(const SaveData *save, unsigned char digest[32])
 {

@@ -46,11 +46,11 @@
 	</row>
 	<row id="WonderTrade_Text_ConnectionError" index="11">
 		<attribute name="window_context_name">used</attribute>
-		<language name="English">Could not connect to Wi-Fi.\nCheck your WFC settings,\nthen retry.</language>
+		<language name="English">Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again.</language>
 	</row>
 	<row id="WonderTrade_Text_PingError" index="12">
 		<attribute name="window_context_name">used</attribute>
-		<language name="English">Could not verify the server\nor saved connection state.\nCheck the connection code.</language>
+		<language name="English">Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below.</language>
 	</row>
 	<row id="WonderTrade_Text_Ineligible" index="13">
 		<attribute name="window_context_name">used</attribute>
@@ -70,7 +70,7 @@
 	</row>
 	<row id="WonderTrade_Text_ErrorCode" index="17">
 		<attribute name="window_context_name">used</attribute>
-		<language name="English">Connection code</language>
+		<language name="English">Support code</language>
 	</row>
 	<row id="WonderTrade_Text_ConnectMs" index="18">
 		<attribute name="window_context_name">used</attribute>
@@ -171,5 +171,9 @@
 	<row id="WonderTrade_Text_Level" index="42">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Lv.</language>
+	</row>
+	<row id="WonderTrade_Text_SaveFirst" index="43">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Save your adventure before\nusing Wonder Trade.</language>
 	</row>
 </body>
