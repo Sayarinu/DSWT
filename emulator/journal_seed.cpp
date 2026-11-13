@@ -80,8 +80,10 @@ constexpr Layout kHeartGoldSoulSilver{{0, 63232}, {63016, 74512}, 16, 4, 8, 12, 
 
 const Layout &LayoutFor(const std::string &target) {
     if (target == "us-rev0" || target == "us-rev1" || target == "europe") return kPlatinum;
-    if (target == "diamond-us-rev5" || target == "pearl-us-rev5") return kDiamondPearl;
-    Require(target == "heartgold-us-rev0" || target == "soulsilver-us-rev0");
+    if (target == "diamond-us-rev5" || target == "pearl-us-rev5" || target == "diamond-europe-rev5" ||
+        target == "pearl-europe-rev5") return kDiamondPearl;
+    Require(target == "heartgold-us-rev0" || target == "soulsilver-us-rev0" || target == "heartgold-europe" ||
+            target == "soulsilver-europe");
     return kHeartGoldSoulSilver;
 }
 
