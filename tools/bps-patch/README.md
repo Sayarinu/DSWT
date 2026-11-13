@@ -33,6 +33,9 @@ python3 tools/bps-patch/patcher.py package game/bundles/0.1.0 --output game/bund
 Each base must match a pristine-verified catalogue entry with a planned patch
 ([`patches/compatibility.json`](../../patches/compatibility.json)). Each target must
 keep its base's game code and revision and contain both profile pins exactly once.
+HeartGold and SoulSilver compress their ARM9 binary and overlays, so the profile,
+key and path checks also search that code expanded; the retail-content check
+below sees compressed code only as compressed bytes.
 Every patch is created twice (bytes must match), walked, and reproduced by both
 Flips and `bps.py`. The bundle is staged and renamed into place without replacing
 anything; `audit/` keeps the walker report and literals for review and is never
