@@ -10,7 +10,7 @@ diff --git a/arm9/Makefile b/arm9/Makefile
 @@ -133 +133 @@ ARFLAGS = rcS
 -STATIC_LIBS := $(addprefix $(BUILD_DIR)/lib/,libsyscall.a)
 +STATIC_LIBS := $(addprefix $(BUILD_DIR)/lib/,libsyscall.a libwonder_trade_tls.a)
-@@ -220,0 +221,41 @@ $(BUILD_DIR)/lib/MSL_C/%.o: MWCFLAGS += -ipa file
+@@ -220,0 +221,44 @@ $(BUILD_DIR)/lib/MSL_C/%.o: MWCFLAGS += -ipa file
 +# Wonder Trade: the shared core, the Diamond/Pearl adapter and Mbed TLS build
 +# against CodeWarrior's MSL C headers instead of the partial lib/MSL_C copy, and
 +# against declaration-only SDK shims from include/wonder_trade/dp/sdk.
@@ -39,6 +39,9 @@ diff --git a/arm9/Makefile b/arm9/Makefile
 +
 +$(WT_C_OBJS): MWCFLAGS = $(WT_MWCFLAGS)
 +$(WT_TLS_OBJS): MWCFLAGS = $(WT_TLS_MWCFLAGS)
++# The game itself must stay on 2.0/sp1 to match retail. Wonder Trade and Mbed TLS
++# use 2.0/sp2p2, the compiler Platinum and HeartGold/SoulSilver build them with.
++$(WT_C_OBJS) $(WT_TLS_OBJS): CC = $(WINE) $(TOOLS_DIR)/mwccarm/2.0/sp2p2/mwccarm.exe
 +$(WT_C_OBJS) $(WT_TLS_OBJS): export MWCIncludes := $(WT_MSL_INCLUDES)
 +$(WT_C_OBJS): $(BUILD_DIR)/wonder_trade_config.h
 +
