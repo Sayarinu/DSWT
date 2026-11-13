@@ -426,8 +426,10 @@ static void WonderTrade_PrintNumber(WonderTradeApp *app, struct Window *window, 
 {
     struct String *number = String_New(12, app->game.heapID);
     int x;
+    String16_FormatInteger(number, value, 10, PRINTING_MODE_LEFT_ALIGN, TRUE);
+    /* Right-align at `right`, never past the window's own edge. */
+    if (right > GetWindowWidth(window) * 8 - 8) right = GetWindowWidth(window) * 8 - 8;
     x = right - (int)sub_02002E14(WT_FONT_SYSTEM, number, 0);
-    x = GetWindowWidth(window) * 8 - (int)sub_02002E14(WT_FONT_SYSTEM, number, 0) - 8;
     WonderTrade_PrintString(window, WT_FONT_SYSTEM, number, x, y, color);
     String_Delete(number);
 }
