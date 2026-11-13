@@ -54,7 +54,7 @@ services:
     environment:
       <<: *service-database
       DSWT_DATABASE_URL: host=/test/run port=5432 dbname=dswt_e2e user=dswt_service
-      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-dswt2
+      WT_LEGALITY_POLICY: pkhex-26.08.26-74b88906-dswt3
       WT_METRICS_PORT: "9092"
       WT_SUBMISSION_WORKERS: ${DSWT_LOCAL_SUBMISSION_WORKERS:-4}
       DSWT_DISPOSABLE_DEVICE_TEST: !reset null

@@ -17,7 +17,10 @@ networking disabled, `--exact`, and never `--ignore-checksum`.
 
 Commit first; generation refuses a dirty tree. Build each pristine base and its
 modified target from that commit with the production profile, copying each ROM
-out of `game/pokeplatinum*/build/` before the next build:
+out of `game/pokeplatinum*/build/` before the next build (repeat for revision 0,
+and for revision 10 with `DSWT_EUROPE_ROM` naming your European dump; for the
+other games, set `ROM_GAME` and copy from `game/pokeheartgold*/build/` or
+`game/pokediamond*/`):
 
 ```sh
 ROM_REVISION=1 ./scripts/build-rom.sh --pristine
@@ -25,13 +28,17 @@ WONDER_TRADE_PROFILE=game/dswt-production/tls/connection.json ROM_REVISION=1 ./s
 python3 tools/bps-patch/patcher.py create --version 0.1.0 \
   --profile game/dswt-production/tls/connection.json --output game/bundles/0.1.0 \
   --pair game/roms/us-rev0.nds game/roms/us-rev0-wt.nds \
-  --pair game/roms/us-rev1.nds game/roms/us-rev1-wt.nds
+  --pair game/roms/us-rev1.nds game/roms/us-rev1-wt.nds \
+  --pair game/roms/europe.nds game/roms/europe-wt.nds
 python3 tools/bps-patch/patcher.py package game/bundles/0.1.0 --output game/bundles/dswt-0.1.0.zip
 ```
 
-Each base must match a pristine-verified catalogue entry
+Each base must match a pristine-verified catalogue entry with a planned patch
 ([`patches/compatibility.json`](../../patches/compatibility.json)). Each target must
 keep its base's game code and revision and contain both profile pins exactly once.
+HeartGold and SoulSilver compress their ARM9 binary and overlays, so the profile,
+key and path checks also search that code expanded; the retail-content check
+below sees compressed code only as compressed bytes.
 Every patch is created twice (bytes must match), walked, and reproduced by both
 Flips and `bps.py`. The bundle is staged and renamed into place without replacing
 anything; `audit/` keeps the walker report and literals for review and is never

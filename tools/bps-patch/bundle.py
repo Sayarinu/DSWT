@@ -19,7 +19,6 @@ import bps
 KIND = "dswt-bps-bundle"
 SCHEMA_VERSION = 2
 MAX_MANIFEST = 1024 * 1024
-FULL_SIZE = 128 * 1024 * 1024
 PATCH_NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,63}\.bps")
 VARIANT = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -28,17 +27,32 @@ HEADER_SIZE = 0x200
 GAME_CODE = slice(0x0C, 0x10)
 ROM_VERSION = 0x1E
 USED_SIZE = 0x80
-# Retail Pokémon Platinum cartridges by game code.
-CARTRIDGES = {
-    "CPUJ": ("Japan", "Japanese"),
-    "CPUE": ("North America", "English"),
-    "CPUP": ("Europe", "English"),
-    "CPUF": ("France", "French"),
-    "CPUD": ("Germany", "German"),
-    "CPUI": ("Italy", "Italian"),
-    "CPUS": ("Spain", "Spanish"),
-    "CPUK": ("Korea", "Korean"),
+# Gen IV Pokémon games by the first three letters of the header game code, with
+# their full cartridge size in bytes.
+GAMES = {
+    "ADA": ("Pokémon Diamond", 64 * 1024 * 1024),
+    "APA": ("Pokémon Pearl", 64 * 1024 * 1024),
+    "CPU": ("Pokémon Platinum", 128 * 1024 * 1024),
+    "IPK": ("Pokémon HeartGold", 128 * 1024 * 1024),
+    "IPG": ("Pokémon SoulSilver", 128 * 1024 * 1024),
 }
+# The last letter of the game code: region and language.
+REGIONS = {
+    "J": ("Japan", "Japanese"),
+    "E": ("North America", "English"),
+    "P": ("Europe", "English"),
+    "F": ("France", "French"),
+    "D": ("Germany", "German"),
+    "I": ("Italy", "Italian"),
+    "S": ("Spain", "Spanish"),
+    "K": ("Korea", "Korean"),
+}
+# Retail cartridges by game code: (game, region, language).
+CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, (game, _) in GAMES.items() for letter in REGIONS}
+GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
+# European English cartridges that reuse the US game code, told apart by their
+# header revision: Platinum Europe reads CPUE revision 10.
+EUROPE_AS_US = {("CPUE", 10)}
 
 
 class BundleError(ValueError):
@@ -54,7 +68,7 @@ def crc32_hex(data):
 
 
 def cartridge(data):
-    """Describe a Platinum dump from its header, or return None for anything else."""
+    """Describe a Gen IV Pokémon dump from its header, or return None for anything else."""
     if len(data) < HEADER_SIZE:
         return None
     try:
@@ -63,12 +77,21 @@ def cartridge(data):
         return None
     if code not in CARTRIDGES:
         return None
-    region, language = CARTRIDGES[code]
-    return {"game_code": code, "region": region, "language": language, "revision": data[ROM_VERSION]}
+    game, region, language = CARTRIDGES[code]
+    revision = data[ROM_VERSION]
+    if (code, revision) in EUROPE_AS_US:
+        region = "Europe"
+    return {"game": game, "game_code": code, "region": region, "language": language,
+            "revision": revision, "size": GAMES[code[:3]][1]}
 
 
 def describe(info):
-    return f"Pokémon Platinum ({info['region']}, {info['language']}, Rev {info['revision']})"
+    return f"{info['game']} ({info['region']}, {info['language']}, Rev {info['revision']})"
+
+
+def title(entry):
+    """Name a manifest entry with its game, such as "Pokémon HeartGold USA Rev 0"."""
+    return f"{GAMES[entry['game_code'][:3]][0]} {entry['name']}"
 
 
 def restore(data, size):
@@ -132,11 +155,11 @@ def select(manifest, data):
             raise BundleError(f"This ROM already has DSWT {manifest['version']} applied.")
     info = cartridge(data)
     if info is None:
-        raise BundleError("This file is not a Pokémon Platinum ROM.")
+        raise BundleError(f"This file is not a {GAME_NAMES} ROM.")
     supported = [entry for entry in entries if entry["game_code"] == info["game_code"]
                  and entry["revision"] == info["revision"]]
     if not supported:
-        names = ", ".join(sorted({entry["name"] for entry in entries}))
+        names = ", ".join(sorted({title(entry) for entry in entries}))
         raise BundleError(f"{describe(info)} is not supported yet. Supported: {names}.")
     if len(data) < HEADER_SIZE + 1 or len(data) > supported[0]["input"]["size"]:
         raise BundleError(f"{describe(info)} has an unexpected size; use a clean, decrypted dump.")

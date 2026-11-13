@@ -54,6 +54,11 @@ if os.environ.get('TEST_PREPARE_FAIL'):
     raise SystemExit('Preserve local workspace edits')
 print(os.environ['TEST_WORKSPACE'])
 ''')
+        self.tool(self.scripts / 'prepare-europe.py', '''
+record('europe', sys.argv[1:])
+assert Path(sys.argv[1]).is_file() and (Path(sys.argv[2]) / '.git').is_dir()
+print(Path(sys.argv[2]) / '.git/dswt-europe')
+''')
         self.tool(self.scripts / 'prepare-tls.py', '''
 record('tls', sys.argv[1:])
 print(os.environ['TEST_TLS'])
@@ -75,26 +80,38 @@ if sys.argv[1] == 'run':
                                    cwd=os.environ['TEST_WORKSPACE']).returncode)
 assert sys.argv[1] == 'build'
 ''')
+        for wine in ('wineserver', 'wineboot'):
+            self.tool(binary / wine, f'''
+record({wine!r}, sys.argv[1:])
+assert Path(os.environ['WINEPREFIX']).is_dir()
+''')
         self.tool(binary / 'make', '''
 record('make', sys.argv[1:])
-if sys.argv[1:] == ['configure']:
-    Path('build').mkdir(exist_ok=True)
-    Path('build/build.ninja').touch()
-    if not Path('build/revision').exists():
+args, build = sys.argv[1:], Path('build')
+if args[0].startswith('-j'):
+    # pokediamond's Make build.
+    raise SystemExit(0)
+if args[0].startswith('GAME_VERSION='):
+    # pokeheartgold keeps one build directory per version.
+    build = build / (args.pop(0).removeprefix('GAME_VERSION=').lower() + '.us')
+if args == ['configure'] or args == ['setup_rom']:
+    build.mkdir(parents=True, exist_ok=True)
+    (build / 'build.ninja').touch()
+    if args == ['configure'] and not Path('build/revision').exists():
         Path('build/revision').write_text('1')
-elif sys.argv[1] == 'release':
+elif args[0] == 'release':
     if os.environ.get('TEST_RELEASE_FAIL'):
         raise SystemExit(9)
-    assert Path('build/build.ninja').is_file()
-    command = sys.argv[2].removeprefix('NINJA=')
+    assert (build / 'build.ninja').is_file()
+    command = args[1].removeprefix('NINJA=')
     # GNU Make exports command-line variables to Ninja and its children.
     os.environ['NINJA'] = command
     raise SystemExit(subprocess.run(shlex.split(command)).returncode)
-elif sys.argv[1] == 'check':
-    assert sys.argv[2:] == ['NINJA=ninja']
+elif args[0] == 'check':
+    assert args[1:] == ['NINJA=ninja']
     assert Path('built').is_file()
 else:
-    assert sys.argv[1:] == ['meson', 'skrew', 'build/lsfgen.stamp']
+    assert args == ['meson', 'skrew', f'{build}/lsfgen.stamp']
 ''')
         self.tool(binary / 'ninja', '''
 record('ninja', sys.argv[1:])
@@ -110,11 +127,14 @@ Path('built').touch()
         meson.parent.mkdir(parents=True)
         self.tool(meson, '''
 record('meson', sys.argv[1:])
+build = Path(sys.argv[2])
 if sys.argv[1] == 'setup':
-    Path('build').mkdir()
-    Path('build/build.ninja').touch()
+    build.mkdir(parents=True)
+    (build / 'build.ninja').touch()
 else:
-    assert sys.argv[1] == 'configure' and Path('build/build.ninja').is_file()
+    assert sys.argv[1] == 'configure' and (build / 'build.ninja').is_file()
+if build != Path('build'):
+    raise SystemExit(0)
 revision = next(arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('-Drevision='))
 previous = Path('build/revision')
 if previous.exists() and previous.read_text() != revision:
@@ -144,11 +164,11 @@ def record(tool, args):
     def calls_for(self, tool):
         return [args for name, args in self.calls if name == tool]
 
-    def assert_docker(self, mode, revision, jobs='1'):
+    def assert_docker(self, mode, revision, jobs='1', image='dswt-rom-builder', builder='tools/rom-builder'):
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '--platform', 'linux/amd64', '-f',
-                                str(self.root / 'tools/rom-builder/Dockerfile'), '-t',
-                                'dswt-rom-builder', str(self.root / 'tools/rom-builder')])
+                                str(self.root / builder / 'Dockerfile'), '-t',
+                                image, str(self.root / builder)])
         self.assertEqual(run[:3], ['run', '--platform', 'linux/amd64'])
         self.assertIn('ROM_REVISION=' + revision, run)
         self.assertIn('ROM_BUILD_JOBS=' + jobs, run)
@@ -158,7 +178,7 @@ def record(tool, args):
         self.assertEqual(mounts, [str(self.workspace) + ':/workspace'] +
                          ([str(self.tls) + ':/tls:ro'] if mode == 'modified' else []))
         self.assertEqual(run[run.index('-w') + 1], '/workspace')
-        self.assertEqual(run[-4:-1], ['dswt-rom-builder', 'bash', '-c'])
+        self.assertEqual(run[-4:-1], [image, 'bash', '-c'])
 
     def test_modified_fresh_and_incremental_builds_both_revisions(self):
         for revision in ('0', '1'):
@@ -199,12 +219,107 @@ def record(tool, args):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertTrue((self.workspace / 'built').is_file())
                     self.assertEqual(self.calls_for('prepare'), [['--pristine']])
+                    self.assertFalse(self.calls_for('europe'))
                     self.assertFalse(self.calls_for('tls') or self.calls_for('profile'))
                     self.assertEqual(len(self.calls_for('python')), 2)
                     self.assertEqual(self.calls_for('meson'), [['configure', 'build', '-Drevision=' + revision]])
                     self.assertEqual(self.calls_for('make'),
                                      [['configure'], ['release', 'NINJA=env -u NINJA ninja -j1'], ['check', 'NINJA=ninja']])
                     self.assert_docker('pristine', revision)
+
+    def test_european_builds_stage_the_verified_dump_after_preparation(self):
+        dump = self.root / 'european dump.nds'
+        dump.write_bytes(b'european ROM')
+        for mode in ('modified', 'pristine'):
+            with self.subTest(mode=mode):
+                args = ('--pristine',) if mode == 'pristine' else ()
+                result = self.run_build(*args, env=dict(self.env, ROM_REVISION='10', DSWT_EUROPE_ROM=str(dump)))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('europe'), [[str(dump), str(self.workspace)]])
+                self.assertEqual([name for name, _ in self.calls][1:5], ['python', 'prepare', 'python', 'europe'])
+                self.assert_docker(mode, '10')
+        self.assertEqual(dump.read_bytes(), b'european ROM')
+
+    def test_european_build_requires_a_local_dump(self):
+        for dump in ('', str(self.root / 'missing.nds')):
+            with self.subTest(dump=dump):
+                result = self.run_build('--pristine', env=dict(self.env, ROM_REVISION='10', DSWT_EUROPE_ROM=dump))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('DSWT_EUROPE_ROM', result.stderr)
+                self.assertEqual(self.calls, [])
+
+    def test_heartgold_and_soulsilver_build_from_one_hgss_workspace(self):
+        for game in ('heartgold', 'soulsilver'):
+            version = game.upper()
+            build = f'build/{game}.us'
+            env = dict(self.env, ROM_GAME=game)
+            del env['ROM_REVISION']
+            with self.subTest(game=game, mode='pristine'):
+                result = self.run_build('--pristine', env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'hgss', '--pristine']])
+                self.assertFalse(self.calls_for('meson'))
+                self.assertEqual(self.calls_for('make'), [
+                    [f'GAME_VERSION={version}', 'setup_rom'],
+                    [f'GAME_VERSION={version}', 'release', 'NINJA=env -u NINJA ninja -j1'],
+                    [f'GAME_VERSION={version}', 'check', 'NINJA=ninja']])
+                self.assert_docker('pristine', '0')
+                self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
+            # The fixture shares one directory; real pristine builds use their own workspace.
+            shutil.rmtree(self.workspace / 'build')
+            for fresh in (True, False):
+                with self.subTest(game=game, mode='modified', fresh=fresh):
+                    result = self.run_build(env=env)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(self.calls_for('prepare'), [['--game', 'hgss']])
+                    meson = self.calls_for('meson')
+                    self.assertEqual([call[:2] for call in meson],
+                                     ([['setup', build]] if fresh else []) + [['configure', build]])
+                    for call in meson:
+                        self.assertIn('-Dgame_version=' + version, call)
+                        self.assertIn('-Dwonder_trade_tls_dir=/tls', call)
+                        self.assertIn('-Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h', call)
+                    self.assertEqual(self.calls_for('make'),
+                                     ([[f'GAME_VERSION={version}', 'meson', 'skrew', f'{build}/lsfgen.stamp']] if fresh else [])
+                                     + [[f'GAME_VERSION={version}', 'release', 'NINJA=env -u NINJA ninja -j1']])
+                    self.assert_docker('modified', '0')
+
+    def test_diamond_and_pearl_build_from_one_dp_workspace(self):
+        # The image's toolchain is already installed in this workspace.
+        license = self.workspace / 'tools/mwccarm/license.dat'
+        license.parent.mkdir(parents=True)
+        license.touch()
+        for game in ('diamond', 'pearl'):
+            env = dict(self.env, ROM_GAME=game, ROM_BUILD_JOBS='4')
+            del env['ROM_REVISION']
+            with self.subTest(game=game):
+                result = self.run_build('--pristine', env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'dp', '--pristine']])
+                self.assertEqual(self.calls_for('wineserver'), [['-p']])
+                self.assertEqual(self.calls_for('wineboot'), [['-i']])
+                self.assertEqual(self.calls_for('make'), [['-j4', f'GAME_VERSION={game.upper()}', 'COMPARE=1']])
+                self.assertFalse(self.calls_for('meson') or self.calls_for('ninja'))
+                self.assert_docker('pristine', '5', '4', 'dswt-rom-builder-dp', 'tools/rom-builder-dp')
+                self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
+            with self.subTest(game=game, mode='modified'):
+                result = self.run_build(env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'dp']])
+                self.assertEqual(self.calls_for('make'), [[
+                    '-j4', f'GAME_VERSION={game.upper()}', 'COMPARE=0', 'WT_TLS_DIR=/tls',
+                    'WT_MSL_DIR=/opt/pokediamond/msl', 'WT_PROFILE_HEADER=/workspace/.git/dswt-connection.h']])
+                self.assertFalse(self.calls_for('meson') or self.calls_for('ninja'))
+                self.assert_docker('modified', '5', '4', 'dswt-rom-builder-dp', 'tools/rom-builder-dp')
+
+    def test_unknown_game_or_hgss_revision_stops_before_preparation(self):
+        for game, revision in (('diamond', '0'), ('pearl', '4'), ('Diamond', '5'), ('HeartGold', '0'),
+                               ('heartgold', '1'), ('soulsilver', '01')):
+            with self.subTest(game=game, revision=revision):
+                result = self.run_build(env=dict(self.env, ROM_GAME=game, ROM_REVISION=revision))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('ROM_', result.stderr)
+                self.assertEqual(self.calls, [])
 
     def test_positive_job_overrides_apply_to_both_build_modes(self):
         for mode in ('modified', 'pristine'):

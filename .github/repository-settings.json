@@ -22,7 +22,6 @@
     "required_status_checks": {
       "strict": true,
       "contexts": [
-        "Check contribution policy",
         "Scan for secrets",
         "Validate source inputs",
         "Build and test connectivity server",

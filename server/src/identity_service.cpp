@@ -2,6 +2,7 @@
 
 #include "dswt/server/identity_store.h"
 #include "admission.h"
+#include "game_variant.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
@@ -29,7 +30,8 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
   RpcTelemetry trace(Operation::Enroll, context, [reply] { return reply->context().result(); }, request->enrollment_id());
   reply->Clear();
   if (context && context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "request cancelled"};
-  if (!detail::NonzeroBytes(request->enrollment_id(), 16) || !detail::NonzeroBytes(request->credential(), 32) || request->hints().size() > 64) {
+  if (!detail::NonzeroBytes(request->enrollment_id(), 16) || !detail::NonzeroBytes(request->credential(), 32) || request->hints().size() > 64 ||
+      !detail::ValidVariant(request->client_build())) {
     reply->mutable_context()->set_result(v1::RESULT_INVALID_REQUEST);
     return grpc::Status::OK;
   }
@@ -42,7 +44,7 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
     std::copy(request->credential().begin(), request->credential().end(), credential.bytes.begin());
     const auto identity = [&] {
       IdentityStore store(connection_info_);
-      return store.Enroll(nonce, credential.bytes);
+      return store.Enroll(nonce, credential.bytes, request->client_build());
     }();
     if (!identity) {
       reply->mutable_context()->set_result(v1::RESULT_CONFLICT);

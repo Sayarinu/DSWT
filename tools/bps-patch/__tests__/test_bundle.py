@@ -58,9 +58,14 @@ class BundleTests(Fixture):
         cases = {
             "already patched": (TARGETS["us-rev1"], "already has DSWT 0.1.0"),
             "trimmed patched": (TARGETS["us-rev1"][:USED], "already has DSWT"),
-            "other game": (rom(1, "x", code="ADAE"), "not a Pokémon Platinum ROM"),
-            "short file": (b"NDS", "not a Pokémon Platinum ROM"),
-            "french": (rom(0, "fr", code="CPUF"), r"France, French, Rev 0\) is not supported yet. Supported: us-rev0, us-rev1"),
+            "other game": (rom(1, "x", code="IRBO"), "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM"),
+            "short file": (b"NDS", "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM"),
+            "diamond": (rom(5, "d", code="ADAE"), r"Pokémon Diamond \(North America, English, Rev 5\) is not supported yet"),
+            "pearl": (rom(5, "p", code="APAP"), r"Pokémon Pearl \(Europe, English, Rev 5\) is not supported yet"),
+            "heartgold": (rom(0, "h", code="IPKE")[:USED], r"Pokémon HeartGold \(North America, English, Rev 0\) is not"),
+            "soulsilver": (rom(0, "s", code="IPGJ"), r"Pokémon SoulSilver \(Japan, Japanese, Rev 0\) is not supported"),
+            "french": (rom(0, "fr", code="CPUF"), r"France, French, Rev 0\) is not supported yet. "
+                       "Supported: Pokémon Platinum us-rev0, Pokémon Platinum us-rev1"),
             "japanese rev 1": (rom(1, "jp", code="CPUJ"), "Japan, Japanese, Rev 1"),
             "modified": (BASES["us-rev1"][:-1] + b"\0", "modified, encrypted or damaged"),
             "trimmed too far": (BASES["us-rev1"][:USED - 1], "modified, encrypted or damaged"),
@@ -156,11 +161,27 @@ class BundleTests(Fixture):
         self.assertEqual(list(self.out.iterdir()), [])
 
     def test_identifies_every_retail_cartridge(self):
-        self.assertEqual(sorted(bundle.CARTRIDGES), ["CPUD", "CPUE", "CPUF", "CPUI", "CPUJ", "CPUK", "CPUP", "CPUS"])
+        self.assertEqual(sorted(bundle.CARTRIDGES), sorted(
+            prefix + letter for prefix in ("ADA", "APA", "CPU", "IPK", "IPG") for letter in "JEPFDISK"))
         self.assertEqual(bundle.cartridge(rom(1, "k", code="CPUK")),
-                         {"game_code": "CPUK", "region": "Korea", "language": "Korean", "revision": 1})
+                         {"game": "Pokémon Platinum", "game_code": "CPUK", "region": "Korea", "language": "Korean",
+                          "revision": 1, "size": 128 * 1024 * 1024})
+        for code, game, size in (("ADAE", "Pokémon Diamond", 64), ("APAE", "Pokémon Pearl", 64),
+                                 ("CPUE", "Pokémon Platinum", 128), ("IPKE", "Pokémon HeartGold", 128),
+                                 ("IPGE", "Pokémon SoulSilver", 128)):
+            with self.subTest(code):
+                info = bundle.cartridge(rom(5, code, code=code))
+                self.assertEqual((info["game"], info["size"], info["region"]), (game, size * 1024 * 1024, "North America"))
+                self.assertEqual(bundle.describe(info), f"{game} (North America, English, Rev 5)")
+                self.assertEqual(bundle.title({"game_code": code, "name": "USA Rev 5"}), f"{game} USA Rev 5")
+        europe = bundle.cartridge(rom(10, "eu", code="CPUE"))
+        self.assertEqual(bundle.describe(europe), "Pokémon Platinum (Europe, English, Rev 10)")
         self.assertIsNone(bundle.cartridge(b"\xff" * 0x200))
+        self.assertIsNone(bundle.cartridge(rom(0, "b", code="IRBO")))
 
+    def test_accepts_manifest_entries_for_every_game(self):
+        self.rewrite(lambda m: m["entries"][0].update(game_code="IPGE"))
+        self.assertEqual(self.patch(BASES["us-rev1"])[0]["variant"], "us-rev1")
 
 if __name__ == "__main__":
     unittest.main()

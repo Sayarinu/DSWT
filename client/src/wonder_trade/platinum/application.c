@@ -1,4 +1,4 @@
-#include "wonder_trade/application.h"
+#include "wonder_trade/platinum/application.h"
 
 #include <nitro.h>
 #include <string.h>
@@ -7,10 +7,11 @@
 #include "applications/party_menu/defs.h"
 #include "applications/party_menu/main.h"
 #include "field/field_system.h"
+#include "wonder_trade/boot.h"
 #include "wonder_trade/network.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/recovery.h"
-#include "wonder_trade/game_save.h"
+#include "wonder_trade/platinum/game_save.h"
 #include "wonder_trade/menu_input.h"
 
 #include "bag.h"
@@ -54,11 +55,10 @@ enum WonderTradeAppState {
 };
 
 #define WT_BOOT_STACK_SIZE 0x8000
-#define WT_BOOT_SILENT_FRAMES 30
 typedef struct WonderTradeBootWorker {
     OSThread thread;
     WtFlashAccess flash;
-    WtGameSave game;
+    WtGame game;
     int result;
     unsigned char stack[WT_BOOT_STACK_SIZE + 8];
 } WonderTradeBootWorker;
@@ -84,6 +84,7 @@ typedef struct WonderTradeApp {
     BOOL graphicsReady;
     WonderTradeBootWorker *boot;
     int bootFrames;
+    WtGame game;
 } WonderTradeApp;
 
 static void WonderTrade_Draw(WonderTradeApp *app);
@@ -468,6 +469,7 @@ static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSyste
     WonderTradeApp *app = ApplicationManager_NewData(appMan, sizeof(WonderTradeApp), HEAP_ID_WONDER_TRADE);
     memset(app, 0, sizeof(*app));
     app->fieldSystem = fieldSystem;
+    app->game.save = SaveData_Ptr(); app->game.heapID = HEAP_ID_WONDER_TRADE;
     PlayTime_FlagNotStarted();
     app->selectedSlot = -1;
     app->messages = MessageLoader_Init(MSG_LOADER_PRELOAD_ENTIRE_BANK, NARC_INDEX_MSGDATA__PL_MSG, TEXT_BANK_WONDER_TRADE, HEAP_ID_WONDER_TRADE);
@@ -481,7 +483,7 @@ static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSyste
 static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = WonderTrade_Create(appMan, ApplicationManager_Args(appMan), WT_APP_CONNECTING, WonderTrade_Text_Connecting, TRUE);
-    WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
+    WonderTradeNetwork_Start(&app->network, &app->game);
     WonderTrade_Draw(app);
     return TRUE;
 }
@@ -491,10 +493,7 @@ static void WonderTrade_BootWorker(void *arg)
     WonderTradeBootWorker *worker = arg;
     WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
     worker->game.save = SaveData_Ptr(); worker->game.heapID = HEAP_ID_WONDER_TRADE;
-    worker->result = WtRecovery_Check(io);
-    if (worker->result != 0) {
-        worker->result = WtGameSave_Boot(&worker->game, io);
-    }
+    worker->result = WtBoot_Check(&worker->game, io);
 }
 
 static BOOL WonderTrade_BootInit(ApplicationManager *appMan, int *state)
@@ -522,7 +521,7 @@ static BOOL WonderTrade_BootPoll(WonderTradeApp *app)
     const unsigned char *stack;
     u32 size, unused;
     if (!OS_IsThreadTerminated(&worker->thread)) {
-        /* Usually this finishes unseen. A longer check may be writing, so ask for patience. */
+        /* Usually this finishes unseen; only a slow check opens the screen early. */
         if (!app->graphicsReady && ++app->bootFrames == WT_BOOT_SILENT_FRAMES) WonderTrade_InitGraphics(app);
         return FALSE;
     }
@@ -559,7 +558,7 @@ static void WonderTrade_Activate(WonderTradeApp *app, int choice)
 {
     switch (app->state) {
     case WT_APP_RECOVERY:
-        WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
+        WonderTradeNetwork_Start(&app->network, &app->game);
         WonderTrade_Show(app, WT_APP_CONNECTING, WonderTrade_Text_Connecting);
         break;
     case WT_APP_CONNECTING:
@@ -572,8 +571,8 @@ static void WonderTrade_Activate(WonderTradeApp *app, int choice)
         if (choice == 1) {
             WonderTrade_Back(app);
         } else {
-            if (app->state == WT_APP_CONFIRM) WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), app->selectedSlot);
-            else WonderTradeNetwork_Collect(&app->network, SaveData_Ptr(), app->state == WT_APP_CANCEL_CONFIRM);
+            if (app->state == WT_APP_CONFIRM) WonderTradeNetwork_Trade(&app->network, app->selectedSlot);
+            else WonderTradeNetwork_Collect(&app->network, app->state == WT_APP_CANCEL_CONFIRM);
             WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
         }
         break;
@@ -661,7 +660,7 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
     }
     if (app->state == WT_APP_RESTART) {
         if (app->network.state == WT_NET_CLOSED) {
-            WonderTradeNetwork_Start(&app->network, HEAP_ID_WONDER_TRADE);
+            WonderTradeNetwork_Start(&app->network, &app->game);
             WonderTrade_Show(app, WT_APP_CONNECTING, WonderTrade_Text_Connecting);
         }
         return FALSE;
@@ -673,7 +672,7 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
         if (app->network.state == WT_NET_ERROR) {
             WonderTrade_Show(app, WT_APP_ERROR, app->state == WT_APP_CONNECTING ? WonderTrade_Text_ConnectionError : WonderTrade_Text_PingError);
         } else if (app->state == WT_APP_CONNECTING && app->network.state == WT_NET_READY) {
-            WonderTradeNetwork_Trade(&app->network, SaveData_Ptr(), -1);
+            WonderTradeNetwork_Trade(&app->network, -1);
             WonderTrade_Show(app, WT_APP_PINGING, WonderTrade_Text_Pinging);
         } else if (app->network.state == WT_NET_RESPONSE) {
             app->selectedSlot = -1;
@@ -683,6 +682,7 @@ static BOOL WonderTrade_Main(ApplicationManager *appMan, int *state)
                 app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
             else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
             else if (app->network.superseded && app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Superseded);
+            else if (app->network.refused) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_CannotHold);
             else if (app->network.waiting) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Waiting);
             else if (app->network.tradePhase == WT_JOURNAL_RECEIVED) WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_NoRoom);
             else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);

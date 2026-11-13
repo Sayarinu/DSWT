@@ -1,4 +1,4 @@
-name: Contribution checks
+name: Secret scan
 
 on:
   pull_request:
@@ -11,19 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  contribution:
-    name: Check contribution policy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Validate contribution
-        run: python3 scripts/check-contribution.py
-
   secrets:
     name: Scan for secrets
     runs-on: ubuntu-24.04

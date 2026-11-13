@@ -1,0 +1,179 @@
+<?xml version="1.0"?>
+<body language="English">
+	<row id="WonderTrade_Text_Title" index="0">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">WONDER TRADE</language>
+	</row>
+	<row id="WonderTrade_Text_Trade" index="1">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Wonder Trade</language>
+	</row>
+	<row id="WonderTrade_Text_Info" index="2">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Info</language>
+	</row>
+	<row id="WonderTrade_Text_Exit" index="3">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Exit</language>
+	</row>
+	<row id="WonderTrade_Text_Retry" index="4">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Retry</language>
+	</row>
+	<row id="WonderTrade_Text_Back" index="5">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Back</language>
+	</row>
+	<row id="WonderTrade_Text_Cancel" index="6">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Cancel</language>
+	</row>
+	<row id="WonderTrade_Text_Connecting" index="7">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Connecting to Wi-Fi...\nPlease wait.</language>
+	</row>
+	<row id="WonderTrade_Text_Disconnecting" index="8">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Disconnecting...\nPlease wait.</language>
+	</row>
+	<row id="WonderTrade_Text_Choose" index="9">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Choose a party Pokémon\nto offer for Wonder Trade.</language>
+	</row>
+	<row id="WonderTrade_Text_Pinging" index="10">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Saving and contacting the server.\nDo not turn off the power.</language>
+	</row>
+	<row id="WonderTrade_Text_ConnectionError" index="11">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again.</language>
+	</row>
+	<row id="WonderTrade_Text_PingError" index="12">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below.</language>
+	</row>
+	<row id="WonderTrade_Text_Ineligible" index="13">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail or capsules.</language>
+	</row>
+	<row id="WonderTrade_Text_Duplicate" index="14">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">An identical or damaged Pokémon\nin your party or PC blocks this.</language>
+	</row>
+	<row id="WonderTrade_Text_Explanation" index="15">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save.</language>
+	</row>
+	<row id="WonderTrade_Text_Diagnostics" index="16">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Connection details</language>
+	</row>
+	<row id="WonderTrade_Text_ErrorCode" index="17">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Support code</language>
+	</row>
+	<row id="WonderTrade_Text_ConnectMs" index="18">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Connect ms</language>
+	</row>
+	<row id="WonderTrade_Text_TlsBytes" index="19">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">TLS bytes</language>
+	</row>
+	<row id="WonderTrade_Text_StackBytes" index="20">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Stack bytes</language>
+	</row>
+	<row id="WonderTrade_Text_FrameMs" index="21">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Frame gap ms</language>
+	</row>
+	<row id="WonderTrade_Text_CheckingSave" index="22">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Checking saved game...\nPlease wait.</language>
+	</row>
+	<row id="WonderTrade_Text_RecoveryRequired" index="23">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Trade recovery required.\nConnect to try again.\n\nKeep this save and its\nrecovery files.</language>
+	</row>
+	<row id="WonderTrade_Text_Confirm" index="24">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Offer the selected Pokémon?\nIt will leave your party.</language>
+	</row>
+	<row id="WonderTrade_Text_Queued" index="25">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Your trade is pending. Choose\nCollect result to check it.</language>
+	</row>
+	<row id="WonderTrade_Text_Collect" index="26">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Collect result</language>
+	</row>
+	<row id="WonderTrade_Text_CancelOffer" index="27">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Cancel offer</language>
+	</row>
+	<row id="WonderTrade_Text_ConfirmCollect" index="28">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Collect your trade result? Trade\nevolution keeps current moves.</language>
+	</row>
+	<row id="WonderTrade_Text_ConfirmCancel" index="29">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Cancel an unmatched offer? If\nmatched, collect it instead.</language>
+	</row>
+	<row id="WonderTrade_Text_Completed" index="30">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Trade completed! Your Pokémon\nis in your party or PC.</language>
+	</row>
+	<row id="WonderTrade_Text_Received" index="31">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">You received</language>
+	</row>
+	<row id="WonderTrade_Text_OriginalTrainer" index="32">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">From</language>
+	</row>
+	<row id="WonderTrade_Text_Returned" index="33">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Offer cancelled. Your Pokémon\nis back in your party or PC.</language>
+	</row>
+	<row id="WonderTrade_Text_Rejected" index="34">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">The server rejected the offer.\nYour Pokémon has been restored.</language>
+	</row>
+	<row id="WonderTrade_Text_Superseded" index="35">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Another copy of this save traded\nfirst. Your Pokémon is restored.</language>
+	</row>
+	<row id="WonderTrade_Text_Waiting" index="36">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">No partner yet. Your Pokémon is\nstill waiting. Check again later.</language>
+	</row>
+	<row id="WonderTrade_Text_NoRoom" index="37">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Your result is still pending. Make\nroom in your party or PC first.</language>
+	</row>
+	<row id="WonderTrade_Text_KeepPlaying" index="38">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Wonder Trade needs more play.\nKeep playing, then try again.</language>
+	</row>
+	<row id="WonderTrade_Text_ConfirmAction" index="39">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Confirm</language>
+	</row>
+	<row id="WonderTrade_Text_RecoveryAction" index="40">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Connect and retry</language>
+	</row>
+	<row id="WonderTrade_Text_CannotHold" index="41">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">This game can’t hold the received\nPokémon. It stays on the server.</language>
+	</row>
+	<row id="WonderTrade_Text_Level" index="42">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Lv.</language>
+	</row>
+	<row id="WonderTrade_Text_SaveFirst" index="43">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Save your adventure before\nusing Wonder Trade.</language>
+	</row>
+</body>

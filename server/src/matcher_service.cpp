@@ -19,6 +19,8 @@ using detail::UnhexBytes;
 struct Offer {
   std::string owner, trade, asset;
   std::uint64_t highwater;
+  // Decimal destination set and owner's game bit, as the selection read them.
+  std::string destinations, game;
 };
 
 class SelectionChanged : public std::runtime_error {
@@ -31,24 +33,37 @@ void Result(v1::MatchReply &reply, v1::ResultCode code) {
   reply.set_result(code);
 }
 
-// The oldest unlocked identity anchors each pair; a random unlocked peer avoids
-// a deterministic partner schedule. Recheck the offer after locking its owner:
-// a cancellation can have committed while the selection snapshot was read.
-std::optional<Offer> Select(Database &database, const std::string &excluded = {}) {
-  const std::string common =
-      "SELECT replace(i.save_id::text,'-',''),replace(o.trade_id::text,'-','') "
-      "FROM dswt.offers o JOIN dswt.save_identities i USING(save_id) ";
-  const std::string admission =
-      "JOIN dswt.audit_journal a ON a.table_name='offers' AND a.before_image IS NULL "
-      "AND a.row_key->>'trade_id'=o.trade_id::text ";
-  const std::string filter =
-      "WHERE o.state=1 AND i.event_highwater<18446744073709551615 "
-      "AND ($1='' OR i.save_id<>nullif($1,'')::uuid) ";
-  const auto sql = common + (excluded.empty() ? admission : "") + filter +
-      (excluded.empty() ? "ORDER BY a.sequence " : "ORDER BY random() ") +
-      "LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
-  auto selected = database.Parameters(sql.c_str(), {HexBytes(excluded)});
-  if (PQntuples(selected.get()) == 0) return std::nullopt;
+// Queued offers (o) of identities that can still record events (i), with the
+// games able to hold each Pokémon (d.destinations) and the owner's variant (v).
+const std::string kQueued =
+    "dswt.offers o JOIN dswt.save_identities i USING(save_id) "
+    "JOIN dswt.identity_variants v USING(save_id) JOIN dswt.offer_destinations d USING(trade_id) "
+    "WHERE o.state=1 AND i.event_highwater<18446744073709551615 ";
+// The destination bit of v's game family: DP 1, Pt 2, HGSS 4. Legacy code 1 is
+// Platinum; structured codes carry family 1-3 in their top byte.
+const std::string kGame = "(1<<((CASE WHEN v.variant=1 THEN 2 ELSE v.variant>>24 END)::integer-1))";
+const std::string kCandidates =
+    "(SELECT o.trade_id,o.save_id,d.destinations," + kGame + " AS game FROM " + kQueued + ")";
+const std::string kSelected =
+    "SELECT replace(i.save_id::text,'-',''),replace(o.trade_id::text,'-',''),d.destinations::text," + kGame + "::text ";
+// Two offers are compatible when each owner's game can hold the other's Pokémon.
+const std::string kAnchor = kSelected +
+    "FROM " + kQueued + "AND NOT o.trade_id=ANY($1::uuid[]) "
+    "AND EXISTS (SELECT 1 FROM " + kCandidates + " p WHERE p.save_id<>o.save_id "
+    "AND d.destinations&p.game<>0 AND p.destinations&" + kGame + "<>0) "
+    "ORDER BY (SELECT a.sequence FROM dswt.audit_journal a WHERE a.table_name='offers' "
+    "AND a.before_image IS NULL AND a.row_key->>'trade_id'=o.trade_id::text) "
+    "LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
+const std::string kPeer = kSelected +
+    "FROM " + kQueued + "AND i.save_id<>$1::uuid AND d.destinations&$2::integer<>0 "
+    "AND $3::integer&" + kGame + "<>0 ORDER BY random() LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
+const std::string kPairAvailable =
+    "SELECT EXISTS (SELECT 1 FROM " + kCandidates + " a JOIN " + kCandidates + " b ON a.save_id<b.save_id "
+    "AND a.destinations&b.game<>0 AND b.destinations&a.game<>0)";
+
+// Recheck the offer after locking its owner: a cancellation can have committed
+// while the selection snapshot was read.
+Offer Locked(Database &database, const detail::Result &selected) {
   auto row = database.Parameters(
       "SELECT replace(o.offered_asset_id::text,'-',''),i.event_highwater::text "
       "FROM dswt.offers o JOIN dswt.save_identities i USING(save_id) "
@@ -56,7 +71,27 @@ std::optional<Offer> Select(Database &database, const std::string &excluded = {}
       {PQgetvalue(selected.get(), 0, 0), PQgetvalue(selected.get(), 0, 1)});
   if (PQntuples(row.get()) == 0) throw SelectionChanged();
   return Offer{UnhexBytes(PQgetvalue(selected.get(), 0, 0)), UnhexBytes(PQgetvalue(selected.get(), 0, 1)),
-      UnhexBytes(PQgetvalue(row.get(), 0, 0)), detail::Unsigned(PQgetvalue(row.get(), 0, 1))};
+      UnhexBytes(PQgetvalue(row.get(), 0, 0)), detail::Unsigned(PQgetvalue(row.get(), 0, 1)),
+      PQgetvalue(selected.get(), 0, 2), PQgetvalue(selected.get(), 0, 3)};
+}
+
+// The oldest unlocked offer with a compatible counterpart anchors each pair; a
+// random unlocked compatible peer avoids a deterministic partner schedule. An
+// offer no other queued game can hold is passed over rather than waited on, and
+// if every compatible peer of an anchor is locked the next anchor is tried.
+std::optional<std::pair<Offer, Offer>> Select(Database &database) {
+  std::string tried;
+  for (;;) {
+    auto anchor = database.Parameters(kAnchor.c_str(), {"{" + tried + "}"});
+    if (PQntuples(anchor.get()) == 0) return std::nullopt;
+    auto first = Locked(database, anchor);
+    auto peer = database.Parameters(kPeer.c_str(), {HexBytes(first.owner), first.game, first.destinations});
+    if (PQntuples(peer.get()) == 1) {
+      auto second = Locked(database, peer);
+      return std::pair{std::move(first), std::move(second)};
+    }
+    tried += (tried.empty() ? "" : ",") + HexBytes(first.trade);
+  }
 }
 
 bool Prior(Database &database, const std::string &operation) {
@@ -118,7 +153,8 @@ MatcherService::MatcherService(std::string connection_info, RecoveryBarrier reco
 bool MatcherService::PairAvailable() const {
   try {
     Database database(connection_info_);
-    auto row = database.Execute("SELECT count(*) >= 2 FROM dswt.offers WHERE state=1");
+    // Only a compatible pair: an incompatible queue would otherwise poll forever.
+    auto row = database.Execute(kPairAvailable.c_str());
     return std::string(PQgetvalue(row.get(), 0, 0)) == "t";
   } catch (const std::exception &) { return false; }
 }
@@ -146,9 +182,9 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
         if (!recovery_->Covers(database, "operation" + request->operation_id(), 0)) {
           Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
         }
-        const auto first = Select(database);
-        const auto second = first ? Select(database, first->owner) : std::nullopt;
-        if (first && second) {
+        const auto pair = Select(database);
+        if (pair) {
+          const auto *first = &pair->first, *second = &pair->second;
           if (!recovery_->Covers(database, "identity" + first->owner, first->highwater) ||
               !recovery_->Covers(database, "identity" + second->owner, second->highwater)) {
             Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;

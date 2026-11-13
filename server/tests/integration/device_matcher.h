@@ -13,14 +13,14 @@
 // Drives a matcher endpoint over local gRPC for the disposable device fixture.
 class DeviceMatcher {
 public:
-  explicit DeviceMatcher(const std::string &address)
+  DeviceMatcher(const std::string &address, dswt::server::MatchWorker::Available available)
       : stub_(dswt::v1::TradeMatcher::NewStub(
             grpc::CreateChannel(address, grpc::InsecureChannelCredentials()))),
         worker_([this](const auto &request, auto *reply) {
           grpc::ClientContext context;
           context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(2));
           return stub_->MatchNext(&context, request, reply);
-        }) {}
+        }, std::move(available)) {}
 
   std::chrono::milliseconds Poll() { return worker_.Poll(); }
 

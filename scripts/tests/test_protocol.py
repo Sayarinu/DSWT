@@ -75,6 +75,19 @@ class WireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             wire.encode_request(self.request(wire.Operation.ENROLL, save_id=b"x" * 16))
 
+    def test_game_variants(self):
+        self.assertEqual(wire.game_family(1), 2)
+        for family, versions in wire.GAME_FAMILIES.items():
+            for version in versions:
+                for language in wire.LANGUAGES:
+                    for revision in (0, 1, 255):
+                        build = family << 24 | version << 16 | language << 8 | revision
+                        self.assertEqual(wire.game_family(build), family)
+        for build in (0, 2, -1, 1 << 32, 0x000C0200, 0x040C0200, 0x020A0200, 0x020C0000, 0x020C0600, 0x020C0900):
+            with self.subTest(build=hex(build)):
+                with self.assertRaises(ValueError):
+                    wire.game_family(build)
+
     def test_hint_and_page_bounds(self):
         for length in (0, 64):
             request = self.request(wire.Operation.ENROLL, payload=struct.pack("<IB", 1, length) + b"x" * length)
@@ -118,10 +131,65 @@ class WireTests(unittest.TestCase):
 
 
 class SaveLayoutTests(unittest.TestCase):
+    LAYOUTS = (("protocol/save-layout.json", "client/upstream.json"),
+               ("protocol/save-layout-hgss.json", "client/upstream-pokeheartgold.json"),
+               ("protocol/save-layout-dp.json", "client/upstream-pokediamond.json"))
+
     def test_journal_erase_sectors_do_not_overlap_any_retail_block(self):
-        layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
-        pin = json.loads((ROOT / "client/upstream.json").read_text())
+        for path, pin in self.LAYOUTS:
+            with self.subTest(layout=path):
+                self.check_layout(json.loads((ROOT / path).read_text()),
+                                  json.loads((ROOT / pin).read_text()))
+
+    def test_games_share_one_journal_record_format(self):
+        platinum, *others = (json.loads((ROOT / path).read_text()) for path, _ in self.LAYOUTS)
+        targets = set(platinum["verified_targets"])
+        for other in others:
+            for key in ("version", "flash_size", "half_size", "journal_banks", "bank_reserved_size",
+                        "record_size", "record_sections"):
+                self.assertEqual(platinum[key], other[key], key)
+            self.assertFalse(targets & set(other["verified_targets"]))
+            targets |= set(other["verified_targets"])
+
+    def test_hgss_layout_matches_the_pinned_decompilation(self):
+        """Values derived from pokeheartgold's save.c/save_arrays.c and the linked size functions."""
+        layout = json.loads((ROOT / "protocol/save-layout-hgss.json").read_text())
+        regions = {region["name"]: (region["offset"], region["size"]) for region in layout["retail_regions_per_half"]}
+        # Two slots: general then PC boxes, each with a 16-byte footer, aligned to 0x100.
+        self.assertEqual(regions["general"], (0, 0xF628))
+        self.assertEqual(regions["boxes"], (0xF700, 18 * 0x1000 + 0x2FC + 4 + 16))
+        # Extra chunks start at SAVE_PAGE_MAX (35) + {0, 3, 4, 6, 8, 10} sectors with a 16-byte footer;
+        # the mirror copy is 64 sectors (one half) later.
+        self.assertEqual([offset for offset, _ in list(regions.values())[2:]],
+                         [(35 + n) * 0x1000 for n in (0, 3, 4, 6, 8, 10)])
+        self.assertEqual(regions["hall_of_fame"][1], 30 * (6 * 0x3C + 4) + 8 + 16)
+        self.assertEqual(regions["frontier"][1], 0xBA0 + 16)
+        self.assertEqual(max(offset + size for offset, size in regions.values()), 0x2ED60)
+        self.assertEqual(layout["block_footer"]["size"], struct.calcsize(layout["block_footer"]["format"]))
+
+    def test_dp_layout_matches_the_pinned_decompilation(self):
+        """Values derived from pokediamond's save.c/save_arrays.c and the linked size functions."""
+        layout = json.loads((ROOT / "protocol/save-layout-dp.json").read_text())
+        regions = {region["name"]: (region["offset"], region["size"]) for region in layout["retail_regions_per_half"]}
+        # The 36 size functions of UNK_020EE700, identical in the Diamond and Pearl ARM9s.
+        sizes = [0x5C, 0x2C, 0x590, 0x774, 0x3AC, 0xE8, 0xA0, 0x13C, 0x1E0, 0x880, 0x74C, 0x1400,
+                 0x9B4, 0x20, 0x834, 0x460, 0x320, 0x108, 0x460, 0x620, 0x14C, 0x170, 0x3EC, 0xD00,
+                 0xE, 0x114, 0xF4, 0xB88, 0xEA0, 0x7C0, 0xFF8, 0x1354, 0x688, 0x28, 0x8, 0x121C8]
+        # SaveArray_sizeof always adds 1..4 bytes; each slot ends with a 20-byte footer.
+        padded = [size + 4 - size % 4 for size in sizes]
+        self.assertEqual(regions["general"], (0, sum(padded[:35]) + 20))
+        self.assertEqual(regions["boxes"], (sum(padded[:35]) + 20, padded[35] + 20))
+        # Both slots are packed without alignment and fit SAVE_PAGE_MAX (32) sectors.
+        self.assertLessEqual(sum(regions["boxes"]), 32 * 0x1000)
+        # Extra chunks UNK_020EE6E0: Hall of Fame at sector 32 and the 0x1354-byte
+        # chunk at sector 35, each with a 16-byte footer; mirrors are 64 sectors later.
+        self.assertEqual(regions["hall_of_fame"], (32 * 0x1000, 0x2AB0 + 16))
+        self.assertEqual(regions["extra_chunk_1"], (35 * 0x1000, 0x1354 + 16))
+        self.assertEqual(max(offset + size for offset, size in regions.values()), 0x24364)
+
+    def check_layout(self, layout, pin):
         self.assertEqual(layout["upstream_revision"], pin["revision"])
+        self.assertEqual(layout["block_footer"]["size"], struct.calcsize(layout["block_footer"]["format"]))
         ranges = []
         for half in (0, layout["half_size"]):
             for region in layout["retail_regions_per_half"]:

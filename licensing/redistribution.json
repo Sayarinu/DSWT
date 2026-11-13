@@ -132,6 +132,47 @@
       "requirements": "The upstream project identifies a relinked proprietary Metrowerks compiler. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish its binaries."
     },
     {
+      "name": "Imported Diamond and Pearl source, graphics, maps, text, audio and game data",
+      "license": "NOASSERTION",
+      "evidence": [
+        "client/upstream-pokediamond.json",
+        "client/UPSTREAM.md",
+        "https://github.com/pret/pokediamond/tree/b623abef1b4dfe204ca50aab42447ac00c134290"
+      ],
+      "decision": "exclude",
+      "requirements": "Keep local/private in game/pokediamond/. The integration patch and project additions in client/ are reviewed project changes; complete modified upstream files, assets and ROM output are not covered."
+    },
+    {
+      "name": "Metrowerks CodeWarrior compiler binaries used by pokediamond (mwccarm.zip)",
+      "license": "NOASSERTION",
+      "evidence": [
+        "tools/rom-builder-dp/Dockerfile",
+        "https://github.com/pret/pokediamond/blob/2019dffc6455d29036d04c233abdfb0d9e7c5894/mwccarm.zip"
+      ],
+      "decision": "exclude",
+      "requirements": "Proprietary Metrowerks compilers, linkers and license files fetched by checksum into a local build image and the workspace's ignored tools/. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish its binaries, the image or its layers."
+    },
+    {
+      "name": "Nitro SDK 3.2 tools and linker templates used by pokediamond (NitroSDK-3_2-060901.7z)",
+      "license": "NOASSERTION",
+      "evidence": [
+        "tools/rom-builder-dp/Dockerfile",
+        "https://github.com/pret/pokediamond/blob/2019dffc6455d29036d04c233abdfb0d9e7c5894/NitroSDK-3_2-060901.7z"
+      ],
+      "decision": "exclude",
+      "requirements": "Only the SDK's Windows tools and ARM7/ARM9 linker templates are extracted into the local image and the ignored workspace. Download availability is not a redistribution grant; establish permitted use before release builds and never publish SDK source, headers, tools, the image or its layers. The declarations in client/include/wonder_trade/dp/ cover only what the shared core calls and are written from the game's assembly and documented SDK behavior, not copied from SDK headers."
+    },
+    {
+      "name": "CodeWarrior MSL C headers from the Metroskrew 0.1.3 release",
+      "license": "NOASSERTION",
+      "evidence": [
+        "tools/rom-builder-dp/Dockerfile",
+        "https://github.com/mid-kid/metroskrew/releases/tag/0.1.3"
+      ],
+      "decision": "exclude",
+      "requirements": "Freescale/Metrowerks MSL C headers, extracted by checksum into the local Diamond/Pearl build image only to compile the Wonder Trade core and Mbed TLS. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish the headers, the image or its layers."
+    },
+    {
       "name": "Fetched game build dependencies: RapidJSON 1.1.0, yyjson 0.12.0, metang v0.2.0-python and Meson 1.12.0",
       "license": "RapidJSON: MIT plus BSD/JSON components; yyjson: MIT; metang and Meson: Apache-2.0",
       "evidence": [

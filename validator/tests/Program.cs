@@ -34,6 +34,7 @@ void CheckReply(ValidateReply reply, byte[] data)
     Require(reply.Sha256.Span.SequenceEqual(SHA256.HashData(data)), "payload mismatch");
     Require(reply.ReasonCodes.Count <= 8 && reply.ReasonCodes.All(r => r.Length is > 0 and <= 32 && r.All(c => c is >= 'A' and <= 'Z' or '_')), "reason bounds");
     Require(reply.Legal == (reply.ReasonCodes.Count == 0), "ambiguous verdict");
+    Require(reply.Legal == (reply.Destinations != 0) && (reply.Destinations & ~(uint)Policy.AllDestinations) == 0, "destination bounds");
 }
 byte[] Canonical(PK4 pk)
 {
@@ -162,6 +163,74 @@ await Test("legal Gen III transfer remains compatible", () =>
     return Task.CompletedTask;
 });
 
+ValidateReply ExpectLegal(byte[] data, Destination destinations)
+{
+    var reply = Policy.Analyze(data);
+    CheckReply(reply, data);
+    Require(reply.Legal, "legal fixture rejected: " + string.Join(',', reply.ReasonCodes));
+    Require(reply.Destinations == (uint)destinations, $"destinations {(Destination)reply.Destinations}, expected {destinations}");
+    return reply;
+}
+Destination DestinationsOf(byte[] data, Action<PK4> change) => Policy.Destinations(new PK4(Mutate(data, change)));
+
+await Test("ordinary Pokémon fits every Gen IV game", () =>
+{
+    ExpectLegal(good, Policy.AllDestinations);
+    ExpectLegal(Wild(), Policy.AllDestinations);
+    return Task.CompletedTask;
+});
+
+await Test("Platinum-only forms do not fit Diamond and Pearl", () =>
+{
+    var giratina = EncounterMovesetGenerator.GenerateEncounters(new PK4 { Species = 487 }, trainer,
+        ReadOnlyMemory<ushort>.Empty, [GameVersion.Pt]).OfType<EncounterStatic4>().First();
+    var origin = (PK4)giratina.ConvertToPKM(trainer);
+    origin.Form = 1;
+    origin.HeldItem = 112; // Griseous Orb holds Origin Forme outside the Distortion World.
+    origin.RefreshAbility(0); // Origin Forme has Levitate.
+    ExpectLegal(Canonical(origin), Destination.Pt | Destination.HGSS);
+    // Personal-table rules for the other Platinum forms, independent of encounter data.
+    foreach (var (species, forms) in new (ushort, byte[])[] { (487, [1]), (492, [1]), (479, [1, 2, 3, 4, 5]) })
+        foreach (var form in forms)
+            Require(DestinationsOf(good, pk => { pk.Species = species; pk.Form = form; }) == (Destination.Pt | Destination.HGSS),
+                $"species {species} form {form} destinations");
+    return Task.CompletedTask;
+});
+
+await Test("held items follow each game's holdable items", () =>
+{
+    // Griseous Orb was added in Platinum.
+    ExpectLegal(Mutate(good, pk => pk.HeldItem = 112), Destination.Pt | Destination.HGSS);
+    // Fast Ball is an HG/SS-only item, but the pinned core holds HG/SS to
+    // Platinum's holdable items, so it fits no game and is not legal.
+    Require(DestinationsOf(good, pk => pk.HeldItem = 492) == Destination.None, "HG/SS item destinations");
+    var reply = Policy.Analyze(Mutate(good, pk => pk.HeldItem = 492));
+    Require(!reply.Legal && reply.Destinations == 0, "HG/SS-only held item accepted");
+    return Task.CompletedTask;
+});
+
+await Test("HG/SS ball shows as the D/P/Pt ball byte", () =>
+{
+    var johto = new SimpleTrainerInfo(GameVersion.HG) { OT = "VALIDATOR", TID16 = 12345, SID16 = 54321, Language = 2, Gender = 0 };
+    var slot = EncounterMovesetGenerator.GenerateEncounters(new PK4 { Species = 16 }, johto,
+        ReadOnlyMemory<ushort>.Empty, [GameVersion.HG]).OfType<EncounterSlot4>().First();
+    var pk = (PK4)slot.ConvertToPKM(johto);
+    pk.Ball = (byte)Ball.Fast;
+    Require(pk.BallHGSS == (byte)Ball.Fast && pk.BallDPPt == (byte)Ball.Poke, "split ball fixture");
+    var data = Canonical(pk);
+    ExpectLegal(data, Policy.AllDestinations);
+    // A D/P/Pt byte those games cannot show leaves only HG/SS.
+    Require(DestinationsOf(data, value => value.BallDPPt = (byte)Ball.Fast) == Destination.HGSS, "invalid D/P/Pt ball byte");
+    return Task.CompletedTask;
+});
+
+await Test("Spiky-eared Pichu fits no game", () =>
+{
+    Require(DestinationsOf(good, pk => { pk.Species = 172; pk.Form = 1; }) == Destination.None, "spiky Pichu destinations");
+    Require(DestinationsOf(good, pk => { pk.Species = 172; pk.Form = 0; }) == Policy.AllDestinations, "Pichu destinations");
+    return Task.CompletedTask;
+});
+
 var illegal = new (string Name, byte[] Data, string Reason)[]
 {
     ("egg", Mutate(good, pk => pk.IsEgg = true), "EGG_NOT_ALLOWED"),
@@ -210,7 +279,7 @@ await Test("real isolated worker accepts legal and rejects illegal payload", asy
     var clock = Stopwatch.StartNew();
     var reply = await runner.Run(good, CancellationToken.None);
     CheckReply(reply, good);
-    Require(reply.Legal, "worker rejected legal input");
+    Require(reply.Legal && reply.Destinations == (uint)Policy.AllDestinations, "worker rejected legal input");
     Console.WriteLine($"Worker cold validation: {clock.ElapsedMilliseconds} ms");
     reply = await runner.Run(illegal[0].Data, CancellationToken.None);
     Require(!reply.Legal, "worker accepted egg");
@@ -293,7 +362,7 @@ await Test("actual internal gRPC payload verdict deadline and size contract", as
     ValidateRequest Request(byte[] bytes) => new() { Pokemon = new() { Pk4 = ByteString.CopyFrom(bytes), Sha256 = ByteString.CopyFrom(SHA256.HashData(bytes)) } };
     var reply = await client.ValidateAsync(Request(good), deadline: DateTime.UtcNow.AddSeconds(2));
     CheckReply(reply, good);
-    Require(reply.Legal, "gRPC rejected legal payload");
+    Require(reply.Legal && reply.Destinations == (uint)Policy.AllDestinations, "gRPC rejected legal payload");
     var wrongHash = Request(good);
     wrongHash.Pokemon.Sha256 = ByteString.CopyFrom(new byte[32]);
     await ExpectStatus(async () => await client.ValidateAsync(wrongHash), StatusCode.InvalidArgument);

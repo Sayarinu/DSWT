@@ -41,14 +41,15 @@ class CommandLineTests(AppFixture):
         source = self.write("Platinum.nds", BASES["us-rev1"][:USED])
         code, out, _ = self.run_app("--input", str(source))
         self.assertEqual(code, 0)
-        self.assertIn("Patched us-rev1", out)
+        self.assertIn("Patched Pokémon Platinum us-rev1", out)
         self.assertEqual((self.inputs / "Platinum (Wonder Trade).nds").read_bytes(), TARGETS["us-rev1"])
         self.assertEqual(source.read_bytes(), BASES["us-rev1"][:USED])
 
     def test_explains_refusals_without_writing(self):
         for name, data, message in (("french", rom(0, "fr", code="CPUF"), "France, French, Rev 0) is not supported yet"),
                                     ("patched", TARGETS["us-rev0"], "already has DSWT"),
-                                    ("other", b"x" * 1024, "not a Pokémon Platinum ROM")):
+                                    ("heartgold", rom(0, "hg", code="IPKE"), "Pokémon HeartGold (North America, English, Rev 0) is not"),
+                                    ("other", b"x" * 1024, "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM")):
             with self.subTest(name):
                 source = self.write(f"{name}.nds", data)
                 code, _, err = self.run_app("--input", str(source), "--output", str(self.root / "out.nds"))
@@ -142,7 +143,7 @@ class ReleaseTests(AppFixture):
         self.assertIn("--draft", create)
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
-        self.assertIn("| us-rev1 |", notes)
+        self.assertIn("| Pokémon Platinum us-rev1 |", notes)
         renamed = self.root / "game/other.zip"
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):

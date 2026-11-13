@@ -72,9 +72,47 @@ class TlsToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not blank"):
             provision.provision(result, "us-rev1")
         with self.assertRaises(ValueError):
-            provision.provision(original, "europe")
+            provision.provision(original, "diamond-us-rev5")
         with self.assertRaises(ValueError):
             provision.provision(original[:262144], "us-rev0")
+
+    def test_hgss_saves_are_checked_against_their_own_layout(self):
+        hgss = bytearray(b"\xff" * 524288)
+        for half in (0, 262144):
+            for block, (offset, size) in enumerate(((0, 63016), (63232, 74512))):
+                start = half + offset
+                hgss[start:start + size - 16] = bytes(size - 16)
+                crc = binascii.crc_hqx(hgss[start:start + size - 16], 0xffff)
+                struct.pack_into("<IIIHH", hgss, start + size - 16, 1, size, 0x20060623, block, crc)
+        for target in ("heartgold-us-rev0", "soulsilver-us-rev0"):
+            with self.subTest(target=target):
+                result = provision.provision(bytes(hgss), target)
+                self.assertEqual(result[0x30000:0x31000], result[0x70000:0x71000])
+                self.assertEqual(result[:0x30000], bytes(hgss[:0x30000]))
+                # A Platinum footer layout is not an HGSS one, and vice versa.
+                with self.assertRaisesRegex(ValueError, "no valid copy"):
+                    provision.provision(synthetic_save(), target)
+        with self.assertRaisesRegex(ValueError, "no valid copy"):
+            provision.provision(bytes(hgss), "us-rev1")
+
+    def test_dp_saves_are_checked_against_their_own_layout(self):
+        dp = bytearray(b"\xff" * 524288)
+        for half in (0, 262144):
+            for block, (offset, size) in enumerate(((0, 49408), (49408, 74208))):
+                start = half + offset
+                dp[start:start + size - 20] = bytes(size - 20)
+                crc = binascii.crc_hqx(dp[start:start + size - 20], 0xffff)
+                struct.pack_into("<IIIIBxH", dp, start + size - 20, 1, 1, size, 0x20060623, block, crc)
+        for target in ("diamond-us-rev5", "pearl-us-rev5"):
+            with self.subTest(target=target):
+                result = provision.provision(bytes(dp), target)
+                self.assertEqual(result[0x30000:0x31000], result[0x70000:0x71000])
+                self.assertEqual(result[:0x30000], bytes(dp[:0x30000]))
+                # Platinum shares the footer format but not the block offsets.
+                with self.assertRaisesRegex(ValueError, "no valid copy"):
+                    provision.provision(synthetic_save(), target)
+        with self.assertRaisesRegex(ValueError, "no valid copy"):
+            provision.provision(bytes(dp), "us-rev1")
 
     def test_corrupt_retail_or_nonblank_reserved_sectors_are_preserved(self):
         for offset in (0, 53036, 0x31000):

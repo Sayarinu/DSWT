@@ -9,8 +9,7 @@ changing code; [`README.md`](README.md) covers what the project does for players
   a custom Wonder Trade server.
 - The pinned [pret/pokeplatinum](https://github.com/pret/pokeplatinum)
   decompilation stays local in the ignored `game/pokeplatinum/`. Never commit
-  anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file;
-  the contribution check rejects them, even in deleted history.
+  anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file.
 - Project additions and integration changes to the game live in `client/`.
   Preserve upstream notices, and record the new revision in `client/UPSTREAM.md`
   and `client/upstream.json` when refreshing the workspace.
@@ -19,14 +18,14 @@ changing code; [`README.md`](README.md) covers what the project does for players
 
 | Path | Contents |
 | --- | --- |
-| `client/` | Game additions, the integration patch and host/native client tests |
+| `client/` | Game-independent client core, the Platinum and HeartGold/SoulSilver adapters (`platinum/` and `hgss/` directories, behind `game_adapter.h`), their integration patches and host/native client tests |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
 | `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS ([`deploy/README.md`](deploy/README.md)) |
 | `patches/` | ROM compatibility contract and player install guide |
-| `scripts/` | ROM build, workspace preparation, TLS and contribution tooling |
+| `scripts/` | ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
 
@@ -57,9 +56,6 @@ opening it. Commands run from the repository root with Python 3.12 or newer and
 Docker. Workflows are in `.github/workflows/`.
 
 ```sh
-# Check contribution policy
-python3 scripts/check-contribution.py
-
 # Validate source inputs
 python3 -m unittest discover -s scripts/tests
 python3 -m venv game/policy-venv

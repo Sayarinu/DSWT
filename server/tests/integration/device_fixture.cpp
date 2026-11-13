@@ -54,7 +54,7 @@ int Check() {
   using namespace dswt::server;
   detail::Database database(kDatabase);
   database.Execute("SELECT save_id FROM dswt.save_identities LIMIT 1");
-  LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-dswt2");
+  LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-dswt3");
   // A real worker must reject this invalid species with the pinned policy/hash.
   if (legality.CheckNewSubmission({}).verdict != LegalityVerdict::Illegal) return 1;
   auto matcher = dswt::v1::TradeMatcher::NewStub(
@@ -78,7 +78,7 @@ int main(int argc, char **argv) try {
   using namespace dswt::server;
   Telemetry::Global().Initialize(TelemetryRole::Backend);
   MetricsServer metrics(LoadMetricsPort(), kDatabase);
-  LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-dswt2");
+  LegalityClient legality("127.0.0.1:50052", "pkhex-26.08.26-74b88906-dswt3");
   // Same-host test data proves local flows only, never off-site recovery.
   RecoveryBarrier localTest = [](auto) { return true; };
   auto admission = std::make_shared<detail::ServiceAdmission>(LoadSubmissionWorkers());
@@ -109,9 +109,9 @@ int main(int argc, char **argv) try {
   std::vector<std::thread> workers;
   std::atomic<bool> failed{false};
   for (int index = MatcherWorkers(); index > 0; --index)
-    workers.emplace_back([&failed] {
+    workers.emplace_back([&failed, &matcher] {
       try {
-        DeviceMatcher worker("127.0.0.1:50054");
+        DeviceMatcher worker("127.0.0.1:50054", [&matcher] { return matcher.PairAvailable(); });
         while (!stopping) {
           if (std::filesystem::exists("/test/matcher-hold")) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

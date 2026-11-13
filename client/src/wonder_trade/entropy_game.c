@@ -4,7 +4,7 @@
 #include <nitro.h>
 #include <string.h>
 #include <mbedtls/platform_util.h>
-#include "system.h"
+#include "wonder_trade/game_adapter.h"
 
 static WtEntropyPool sPool;
 
@@ -35,8 +35,7 @@ void WonderTradeEntropy_Frame(void)
     memset(&sample, 0, sizeof(sample));
     OS_GetLowEntropyData(low);
     memcpy(sample.low, low, sizeof(low));
-    sample.frame = gSystem.vblankCounter; sample.keys = gSystem.heldKeysRaw;
-    sample.x = gSystem.touchX; sample.y = gSystem.touchY; sample.touching = gSystem.touchHeld;
+    WtGame_SampleInput(&sample);
     WtEntropy_Frame(&next, &sample);
     /* Only the main loop writes; workers copy a coherent pool with IRQs masked.
      * Hash outside the short publication/snapshot critical sections. */
