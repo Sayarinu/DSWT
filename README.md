@@ -47,6 +47,8 @@ Supported today:
 | Game | Revisions | Emulator |
 | --- | --- | --- |
 | Pokémon Platinum, US English | Rev 0 and Rev 1 | melonDS 1.1 |
+| Pokémon Diamond and Pearl, US English | Rev 5 | melonDS 1.1 |
+| Pokémon HeartGold and SoulSilver, US English | Rev 0 | melonDS 1.1 |
 
 Other versions and languages (Japanese, Korean, European English, French, German,
 Italian and Spanish) and the other Gen IV games (Diamond, Pearl, HeartGold and
