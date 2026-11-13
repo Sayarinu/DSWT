@@ -68,16 +68,34 @@ void CheckTail(const Bytes &bytes, unsigned bank) {
     Require((*begin == 0 || *begin == 255) && std::all_of(begin, end, [&](auto byte) { return byte == *begin; }));
 }
 
+// Retail block layouts from protocol/save-layout*.json: each game family's two
+// blocks and the footer fields that close them.
+struct Layout {
+    std::array<std::size_t, 2> offsets, sizes;
+    std::size_t footer, size_at, magic_at, block_at, block_width, crc_at;
+};
+constexpr Layout kPlatinum{{0, 53036}, {53036, 74212}, 20, 8, 12, 16, 1, 18};
+constexpr Layout kDiamondPearl{{0, 49408}, {49408, 74208}, 20, 8, 12, 16, 1, 18};
+constexpr Layout kHeartGoldSoulSilver{{0, 63232}, {63016, 74512}, 16, 4, 8, 12, 2, 14};
+
+const Layout &LayoutFor(const std::string &target) {
+    if (target == "us-rev0" || target == "us-rev1" || target == "europe") return kPlatinum;
+    if (target == "diamond-us-rev5" || target == "pearl-us-rev5") return kDiamondPearl;
+    Require(target == "heartgold-us-rev0" || target == "soulsilver-us-rev0");
+    return kHeartGoldSoulSilver;
+}
+
 void CheckLayout(const Bytes &bytes, const std::string &target) {
-    Require(target == "us-rev0" || target == "us-rev1" || target == "europe");
-    constexpr std::array<std::size_t, 2> offsets{0, 53036}, sizes{53036, 74212};
+    const auto &layout = LayoutFor(target);
     for (unsigned block = 0; block < 2; ++block) {
         bool valid = false;
         for (const auto half : {0U, 262144U}) {
-            const auto *body = bytes.data() + half + offsets[block];
-            const auto *footer = body + sizes[block] - 20;
-            valid |= Number(footer + 8, 4) == sizes[block] && Number(footer + 12, 4) == 0x20060623 &&
-                footer[16] == block && Number(footer + 18, 2) == Crc(body, sizes[block] - 20);
+            const auto size = layout.sizes[block];
+            const auto *body = bytes.data() + half + layout.offsets[block];
+            const auto *footer = body + size - layout.footer;
+            valid |= Number(footer + layout.size_at, 4) == size && Number(footer + layout.magic_at, 4) == 0x20060623 &&
+                Number(footer + layout.block_at, layout.block_width) == block &&
+                Number(footer + layout.crc_at, 2) == Crc(body, size - layout.footer);
         }
         Require(valid);
         CheckTail(bytes, block);

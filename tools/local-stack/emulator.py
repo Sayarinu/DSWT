@@ -122,8 +122,11 @@ class Emulator:
     def create(self, source, rom, target, image):
         source, rom = source.resolve(strict=True), rom.resolve(strict=True)
         original, program = source.read_bytes(), rom.read_bytes()
-        if len(program) != 134217728 or program[12:16] != b"CPUE" or program[30] != int(target[-1]):
-            raise ValueError("Use the matching US Rev 0/1 built ROM")
+        variant = next(item for item in json.loads((stack.ROOT / "patches/compatibility.json").read_text())["variants"]
+                       if item["id"] == target)
+        if (len(program) != variant["size"] or program[12:16] != variant["game_code"].encode()
+                or program[30] != variant["revision"]):
+            raise ValueError(f"Use a ROM built for {variant['game']} {variant['name']}")
         provisioned = PROVISION.provision(original, target)
         image = self.image(image)
         sources = self.image_sources(image)  # Refuse a stale image before anything is provisioned.
@@ -433,7 +436,7 @@ def main():
     sub = parser.add_subparsers(dest="action", required=True)
     create = sub.add_parser("create")
     create.add_argument("--save", type=Path, required=True); create.add_argument("--rom", type=Path, required=True)
-    create.add_argument("--target", choices=("us-rev0", "us-rev1"), required=True)
+    create.add_argument("--target", choices=PROVISION.TARGETS, required=True)
     create.add_argument("--image", default="dswt-emulator-builder")
     fork = sub.add_parser("fork", help="copy another profile's checked snapshot, sharing its identity")
     fork.add_argument("--source", required=True); fork.add_argument("--snapshot", required=True)
