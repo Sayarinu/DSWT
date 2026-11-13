@@ -248,6 +248,12 @@ static int Absent(SaveData *save, const unsigned char outgoing[136])
     return 0;
 }
 
+/* Nonzero when the loaded save is older than the one recorded in the entry. */
+static int Behind(const WtGame *game, const WtJournalEntry *entry)
+{
+    return (u32)(game->save->saveCounter - entry->globalCounter) >= 0x80000000;
+}
+
 static int Removed(WtGame *game, const WtJournalEntry *entry)
 {
     unsigned char canonical[136];
@@ -255,8 +261,7 @@ static int Removed(WtGame *game, const WtJournalEntry *entry)
         || WtPokemon_Decode(entry->original, canonical) != 0
         || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0) return -1;
     /* A selected older retail half cannot be promoted to a new checkpoint. */
-    if ((u32)(game->save->saveCounter - entry->globalCounter) >= 0x80000000
-        || Absent(game->save, entry->outgoing) != 0) return -1;
+    if (Behind(game, entry) || Absent(game->save, entry->outgoing) != 0) return -1;
     return WtGame_Checkpoint(game);
 }
 
@@ -390,12 +395,23 @@ static void Install(SaveData *save, const SaveData *candidate)
     memcpy(save->dynamic_region, candidate->dynamic_region, sizeof(save->dynamic_region));
 }
 
+/* A delivery applied earlier: either the save recorded with it, or one the
+ * game saved after it while the ACK waited. An older copy is refused. */
+static int Applied(WtGame *game, const WtJournalEntry *entry)
+{
+    unsigned char digest[32];
+    if (Hash(game->save, digest) != 0) return -1;
+    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return VerifyReceived(game, entry);
+    if (Behind(game, entry)) return -1;
+    return WtGame_Checkpoint(game);
+}
+
 static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entry)
 {
     SaveData *candidate;
     unsigned char digest[32];
     int result = -1;
-    if (step == WT_INVENTORY_VERIFY_RECEIVED) return VerifyReceived(game, entry);
+    if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
     candidate = Heap_Alloc(game->heapID, sizeof(*candidate));
     if (!candidate) return -1;
     memcpy(candidate, game->save, sizeof(*candidate));
@@ -431,6 +447,10 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
             || WtPokemon_Decode(entry->original, canonical) != 0
             || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0)) return -1;
     if (step == WT_INVENTORY_VERIFY_REMOVED) return Removed(game, entry);
+    if (step == WT_INVENTORY_PREPARE_RESTORE) {
+        if (Hash(game->save, digest) != 0) return -1;
+        return memcmp(digest, entry->inventoryBefore, 32) == 0 || memcmp(digest, entry->inventoryAfter, 32) == 0 ? 0 : 1;
+    }
     if (step == WT_INVENTORY_PREPARE_RECEIVE || step == WT_INVENTORY_RECEIVE || step == WT_INVENTORY_VERIFY_RECEIVED)
         return Receive(game, step, entry);
     if (step != WT_INVENTORY_PREPARE_REMOVE && step != WT_INVENTORY_REMOVE && step != WT_INVENTORY_RESTORE) return -1;
@@ -559,7 +579,11 @@ int WtGame_CanHold(void *arg, const unsigned char pk4[136])
 
 int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 {
-    if (entry->phase == WT_JOURNAL_EMPTY || entry->phase == WT_JOURNAL_IDLE) return 1;
-    if (entry->phase == WT_JOURNAL_QUEUED || entry->phase == WT_JOURNAL_RECEIVED) return Removed(game, entry) == 0;
-    return 0;
+    switch (entry->phase) {
+    case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_ENROLLING: return 1;
+    case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED: case WT_JOURNAL_RESTORING:
+        return Removed(game, entry) == 0;
+    case WT_JOURNAL_APPLIED: return Applied(game, entry) == 0;
+    default: return 0;
+    }
 }

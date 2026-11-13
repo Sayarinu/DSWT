@@ -8,7 +8,7 @@
 
 typedef struct Fixture {
     unsigned char banks[2][4096], pokemon[136], delivered[136], checked[136];
-    unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks;
+    unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks, changed;
     unsigned reads, failRead;
     unsigned char id;
     int rotateSeed;
@@ -81,18 +81,23 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     case WT_INVENTORY_VERIFY_REMOVED: return fixture->removed ? 0 : -1;
     case WT_INVENTORY_PREPARE_RECEIVE:
         if (fixture->full) return 1;
-        Mirrored(fixture, WT_JOURNAL_RECEIVED);
+        /* A delivery, or a returned offer the save no longer has room for in place. */
+        assert(entry->phase == WT_JOURNAL_RECEIVED || entry->phase == WT_JOURNAL_RESTORING);
+        Mirrored(fixture, entry->phase);
         entry->destination.kind = 1; entry->destination.slot = 1; entry->destination.length = 236;
         memset(entry->destinationBefore, 0, 236); memset(entry->destinationAfter, 3, 236);
         memcpy(entry->destinationAfter, entry->incoming, 136);
         assert(Hash(entry->incoming, 136, entry->appliedDigest) == 0);
         return 0;
     case WT_INVENTORY_RECEIVE:
-        Mirrored(fixture, WT_JOURNAL_APPLYING);
+        assert(entry->phase == WT_JOURNAL_APPLYING || entry->phase == WT_JOURNAL_RESTORING);
+        Mirrored(fixture, entry->phase);
         if (!fixture->received) { fixture->received = 1; memcpy(fixture->delivered, entry->incoming, 136); }
         return 0;
     case WT_INVENTORY_VERIFY_RECEIVED: return fixture->received && memcmp(fixture->delivered, entry->incoming, 136) == 0 ? 0 : -1;
+    case WT_INVENTORY_PREPARE_RESTORE: return fixture->changed ? 1 : 0;
     case WT_INVENTORY_RESTORE:
+        assert(!fixture->changed);
         Mirrored(fixture, WT_JOURNAL_RESTORING);
         fixture->removed = 0; fixture->restored = 1; return 0;
     }
@@ -438,7 +443,9 @@ static void LoadedStateAndMismatch(void)
     WtJournalIO journal = { &fixture, Read, Write, Hash };
     WtEngineIO io = { &fixture, Random, Inventory, CanHold };
     unsigned phase, code;
-    const unsigned phases[] = { WT_JOURNAL_ESCROW, WT_JOURNAL_SUBMIT_READY, WT_JOURNAL_APPLIED };
+    /* A deposit must keep its Submit. APPLIED may lack its ACK, which is
+     * prepared on the next visit (LocalSettlement). */
+    const unsigned phases[] = { WT_JOURNAL_ESCROW, WT_JOURNAL_SUBMIT_READY };
     unsigned char packet[902]; size_t size;
     for (phase = 0; phase < sizeof(phases) / sizeof(*phases); ++phase) {
         Init(&fixture, 1, 25);
@@ -655,11 +662,81 @@ static void SupersededSubmit(void)
     }
 }
 
+/* Rejected Submit for a deposited offer: an ILLEGAL reply, then the
+ * reconcile page whose REJECTED event proves it may be restored. */
+static int Reject(Fixture *fixture)
+{
+    unsigned char packet[902]; size_t size;
+    assert(WtEngine_Deposit(&fixture->engine, 0) == 0 && WtEngine_Request(&fixture->engine, 0) == 0);
+    size = Header(fixture, packet, WT_RESULT_ILLEGAL_POKEMON, 2, 2, 0);
+    assert(WtEngine_Reply(&fixture->engine, packet, size) == 1);
+    assert(WtEngine_Request(&fixture->engine, WT_OP_RECONCILE) == 0);
+    size = Header(fixture, packet, WT_RESULT_OK, 2, 2, 116);
+    packet[44] = 1; Put(packet + 46, 2, 8); Put(packet + 54, 2, 8); packet[62] = WT_EVENT_REJECTED;
+    memcpy(packet + 54 + 25, fixture->engine.entry.operation, 16);
+    assert(Hash(fixture->pokemon, 136, packet + 54 + 57) == 0);
+    return WtEngine_Reply(&fixture->engine, packet, size);
+}
+
+static void LocalSettlement(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], incoming[136], pending[256]; size_t size;
+    uint64_t counter;
+    /* Boot finishes a removal interrupted before SUBMIT_READY; the retained
+     * Submit is sent unchanged on the next visit. */
+    Init(&fixture, 1, 25); Enroll(&fixture); counter = fixture.engine.entry.nextCounter;
+    fixture.failStep = WT_INVENTORY_VERIFY_REMOVED + 1;
+    assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && fixture.removed);
+    Mirrored(&fixture, WT_JOURNAL_ESCROW); memcpy(pending, fixture.engine.entry.request, 256);
+    fixture.failStep = 0; fixture.random = UINT32_MAX; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed && !fixture.restored);
+    Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
+    assert(fixture.engine.entry.nextCounter == counter && memcmp(fixture.engine.entry.request, pending, 256) == 0);
+    fixture.random = 100; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0 && memcmp(fixture.engine.frame, pending, 256) == 0);
+    /* Nothing local is left once the offer is queued. */
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture); fixture.random = UINT32_MAX;
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed && !fixture.restored);
+    Mirrored(&fixture, WT_JOURNAL_QUEUED);
+
+    /* A rejected offer returns to the first free slot once the save has changed since. */
+    Init(&fixture, 1, 25); Enroll(&fixture); fixture.changed = 1;
+    assert(Reject(&fixture) == 0 && fixture.received && !fixture.restored);
+    assert(memcmp(fixture.delivered, fixture.pokemon, 136) == 0);
+    Mirrored(&fixture, WT_JOURNAL_IDLE);
+    /* With no room it stays in the journal, and the next boot returns it. */
+    Init(&fixture, 1, 25); Enroll(&fixture); fixture.changed = 1; fixture.full = 1;
+    assert(Reject(&fixture) == 1 && !fixture.received);
+    Mirrored(&fixture, WT_JOURNAL_RESTORING);
+    fixture.full = 0; fixture.random = UINT32_MAX; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.received);
+    assert(memcmp(fixture.delivered, fixture.pokemon, 136) == 0);
+    Mirrored(&fixture, WT_JOURNAL_IDLE);
+
+    /* Boot finishes a delivery interrupted while applying; its ACK waits for the next visit. */
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture); WtTest_Pokemon(incoming, 2);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_COLLECT) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 274);
+    Snapshot(&fixture, packet + 44, WT_TRADE_MATCHED, WT_DELIVERY_MATCH, 3, incoming);
+    memcpy(packet + 182, incoming, 136);
+    fixture.failStep = WT_INVENTORY_RECEIVE + 1;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && !fixture.received);
+    Mirrored(&fixture, WT_JOURNAL_APPLYING);
+    fixture.failStep = 0; fixture.random = UINT32_MAX; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.received);
+    Mirrored(&fixture, WT_JOURNAL_APPLIED); assert(fixture.engine.entry.requestLength == 0);
+    fixture.random = 100; WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.engine.frame[5] == WT_OP_ACKNOWLEDGE);
+    Mirrored(&fixture, WT_JOURNAL_APPLIED); assert(fixture.engine.entry.request[5] == WT_OP_ACKNOWLEDGE);
+}
+
 int main(void)
 {
     PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
-    DeliveryKindBinding();
-    puts("Recoverable engine: paired delivery, match-cancel race, return, refused delivery, rejection, retries, full-storage restart, stale context and failed persistence passed");
+    DeliveryKindBinding(); LocalSettlement();
+    puts("Recoverable engine: paired delivery, match-cancel race, return, refused delivery, rejection, retries, full-storage restart, stale context, failed persistence and boot settlement passed");
     return 0;
 }

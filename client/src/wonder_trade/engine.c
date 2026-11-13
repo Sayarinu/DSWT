@@ -43,7 +43,8 @@ static int StateKnown(const WtJournalEntry *entry, WtWireHash hash)
     case WT_JOURNAL_ENROLLING: return operation == WT_OP_ENROLL;
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
     case WT_JOURNAL_QUEUED: return operation == 0 || operation == WT_OP_CANCEL;
-    case WT_JOURNAL_APPLIED: return operation == WT_OP_ACKNOWLEDGE;
+    /* A delivery finished at boot waits for its ACK until the next visit. */
+    case WT_JOURNAL_APPLIED: return operation == 0 || operation == WT_OP_ACKNOWLEDGE;
     default: return 0;
     }
 }
@@ -105,10 +106,33 @@ static int Inventory(WtEngine *engine, enum WtInventoryStep step, WtJournalEntry
     return 0;
 }
 
+/* Return a rejected or cancelled offer. While the save still matches the
+ * escrow it goes back to its own slot; once the game has saved since, it
+ * returns like a delivery into the first free party or PC slot, recorded
+ * before the save is written. 1 keeps it in the journal while storage is full. */
+static int Restore(WtEngine *engine, WtJournalEntry *next)
+{
+    int prepared;
+    if (next->deliveryKind != WT_DELIVERY_RETURN) {
+        prepared = engine->io.inventory(engine->io.arg, WT_INVENTORY_PREPARE_RESTORE, next, next->source.slot);
+        if (prepared == 0) return Inventory(engine, WT_INVENTORY_RESTORE, next, next->source.slot);
+        if (prepared != 1) return Block(engine);
+        next->deliveryKind = WT_DELIVERY_RETURN;
+        memcpy(next->incoming, next->outgoing, sizeof(next->incoming));
+        if (engine->journal.io.hash(next->incoming, sizeof(next->incoming), next->incomingDigest) != 0) return Block(engine);
+        prepared = engine->io.inventory(engine->io.arg, WT_INVENTORY_PREPARE_RECEIVE, next, 0);
+        if (prepared == 1) return 1;
+        if (prepared != 0) return Block(engine);
+        if (Commit(engine, next) != 0) return -1;
+    }
+    if (Inventory(engine, WT_INVENTORY_RECEIVE, next, next->destination.slot) != 0
+        || Inventory(engine, WT_INVENTORY_VERIFY_RECEIVED, next, next->destination.slot) != 0) return -1;
+    return 0;
+}
+
 static int Resume(WtEngine *engine)
 {
     WtJournalEntry next = engine->entry;
-    WtWireRequest request;
     int result = -1;
     if (engine->blocked) goto done;
     if (next.phase == WT_JOURNAL_ESCROW) {
@@ -118,7 +142,8 @@ static int Resume(WtEngine *engine)
         if (Commit(engine, &next) != 0) goto done;
     }
     if (next.phase == WT_JOURNAL_RESTORING) {
-        if (Inventory(engine, WT_INVENTORY_RESTORE, &next, next.source.slot) != 0) goto done;
+        int restored = Restore(engine, &next);
+        if (restored != 0) { result = restored; goto done; }
         Idle(&next);
         if (Commit(engine, &next) != 0) goto done;
     }
@@ -132,24 +157,45 @@ static int Resume(WtEngine *engine)
     if (next.phase == WT_JOURNAL_APPLYING) {
         if (Inventory(engine, WT_INVENTORY_RECEIVE, &next, next.destination.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_RECEIVED, &next, next.destination.slot) != 0) goto done;
+        /* Applying needs no randomness, so boot can finish it; the ACK,
+         * which needs a request ID, is prepared on the next visit. */
         next.phase = WT_JOURNAL_APPLIED;
         memcpy(next.lastReceipt, next.receipt, 16);
-        if (RequestIdentity(engine, &request, WT_OP_ACKNOWLEDGE) != 0) goto done;
-        memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
-        request.counter = next.operationCounter;
-        memcpy(request.body.acknowledge.trade, next.trade, 16);
-        memcpy(request.body.acknowledge.receipt, next.receipt, 16);
-        memcpy(request.body.acknowledge.deliveredDigest, next.incomingDigest, 32);
-        memcpy(request.body.acknowledge.appliedDigest, next.appliedDigest, 32);
-        request.body.acknowledge.generation = engine->entry.generation + 1;
-        if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
-        Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
-        engine->lastResult = 0;
+        if (Commit(engine, &next) != 0) goto done;
     }
+    result = 0;
+done:
+    Clear(&next, sizeof(next));
+    return result;
+}
+
+static int Acknowledge(WtEngine *engine)
+{
+    WtJournalEntry next = engine->entry;
+    WtWireRequest request;
+    int result = -1;
+    if (RequestIdentity(engine, &request, WT_OP_ACKNOWLEDGE) != 0) goto done;
+    memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
+    request.counter = next.operationCounter;
+    memcpy(request.body.acknowledge.trade, next.trade, 16);
+    memcpy(request.body.acknowledge.receipt, next.receipt, 16);
+    memcpy(request.body.acknowledge.deliveredDigest, next.incomingDigest, 32);
+    memcpy(request.body.acknowledge.appliedDigest, next.appliedDigest, 32);
+    request.body.acknowledge.generation = engine->entry.generation + 1;
+    if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
+    Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
+    engine->lastResult = 0;
     result = 0;
 done:
     Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
     return result;
+}
+
+int WtEngine_Settle(WtEngine *engine)
+{
+    /* An interrupted deposit finishes its removal rather than cancel: its
+     * Submit must stay unchanged until the server's outcome is proven. */
+    return Refresh(engine) != 0 ? -1 : Resume(engine);
 }
 
 int WtEngine_Open(WtEngine *engine, WtJournalIO journal, WtEngineIO io)
@@ -222,6 +268,7 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     if (Refresh(engine) != 0 || engine->frameSize) return -1;
     result = Resume(engine);
     if (result != 0) return result;
+    if (engine->entry.phase == WT_JOURNAL_APPLIED && !engine->entry.requestLength && Acknowledge(engine) != 0) return -1;
     next = engine->entry;
     result = -1;
     rejectionLookup = operation == WT_OP_RECONCILE && next.requestLength

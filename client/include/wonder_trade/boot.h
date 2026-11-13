@@ -5,9 +5,12 @@
 #include "wonder_trade/journal.h"
 
 /* Boot inspection after WtRecovery_Begin, before any gameplay; run it on a
- * worker thread. Retail writes are granted, and a journal mirror repaired,
- * only when nothing is pending or the game proves a pending deposit absent.
- * Zero when gameplay may start; otherwise the caller blocks recovery. */
+ * worker thread. It first finishes local steps (WtEngine_Settle): it cancels
+ * an interrupted deposit, returns a rejected offer and applies a collected
+ * delivery. Retail writes are granted, and a journal mirror repaired, only
+ * when the game then proves its state (WtGame_CanLeave); steps that need the
+ * network wait for the next Wonder Trade visit. Zero when gameplay may start;
+ * otherwise the caller blocks recovery. */
 int WtBoot_Check(WtGame *, WtJournalIO);
 
 /* The boot screen stays hidden while the check runs, so an ordinary boot goes

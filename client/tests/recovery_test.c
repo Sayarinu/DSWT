@@ -103,8 +103,20 @@ int main(void)
     WtRecovery_Block(); WtRecovery_InternalWrite(1);
     assert(WtRecovery_CanWrite() && !WtRecovery_CanClear());
     WtRecovery_InternalWrite(0); assert(!WtRecovery_CanWrite());
-    WtRecovery_Allow(WT_JOURNAL_APPLYING);
-    assert(!WtRecovery_CanWrite() && !WtRecovery_CanClear());
+    {
+        /* Steps that wait for the network allow play but never clearing the save;
+         * local steps must finish first, and recovery evidence stays blocked. */
+        const unsigned pending[] = { WT_JOURNAL_ENROLLING, WT_JOURNAL_SUBMIT_READY, WT_JOURNAL_QUEUED,
+            WT_JOURNAL_RECEIVED, WT_JOURNAL_APPLIED, WT_JOURNAL_RESTORING };
+        const unsigned blocked[] = { WT_JOURNAL_ESCROW, WT_JOURNAL_APPLYING, WT_JOURNAL_RECOVERY_REQUIRED };
+        unsigned i;
+        for (i = 0; i < sizeof(pending) / sizeof(*pending); ++i) {
+            WtRecovery_Allow(pending[i]); assert(WtRecovery_CanWrite() && !WtRecovery_CanClear());
+        }
+        for (i = 0; i < sizeof(blocked) / sizeof(*blocked); ++i) {
+            WtRecovery_Allow(blocked[i]); assert(!WtRecovery_CanWrite() && !WtRecovery_CanClear());
+        }
+    }
     WtRecovery_Allow(WT_JOURNAL_IDLE);
     assert(WtRecovery_CanWrite() && WtRecovery_CanClear());
     puts("Read-only boot classification, mutation gates and evidence preservation passed");

@@ -44,8 +44,14 @@ void WtRecovery_Block(void) { sState = BLOCKED; }
 void WtRecovery_InternalWrite(int allowed) { sInternalWrite = allowed != 0; }
 void WtRecovery_Allow(unsigned phase)
 {
-    sState = phase == WT_JOURNAL_EMPTY || phase == WT_JOURNAL_IDLE ? SAFE
-        : phase == WT_JOURNAL_QUEUED || phase == WT_JOURNAL_RECEIVED ? PENDING : BLOCKED;
+    /* Every step that waits for the network may wait while the game is played;
+     * the next Wonder Trade visit finishes it. Local steps finish before play. */
+    switch (phase) {
+    case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: sState = SAFE; break;
+    case WT_JOURNAL_ENROLLING: case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED:
+    case WT_JOURNAL_RECEIVED: case WT_JOURNAL_APPLIED: case WT_JOURNAL_RESTORING: sState = PENDING; break;
+    default: sState = BLOCKED; break;
+    }
 }
 
 int WtRecovery_Check(WtJournalIO source)

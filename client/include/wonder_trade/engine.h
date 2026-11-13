@@ -12,7 +12,10 @@
 enum WtInventoryStep {
     WT_INVENTORY_PREPARE_REMOVE, WT_INVENTORY_REMOVE, WT_INVENTORY_VERIFY_REMOVED,
     WT_INVENTORY_PREPARE_RECEIVE, WT_INVENTORY_RECEIVE, WT_INVENTORY_VERIFY_RECEIVED,
-    WT_INVENTORY_RESTORE
+    WT_INVENTORY_RESTORE,
+    /* 0 when RESTORE can put the escrowed Pokémon back exactly (the save is
+     * unchanged since the escrow), 1 when the save has changed since. */
+    WT_INVENTORY_PREPARE_RESTORE
 };
 
 /* PREPARE only computes checked images/locators/hashes in the candidate entry.
@@ -55,6 +58,11 @@ int WtEngine_Deposit(WtEngine *, unsigned slot);
 /* Zero selects the recovery request. Pending mutation bytes always take
  * precedence. Returned frame belongs to the engine and contains a credential. */
 int WtEngine_Request(WtEngine *, unsigned operation);
+/* Finish what needs no network or randomness, before gameplay: complete an
+ * interrupted deposit's removal (its Submit is sent on the next visit),
+ * restore a rejected offer, and apply a collected delivery. 1 keeps a delivery or return in the journal
+ * while storage is full. Everything else waits for the next visit. */
+int WtEngine_Settle(WtEngine *);
 /* The exact outstanding frame binds the raw reply. HTTP/TLS success alone
  * cannot advance the journal. A positive return retains a pending operation,
  * including a refused delivery (see refused). */
