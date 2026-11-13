@@ -350,7 +350,8 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     sub_0200CD68(app->bgConfig, GF_BG_LYR_MAIN_0, WT_MESSAGE_TILE, WT_MESSAGE_PALETTE, (u8)Options_GetFrame(options), app->game.heapID);
 
     AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 2, 1, 28, 2, WT_TEXT_PALETTE, 1);
-    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 2, 17, 27, 6, WT_TEXT_PALETTE, 61);
+    /* The field's own message box: 27x4 tiles at (2, 19), as text_02054590.c places it. */
+    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 2, 19, 27, 4, WT_TEXT_PALETTE, 61);
     AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 4, 18, 10, WT_TEXT_PALETTE, 223);
     AddWindowParameterized(app->bgConfig, &app->body, GF_BG_LYR_MAIN_0, 2, 5, 28, 16, WT_TEXT_PALETTE, 413);
     AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 2, 1, 28, 2, WT_SUB_TEXT_PALETTE, 1);
@@ -558,8 +559,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         }
         ScheduleWindowCopyToVram(&app->body);
     } else {
-        /* The player's own message box and message font, as in conversations. */
-        SetWindowY(&app->message, preview ? 17 : 9);
+        /* The player's own message box and message font, where conversations show them. */
         FillWindowPixelBuffer(&app->message, 15);
         DrawFrameAndWindow2(&app->message, TRUE, WT_MESSAGE_TILE, WT_MESSAGE_PALETTE);
         WonderTrade_Print(app, &app->message, WT_FONT_MESSAGE, app->statusMessage, 0, 0, WT_COLOR_DARK);
