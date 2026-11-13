@@ -41,7 +41,7 @@ class CommandLineTests(AppFixture):
         source = self.write("Platinum.nds", BASES["us-rev1"][:USED])
         code, out, _ = self.run_app("--input", str(source))
         self.assertEqual(code, 0)
-        self.assertIn("Patched us-rev1", out)
+        self.assertIn("Patched Pokémon Platinum us-rev1", out)
         self.assertEqual((self.inputs / "Platinum (Wonder Trade).nds").read_bytes(), TARGETS["us-rev1"])
         self.assertEqual(source.read_bytes(), BASES["us-rev1"][:USED])
 
@@ -143,7 +143,7 @@ class ReleaseTests(AppFixture):
         self.assertIn("--draft", create)
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
-        self.assertIn("| us-rev1 |", notes)
+        self.assertIn("| Pokémon Platinum us-rev1 |", notes)
         renamed = self.root / "game/other.zip"
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):

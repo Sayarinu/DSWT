@@ -1,14 +1,14 @@
 # Install Wonder Trade
 
-Wonder Trade is a patch for your own copy of Pokémon Platinum, with Diamond and
-Pearl being tested. It trades a party Pokémon with a random player through this
-project's server. No ROM is included.
+Wonder Trade is a patch for your own copy of Pokémon Platinum, with Diamond,
+Pearl, HeartGold and SoulSilver being tested. It trades a party Pokémon with a
+random player through this project's server. No ROM is included.
 
 ## What you need
 
 - A decrypted dump of your own US English Pokémon Platinum cartridge, Rev 0 or
-  Rev 1. Trimmed dumps work. US Diamond and Pearl Rev 5 patches are included for
-  testing. Other games (HeartGold, SoulSilver), versions and languages are
+  Rev 1. Trimmed dumps work. US Diamond and Pearl Rev 5 and US HeartGold and
+  SoulSilver patches are included for testing. Other versions and languages are
   recognised but not supported yet, and encrypted dumps are refused.
 - melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
 - The DSWT Patcher for your computer from the release page, or the patch archive

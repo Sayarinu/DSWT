@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 import patcher
-from support import BASES, PINS, PROFILE, TARGETS, assemble, rom, source_read, target_read
+from support import BASES, PINS, PROFILE, TARGETS, assemble, blz, rom, source_read, target_read, with_overlay
 
 RECORD = {key: key for key in ("tool", "version", "revision", "archive", "license", "notices", "build", "binary")}
 SCALAR = bytes([0x11] * 32)
@@ -183,6 +183,32 @@ class CreateTests(Fixture):
         manifest = self.create(pairs=self.leak(BASES["us-rev1"][0x400:0x41F]))  # 31 bytes: shorter than a window
         self.assertEqual(manifest["release_checks"]["private_keys_checked"], 1)
         self.assertEqual(manifest["release_checks"]["verbatim_retail_run_limit"], 47)
+
+    def test_checks_search_compressed_code(self):
+        # Like HeartGold, the base and target keep their code in a compressed overlay.
+        base = with_overlay(rom(1, "compressed-base"), blz(bytes(range(16)) + bytes(120), 120))
+        self.catalog["variants"].append(dict(self.catalog["variants"][1], id="compressed", planned_patch="dswt-c.bps",
+                                             sha256=hashlib.sha256(base).hexdigest()))
+        base_path = self.write("compressed-base.nds", base)
+
+        def compressed(payload, damage=False):
+            code = bytearray(blz(payload + bytes(300), 300))
+            if damage:
+                code[-8:-4] = (0x08FFFFFF).to_bytes(4, "little")
+            return [(base_path, self.write("compressed.nds", with_overlay(rom(1, "compressed"), bytes(code))))]
+        profile = b"wt.dswt.games:443" + PINS[0] + PINS[1]
+        self.assertNotIn(PINS[0], compressed(profile)[0][1].read_bytes())
+        manifest = self.create(pairs=compressed(profile))
+        self.assertEqual([entry["variant"] for entry in manifest["entries"]], ["compressed"])
+        (self.inputs / "current.key").write_bytes(KEY)
+        for name, payload, message in (("key", profile + SCALAR, "private key current.key"),
+                                       ("profile twice", profile + PINS[0], "connection profile"),
+                                       ("damaged", profile, "malformed compressed code")):
+            with self.subTest(name):
+                (self.inputs / "compressed.nds").unlink()
+                with self.assertRaisesRegex(patcher.PatchError, message):
+                    self.create(pairs=compressed(payload, damage=name == "damaged"), output=self.root / "game/other")
+                self.assertFalse((self.root / "game/other").exists())
 
     def test_explicit_keys_replace_the_default_and_must_be_pem(self):
         other = self.inputs / "elsewhere.pem"
