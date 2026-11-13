@@ -49,7 +49,7 @@ typedef struct WtGameConfig {
     /* SDK backup types (CARDBackupType) the game identifies its 4 Mbit save
      * flash as; journal access refuses any other. List one type twice if needed. */
     uint32_t flashType[2];
-    /* Enroll's game variant code (protocol/README.md, "Game variants"). */
+    /* Enroll's game variant code (wiki Protocol, "Game variants": https://github.com/Sayarinu/DSWT/wiki/Protocol). */
     uint32_t enrollVariant;
 } WtGameConfig;
 

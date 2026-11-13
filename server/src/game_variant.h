@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// The enrollment build u32 names a save's game variant; see protocol/README.md.
+// The enrollment build u32 names a save's game variant; see https://github.com/Sayarinu/DSWT/wiki/Protocol.
 // Structured codes pack family << 24 | version << 16 | language << 8 | revision
 // with the games' own version and language IDs. Code 1 is the legacy alias for
 // US English Platinum that released clients send.
