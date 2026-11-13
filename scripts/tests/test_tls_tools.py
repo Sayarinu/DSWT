@@ -31,14 +31,14 @@ prepare = module("prepare-tls")
 launcher = module("run-emulator")
 
 
-def synthetic_save():
+def synthetic_save(magic=0x20060623):
     data = bytearray(b"\xff" * 524288)
     for half in (0, 262144):
         for block, (offset, size) in enumerate(((0, 53036), (53036, 74212))):
             start = half + offset
             data[start:start + size - 20] = bytes(size - 20)
             crc = binascii.crc_hqx(data[start:start + size - 20], 0xffff)
-            struct.pack_into("<IIIIBxH", data, start + size - 20, 1, 1, size, 0x20060623, block, crc)
+            struct.pack_into("<IIIIBxH", data, start + size - 20, 1, 1, size, magic, block, crc)
     return bytes(data)
 
 
@@ -75,6 +75,16 @@ class TlsToolTests(unittest.TestCase):
             provision.provision(original, "diamond-us-rev5")
         with self.assertRaises(ValueError):
             provision.provision(original[:262144], "us-rev0")
+
+    def test_save_footer_magic_follows_the_cartridge_language(self):
+        # Korean cartridges mark save blocks with 0x20070903; every other language uses 0x20060623.
+        layout = provision.layout_for("us-rev1")
+        self.assertEqual(provision.footer_magic(layout, "us-rev1"), 0x20060623)
+        self.assertEqual(provision.footer_magic(layout, "platinum-korea"), 0x20070903)
+        self.assertIn("Korean", layout["languages"])
+        self.assertTrue(provision.provision(synthetic_save(), "us-rev1"))
+        with self.assertRaisesRegex(ValueError, "no valid copy"):
+            provision.provision(synthetic_save(0x20070903), "us-rev1")
 
     def test_hgss_saves_are_checked_against_their_own_layout(self):
         hgss = bytearray(b"\xff" * 524288)

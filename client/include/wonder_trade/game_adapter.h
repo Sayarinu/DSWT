@@ -40,6 +40,11 @@ typedef struct WtReceivedPokemon {
     uint16_t nickname[WT_GAME_NAME_LENGTH + 1], originalTrainer[WT_GAME_TRAINER_NAME_LENGTH + 1];
 } WtReceivedPokemon;
 
+/* Save footer magic for this build's language; Korean builds define 0x20070903. */
+#ifndef WT_SAVE_MAGIC
+#define WT_SAVE_MAGIC 0x20060623
+#endif
+
 typedef struct WtGameConfig {
     /* Flash addresses of the two 4 KiB journal banks. Each starts a 64 KiB
      * sector of the 4 Mbit save flash that the game never uses. */
@@ -51,6 +56,9 @@ typedef struct WtGameConfig {
     uint32_t flashType[2];
     /* Enroll's game variant code (wiki Protocol, "Game variants": https://github.com/Sayarinu/DSWT/wiki/Protocol). */
     uint32_t enrollVariant;
+    /* The magic number in this cartridge's save block footers: 0x20060623, or
+     * 0x20070903 in every Korean game. Block sizes are the same in every language. */
+    uint32_t saveMagic;
 } WtGameConfig;
 
 extern const WtGameConfig gWtGameConfig;

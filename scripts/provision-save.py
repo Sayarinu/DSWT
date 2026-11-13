@@ -41,8 +41,15 @@ def layout_for(target):
     raise ValueError("Only a verified target's save layout is supported")
 
 
+def footer_magic(layout, target):
+    """Every Korean cartridge marks its save blocks with its own magic number."""
+    magic = layout["footer_magic"]
+    return magic["korean"] if target.endswith(layout["korean_target_suffix"]) else magic["international"]
+
+
 def provision(data, target):
     layout = layout_for(target)
+    magic = footer_magic(layout, target)
     if len(data) != layout["flash_size"]:
         raise ValueError("Only a full 512 KiB save for a verified target is supported")
     footer_format = layout["block_footer"]
@@ -54,7 +61,7 @@ def provision(data, target):
             offset, size = half + region["offset"], region["size"]
             body = data[offset:offset + size - footer_size]
             footer = dict(zip(fields, struct.unpack(footer_format["format"], data[offset + size - footer_size:offset + size])))
-            valid |= (footer["size"] == size and footer["magic"] == 0x20060623 and footer["block"] == block_id
+            valid |= (footer["size"] == size and footer["magic"] == magic and footer["block"] == block_id
                       and binascii.crc_hqx(body, 0xffff) == footer["crc"])
         if not valid:
             raise ValueError("Retail save block has no valid copy; preserve it for recovery")

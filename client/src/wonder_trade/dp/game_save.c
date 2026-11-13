@@ -26,7 +26,6 @@
 extern u8 CalcShininessByOtIdAndPersonality(u32 otId, u32 personality);
 
 #define FOOTER_SIZE 20
-#define FOOTER_MAGIC 0x20060623
 #define GENERAL_SIZE 0xC100
 #define BOXES_OFFSET 0xC100
 #define BOXES_SIZE 0x121E0
@@ -121,7 +120,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
             if (half == 2) { result = -7; goto done; }
             footer = footers[block][half];
             /* global counter, block counter, size, magic, block u8, pad, CRC u16 */
-            if (Read32(footer + 8) != sBlocks[block].size || Read32(footer + 12) != FOOTER_MAGIC
+            if (Read32(footer + 8) != sBlocks[block].size || Read32(footer + 12) != gWtGameConfig.saveMagic
                 || footer[16] != block) { result = -3; goto done; }
             if (Read32(footer) != save->unk_20214 - age) { result = -6; goto done; }
             address = half * 0x40000 + sBlocks[block].offset;

@@ -87,15 +87,24 @@ const Layout &LayoutFor(const std::string &target) {
     return kHeartGoldSoulSilver;
 }
 
+// Korean cartridges mark save blocks with their own magic (protocol/save-layout*.json).
+std::uint32_t FooterMagic(const std::string &target) {
+    const std::string korean = "-korea";
+    const bool isKorean = target.size() > korean.size() &&
+        target.compare(target.size() - korean.size(), korean.size(), korean) == 0;
+    return isKorean ? 0x20070903 : 0x20060623;
+}
+
 void CheckLayout(const Bytes &bytes, const std::string &target) {
     const auto &layout = LayoutFor(target);
+    const auto magic = FooterMagic(target);
     for (unsigned block = 0; block < 2; ++block) {
         bool valid = false;
         for (const auto half : {0U, 262144U}) {
             const auto size = layout.sizes[block];
             const auto *body = bytes.data() + half + layout.offsets[block];
             const auto *footer = body + size - layout.footer;
-            valid |= Number(footer + layout.size_at, 4) == size && Number(footer + layout.magic_at, 4) == 0x20060623 &&
+            valid |= Number(footer + layout.size_at, 4) == size && Number(footer + layout.magic_at, 4) == magic &&
                 Number(footer + layout.block_at, layout.block_width) == block &&
                 Number(footer + layout.crc_at, 2) == Crc(body, size - layout.footer);
         }

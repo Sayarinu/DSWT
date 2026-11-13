@@ -92,6 +92,7 @@ const WtGameConfig gWtGameConfig = {
     2, 1,
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_VARIANT,
+    WT_SAVE_MAGIC,
 };
 
 /* The European English cartridge runs the same code as the US one, so the
