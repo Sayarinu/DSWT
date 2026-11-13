@@ -23,14 +23,25 @@ def seal(record):
     record[4092:] = b"CMIT"
 
 
-def retail_save(record):
+# Retail block offsets/sizes and footer per game family (protocol/save-layout*.json).
+LAYOUTS = {
+    "us-rev1": (((0, 53036), (53036, 74212)), 20, lambda size, block, crc: (1, 1, size, 0x20060623, block, crc), "<IIIIBxH"),
+    "diamond-us-rev5": (((0, 49408), (49408, 74208)), 20, lambda size, block, crc: (1, 1, size, 0x20060623, block, crc),
+                        "<IIIIBxH"),
+    "heartgold-us-rev0": (((0, 63016), (63232, 74512)), 16, lambda size, block, crc: (1, size, 0x20060623, block, crc),
+                          "<IIIHH"),
+}
+
+
+def retail_save(record, target="us-rev1"):
+    blocks, footer, fields, layout = LAYOUTS[target]
     data = bytearray(b"\xff" * 524288)
     for half in (0, 262144):
-        for block, (offset, size) in enumerate(((0, 53036), (53036, 74212))):
+        for block, (offset, size) in enumerate(blocks):
             start = half + offset
-            data[start:start + size - 20] = bytes(size - 20)
-            crc = binascii.crc_hqx(data[start:start + size - 20], 0xffff)
-            struct.pack_into("<IIIIBxH", data, start + size - 20, 1, 1, size, 0x20060623, block, crc)
+            data[start:start + size - footer] = bytes(size - footer)
+            crc = binascii.crc_hqx(data[start:start + size - footer], 0xffff)
+            struct.pack_into(layout, data, start + size - footer, *fields(size, block, crc))
     for bank in BANKS:
         data[bank:bank + 4096] = record
     return bytes(data)
@@ -124,6 +135,20 @@ class JournalSeedTests(unittest.TestCase):
                 self.assertEqual(self.save.read_bytes(), data)
                 self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.install(1); self.tool("inspect", target="diamond-us-rev5", ok=False)
+
+    def test_each_game_family_layout_is_checked(self):
+        record = self.record(5)
+        for target in LAYOUTS:
+            with self.subTest(target):
+                self.save = self.root / f"{target}.sav"
+                for other in LAYOUTS:
+                    self.save.unlink(missing_ok=True)
+                    self.save.write_bytes(retail_save(record, target))
+                    self.save.chmod(0o600)
+                    self.tool("inspect", target=other, ok=other == target)
+                self.tool("prepare")
+                self.tool("seed", target=target)
+                self.assertNotEqual(self.save.read_bytes()[BANKS[0] + 1444:BANKS[0] + 1476], record[1444:1476])
 
     def test_a_recognized_torn_mirror_is_repaired_without_losing_active_data(self):
         original = self.install(5)

@@ -14,6 +14,7 @@
 #include "game_stats.h"
 #include "heap.h"
 #include "item.h"
+#include "mail.h"
 #include "party.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
@@ -337,6 +338,24 @@ static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, in
     if (!destination || memcmp(destination, entry->destinationBefore, entry->destination.length) != 0
         || (entry->destination.kind == 1 && party->core.curCount != entry->destination.slot)) return -1;
     if (ReceiveEffects(game, save, entry, &mon) != 0) return -1;
+    if (entry->deliveryKind == WT_DELIVERY_MATCH && entry->destination.kind == 1) {
+        /* Mail_New leaves each message's msg_no as heap contents (MailMsg_Init),
+         * so a replay after a restart would build a different image. Prepare a
+         * fully defined blank mail; a replay keeps the recorded message numbers,
+         * which also recovers deliveries prepared before this fix. */
+        struct Mail mail;
+        unsigned i;
+        memset(&mail, 0, sizeof(mail)); Mail_Init(&mail);
+        if (!prepare) {
+            Pokemon recorded;
+            struct Mail retained;
+            if (WtPokemon_Decode(entry->destinationAfter, canonical) != 0) return -1;
+            memcpy(&recorded, entry->destinationAfter, sizeof(recorded));
+            GetMonData(&recorded, MON_DATA_MAIL, &retained);
+            for (i = 0; i < NELEMS(mail.unk_20); ++i) mail.unk_20[i].msg_no = retained.unk_20[i].msg_no;
+        }
+        SetMonData(&mon, MON_DATA_MAIL, &mail);
+    }
     if (entry->deliveryKind == WT_DELIVERY_MATCH && entry->destination.kind == 2) {
         RestoreBoxMonPP(Mon_GetBoxMon(&mon));
         BoxMon_UpdateShayminForm(Mon_GetBoxMon(&mon), SHAYMIN_LAND);
