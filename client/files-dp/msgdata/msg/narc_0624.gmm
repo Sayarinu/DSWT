@@ -73,91 +73,91 @@
 	<row id="WonderTrade_Text_Connecting" index="7">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Connecting to Wi-Fi...\nPlease wait.</language>
-		<language name="French">Connexion à la CWF\nNintendo... Veuillez\npatienter.</language>
-		<language name="German">Verbindung zur\nNintendo WFC... Bitte\nwarte einen Moment.</language>
-		<language name="Italian">Connessione alla\nNintendo Wi-Fi\nConnection... Attendi\nun momento.</language>
-		<language name="Spanish">Conectando con la CWF\nde Nintendo... Por\nfavor, espera un\nmomento.</language>
-		<language name="Japanese">Wi-Fiに　せつぞく　しています\nしばらく　おまちください</language>
-		<language name="Korean">Wi-Fi 커넥션에 접속하고 있습니다\n잠시만 기다려주십시오</language>
+		<language name="French">Connexion en cours... Veuillez\npatienter.</language>
+		<language name="German">Verbindung... Bitte warte einen\nMoment.</language>
+		<language name="Italian">Connessione... Attendi un momento.</language>
+		<language name="Spanish">Conectando... Espera un momento.</language>
+		<language name="Japanese">せつぞく　しています\nしばらく　おまちください</language>
+		<language name="Korean">접속하고 있습니다\n잠시만 기다려주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Disconnecting" index="8">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Disconnecting...\nPlease wait.</language>
-		<language name="French">Déconnexion en\ncours...\nVeuillez\npatienter.</language>
-		<language name="German">Verbindung wird\nbeendet... Bitte\nwarte einen\nMoment.</language>
-		<language name="Italian">Disconnessione\nin corso.\nAttendi un\nmomento.</language>
-		<language name="Spanish">Desconectando...\nPor favor,\nespera un\nmomento.</language>
+		<language name="French">Déconnexion... Veuillez patienter.</language>
+		<language name="German">Verbindung wird beendet... Bitte\nwarte.</language>
+		<language name="Italian">Disconnessione... Attendi un\nmomento.</language>
+		<language name="Spanish">Desconectando... Espera un momento.</language>
 		<language name="Japanese">つうしんを　しゅうりょう　します\nしばらく　おまちください</language>
 		<language name="Korean">통신을 종료합니다\n잠시만 기다려주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Choose" index="9">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Choose a party Pokémon\nto offer for Wonder Trade.</language>
-		<language name="French">Choisissez un Pokémon de\nvotre équipe pour\nl’Echange Miracle.</language>
-		<language name="German">Wähle ein Pokémon aus\ndeinem Team für den\nWundertausch.</language>
-		<language name="Italian">Scegli un Pokémon della\nsquadra per lo Scambio\nProdigioso.</language>
-		<language name="Spanish">Elige un Pokémon de tu\nequipo para el Intercambio\nProdigioso.</language>
-		<language name="Japanese">ミラクルこうかんに　だす\nてもちの　ポケモンを　えらんでください</language>
-		<language name="Korean">미라클교환에 내놓을\n지닌 포켓몬을 선택해 주십시오</language>
+		<language name="French">Choisissez un Pokémon de votre\néquipe.</language>
+		<language name="German">Wähle ein Pokémon aus deinem Team.</language>
+		<language name="Italian">Scegli un Pokémon della squadra.</language>
+		<language name="Spanish">Elige un Pokémon de tu equipo.</language>
+		<language name="Japanese">だす　ポケモンを\nえらんでください</language>
+		<language name="Korean">내놓을 포켓몬을\n선택해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Pinging" index="10">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Saving and contacting the server.\nDo not turn off the power.</language>
-		<language name="French">Sauvegarde et connexion au\nserveur en cours... Ne pas\néteindre.</language>
-		<language name="German">Speichervorgang und Verbindung\nzum Server... Bitte das System\nnicht ausschalten.</language>
-		<language name="Italian">Salvataggio e connessione al\nserver in corso. Non spegnere la\nconsole.</language>
-		<language name="Spanish">Guardando y conectando con el\nservidor... No apagues la\nconsola.</language>
-		<language name="Japanese">レポ－トを　かいて　サ－バ－に\nせつぞく　しています\nでんげんを　きらないでください</language>
-		<language name="Korean">리포트를 작성하고\n서버에 접속하고 있습니다\n전원을 끄지 마십시오</language>
+		<language name="French">Sauvegarde et connexion... Ne pas\néteindre.</language>
+		<language name="German">Speichern und verbinden... System\nnicht ausschalten.</language>
+		<language name="Italian">Salvataggio e connessione. Non\nspegnere.</language>
+		<language name="Spanish">Guardando y conectando... No\napagues la consola.</language>
+		<language name="Japanese">レポートを　かいています\nでんげんを　きらないでください</language>
+		<language name="Korean">리포트를 작성하고 있습니다\n전원을 끄지 마십시오</language>
 	</row>
 	<row id="WonderTrade_Text_ConnectionError" index="11">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again.</language>
-		<language name="French">Impossible de se connecter à\nInternet. Vérifiez vos paramètres\nde la CWF Nintendo et la portée\nde votre point d’accès, puis\nréessayez.</language>
-		<language name="German">Keine Verbindung zum Internet.\nÜberprüfe die Einstellungen der\nNintendo WFC und ob dein\nZugangspunkt in Reichweite ist,\nund versuche es dann noch einmal.</language>
-		<language name="Italian">Impossibile connettersi a\nInternet. Controlla le\nimpostazioni della Nintendo WFC e\nche il punto di accesso sia nel\nraggio d’azione, poi riprova.</language>
-		<language name="Spanish">No se ha podido conectar a\nInternet. Comprueba la\nconfiguración de la CWF de\nNintendo y que el punto de acceso\nesté cerca, y vuelve a\nintentarlo.</language>
-		<language name="Japanese">インタ－ネットに\nせつぞく　できませんでした\nニンテンド－Wi-Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください</language>
+		<language name="French">Impossible de se connecter à Internet.\nVérifiez vos paramètres de la CWF\nNintendo et la portée de votre point\nd’accès, puis réessayez.</language>
+		<language name="German">Keine Verbindung zum Internet.\nÜberprüfe die Einstellungen der Nintendo\nWFC und ob dein Zugangspunkt in\nReichweite ist, und versuche es dann\nnoch einmal.</language>
+		<language name="Italian">Impossibile connettersi a Internet.\nControlla le impostazioni della Nintendo\nWFC e che il punto di accesso sia nel\nraggio d’azione, poi riprova.</language>
+		<language name="Spanish">No se ha podido conectar a Internet.\nComprueba la configuración de la CWF de\nNintendo y que el punto de acceso esté\ncerca, y vuelve a intentarlo.</language>
+		<language name="Japanese">インターネットに\nせつぞく　できませんでした\nニンテンドーWi‐Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください</language>
 		<language name="Korean">인터넷에 접속할 수 없었습니다\n닌텐도 Wi-Fi 커넥션 설정을\n확인하고 다시 시도해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_PingError" index="12">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below.</language>
-		<language name="French">Erreur de communication avec\nl’Echange Miracle. Veuillez\nréessayer. Si l’erreur se\nrépète, notez le code\nci-dessous.</language>
-		<language name="German">Verbindungsfehler beim\nWundertausch. Bitte versuche es\nnoch einmal. Tritt der Fehler\nerneut auf, notiere den Code\nunten.</language>
-		<language name="Italian">Errore di comunicazione con lo\nScambio Prodigioso. Riprova. Se\nl’errore si ripete, annota il\ncodice qui sotto.</language>
-		<language name="Spanish">Error de conexión con el\nIntercambio Prodigioso. Vuelve\na intentarlo. Si se repite,\nanota el código de abajo.</language>
-		<language name="Japanese">つうしんエラ－が　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コ－ドを　ひかえてください</language>
+		<language name="French">Erreur de communication avec l’Echange\nMiracle. Veuillez réessayer. Si l’erreur\nse répète, notez le code ci-dessous.</language>
+		<language name="German">Verbindungsfehler beim Wundertausch.\nBitte versuche es noch einmal. Tritt der\nFehler erneut auf, notiere den Code\nunten.</language>
+		<language name="Italian">Errore di comunicazione con lo Scambio\nProdigioso. Riprova. Se l’errore si\nripete, annota il codice qui sotto.</language>
+		<language name="Spanish">Error de conexión con el Intercambio\nProdigioso. Vuelve a intentarlo. Si se\nrepite, anota el código de abajo.</language>
+		<language name="Japanese">つうしんエラーが　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コードを　ひかえてください</language>
 		<language name="Korean">통신 에러가 발생했습니다\n다시 시도해 주십시오\n계속 발생하면\n아래 코드를 적어 두십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Ineligible" index="13">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail or capsules.</language>
-		<language name="French">Ce Pokémon ne peut pas faire\nl’objet d’un échange. Gardez\nun autre Pokémon apte au\ncombat. Pas d’Oeufs, de\nLettres ni de Capsules Ball.</language>
-		<language name="German">Dieses Pokémon kann nicht\nzum Tausch angeboten werden.\nBehalte ein anderes\nkampffähiges Pokémon. Keine\nEier, Briefe oder\nBallkapseln.</language>
-		<language name="Italian">Quel Pokémon non può essere\nscambiato. Tieni un altro\nPokémon in grado di lottare.\nNiente Uova, Messaggi o\nCapsule.</language>
-		<language name="Spanish">No se puede intercambiar ese\nPokémon. Conserva otro\nPokémon que pueda combatir.\nSin huevos, cartas ni\ncápsulas.</language>
-		<language name="Japanese">その　ポケモンは　だせません！\nたたかえる　ポケモンを\nほかに　のこしてください\nタマゴ　メ－ル　カプセルは　だせません</language>
+		<language name="French">Ce Pokémon ne peut pas faire l’objet\nd’un échange. Gardez un autre Pokémon\napte au combat. Pas d’Oeufs, de Lettres\nni de Capsules Ball.</language>
+		<language name="German">Dieses Pokémon kann nicht zum Tausch\nangeboten werden. Behalte ein anderes\nkampffähiges Pokémon. Keine Eier, Briefe\noder Ballkapseln.</language>
+		<language name="Italian">Quel Pokémon non può essere scambiato.\nTieni un altro Pokémon in grado di\nlottare. Niente Uova, Messaggi o\nCapsule.</language>
+		<language name="Spanish">No se puede intercambiar ese Pokémon.\nConserva otro Pokémon que pueda\ncombatir. Sin huevos, cartas ni\ncápsulas.</language>
+		<language name="Japanese">その　ポケモンは　だせません！\nたたかえる　ポケモンを\nほかに　のこしてください\nタマゴ　メール　カプセルは　だせません</language>
 		<language name="Korean">그 포켓몬은 내놓을 수 없습니다!\n싸울 수 있는 포켓몬을\n남겨 주십시오\n알, 메일, 캡슐은 안 됩니다</language>
 	</row>
 	<row id="WonderTrade_Text_Duplicate" index="14">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">An identical or damaged Pokémon\nin your party or PC blocks this.</language>
-		<language name="French">Un Pokémon identique ou\nendommagé dans votre équipe ou\nvos Boîtes du PC bloque\nl’échange.</language>
-		<language name="German">Ein gleiches oder beschädigtes\nPokémon in deinem Team oder in\ndeinen PC-Boxen verhindert den\nTausch.</language>
-		<language name="Italian">Un Pokémon identico o\ndanneggiato nella squadra o nei\nBox PC impedisce lo scambio.</language>
-		<language name="Spanish">Un Pokémon idéntico o dañado en\ntu equipo o en las cajas de PC\nimpide el intercambio.</language>
-		<language name="Japanese">てもちか　ボックスに　おなじ\nポケモンか　こわれた　ポケモンが\nいるので　だせません</language>
-		<language name="Korean">지닌 포켓몬이나 박스에\n똑같거나 손상된 포켓몬이\n있어 내놓을 수 없습니다</language>
+		<language name="French">Un Pokémon identique ou endommagé\nbloque l’échange.</language>
+		<language name="German">Ein gleiches oder beschädigtes\nPokémon verhindert dies.</language>
+		<language name="Italian">Un Pokémon identico o danneggiato lo\nimpedisce.</language>
+		<language name="Spanish">Un Pokémon idéntico o dañado lo\nimpide.</language>
+		<language name="Japanese">おなじか　こわれた　ポケモンが\nいるので　だせません</language>
+		<language name="Korean">똑같거나 손상된 포켓몬이\n있어 내놓을 수 없습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Explanation" index="15">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save.</language>
-		<language name="French">Echangez un Pokémon de votre\néquipe avec un Dresseur au\nhasard. Il attend en sécurité\nsur le serveur. Revenez pour\nrécupérer le résultat, ou\nannulez avant l’échange. Une\noffre par sauvegarde.</language>
-		<language name="German">Tausche ein Pokémon aus deinem\nTeam mit einem zufälligen\nTrainer. Es wartet sicher auf\ndem Server. Komm zurück, um\ndas Ergebnis abzuholen, oder\nbrich vorher ab. Ein Angebot\npro Spielstand.</language>
-		<language name="Italian">Scambia un Pokémon della\nsquadra con un Allenatore a\ncaso. Attende al sicuro sul\nserver. Torna a ritirare il\nrisultato o annulla prima\ndello scambio. Un’offerta per\nsalvataggio.</language>
-		<language name="Spanish">Intercambia un Pokémon de tu\nequipo con un Entrenador al\nazar. Espera seguro en el\nservidor. Vuelve para recoger\nel resultado o cancela antes\ndel intercambio. Una oferta\npor partida.</language>
-		<language name="Japanese">てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサ－バ－で　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポ－トに　ひとつまで</language>
+		<language name="French">Echangez un Pokémon de votre équipe\navec un Dresseur au hasard. Il attend\nen sécurité sur le serveur. Revenez\npour récupérer le résultat, ou annulez\navant l’échange. Une offre par\nsauvegarde.</language>
+		<language name="German">Tausche ein Pokémon aus deinem Team mit\neinem zufälligen Trainer. Es wartet\nsicher auf dem Server. Komm zurück, um\ndas Ergebnis abzuholen, oder brich\nvorher ab. Ein Angebot pro Spielstand.</language>
+		<language name="Italian">Scambia un Pokémon della squadra con un\nAllenatore a caso. Attende al sicuro sul\nserver. Torna a ritirare il risultato o\nannulla prima dello scambio. Un’offerta\nper salvataggio.</language>
+		<language name="Spanish">Intercambia un Pokémon de tu equipo con\nun Entrenador al azar. Espera seguro en\nel servidor. Vuelve para recoger el\nresultado o cancela antes del\nintercambio. Una oferta por partida.</language>
+		<language name="Japanese">てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサーバーで　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポートに　ひとつまで</language>
 		<language name="Korean">지닌 포켓몬을\n누군가와 교환합니다\n상대가 정해질 때까지\n서버에서 맡아 둡니다\n나중에 받거나\n그 전에 취소해 주십시오\n리포트 하나에 하나까지</language>
 	</row>
 	<row id="WonderTrade_Text_Diagnostics" index="16">
@@ -177,7 +177,7 @@
 		<language name="German">Support-Code</language>
 		<language name="Italian">Codice assistenza</language>
 		<language name="Spanish">Código de asistencia</language>
-		<language name="Japanese">サポ－トコ－ド</language>
+		<language name="Japanese">サポートコード</language>
 		<language name="Korean">지원 코드</language>
 	</row>
 	<row id="WonderTrade_Text_ConnectMs" index="18">
@@ -217,48 +217,48 @@
 		<language name="German">Bildlücke ms</language>
 		<language name="Italian">Pausa frame ms</language>
 		<language name="Spanish">Pausa fotograma ms</language>
-		<language name="Japanese">フレ－ム　ms</language>
+		<language name="Japanese">フレーム　ms</language>
 		<language name="Korean">프레임 ms</language>
 	</row>
 	<row id="WonderTrade_Text_CheckingSave" index="22">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Checking saved game...\nPlease wait.</language>
-		<language name="French">Vérification de la\nsauvegarde... Veuillez\npatienter.</language>
-		<language name="German">Spielstand wird\ngeprüft... Bitte warte\neinen Moment.</language>
-		<language name="Italian">Verifica del\nsalvataggio in corso.\nAttendi un momento.</language>
-		<language name="Spanish">Comprobando la\npartida... Por favor,\nespera un momento.</language>
-		<language name="Japanese">レポ－トを　かくにん　しています\nしばらく　おまちください</language>
+		<language name="French">Vérification de la sauvegarde...\nVeuillez patienter.</language>
+		<language name="German">Spielstand wird geprüft... Bitte\nwarte.</language>
+		<language name="Italian">Verifica del salvataggio... Attendi.</language>
+		<language name="Spanish">Comprobando la partida... Espera un\nmomento.</language>
+		<language name="Japanese">レポートを　かくにん　しています\nしばらく　おまちください</language>
 		<language name="Korean">리포트를 확인하고 있습니다\n잠시만 기다려주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_RecoveryRequired" index="23">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Trade recovery required.\nConnect to try again.\n\nKeep this save and its\nrecovery files.</language>
-		<language name="French">L’échange doit être\nrécupéré. Connectez-vous\npour réessayer.\n\nConservez cette\nsauvegarde et ses\nfichiers de\nrécupération.</language>
-		<language name="German">Der Tausch muss\nwiederhergestellt\nwerden. Verbinde dich,\num es noch einmal zu\nversuchen.\n\nBehalte diesen\nSpielstand und seine\nWiederherstellungsdateien.</language>
-		<language name="Italian">Lo scambio deve essere\nripristinato. Connettiti\nper riprovare.\n\nConserva questo\nsalvataggio e i suoi\nfile di ripristino.</language>
-		<language name="Spanish">Hay que recuperar el\nintercambio. Conéctate\npara volver a\nintentarlo.\n\nConserva esta partida y\nsus archivos de\nrecuperación.</language>
-		<language name="Japanese">こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポ－トと\nふっきゅうファイルを\nのこしてください</language>
+		<language name="French">L’échange doit être récupéré.\nConnectez-vous pour réessayer.\n\nConservez cette sauvegarde et ses\nfichiers de récupération.</language>
+		<language name="German">Der Tausch muss wiederhergestellt\nwerden. Verbinde dich, um es noch einmal\nzu versuchen.\n\nBehalte diesen Spielstand und seine\nWiederherstellungsdateien.</language>
+		<language name="Italian">Lo scambio deve essere ripristinato.\nConnettiti per riprovare.\n\nConserva questo salvataggio e i suoi file\ndi ripristino.</language>
+		<language name="Spanish">Hay que recuperar el intercambio.\nConéctate para volver a intentarlo.\n\nConserva esta partida y sus archivos de\nrecuperación.</language>
+		<language name="Japanese">こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポートと\nふっきゅうファイルを\nのこしてください</language>
 		<language name="Korean">교환 복구가 필요합니다\n접속해서 다시 시도해 주십시오\n\n이 리포트와\n복구 파일을 보관해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Confirm" index="24">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Offer the selected Pokémon?\nIt will leave your party.</language>
-		<language name="French">Proposer ce Pokémon? Il\nquittera votre équipe.</language>
-		<language name="German">Dieses Pokémon anbieten? Es\nverlässt dein Team.</language>
-		<language name="Italian">Vuoi offrire questo\nPokémon? Lascerà la\nsquadra.</language>
-		<language name="Spanish">¿Ofrecer este Pokémon?\nSaldrá de tu equipo.</language>
+		<language name="French">Proposer ce Pokémon? Il quittera\nvotre équipe.</language>
+		<language name="German">Dieses Pokémon anbieten? Es verlässt\ndein Team.</language>
+		<language name="Italian">Offrire questo Pokémon? Lascerà la\nsquadra.</language>
+		<language name="Spanish">¿Ofrecer este Pokémon? Saldrá de tu\nequipo.</language>
 		<language name="Japanese">この　ポケモンを　だしますか？\nてもちから　いなくなります</language>
 		<language name="Korean">이 포켓몬을 내놓겠습니까?\n지닌 포켓몬에서 빠집니다</language>
 	</row>
 	<row id="WonderTrade_Text_Queued" index="25">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Your trade is pending. Choose\nCollect result to check it.</language>
-		<language name="French">Votre échange est en attente.\nChoisissez Récupérer pour\nvérifier.</language>
-		<language name="German">Dein Tausch ist noch offen.\nWähle Ergebnis abholen, um\nnachzusehen.</language>
-		<language name="Italian">Lo scambio è in attesa.\nScegli Ritira risultato per\ncontrollare.</language>
-		<language name="Spanish">Tu intercambio está\npendiente. Elige Recoger\nresultado para comprobarlo.</language>
-		<language name="Japanese">こうかんを　まっています\nけっかを　うけとるで\nたしかめてください</language>
-		<language name="Korean">교환을 기다리고 있습니다\n결과 받기를 선택해\n확인해 주십시오</language>
+		<language name="French">Echange en attente. Choisissez\nRécupérer.</language>
+		<language name="German">Tausch offen. Wähle Ergebnis\nabholen.</language>
+		<language name="Italian">Scambio in attesa. Scegli Ritira\nrisultato.</language>
+		<language name="Spanish">Intercambio pendiente. Elige Recoger\nresultado.</language>
+		<language name="Japanese">こうかんを　まっています\nけっかを　うけとって　ください</language>
+		<language name="Korean">교환을 기다리고 있습니다\n결과 받기를 선택해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Collect" index="26">
 		<attribute name="window_context_name">used</attribute>
@@ -283,32 +283,32 @@
 	<row id="WonderTrade_Text_ConfirmCollect" index="28">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Collect your trade result? Trade\nevolution keeps current moves.</language>
-		<language name="French">Récupérer le résultat? Une\névolution par échange conserve\nles capacités actuelles.</language>
-		<language name="German">Ergebnis abholen? Bei einer\nEntwicklung durch Tausch bleiben\ndie Attacken gleich.</language>
-		<language name="Italian">Vuoi ritirare il risultato? Con\nl’evoluzione tramite scambio le\nmosse restano uguali.</language>
-		<language name="Spanish">¿Recoger el resultado? Si\nevoluciona por intercambio,\nconserva sus movimientos.</language>
-		<language name="Japanese">けっかを　うけとりますか？\nこうかんで　しんかしても\nわざは　そのままです</language>
-		<language name="Korean">결과를 받겠습니까?\n교환으로 진화해도\n기술은 그대로입니다</language>
+		<language name="French">Récupérer? L’évolution conserve les\ncapacités.</language>
+		<language name="German">Ergebnis abholen? Attacken bleiben\nbei Entwicklung.</language>
+		<language name="Italian">Ritirare il risultato? Le mosse\nrestano uguali.</language>
+		<language name="Spanish">¿Recoger el resultado? Conserva sus\nmovimientos.</language>
+		<language name="Japanese">けっかを　うけとりますか？\nしんかしても　わざは　そのまま</language>
+		<language name="Korean">결과를 받겠습니까?\n진화해도 기술은 그대로입니다</language>
 	</row>
 	<row id="WonderTrade_Text_ConfirmCancel" index="29">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Cancel an unmatched offer? If\nmatched, collect it instead.</language>
-		<language name="French">Annuler une offre sans\npartenaire? S’il y a eu un\néchange, récupérez-le.</language>
-		<language name="German">Ein Angebot ohne Partner\nzurückziehen? Gab es schon\neinen Tausch, hol ihn ab.</language>
-		<language name="Italian">Vuoi annullare un’offerta\nsenza partner? Se c’è stato\nuno scambio, ritiralo.</language>
-		<language name="Spanish">¿Cancelar una oferta sin\ncompañero? Si ya hubo\nintercambio, recógelo.</language>
-		<language name="Japanese">あいての　いない　こうかんを\nとりけしますか？\nこうかん　ずみなら\nうけとってください</language>
-		<language name="Korean">상대가 없는 교환을\n취소하겠습니까?\n이미 교환되었으면\n받아 주십시오</language>
+		<language name="French">Annuler l’offre? Si échangée,\nrécupérez-la.</language>
+		<language name="German">Angebot zurückziehen? Wenn\ngetauscht, abholen.</language>
+		<language name="Italian">Annullare l’offerta? Se scambiata,\nritirala.</language>
+		<language name="Spanish">¿Cancelar la oferta? Si ya hubo\nintercambio, recógelo.</language>
+		<language name="Japanese">とりけしますか？\nあいてが　いれば　うけとってください</language>
+		<language name="Korean">교환을 취소하겠습니까?\n교환되었으면 받아 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_Completed" index="30">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Trade completed! Your Pokémon\nis in your party or PC.</language>
-		<language name="French">L’échange est terminé! Votre\nPokémon est dans votre équipe\nou dans le PC.</language>
-		<language name="German">Tausch abgeschlossen! Dein\nPokémon ist in deinem Team\noder im PC.</language>
-		<language name="Italian">Scambio completato! Il\nPokémon è nella squadra o nel\nPC.</language>
-		<language name="Spanish">¡Intercambio completado! Tu\nPokémon está en tu equipo o\nen el PC.</language>
-		<language name="Japanese">こうかん　かんりょう！\nポケモンは　てもちか\nボックスに　います</language>
-		<language name="Korean">교환 완료!\n포켓몬은 지닌 포켓몬이나\n박스에 있습니다</language>
+		<language name="French">Echange terminé! Votre Pokémon est\ndans l’équipe ou le PC.</language>
+		<language name="German">Tausch beendet! Dein Pokémon ist im\nTeam oder PC.</language>
+		<language name="Italian">Scambio completato! È nella squadra\no nel PC.</language>
+		<language name="Spanish">¡Intercambio hecho! Está en tu\nequipo o el PC.</language>
+		<language name="Japanese">こうかん　かんりょう！\nてもちか　ボックスに　います</language>
+		<language name="Korean">교환 완료!\n지닌 포켓몬이나 박스에 있습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Received" index="31">
 		<attribute name="window_context_name">used</attribute>
@@ -333,62 +333,62 @@
 	<row id="WonderTrade_Text_Returned" index="33">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Offer cancelled. Your Pokémon\nis back in your party or PC.</language>
-		<language name="French">Offre annulée. Votre Pokémon\nest de retour dans votre\néquipe ou dans le PC.</language>
-		<language name="German">Angebot zurückgezogen. Dein\nPokémon ist wieder in deinem\nTeam oder im PC.</language>
-		<language name="Italian">Offerta annullata. Il Pokémon\nè tornato nella squadra o nel\nPC.</language>
-		<language name="Spanish">Oferta cancelada. Tu Pokémon\nha vuelto a tu equipo o al\nPC.</language>
-		<language name="Japanese">とりけしました\nポケモンは　てもちか\nボックスに　もどりました</language>
-		<language name="Korean">취소했습니다\n포켓몬은 지닌 포켓몬이나\n박스로 돌아왔습니다</language>
+		<language name="French">Offre annulée. Votre Pokémon est\nrevenu.</language>
+		<language name="German">Angebot zurückgezogen. Dein Pokémon\nist zurück.</language>
+		<language name="Italian">Offerta annullata. Il Pokémon è\ntornato.</language>
+		<language name="Spanish">Oferta cancelada. Tu Pokémon ha\nvuelto.</language>
+		<language name="Japanese">とりけしました\nポケモンは　もどりました</language>
+		<language name="Korean">취소했습니다\n포켓몬이 돌아왔습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Rejected" index="34">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">The server rejected the offer.\nYour Pokémon has been restored.</language>
-		<language name="French">Le serveur a refusé l’offre.\nVotre Pokémon vous a été rendu.</language>
-		<language name="German">Der Server hat das Angebot\nabgelehnt. Du hast dein Pokémon\nzurückbekommen.</language>
-		<language name="Italian">Il server ha rifiutato\nl’offerta. Il Pokémon ti è\nstato restituito.</language>
-		<language name="Spanish">El servidor ha rechazado la\noferta. Has recuperado tu\nPokémon.</language>
-		<language name="Japanese">サ－バ－が　こうかんを\nことわりました\nポケモンは　もどりました</language>
-		<language name="Korean">서버가 교환을 거부했습니다\n포켓몬이 돌아왔습니다</language>
+		<language name="French">Offre refusée par le serveur. Votre\nPokémon est revenu.</language>
+		<language name="German">Vom Server abgelehnt. Dein Pokémon\nist zurück.</language>
+		<language name="Italian">Offerta rifiutata. Il Pokémon è\ntornato.</language>
+		<language name="Spanish">Oferta rechazada. Tu Pokémon ha\nvuelto.</language>
+		<language name="Japanese">サーバーが　ことわりました\nポケモンは　もどりました</language>
+		<language name="Korean">서버가 거부했습니다\n포켓몬이 돌아왔습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Superseded" index="35">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Another copy of this save traded\nfirst. Your Pokémon is restored.</language>
-		<language name="French">Une autre copie de cette\nsauvegarde a fait l’échange en\npremier. Votre Pokémon vous a\nété rendu.</language>
-		<language name="German">Eine andere Kopie dieses\nSpielstands hat zuerst\ngetauscht. Du hast dein Pokémon\nzurückbekommen.</language>
-		<language name="Italian">Un’altra copia di questo\nsalvataggio ha scambiato per\nprima. Il Pokémon ti è stato\nrestituito.</language>
-		<language name="Spanish">Otra copia de esta partida\nintercambió primero. Has\nrecuperado tu Pokémon.</language>
-		<language name="Japanese">この　レポ－トの　べつの　コピ－が\nさきに　こうかん　しました\nポケモンは　もどりました</language>
-		<language name="Korean">이 리포트의 다른 사본이\n먼저 교환했습니다\n포켓몬이 돌아왔습니다</language>
+		<language name="French">Une copie de la sauvegarde a échangé\navant. Pokémon rendu.</language>
+		<language name="German">Eine Spielstand-Kopie war schneller.\nPokémon zurück.</language>
+		<language name="Italian">Una copia del salvataggio ha\nscambiato prima. Pokémon reso.</language>
+		<language name="Spanish">Otra copia de la partida fue antes.\nPokémon devuelto.</language>
+		<language name="Japanese">べつの　コピーが　さきに　こうかん\nポケモンは　もどりました</language>
+		<language name="Korean">다른 사본이 먼저 교환했습니다\n포켓몬이 돌아왔습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Waiting" index="36">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">No partner yet. Your Pokémon is\nstill waiting. Check again later.</language>
-		<language name="French">Pas encore de partenaire. Votre\nPokémon attend toujours. Revenez\nplus tard.</language>
-		<language name="German">Noch kein Tauschpartner. Dein\nPokémon wartet noch. Schau später\nwieder vorbei.</language>
-		<language name="Italian">Nessun partner per ora. Il\nPokémon è ancora in attesa.\nRiprova più tardi.</language>
-		<language name="Spanish">Todavía no hay compañero. Tu\nPokémon sigue esperando. Vuelve\nmás tarde.</language>
-		<language name="Japanese">まだ　あいてが　いません\nポケモンは　まっています\nあとで　また　みてください</language>
-		<language name="Korean">아직 상대가 없습니다\n포켓몬이 기다리고 있습니다\n나중에 다시 확인해 주십시오</language>
+		<language name="French">Pas encore de partenaire. Revenez\nplus tard.</language>
+		<language name="German">Noch kein Tauschpartner. Schau\nspäter wieder vorbei.</language>
+		<language name="Italian">Nessun partner per ora. Riprova più\ntardi.</language>
+		<language name="Spanish">Aún no hay compañero. Vuelve más\ntarde.</language>
+		<language name="Japanese">まだ　あいてが　いません\nあとで　また　みてください</language>
+		<language name="Korean">아직 상대가 없습니다\n나중에 다시 확인해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_NoRoom" index="37">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Your result is still pending. Make\nroom in your party or PC first.</language>
-		<language name="French">Votre résultat reste en attente.\nFaites de la place dans votre\néquipe ou dans le PC, puis\nrécupérez-le.</language>
-		<language name="German">Dein Ergebnis bleibt offen.\nSchaffe Platz im Team oder im PC\nund hol es dann ab.</language>
-		<language name="Italian">Il risultato resta in attesa. Fai\nspazio nella squadra o nel PC, poi\nritiralo.</language>
-		<language name="Spanish">Tu resultado sigue pendiente. Haz\nsitio en tu equipo o en el PC y\nrecógelo.</language>
-		<language name="Japanese">けっかは　まだ　あずかっています\nてもちか　ボックスを　あけてから\nうけとってください</language>
-		<language name="Korean">결과를 아직 맡고 있습니다\n지닌 포켓몬이나 박스를\n비운 뒤 받아 주십시오</language>
+		<language name="French">Résultat en attente. Libérez de la\nplace, puis récupérez-le.</language>
+		<language name="German">Ergebnis offen. Schaffe Platz und hol\nes dann ab.</language>
+		<language name="Italian">Risultato in attesa. Fai spazio e poi\nritiralo.</language>
+		<language name="Spanish">Resultado pendiente. Haz sitio y\nluego recógelo.</language>
+		<language name="Japanese">けっかは　あずかっています\nあけてから　うけとってください</language>
+		<language name="Korean">결과를 맡고 있습니다\n자리를 비운 뒤 받아 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_KeepPlaying" index="38">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Wonder Trade needs more play.\nKeep playing, then try again.</language>
-		<language name="French">L’Echange Miracle a besoin\nd’un peu plus de jeu.\nContinuez à jouer, puis\nréessayez.</language>
-		<language name="German">Für den Wundertausch musst du\nnoch etwas weiterspielen.\nVersuche es dann noch einmal.</language>
-		<language name="Italian">Lo Scambio Prodigioso\nrichiede ancora un po’ di\ngioco. Continua a giocare e\nriprova.</language>
-		<language name="Spanish">El Intercambio Prodigioso\nnecesita algo más de juego.\nSigue jugando y vuelve a\nintentarlo.</language>
-		<language name="Japanese">ミラクルこうかんの　じゅんびに\nもうすこし　あそんでください\nそのあと　もういちど\nためしてください</language>
-		<language name="Korean">미라클교환을 준비하려면\n조금 더 플레이해야 합니다\n플레이한 뒤 다시\n시도해 주십시오</language>
+		<language name="French">Jouez encore un peu, puis\nréessayez.</language>
+		<language name="German">Spiel noch etwas weiter und versuche\nes erneut.</language>
+		<language name="Italian">Gioca ancora un po’ e poi riprova.</language>
+		<language name="Spanish">Juega un poco más y vuelve a\nintentarlo.</language>
+		<language name="Japanese">もうすこし　あそんでから\nもういちど　ためしてください</language>
+		<language name="Korean">조금 더 플레이한 뒤\n다시 시도해 주십시오</language>
 	</row>
 	<row id="WonderTrade_Text_ConfirmAction" index="39">
 		<attribute name="window_context_name">used</attribute>
@@ -403,22 +403,22 @@
 	<row id="WonderTrade_Text_RecoveryAction" index="40">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Connect and retry</language>
-		<language name="French">Connexion et nouvel essai</language>
-		<language name="German">Verbinden und wiederholen</language>
-		<language name="Italian">Connetti e riprova</language>
-		<language name="Spanish">Conectar y reintentar</language>
+		<language name="French">Reconnecter</language>
+		<language name="German">Neu verbinden</language>
+		<language name="Italian">Riconnetti</language>
+		<language name="Spanish">Reconectar</language>
 		<language name="Japanese">せつぞくして　もういちど</language>
-		<language name="Korean">접속해서 다시 시도</language>
+		<language name="Korean">다시 접속</language>
 	</row>
 	<row id="WonderTrade_Text_CannotHold" index="41">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">This game can’t hold the received\nPokémon. It stays on the server.</language>
-		<language name="French">Ce jeu ne peut pas accueillir le\nPokémon reçu. Il reste sur le\nserveur.</language>
-		<language name="German">Dieses Spiel kann das erhaltene\nPokémon nicht aufnehmen. Es\nbleibt auf dem Server.</language>
-		<language name="Italian">Questo gioco non può accogliere\nil Pokémon ricevuto. Resta sul\nserver.</language>
-		<language name="Spanish">Este juego no puede tener el\nPokémon recibido. Se queda en el\nservidor.</language>
-		<language name="Japanese">この　ソフトでは　うけとった\nポケモンを　あずかれません\nサ－バ－に　のこります</language>
-		<language name="Korean">이 소프트로는 받은\n포켓몬을 맡을 수 없습니다\n서버에 남습니다</language>
+		<language name="French">Ce jeu ne peut pas recevoir ce\nPokémon. Il reste sur le serveur.</language>
+		<language name="German">Hier nicht empfangbar. Es bleibt auf\ndem Server.</language>
+		<language name="Italian">Questo gioco non può riceverlo.\nResta sul server.</language>
+		<language name="Spanish">Este juego no puede tenerlo. Se\nqueda en el servidor.</language>
+		<language name="Japanese">この　ソフトでは　あずかれません\nサーバーに　のこります</language>
+		<language name="Korean">이 소프트로는 받을 수 없습니다\n서버에 남습니다</language>
 	</row>
 	<row id="WonderTrade_Text_Level" index="42">
 		<attribute name="window_context_name">used</attribute>
@@ -433,11 +433,11 @@
 	<row id="WonderTrade_Text_SaveFirst" index="43">
 		<attribute name="window_context_name">used</attribute>
 		<language name="English">Save your adventure before\nusing Wonder Trade.</language>
-		<language name="French">Sauvegardez votre aventure\navant d’utiliser l’Echange\nMiracle.</language>
-		<language name="German">Speichere dein Abenteuer,\nbevor du den Wundertausch\nnutzt.</language>
-		<language name="Italian">Salva l’avventura prima di\nusare lo Scambio\nProdigioso.</language>
-		<language name="Spanish">Guarda tu aventura antes\nde usar el Intercambio\nProdigioso.</language>
-		<language name="Japanese">ミラクルこうかんを　つかう\nまえに　レポ－トを\nかいてください</language>
-		<language name="Korean">미라클교환을 쓰기 전에\n리포트를 작성해 주십시오</language>
+		<language name="French">Sauvegardez avant d’utiliser\nl’Echange Miracle.</language>
+		<language name="German">Speichere, bevor du den\nWundertausch nutzt.</language>
+		<language name="Italian">Salva prima di usare lo Scambio\nProdigioso.</language>
+		<language name="Spanish">Guarda antes de usar el Intercambio\nProdigioso.</language>
+		<language name="Japanese">つかう　まえに\nレポートを　かいてください</language>
+		<language name="Korean">쓰기 전에\n리포트를 작성해 주십시오</language>
 	</row>
 </body>
