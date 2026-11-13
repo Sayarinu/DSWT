@@ -26,7 +26,7 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
 | `patches/` | Supported cartridges and the install guide shipped in each release |
-| `scripts/` | ROM build, workspace preparation and TLS tooling |
+| `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
 
@@ -112,6 +112,9 @@ only merge what is ready to serve players. The required check names are listed i
   link to the tracker; the ID is enough.
 - PRs merge into `main` with a merge commit once the required checks pass and
   review conversations are resolved. Squash and rebase merges are disabled.
+- `scripts/` holds only scripts that are reused, with their tests in
+  `scripts/tests/`. Put scripts used only for testing in the gitignored
+  `testing-scripts/` folder, and don't commit one-off or development scripts.
 - Documentation lives in the [wiki](https://github.com/Sayarinu/DSWT/wiki), written in plain terms. Keep
   `README.md` short, like a store page, and update the wiki page a change
   affects. Track only docs something depends on: this file, `README.md`,
