@@ -30,6 +30,7 @@
 #include "render_window.h"
 #include "save_player.h"
 #include "screen_fade.h"
+#include "sound.h"
 #include "sound_playback.h"
 #include "system.h"
 #include "text.h"
@@ -484,6 +485,8 @@ static WonderTradeApp *WonderTrade_Create(ApplicationManager *appMan, FieldSyste
 static BOOL WonderTrade_Init(ApplicationManager *appMan, int *state)
 {
     WonderTradeApp *app = WonderTrade_Create(appMan, ApplicationManager_Args(appMan), WT_APP_CONNECTING, WonderTrade_Text_Connecting, TRUE);
+    /* The GTS menu's theme and scene; the field map restores its own music on return. */
+    Sound_SetSceneAndPlayBGM(SOUND_SCENE_23, SEQ_BLD_BLD_GTC_sseq, 1);
     WonderTradeNetwork_Start(&app->network, &app->game);
     WonderTrade_Draw(app);
     return TRUE;
