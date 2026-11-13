@@ -21,6 +21,7 @@ const WtGameConfig gWtGameConfig = {
     DEFAULT_DWC_DMA_NUMBER, DEFAULT_DWC_POWER_MODE,
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_GAME_VARIANT,
+    WT_SAVE_MAGIC,
 };
 
 /* Each Platinum revision is a separate build with its own variant code. */

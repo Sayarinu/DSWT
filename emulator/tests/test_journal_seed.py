@@ -136,6 +136,17 @@ class JournalSeedTests(unittest.TestCase):
                 self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.install(1); self.tool("inspect", target="diamond-us-rev5", ok=False)
 
+    def test_korean_footer_magic_is_refused_for_other_targets(self):
+        record = self.record(5)
+        self.save = self.root / "korean.sav"
+        data = bytearray(retail_save(record))
+        for half in (0, 262144):
+            for offset, size in ((0, 53036), (53036, 74212)):
+                struct.pack_into("<I", data, half + offset + size - 20 + 12, 0x20070903)
+        self.save.write_bytes(bytes(data)); self.save.chmod(0o600)
+        self.tool("inspect", target="us-rev1", ok=False)
+        self.assertEqual(self.save.read_bytes(), bytes(data))
+
     def test_each_game_family_layout_is_checked(self):
         record = self.record(5)
         for target in LAYOUTS:

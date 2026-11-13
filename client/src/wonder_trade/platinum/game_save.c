@@ -85,7 +85,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
                 }
             }
             if (WtFlash_ReadRange(address + info->size - 20, footer, sizeof(footer)) != 0
-                || Read32(footer + 8) != info->size || Read32(footer + 12) != 0x20060623
+                || Read32(footer + 8) != info->size || Read32(footer + 12) != gWtGameConfig.saveMagic
                 || footer[16] != block || Read16(footer + 18) != crc
                 || (Read32(footer) != save->globalCounter && Read32(footer) + 1 != save->globalCounter)
                 || (Read32(footer + 4) != save->blockCounters[block]
