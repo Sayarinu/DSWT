@@ -29,6 +29,8 @@
 !server/migrations/0001_ledger.sql
 !server/migrations/0002_matcher.sql
 !server/migrations/0003_observation_time.sql
+!server/migrations/0004_identity_variants.sql
+!server/migrations/0005_offer_destinations.sql
 !server/proto/connectivity.proto
 !server/proto/trade.proto
 !server/src/admission.cpp
@@ -38,6 +40,7 @@
 !server/src/bounded_query.h
 !server/src/config.cpp
 !server/src/connectivity_service.cpp
+!server/src/game_variant.h
 !server/src/http_listener.cpp
 !server/src/http_request_handler.cpp
 !server/src/http_services.cpp
@@ -88,6 +91,7 @@
 !server/tests/unit/admission_test.cpp
 !server/tests/unit/config_test.cpp
 !server/tests/unit/connectivity_service_test.cpp
+!server/tests/unit/game_variant_test.cpp
 !server/tests/unit/http_request_handler_test.cpp
 !server/tests/unit/legality_client_test.cpp
 !server/tests/unit/telemetry_test.cpp

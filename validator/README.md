@@ -1,6 +1,7 @@
 The isolated validator accepts only canonical 136-byte PK4 data and its SHA-256
 through `PokemonLegality.Validate`. It returns a boolean, the exact payload hash,
-policy `pkhex-26.08.26-74b88906-dswt2` and up to eight stable reason codes. It never
+policy `pkhex-26.08.26-74b88906-dswt3`, up to eight stable reason codes and, when
+legal, the destination games that can hold the Pokémon. It never
 returns a Pokémon or repairs data. No ROM, save, UI, sprite or package icon is
 included in the build context or runtime.
 
@@ -23,14 +24,22 @@ threads; a managed-heap setting alone is insufficient.
 The policy uses the pinned core's Gen IV legality analysis, physical Gen III
 transfer rules and invalid verdicts for missing Gen III/IV RNG frames. Gen IV
 names use historical-format checks rather than later consoles' word lists.
-Eggs, mail, invalid structures/species and forms incompatible with Platinum are
-rejected. The game must reject attached capsules and protect its last usable
+Eggs, mail, invalid structures/species and forms no Gen IV game can hold or trade
+are rejected. The game must reject attached capsules and protect its last usable
 party Pokémon before escrow: those facts are absent from canonical PK4.
+
+Analysis assumes no home game. A legal reply's `destinations` sets bit 0 for
+Diamond/Pearl, bit 1 for Platinum and bit 2 for HeartGold/SoulSilver when that
+game's pinned PKHeX tables accept the species/form, held item and ball byte it
+reads (`Policy.Destinations` cites each rule). Legal Pokémon that fit no game are
+rejected. An empty set never means every game: the server treats a legal reply
+without destinations, such as one from an older validator, as unavailable.
 
 | Reason | Meaning |
 | --- | --- |
 | `INVALID_STRUCTURE`, `INVALID_SPECIES` | Canonical shape/checksum/reserved fields or species failed |
 | `EGG_NOT_ALLOWED`, `MAIL_NOT_ALLOWED`, `INCOMPATIBLE_FORM` | Unsupported trade content |
+| `INCOMPATIBLE_GAME` | Legal, but no Diamond/Pearl, Platinum or HeartGold/SoulSilver game can hold it |
 | `ILLEGAL_ENCOUNTER`, `ILLEGAL_MOVES`, `ILLEGAL_RNG`, `ILLEGAL_DATA` | Pinned core legality checks failed |
 
 RPC failures, timeouts, worker failures, capacity exhaustion and mismatched

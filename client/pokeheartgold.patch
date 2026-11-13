@@ -1,0 +1,338 @@
+diff --git a/asm/include/overlay_27.inc b/asm/include/overlay_27.inc
+--- a/asm/include/overlay_27.inc
++++ b/asm/include/overlay_27.inc
+@@ -169,0 +170,8 @@
++.public WtMenuIcon_Create
++.public WtMenuIcon_Destroy
++.public WtMenuIcon_Update
++.public WtMenuIcon_GetSprite
++.public WtMenuIcon_Highlight
++.public WtMenuIcon_Navigate
++.public WtMenuIcon_SelectionForIndex
++.public WtMenuIcon_Touch
+diff --git a/asm/overlay_27.s b/asm/overlay_27.s
+--- a/asm/overlay_27.s
++++ b/asm/overlay_27.s
+@@ -112,0 +113,2 @@ ov27_02259F80: ; 0x02259F80
++	add r0, r4, #0
++	bl WtMenuIcon_Create
+@@ -245,0 +248 @@ ov27_0225A19C: ; 0x0225A19C
++	bl WtMenuIcon_Destroy
+@@ -465,6 +468,3 @@ _0225A36E:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -568,0 +569,2 @@ _0225A44A:
++	add r0, r5, #0
++	bl WtMenuIcon_Update
+@@ -1035 +1037 @@ ov27_0225A7DC: ; 0x0225A7DC
+-	cmp r0, #7
++	cmp r0, #10
+@@ -1693 +1695 @@ ov27_0225AD0C: ; 0x0225AD0C
+-	mov r0, #0x10
++	mov r0, #0x11
+@@ -2479 +2481 @@ ov27_0225B398: ; 0x0225B398
+-	cmp r1, #7
++	cmp r1, #10
+@@ -2519,0 +2522,3 @@ _0225B3E4:
++	add r0, r6, #0
++	ldr r1, [sp]
++	bl WtMenuIcon_Highlight
+@@ -2567 +2572 @@ _0225B438:
+-	bl ov27_0225B360
++	bl WtMenuIcon_Navigate
+@@ -2582,6 +2587,3 @@ _0225B448:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -2595,6 +2597,3 @@ _0225B478:
+-	ldr r0, [r5, #0x14]
+-	lsl r0, r0, #2
+-	add r1, r5, r0
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r0, [r1, r0]
++	ldr r1, [r5, #0x14]
++	add r0, r5, #0
++	bl WtMenuIcon_GetSprite
+@@ -2609 +2608 @@ _0225B490:
+-	bl ov27_0225C170
++	bl WtMenuIcon_SelectionForIndex
+@@ -2712,0 +2712,8 @@ _0225B55A:
++	cmp r4, #10
++	bne _0225B55A_grid
++	add r0, r5, #0
++	bl WtMenuIcon_Touch
++	mov r1, #1
++	eor r0, r1
++	pop {r4, r5, r6, pc}
++_0225B55A_grid:
+@@ -6020,0 +6028 @@ ov27_0225CF68: ; 0x0225CF68
++	.byte 0x8E, 0xAE, 0x60, 0x9C
+diff --git a/files/meson.build b/files/meson.build
+--- a/files/meson.build
++++ b/files/meson.build
+@@ -95,0 +96 @@ subdir('tel')
++subdir('wonder_trade')
+diff --git a/files/msgdata/NARC_msg.txt b/files/msgdata/NARC_msg.txt
+--- a/files/msgdata/NARC_msg.txt
++++ b/files/msgdata/NARC_msg.txt
+@@ -829 +829,2 @@ NARC_msg_msg_0827_bin
+-NARC_msg_msg_0828_bin
+\ No newline at end of file
++NARC_msg_msg_0828_bin
++NARC_msg_msg_0829_bin
+\ No newline at end of file
+diff --git a/heartgold.us/filesystem.csv b/heartgold.us/filesystem.csv
+--- a/heartgold.us/filesystem.csv
++++ b/heartgold.us/filesystem.csv
+@@ -385,0 +386 @@ files/dwc/utility.bin,/dwc/utility.bin
++files/wonder_trade/menu_icon.narc,/wonder_trade/menu_icon.narc
+diff --git a/include/constants/heap.h b/include/constants/heap.h
+--- a/include/constants/heap.h
++++ b/include/constants/heap.h
+@@ -165,0 +166 @@ enum HeapID {
++    HEAP_ID_WONDER_TRADE,
+diff --git a/include/filesystem_files_def.h b/include/filesystem_files_def.h
+--- a/include/filesystem_files_def.h
++++ b/include/filesystem_files_def.h
+@@ -273,0 +274 @@ typedef enum NarcId {
++    NARC_wonder_trade_menu_icon = 267,
+@@ -545,0 +547 @@ char *sNarcFileList[] = {
++    "wonder_trade/menu_icon.narc",
+diff --git a/main.lsf.in b/main.lsf.in
+--- a/main.lsf.in
++++ b/main.lsf.in
+@@ -173,0 +174,5 @@ Static main
++    Object src/wonder_trade/hgss/launch.c
++    Object src/wonder_trade/entropy.c
++    Object src/wonder_trade/entropy_game.c
++    Object src/wonder_trade/recovery.c
++    Object src/wonder_trade/hgss/hooks.c
+@@ -355,0 +361 @@ Static main
++    Library libwonder_trade_tls_resident.a
+@@ -710,0 +717 @@ Overlay OVY_27
++    Object src/wonder_trade/hgss/menu_icon.c
+@@ -1431,0 +1439,23 @@ Overlay OVY_128
++
++# Wonder Trade runs with the field unloaded and the Wi-Fi libraries (OVY_0)
++# loaded, like the other Wi-Fi applications after OVY_0. It must end before
++# OVY_12 does, or the main arena would start later and HGSS's boot heaps would
++# no longer fit. Its templates, the save gates, the entropy hook and SHA-256
++# stay in the static binary.
++Overlay wonder_trade
++{
++    After OVY_0
++    Object src/wonder_trade/hgss/application.c
++    Object src/wonder_trade/network.c
++    Object src/wonder_trade/tls.c
++    Object src/wonder_trade/http.c
++    Object src/wonder_trade/wire.c
++    Object src/wonder_trade/seed.c
++    Object src/wonder_trade/journal.c
++    Object src/wonder_trade/engine.c
++    Object src/wonder_trade/pokemon_codec.c
++    Object src/wonder_trade/hgss/game_save.c
++    Object src/wonder_trade/flash.c
++    Object src/wonder_trade/boot.c
++    Library libwonder_trade_tls.a
++}
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -11,0 +12,2 @@ fs = import('fs')
++configure_file(input: get_option('wonder_trade_profile_header'), output: 'wonder_trade_config.h', copy: true)
++
+@@ -139,0 +142,7 @@ subdir('src')
++# The per-frame entropy hook hashes with SHA-256 for as long as the game runs;
++# the rest of Mbed TLS is loaded with the wonder_trade overlay.
++wt_tls_resident_sources = [
++    'tf-psa-crypto/drivers/builtin/src/sha256.c',
++    'tf-psa-crypto/platform/platform_util.c',
++]
++subdir('src/wonder_trade')
+@@ -158,0 +168 @@ main = executable('main',
++        wt_tls_args,
+@@ -168,0 +179,2 @@ main = executable('main',
++        toplevel_includes,
++        wt_tls_includes,
+@@ -184,0 +197,2 @@ main = executable('main',
++        wt_tls_resident,
++        wt_tls,
+diff --git a/meson.options b/meson.options
+--- a/meson.options
++++ b/meson.options
+@@ -1 +1,3 @@
+-option('game_version', type : 'combo', choices : ['HEARTGOLD', 'SOULSILVER'], value : 'HEARTGOLD')
+\ No newline at end of file
++option('game_version', type : 'combo', choices : ['HEARTGOLD', 'SOULSILVER'], value : 'HEARTGOLD')
++option('wonder_trade_tls_dir', type: 'string', value: '')
++option('wonder_trade_profile_header', type: 'string', value: '')
+\ No newline at end of file
+diff --git a/soulsilver.us/filesystem.csv b/soulsilver.us/filesystem.csv
+--- a/soulsilver.us/filesystem.csv
++++ b/soulsilver.us/filesystem.csv
+@@ -385,0 +386 @@ files/dwc/utility.bin,/dwc/utility.bin
++files/wonder_trade/menu_icon.narc,/wonder_trade/menu_icon.narc
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,0 +2,3 @@
++#include "wonder_trade/entropy_game.h"
++#include "wonder_trade/hgss/application.h"
++#include "wonder_trade/recovery.h"
+@@ -90,0 +94 @@ void NitroMain(void) {
++    WonderTradeEntropy_Init();
+@@ -98,0 +103 @@ void NitroMain(void) {
++        WonderTradeEntropy_Frame();
+@@ -145,2 +150,11 @@ static void Main_RunOverlayManager(void) {
+-        if (_02111868.queuedMainOverlayId != FS_OVERLAY_ID_NONE) {
+-            HandleLoadOverlay(_02111868.queuedMainOverlayId, OVY_LOAD_NORMAL);
++        if (!WtRecovery_Started()) {
++            _02111868.mainOverlayId = FS_OVERLAY_ID_NONE;
++            _02111868.overlayManager = OverlayManager_New(&gWonderTradeBootAppTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
++        } else {
++            if (_02111868.queuedMainOverlayId != FS_OVERLAY_ID_NONE) {
++                HandleLoadOverlay(_02111868.queuedMainOverlayId, OVY_LOAD_NORMAL);
++            }
++            _02111868.mainOverlayId = _02111868.queuedMainOverlayId;
++            _02111868.overlayManager = OverlayManager_New(_02111868.queuedMainOverlayTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
++            _02111868.queuedMainOverlayId = FS_OVERLAY_ID_NONE;
++            _02111868.queuedMainOverlayTemplate = NULL;
+@@ -148,4 +161,0 @@ static void Main_RunOverlayManager(void) {
+-        _02111868.mainOverlayId = _02111868.queuedMainOverlayId;
+-        _02111868.overlayManager = OverlayManager_New(_02111868.queuedMainOverlayTemplate, &_02111868.unk_10, HEAP_ID_DEFAULT);
+-        _02111868.queuedMainOverlayId = FS_OVERLAY_ID_NONE;
+-        _02111868.queuedMainOverlayTemplate = NULL;
+diff --git a/src/overlay_36.c b/src/overlay_36.c
+--- a/src/overlay_36.c
++++ b/src/overlay_36.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -94,0 +96,2 @@ BOOL ov36_TitleScreen_NewGame_AppInit(OverlayManager *man, int *state) {
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return FALSE; }
++
+@@ -118,0 +122,2 @@ BOOL ov36_App_InitGameState_AfterOakSpeech_AppInit(OverlayManager *man, int *sta
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return FALSE; }
++
+@@ -252,0 +258,2 @@ static void NewGame_InitSaveData(enum HeapID heapID, SaveData *saveData) {
++    if (!WtRecovery_CanClear()) { OS_ResetSystem(0); return; }
++
+diff --git a/src/save.c b/src/save.c
+--- a/src/save.c
++++ b/src/save.c
+@@ -1,0 +2 @@
++#include "wonder_trade/recovery.h"
+@@ -14,0 +16 @@ static BOOL saveWritten;
++static BOOL sWonderTradeBlocked;
+@@ -140,0 +143,2 @@ BOOL Save_DeleteAllData(SaveData *saveData) {
++    if (!WtRecovery_Started() || !WtRecovery_CanClear()) return FALSE;
++
+@@ -181,0 +186,2 @@ int SaveGameNormal(SaveData *saveData) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -264,0 +271,3 @@ void Save_PrepareForAsyncWrite(SaveData *saveData, int a1) {
++    sWonderTradeBlocked = !WtRecovery_CanWrite();
++    if (sWonderTradeBlocked) return;
++
+@@ -270,0 +280,2 @@ int Save_WriteFileAsync(SaveData *saveData) {
++    if (sWonderTradeBlocked) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -282,0 +294,2 @@ void Save_Cancel(SaveData *saveData) {
++    if (sWonderTradeBlocked) return;
++
+@@ -882,0 +896,2 @@ int WriteExtraSaveChunk(SaveData *saveData, int idx, void *data) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -921,0 +937,2 @@ int sub_02028230(SaveData *saveData, int idx, void *data) {
++    if (!WtRecovery_CanWrite()) return WRITE_STATUS_TOTAL_FAIL;
++
+@@ -1107,0 +1125,2 @@ static s32 FlashWriteChunk(u32 offset, void *data, u32 size) {
++    if (!WtRecovery_CanWrite()) return FALSE;
++
+diff --git a/src/start_menu.c b/src/start_menu.c
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -47,0 +48,2 @@
++#include "wonder_trade/hgss/application.h"
++#include "wonder_trade/hgss/menu_icon.h"
+@@ -159,0 +162,5 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager);
++static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu);
++static BOOL StartMenu_SelectWonderTrade(TaskManager *taskManager, FieldSystem *fieldSystem, StartMenuTaskData *startMenu, BOOL touch);
++static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager);
++static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager);
++static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager);
+@@ -578,0 +586,6 @@ static BOOL Task_StartMenu_HandleInput(TaskManager *taskManager) {
++                } else if (gSystem.newKeys & PAD_BUTTON_SELECT) {
++                    // Fallback for when the sub-screen icon could not be allocated.
++                    if (!StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, FALSE)) {
++                        return FALSE;
++                    }
++                    FieldSystem_ResetGearRingManagerIfNotSelectingSaveOrPokegear(fieldSystem);
+@@ -591,0 +605,3 @@ static BOOL StartMenu_HandleKeyInput(TaskManager *taskManager, FieldSystem *fiel
++    if (fieldSystem->unkD3 == WT_MENU_ICON_SELECTION) {
++        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, FALSE);
++    }
+@@ -652,0 +669,3 @@ static BOOL StartMenu_HandleTouchInput(TaskManager *taskManager, FieldSystem *fi
++    case WT_MENU_ICON_SELECTION + 2:
++        fieldSystem->unkD3 = WT_MENU_ICON_SELECTION;
++        return StartMenu_SelectWonderTrade(taskManager, fieldSystem, startMenu, TRUE);
+@@ -1502,0 +1522,46 @@ static void Task_StartMenu_WaitEvolution(TaskManager *taskManager) {
++
++static BOOL StartMenu_WonderTradeAvailable(FieldSystem *fieldSystem, StartMenuTaskData *startMenu) {
++    // Safari, Bug-Catching Contest, Pal Park, Union Room and similar menus forbid saving.
++    return !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_SAVE))
++        && !(startMenu->inhibitIconFlags & (1 << START_MENU_ACTION_DISABLE_POKEMON))
++        && Party_GetCount(SaveArray_Party_Get(fieldSystem->saveData)) > 0;
++}
++
++static BOOL StartMenu_SelectWonderTrade(TaskManager *taskManager, FieldSystem *fieldSystem, StartMenuTaskData *startMenu, BOOL touch) {
++    fieldSystem->lastTouchMenuInput = 0;
++    if (!StartMenu_WonderTradeAvailable(fieldSystem, startMenu)) {
++        return TRUE;
++    }
++    PlaySE(SEQ_SE_DP_SELECT);
++    MenuInputStateMgr_SetState(&fieldSystem->menuInputState, touch ? MENU_INPUT_STATE_TOUCH : MENU_INPUT_STATE_BUTTONS);
++    sub_0203DF64(fieldSystem, touch);
++    ov01_021F6B50(fieldSystem);
++    return Task_StartMenu_HandleSelection_WonderTrade(taskManager);
++}
++
++static BOOL Task_StartMenu_HandleSelection_WonderTrade(TaskManager *taskManager) {
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldMap_FadeScreen(FADE_TYPE_BRIGHTNESS_OUT);
++    startMenu->exitTaskFunc = Task_StartMenu_WonderTrade;
++    startMenu->state = START_MENU_STATE_WAIT_FADE;
++    return TRUE;
++}
++
++static BOOL Task_StartMenu_WonderTrade(TaskManager *taskManager) {
++    FieldSystem *fieldSystem = TaskManager_GetFieldSystem(taskManager);
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldSystem_LaunchApplication(fieldSystem, &gWonderTradeAppTemplate, fieldSystem);
++    startMenu->exitTaskFunc = Task_StartMenu_HandleReturn_WonderTrade;
++    return FALSE;
++}
++
++static BOOL Task_StartMenu_HandleReturn_WonderTrade(TaskManager *taskManager) {
++    FieldSystem *fieldSystem = TaskManager_GetFieldSystem(taskManager);
++    StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++
++    FieldSystem_LoadFieldOverlay(fieldSystem);
++    startMenu->state = START_MENU_STATE_RETURN;
++    return FALSE;
++}

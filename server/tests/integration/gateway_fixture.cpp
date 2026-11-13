@@ -39,7 +39,8 @@ public:
           }
           if (!release.empty() && std::filesystem::exists(release + ".outage"))
             return LegalityDecision{LegalityVerdict::Unavailable, {}};
-          return LegalityDecision{data[8] == 3 ? LegalityVerdict::Illegal : LegalityVerdict::Legal, {}};
+          if (data[8] == 3) return LegalityDecision{LegalityVerdict::Illegal, {}};
+          return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
         }, [](auto) { return true; }, std::move(admission)) {}
   TradeService trades;
 

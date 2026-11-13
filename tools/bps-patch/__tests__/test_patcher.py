@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 import patcher
-from support import BASES, PINS, PROFILE, TARGETS, assemble, rom, source_read, target_read
+from support import BASES, PINS, PROFILE, TARGETS, assemble, blz, rom, source_read, target_read, with_overlay
 
 RECORD = {key: key for key in ("tool", "version", "revision", "archive", "license", "notices", "build", "binary")}
 SCALAR = bytes([0x11] * 32)
@@ -65,11 +65,16 @@ class Fixture(unittest.TestCase):
         self.inputs = self.root / "inputs"
         self.inputs.mkdir()
         self.catalog = {"variants": [
-            {"id": key, "name": key, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+            {"id": key, "game": "Pokémon Platinum", "name": key, "game_code": "CPUE", "revision": data[0x1E],
+             "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
              "pristine_verified": True, "planned_patch": f"dswt-{key}.bps"}
             for key, data in BASES.items()] + [
-            {"id": "europe", "name": "Europe", "size": 4096, "sha256": hashlib.sha256(rom(0, "europe", "CPUP")).hexdigest(),
-             "pristine_verified": False, "planned_patch": "dswt-europe.bps"}]}
+            {"id": "europe", "game": "Pokémon Platinum", "name": "Europe", "game_code": "CPUP", "revision": 0,
+             "size": 4096, "sha256": hashlib.sha256(rom(0, "europe", "CPUP")).hexdigest(),
+             "pristine_verified": False, "planned_patch": "dswt-europe.bps"},
+            {"id": "diamond", "game": "Pokémon Diamond", "name": "Diamond", "game_code": "ADAE", "revision": 5,
+             "size": 4096, "sha256": hashlib.sha256(rom(5, "diamond", "ADAE")).hexdigest(),
+             "pristine_verified": True, "planned_patch": None}]}
         self.source = {"commit": "a" * 40, "dirty": False, "upstream_repository": "upstream", "upstream_revision": "b" * 40}
         self.profile = self.write("profile.json", json.dumps(PROFILE).encode())
         self.pairs = [(self.write(f"{key}.nds", BASES[key]), self.write(f"{key}-wt.nds", TARGETS[key])) for key in BASES]
@@ -141,6 +146,18 @@ class CreateTests(Fixture):
             self.assertFalse((self.root / "game/bundle").exists(), name)
             self.assertEqual(self.leftovers(self.root / "game"), [], name)
 
+    def test_only_catalogued_supported_bases_are_used(self):
+        diamond = self.write("diamond.nds", rom(5, "diamond", "ADAE"))
+        relabelled = rom(0, "relabelled", "CPUP")
+        self.catalog["variants"].append(dict(self.catalog["variants"][0], id="relabelled", planned_patch="dswt-x.bps",
+                                             sha256=hashlib.sha256(relabelled).hexdigest()))
+        relabelled = self.write("relabelled.nds", relabelled)
+        for base, message in ((diamond, "Recognized Pokémon Diamond Diamond, but it is not supported yet"),
+                              (relabelled, "does not have its catalogued cartridge header")):
+            with self.subTest(base.name), self.assertRaisesRegex(patcher.PatchError, message):
+                self.create(pairs=[(base, self.pairs[0][1])])
+            self.assertFalse((self.root / "game/bundle").exists())
+
     def leak(self, data, at=0x800):
         target = bytearray(TARGETS["us-rev1"])
         target[at:at + len(data)] = data
@@ -166,6 +183,32 @@ class CreateTests(Fixture):
         manifest = self.create(pairs=self.leak(BASES["us-rev1"][0x400:0x41F]))  # 31 bytes: shorter than a window
         self.assertEqual(manifest["release_checks"]["private_keys_checked"], 1)
         self.assertEqual(manifest["release_checks"]["verbatim_retail_run_limit"], 47)
+
+    def test_checks_search_compressed_code(self):
+        # Like HeartGold, the base and target keep their code in a compressed overlay.
+        base = with_overlay(rom(1, "compressed-base"), blz(bytes(range(16)) + bytes(120), 120))
+        self.catalog["variants"].append(dict(self.catalog["variants"][1], id="compressed", planned_patch="dswt-c.bps",
+                                             sha256=hashlib.sha256(base).hexdigest()))
+        base_path = self.write("compressed-base.nds", base)
+
+        def compressed(payload, damage=False):
+            code = bytearray(blz(payload + bytes(300), 300))
+            if damage:
+                code[-8:-4] = (0x08FFFFFF).to_bytes(4, "little")
+            return [(base_path, self.write("compressed.nds", with_overlay(rom(1, "compressed"), bytes(code))))]
+        profile = b"wt.dswt.games:443" + PINS[0] + PINS[1]
+        self.assertNotIn(PINS[0], compressed(profile)[0][1].read_bytes())
+        manifest = self.create(pairs=compressed(profile))
+        self.assertEqual([entry["variant"] for entry in manifest["entries"]], ["compressed"])
+        (self.inputs / "current.key").write_bytes(KEY)
+        for name, payload, message in (("key", profile + SCALAR, "private key current.key"),
+                                       ("profile twice", profile + PINS[0], "connection profile"),
+                                       ("damaged", profile, "malformed compressed code")):
+            with self.subTest(name):
+                (self.inputs / "compressed.nds").unlink()
+                with self.assertRaisesRegex(patcher.PatchError, message):
+                    self.create(pairs=compressed(payload, damage=name == "damaged"), output=self.root / "game/other")
+                self.assertFalse((self.root / "game/other").exists())
 
     def test_explicit_keys_replace_the_default_and_must_be_pem(self):
         other = self.inputs / "elsewhere.pem"

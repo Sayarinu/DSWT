@@ -5,6 +5,7 @@ add_executable(dswt-unit-tests
     unit/admission_test.cpp
     unit/config_test.cpp
     unit/connectivity_service_test.cpp
+    unit/game_variant_test.cpp
     unit/http_request_handler_test.cpp
     unit/wal_archive_barrier_test.cpp)
 target_sources(dswt-unit-tests PRIVATE unit/telemetry_test.cpp)

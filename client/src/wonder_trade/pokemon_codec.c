@@ -55,3 +55,14 @@ int WtPokemon_Encode(const unsigned char canonical[136], unsigned char encrypted
     Crypt(image, Read16(image + 6)); memcpy(encrypted, image, sizeof(image));
     return 0;
 }
+
+int WtPokemon_Fits(const unsigned char canonical[136], const WtPokemonLimits *limits)
+{
+    /* Block A: species 0x08, held item 0x0A. Block B: form in bits 3-7 of 0x40.
+     * Block D: the D/P/Pt ball at 0x83 (HG/SS also read 0x86). */
+    unsigned species = Read16(canonical + 0x08), item = Read16(canonical + 0x0A);
+    unsigned form = canonical[0x40] >> 3, ball = canonical[0x83];
+    if (!Valid(canonical) || species == 0 || species > limits->maxSpecies
+        || form >= limits->forms(species) || ball == 0 || ball > limits->maxBall) return 0;
+    return item == 0 || (item <= limits->maxItem && limits->holdable(limits->arg, item));
+}

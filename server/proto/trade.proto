@@ -90,7 +90,7 @@ message CanonicalPokemon {
 message EnrollRequest {
   bytes enrollment_id = 1; // 16 random bytes durably saved before enrollment.
   bytes credential = 2; // 32 CSPRNG bytes already durable on the client.
-  uint32 client_build = 3;
+  uint32 client_build = 3; // Game variant code; 1 is legacy US English Platinum.
   bytes hints = 4; // At most 64 optional bytes; never authentication evidence.
 }
 
@@ -202,4 +202,9 @@ message ValidateReply {
   repeated string reason_codes = 3; // At most 8 codes, each at most 32 ASCII bytes.
   bytes sha256 = 4; // 32 bytes identifying the exact submitted canonical payload.
   // No repaired or substituted payload: validation cannot mutate an asset.
+  // Gen IV games able to hold a legal Pokémon: bit 0 Diamond/Pearl, bit 1
+  // Platinum, bit 2 HeartGold/SoulSilver; other bits are zero. Non-zero exactly
+  // when legal. Zero never means "all games": a legal reply without a bit, as an
+  // older validator would send, is malformed and treated as unavailable.
+  uint32 destinations = 5;
 }

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "upstream_pin": "client/upstream-pokediamond.json",
+  "upstream_revision": "b623abef1b4dfe204ca50aab42447ac00c134290",
+  "verified_targets": ["diamond-us-rev5", "pearl-us-rev5"],
+  "flash_size": 524288,
+  "half_size": 262144,
+  "block_footer": {"size": 20, "format": "<IIIIBxH", "fields": ["counter", "block_counter", "size", "magic", "block", "crc"]},
+  "retail_regions_per_half": [
+    {"name": "general", "offset": 0, "size": 49408},
+    {"name": "boxes", "offset": 49408, "size": 74208},
+    {"name": "hall_of_fame", "offset": 131072, "size": 10944},
+    {"name": "extra_chunk_1", "offset": 143360, "size": 4964}
+  ],
+  "journal_banks": [196608, 458752],
+  "bank_reserved_size": 65536,
+  "record_size": 4096,
+  "record_sections": [
+    {"name": "header", "offset": 0, "size": 32},
+    {"name": "identity", "offset": 32, "size": 64},
+    {"name": "progress", "offset": 96, "size": 64},
+    {"name": "transaction", "offset": 160, "size": 256},
+    {"name": "pokemon_images", "offset": 416, "size": 1024},
+    {"name": "transport_private_state", "offset": 1440, "size": 512},
+    {"name": "pending_request", "offset": 1952, "size": 264},
+    {"name": "reserved_zero", "offset": 2216, "size": 1844},
+    {"name": "sha256", "offset": 4060, "size": 32},
+    {"name": "commit_tag", "offset": 4092, "size": 4}
+  ]
+}

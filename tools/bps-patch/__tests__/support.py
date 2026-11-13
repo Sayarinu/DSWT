@@ -47,6 +47,33 @@ def literal_patch(source, target):
     return assemble(source, target, [target_read(target)])
 
 
+def blz(data, run=0):
+    """Compress data, whose last run bytes are zero, as BLZ: literals, then 18-byte copies for the zeros."""
+    tokens = [("literal", 0)] * 3 if run else []  # in decode order, from the end backwards
+    copies = (run - 3) // 18 if run else 0
+    tokens += [("copy", 15 << 12)] * copies  # length 15 + 3, distance 0 + 3
+    tokens += [("literal", byte) for byte in reversed(data[:len(data) - 3 - 18 * copies if run else len(data)])]
+    backwards = bytearray()
+    for group in range(0, len(tokens), 8):
+        chunk = tokens[group:group + 8]
+        backwards.append(sum(0x80 >> index for index, (kind, _) in enumerate(chunk) if kind == "copy"))
+        for kind, value in chunk:
+            backwards += bytes([value >> 8, value & 0xFF]) if kind == "copy" else bytes([value])
+    stream = bytes(reversed(backwards))
+    size = len(stream) + 8
+    return stream + struct.pack("<II", 8 << 24 | size, len(data) - size)
+
+
+def with_overlay(base, code):
+    """Add an ARM9 overlay table and FAT naming one compressed overlay file at 0x400."""
+    data = bytearray(base)
+    data[0x48:0x58] = struct.pack("<IIII", 0x300, 8, 0x340, 32)
+    data[0x300:0x308] = struct.pack("<II", 0x400, 0x400 + len(code))
+    data[0x340:0x360] = struct.pack("<8I", 0, 0, 0, 0, 0, 0, 0, 1 << 24 | len(code))
+    data[0x400:0x400 + len(code)] = code
+    return bytes(data)
+
+
 # ROM-shaped fixtures: a cartridge header, a pseudo-random body and erased-flash padding.
 SIZE, USED = 4096, 4096 - 0x100
 PINS = [bytes([0x31] * 32), bytes([0x32] * 32)]

@@ -10,12 +10,62 @@ import sys
 import tempfile
 
 
+# Each upstream decompilation has its own pin, integration patch, adapter and
+# resource overlay. The shared core overlays every workspace; another game's
+# adapter and resources never do. Build patches apply to pristine workspaces too
+# and leave upstream output unchanged. Staged revisions build from inputs staged
+# from a verified local dump, so upstream lists no checksum for them.
+GAMES = {
+    "platinum": {
+        "pin": "client/upstream.json",
+        "patch": "client/pokeplatinum.patch",
+        "build_patches": ("client/europe.patch",),
+        "staged_revisions": ("10",),
+        "workspace": "pokeplatinum",
+        "adapter": "platinum",
+        "resources": ("res",),
+        "rom_sha1": "platinum.us/rom_rev{}.sha1",
+    },
+    "hgss": {
+        "pin": "client/upstream-pokeheartgold.json",
+        "patch": "client/pokeheartgold.patch",
+        "build_patches": (),
+        "staged_revisions": (),
+        "workspace": "pokeheartgold",
+        "adapter": "hgss",
+        "resources": ("files",),
+        "rom_sha1": "{}.us/rom.sha1",
+    },
+    # pret/pokediamond builds Diamond and Pearl with Make; ARM9 sources live
+    # under arm9/, so client/src lands in arm9/src, and its own text overlay
+    # client/files-dp lands in files/.
+    "dp": {
+        "pin": "client/upstream-pokediamond.json",
+        "patch": "client/pokediamond.patch",
+        "build_patches": (),
+        "staged_revisions": (),
+        "workspace": "pokediamond",
+        "adapter": "dp",
+        "resources": ("files-dp",),
+        "rom_sha1": "poke{}.us.sha1",
+        "destinations": {"src": "arm9/src", "files-dp": "files"},
+    },
+}
+ADAPTERS = {game["adapter"] for game in GAMES.values()}
+RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
+
+
 def git(workspace, *args):
     return subprocess.check_output(["git", "-C", str(workspace), *args])
 
 
-def overlay_files(root, workspace):
-    patch = root / "client/pokeplatinum.patch"
+def foreign_adapter(name, game):
+    parts = PurePosixPath(name).parts
+    return (len(parts) > 3 and parts[0] in ("include", "src") and parts[1] == "wonder_trade"
+            and parts[2] in ADAPTERS and parts[2] != game["adapter"])
+
+
+def patched_paths(patch):
     paths = []
     for line in patch.read_text().splitlines():
         if not line.startswith("diff --git "):
@@ -29,7 +79,14 @@ def overlay_files(root, workspace):
         paths.append(path.as_posix())
     if not paths or len(set(paths)) != len(paths):
         raise RuntimeError("Integration patch must name unique upstream files")
+    return paths
 
+
+def overlay_files(root, workspace, game=GAMES["platinum"], pristine=False):
+    patches = [root / name for name in game["build_patches"]] + ([] if pristine else [root / game["patch"]])
+    if not patches:
+        return {}, {}
+    paths = list(dict.fromkeys(path for patch in patches for path in patched_paths(patch)))
     base = {name: git(workspace, "show", f"HEAD:{name}") for name in paths}
     with tempfile.TemporaryDirectory(prefix="dswt-overlay-") as temp:
         stage = Path(temp)
@@ -37,12 +94,15 @@ def overlay_files(root, workspace):
             dest = stage / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
-        subprocess.run(
-            ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
-        )
+        for patch in patches:
+            subprocess.run(
+                ["git", "apply", "--unidiff-zero", str(patch)], cwd=stage, check=True
+            )
         desired = {name: (stage / name).read_bytes() for name in paths}
 
-    for directory in ("include", "src", "res"):
+    for directory in () if pristine else ("include", "src", *RESOURCES):
+        if directory in RESOURCES and directory not in game["resources"]:
+            continue
         source = root / "client" / directory
         if source.is_symlink():
             raise RuntimeError(f"Client overlays must not contain symlinks: {source}")
@@ -51,13 +111,17 @@ def overlay_files(root, workspace):
                 raise RuntimeError(f"Client overlays must not contain symlinks: {path}")
             if path.is_file():
                 name = path.relative_to(root / "client").as_posix()
+                if foreign_adapter(name, game):
+                    continue
+                if directory in game.get("destinations", {}):
+                    name = game["destinations"][directory] + name[len(directory):]
                 if name in desired:
                     raise RuntimeError(f"Overlay and integration patch overlap: {name}")
                 desired[name] = path.read_bytes()
     return base, desired
 
 
-def configure(root, workspace, pin, pristine):
+def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
     if workspace.is_symlink() or (workspace / ".git").is_symlink():
         raise RuntimeError("Game workspace must be a standalone local checkout")
     if not (workspace / ".git").is_dir():
@@ -69,11 +133,13 @@ def configure(root, workspace, pin, pristine):
     if git(workspace, "rev-parse", "HEAD^{tree}").decode().strip() != pin["tree"]:
         raise RuntimeError("Game workspace does not match the pinned upstream tree")
     for revision, digest in pin["rom_sha1"].items():
-        upstream = git(workspace, "show", f"HEAD:platinum.us/rom_rev{revision}.sha1")
+        if revision in game["staged_revisions"]:
+            continue
+        upstream = git(workspace, "show", "HEAD:" + game["rom_sha1"].format(revision))
         if upstream.decode().split()[0] != digest:
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
 
-    base, desired = ({}, {}) if pristine else overlay_files(root, workspace)
+    base, desired = overlay_files(root, workspace, game, pristine)
     marker = workspace / ".git/dswt-overlays.json"
     if marker.is_symlink():
         raise RuntimeError("Overlay ownership record must not be a symlink")
@@ -102,14 +168,15 @@ def configure(root, workspace, pin, pristine):
     marker.write_text(json.dumps(sorted(desired)) + "\n")
 
 
-def prepare(root, pristine=False):
+def prepare(root, pristine=False, name="platinum"):
     root = root.resolve()
-    pin = json.loads((root / "client/upstream.json").read_text())
+    game = GAMES[name]
+    pin = json.loads((root / game["pin"]).read_text())
     if (root / "game").is_symlink():
         raise RuntimeError("Game workspace directory must not be a symlink")
-    workspace = root / "game" / ("pokeplatinum-pristine" if pristine else "pokeplatinum")
+    workspace = root / "game" / (game["workspace"] + ("-pristine" if pristine else ""))
     if workspace.exists() or workspace.is_symlink():
-        configure(root, workspace, pin, pristine)
+        configure(root, workspace, pin, pristine, game)
         return workspace
 
     workspace.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +185,7 @@ def prepare(root, pristine=False):
         git(stage, "init", "--quiet")
         git(stage, "fetch", "--depth=1", pin["repository"], pin["revision"])
         git(stage, "checkout", "--quiet", "--detach", "FETCH_HEAD")
-        configure(root, stage, pin, pristine)
+        configure(root, stage, pin, pristine, game)
         stage.rename(workspace)
     return workspace
 
@@ -126,9 +193,12 @@ def prepare(root, pristine=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
+    parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
+                        help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
+                             "or dp for Diamond and Pearl")
     args = parser.parse_args()
     try:
-        print(prepare(Path(__file__).resolve().parent.parent, args.pristine))
+        print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Cannot prepare game workspace: {error}", file=sys.stderr)
         sys.exit(1)

@@ -48,6 +48,21 @@ RESPONSE_SIZES = {
 }
 
 
+LEGACY_PLATINUM = 1
+GAME_FAMILIES = {1: (10, 11), 2: (12,), 3: (7, 8)}  # DP, Platinum, HGSS version IDs
+LANGUAGES = (1, 2, 3, 4, 5, 7, 8)
+
+
+def game_family(build):
+    """Return the trade family of an enrollment build code; see "Game variants"."""
+    if build == LEGACY_PLATINUM:
+        return 2
+    family, version, language = build >> 24, build >> 16 & 0xFF, build >> 8 & 0xFF
+    if not 0 <= build < 1 << 32 or version not in GAME_FAMILIES.get(family, ()) or language not in LANGUAGES:
+        raise ValueError("Unknown game variant")
+    return family
+
+
 @dataclass(frozen=True)
 class Request:
     operation: Operation

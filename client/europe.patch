@@ -1,0 +1,66 @@
+diff --git a/meson.options b/meson.options
+--- a/meson.options
++++ b/meson.options
+@@ -1,3 +1,3 @@
+ option('gdb_debugging', type : 'boolean', value : false)
+-option('revision', type : 'combo', choices: ['0', '1'], value : '1')
++option('revision', type : 'combo', choices: ['0', '1', '10'], value : '1')
+ option('logging_enabled', type: 'boolean', value: false)
+diff --git a/platinum.us/meson.build b/platinum.us/meson.build
+--- a/platinum.us/meson.build
++++ b/platinum.us/meson.build
+@@ -21,6 +21,15 @@ if get_option('revision') == '0'
+     rom_ini = files('rom_rev0.ini')
+     sbins_for_rev_sha1 = files('sbins_rev0.sha1')
+     rom_sha1 = files('rom_rev0.sha1')
++elif get_option('revision') == '10'
++    # European English runs Rev 1 code; scripts/prepare-europe.py stages its inputs.
++    europe_dir = meson.project_source_root() / '.git/dswt-europe'
++    filesys_csv = files(europe_dir / 'filesys.csv')
++    filesys_sha1 = files(europe_dir / 'filesys.sha1')
++    rom_header_template = files(europe_dir / 'rom_header_template.sbin')
++    rom_ini = files(europe_dir / 'rom.ini')
++    sbins_for_rev_sha1 = files('sbins_rev1.sha1')
++    rom_sha1 = files(europe_dir / 'rom.sha1')
+ else
+     rom_header_template = files('rom_header_template_rev1.sbin')
+     rom_ini = files('rom_rev1.ini')
+diff --git a/res/text/meson.build b/res/text/meson.build
+--- a/res/text/meson.build
++++ b/res/text/meson.build
+@@ -126,17 +126,27 @@ town_map_text_bank = custom_target('town_map_text_bank',
+ 
+ text_bank_files += town_map_text_bank
+ 
++text_banks_command = [
++    nitroarc_exe,
++    '--create',
++    '--index',
++    '--files-from', text_banks_order,
++    '--file', '@OUTPUT0@',
++]
++if get_option('revision') == '10'
++    # Replace the encoded banks that differ in Europe with the staged originals.
++    text_banks_command = [
++        'sh', '-c', 'rm -rf "$0.europe" && cp -R "$0" "$0.europe" && cp "$1"/* "$0.europe" && shift && exec "$@" "$0.europe"',
++        '@PRIVATE_DIR@', meson.project_source_root() / '.git/dswt-europe/text',
++    ] + text_banks_command
++else
++    text_banks_command += '@PRIVATE_DIR@'
++endif
++
+ text_banks = custom_target('pl_msg.narc',
+     output: 'pl_msg.narc',
+     input: json_to_bin_gen.process(text_bank_files),
+-    command: [
+-        nitroarc_exe,
+-        '--create',
+-        '--index',
+-        '--files-from', text_banks_order,
+-        '--file', '@OUTPUT0@',
+-        '@PRIVATE_DIR@',
+-    ],
++    command: text_banks_command,
+ )
+ 
+ nitrofs_files += text_banks

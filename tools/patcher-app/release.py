@@ -35,8 +35,8 @@ def archive_name(version):
 
 
 def notes(manifest):
-    rows = "\n".join(f"| {entry['name']} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
-    return f"""Wonder Trade for your own copy of Pokémon Platinum.
+    rows = "\n".join(f"| {build.bundle.title(entry)} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
+    return f"""Wonder Trade for your own copy of a supported Pokémon game.
 
 Download the patcher for your computer, open it, choose a clean dump of your cartridge
 and save the patched ROM. Trimmed dumps work; the original file is never changed.
@@ -47,7 +47,7 @@ BPS patcher; read its `INSTALL.md` first.
 | --- | --- |
 {rows}
 
-Other versions and languages are recognised but not supported yet.
+Other games, versions and languages are recognised but not supported yet.
 The apps are not code-signed: Windows SmartScreen and macOS Gatekeeper ask you to confirm
 the first launch. `SHA256SUMS` lists every file in this release.
 

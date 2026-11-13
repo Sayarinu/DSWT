@@ -218,7 +218,7 @@ The output is `game/pokeplatinum/build/pokeplatinum.us.nds`. The provisioning
 tool verifies both retail block types have a valid copy, requires both reserved
 64 KiB banks to be blank and exclusively creates each output. It never updates
 an existing seed or transaction record. Region/layout validation is limited to
-the verified US targets.
+the verified targets listed in `protocol/save-layout*.json`.
 
 For melonDS on Linux, build the [durable emulator](../../emulator/README.md),
 configure each instance to load its own save path and launch through:

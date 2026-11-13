@@ -49,8 +49,8 @@ Supported today:
 | Pokémon Platinum, US English | Rev 0 and Rev 1 | melonDS 1.1 |
 
 Other versions and languages (Japanese, Korean, European English, French, German,
-Italian and Spanish) are recognised but each needs its own ported and tested
-target first. Physical DS hardware is not supported yet.
+Italian and Spanish) and the other Gen IV games (Diamond, Pearl, HeartGold and
+SoulSilver) are recognised but each needs its own ported and tested target first. Physical DS hardware is not supported yet.
 
 - [Install and trade guide](patches/INSTALL.md): what players do with a released bundle.
 - [ROM compatibility](patches/README.md): the verified inputs and the bundle contract.

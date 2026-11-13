@@ -69,7 +69,7 @@ void CheckTail(const Bytes &bytes, unsigned bank) {
 }
 
 void CheckLayout(const Bytes &bytes, const std::string &target) {
-    Require(target == "us-rev0" || target == "us-rev1");
+    Require(target == "us-rev0" || target == "us-rev1" || target == "europe");
     constexpr std::array<std::size_t, 2> offsets{0, 53036}, sizes{53036, 74212};
     for (unsigned block = 0; block < 2; ++block) {
         bool valid = false;

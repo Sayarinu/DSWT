@@ -25,6 +25,28 @@ identity in both journal banks before submitting anything. Device/MAC/trainer
 IDs, emulator hints, game PRNG output and copied save counters are not secrets.
 TLS entropy and seed persistence require the LUNE-300 review; no fallback.
 
+### Game variants
+
+Enroll's build u32 names the save's game variant as
+`family << 24 | version << 16 | language << 8 | revision`, using the games' own
+version and language IDs and the ROM header revision byte. `code >> 24` is the trade family, except legacy
+code 1, which US English Platinum clients send (any revision). European English
+Platinum builds send `0x020C020A`.
+
+| Field | Values |
+| --- | --- |
+| Family / version | 1 DP: Diamond 10, Pearl 11; 2 Platinum: 12; 3 HGSS: HeartGold 7, SoulSilver 8 |
+| Language | Japanese 1, English 2, French 3, Italian 4, German 5, Spanish 7, Korean 8 |
+| Revision | 0..255 |
+
+For example `0x020C0201` is English Platinum Rev 1. Any other code is
+`INVALID_REQUEST`. The server stores the variant with the new identity and never
+changes it: a retry with the same enrollment ID and credential but another
+variant is `CONFLICT`, like a conflicting credential. Code 1 and an explicit
+English Platinum code are the one exception; they match each other and return
+the identity with its stored variant unchanged. Identities enrolled before
+variants were recorded are code 1.
+
 The server stores SHA-256 of ASCII `DSWT save credential v1`, one zero byte,
 the 16 save-ID bytes and the 32 credential bytes, and compares verifiers in
 constant time. This scheme is for CSPRNG credentials, not human passwords. The
@@ -63,7 +85,15 @@ a database advisory lock shared across replicas. It anchors the oldest unlocked
 eligible offer by its immutable admission event and randomly chooses a distinct
 unlocked owner. Busy workers return `PROCESSING`; reuse that operation ID. A
 final `NOT_FOUND` records no eligible pair, so later polling needs a new ID.
+Workers start a new attempt only while a compatible pair is queued.
 Pairs and no-pair outcomes survive retry/restart and require recovery coverage.
+Submit stores, immutably with the offer, the validator's destination set: the
+games able to hold the Pokémon (bit 0 Diamond/Pearl, bit 1 Platinum, bit 2
+HeartGold/SoulSilver). Two offers pair only if each owner's game family is in
+the other offer's set. Offers stored before destination sets are Platinum-only.
+The anchor is the oldest eligible offer that has a compatible counterpart; an
+offer no other queued game can hold waits without blocking younger offers, and
+if every compatible peer of an anchor is locked the next anchor is tried.
 The one-hour capacity gate must measure contention before production promotion.
 
 Retain final operation outcomes, payloads, receipts and contiguous ownership
@@ -122,7 +152,7 @@ highwater values; a retried mutation's outcome/event remain its original result.
 
 | Op | Request body in order | Successful response body |
 | --- | --- | --- |
-| 1 Enroll | Build u32, hint length u8, 0..64 hint bytes | Save ID (16) |
+| 1 Enroll | Build u32 (game variant above), hint length u8, 0..64 hint bytes | Save ID (16) |
 | 2 Submit | Escrow generation u64, canonical PK4 (136), digest (32) | Outcome event u64, snapshot (138) |
 | 3 Status | Trade ID (16); zero selects current pending trade | Snapshot (138); all zero when none |
 | 4 Cancel | Nonzero trade ID (16) | Outcome event u64, snapshot (138) |
@@ -147,8 +177,9 @@ zero sanity u16, checksum u16, then four 32-byte blocks in A/B/C/D order. The
 checksum is the sum of 64 little-endian u16 values in bytes 8..135 modulo 65536;
 the SHA-256 covers all 136 bytes. Party suffixes, encrypted/shuffled guesses and
 automatic repairs are forbidden. Full original local images remain in escrow.
-The pinned isolated PKHeX service checks strict legality for Platinum and returns
-a verdict, exact payload hash and bounded policy/reason codes, never a replacement payload. RPC
+The pinned isolated PKHeX service checks strict Gen IV legality and returns a
+verdict, exact payload hash, bounded policy/reason codes and, for legal Pokémon,
+the Gen IV games that can hold it, never a replacement payload. RPC
 failure is unavailable, not an illegal verdict. The server rejects Eggs and mail;
 the game rejects attached capsules and protects its last usable party Pokémon
 before escrow, since those facts are outside canonical PK4. The pinned policy,
@@ -171,7 +202,7 @@ the gateway cannot invoke them. Validator RPCs grant no ownership authority.
 | QUEUED → MATCHED | Lock two distinct owners/offers in a consistent order; atomically exchange asset ownership and create both immutable delivery receipts/events. Never expose half a pair. |
 | QUEUED → RETURN_READY | Cancellation races under the same locks. A committed match wins; otherwise keep the original asset owned by its depositor and issue a return receipt. |
 | Ready → Collect | Read-only replay of the same receipt/payload. No removal, expiry or new assignment, including after an acknowledgement. Full local storage leaves it pending. |
-| Collect → locally applied | Verify receipt/digest; persist incoming bytes and destination pre/post images in both journals. Import once into a free slot and apply ordinary game trade effects for a match (none for a return). Verify full saves into both retail copies, then mirror the applied receipt and final digest in both journals before gameplay resumes. |
+| Collect → locally applied | Verify receipt/digest; for a match, check the game can hold the Pokémon (species, form, held item, ball) or leave the trade pending with nothing recorded. Persist incoming bytes and destination pre/post images in both journals. Import once into a free slot and apply ordinary game trade effects for a match (none for a return). Verify full saves into both retail copies, then mirror the applied receipt and final digest in both journals before gameplay resumes. |
 | Applied → ACKNOWLEDGED | Send the persisted acknowledgement with receipt, delivered/applied digests and journal generation. Record it idempotently; do not delete replay data. Only its final outcome releases the identity for another deposit. |
 
 Never restore a submitted original from a timeout or `NOT_FOUND` alone. Only a
@@ -186,15 +217,46 @@ acknowledgement to the immutable delivered asset and revalidates future deposits
 
 ## Journal placement and migration
 
-[`save-layout.json`](save-layout.json) records the pinned US layout. Each 0x40000
+[`save-layout.json`](save-layout.json) records the pinned layout of US Rev 0, Rev 1
+and European English Platinum, whose ARM9 and overlays are byte-identical to US
+Rev 1. Each 0x40000
 half contains general data at 0..0xCF2C, boxes through 0x1F110, Hall of Fame at
 0x20000, Battle Hall at 0x23000 and four recordings at 0x24000/26000/28000/2A000,
 ending at 0x2BD60. Existing GTS data is inside the general block and stays intact.
 Reserve a complete 64 KiB flash sector at 0x30000 and 0x70000 for independent
 journal banks; the SDK's 256-byte programming pages/64 KiB erase sectors do not
 overlap retail content there. Reject smaller flash, unknown layouts, foreign
-journal magic and unsupported versions without writing. Europe needs its own
-layout validation before it can join this list.
+journal magic and unsupported versions without writing. Any other target needs
+its own layout validation before it can join this list.
+
+[`save-layout-hgss.json`](save-layout-hgss.json) records US HeartGold and
+SoulSilver from the pinned pokeheartgold source, confirmed against the size
+functions linked into both pristine (retail-identical) ARM9 binaries. Each half
+holds general data at 0..0xF628 and boxes at 0xF700..0x21A10, each with a 16-byte
+footer (counter, size, magic, block u16, CRC u16), then the Hall of Fame at
+0x23000, Battle Frontier data at 0x26000 and four recordings at
+0x27000/29000/2B000/2D000, ending at 0x2ED60; the second half mirrors them at
++0x40000. The same 0x30000 and 0x70000 sectors are unused, so HeartGold and
+SoulSilver use the same journal banks and record format. Their saves write only
+the PC boxes changed since the last save; the adapter marks every box modified
+before each of its two consecutive retail saves so both halves hold the full
+image, and its digests read the box-modified flags (0x21704 in each half) as zero.
+
+[`save-layout-dp.json`](save-layout-dp.json) records US Diamond and Pearl
+(Rev 5) from the pinned pokediamond source and the size functions linked into
+both pristine (retail-identical) ARM9 binaries, which are the same in each.
+Like Platinum, each half packs general data at 0..0xC100 and boxes at
+0xC100..0x1E2E0 with 20-byte footers, filling exactly the 32 sectors
+`SAVE_PAGE_MAX` allows. Its only extra chunks are the Hall of Fame at 0x20000
+and a 0x1354-byte chunk at 0x23000, each with a 16-byte footer and ending by
+0x24364; the second half mirrors them at +0x40000. Nothing else writes the
+flash: every write goes through `save.c`, and the 0x30000 and 0x70000 sectors
+are unused, so Diamond and Pearl use the same journal banks and record format.
+Deleting the save (`sub_0202263C`) erases all 128 sectors, journals included,
+so it is gated like the other games' delete paths. A save writes the box block
+only after the box data changed, so the adapter sets that flag before each of
+its two consecutive retail saves; both halves then hold the full image, and
+whole blocks need no masked digest.
 
 Each bank begins with one explicitly serialized 4096-byte record. Header:
 `DSWJ`, version u16=1, phase u16, record-size u32=4096, reserved u32=0,

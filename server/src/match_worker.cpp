@@ -7,7 +7,9 @@
 namespace dswt::server {
 
 std::chrono::milliseconds MatchWorker::Poll() {
-  if (request_.operation_id().empty()) {
+  if (!Pending()) {
+    // An uncertain attempt is always resolved; a new one needs a compatible pair.
+    if (!available_()) return kIdleDelay;
     unsigned char id[16];
     if (RAND_bytes(id, sizeof(id)) != 1) throw std::runtime_error("worker randomness unavailable");
     request_.set_operation_id(id, sizeof(id));

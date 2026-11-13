@@ -12,6 +12,7 @@ updates:
       - /validator
       - /tools/bps-patch
       - /tools/rom-builder
+      - /tools/rom-builder-dp
     schedule:
       interval: weekly
   - package-ecosystem: docker-compose

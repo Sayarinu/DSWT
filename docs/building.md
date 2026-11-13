@@ -27,9 +27,18 @@ definition is in `tools/rom-builder/Dockerfile`. This project script builds the
 modified ROM. To reproduce and check the unmodified US baseline, run
 `./scripts/build-rom.sh --pristine` (also accepts `ROM_REVISION=0`). This uses
 `game/pokeplatinum-pristine/` and runs all upstream pristine checksum checks.
+European English Platinum is `ROM_REVISION=10`: it runs Rev 1 code, and its
+header area and the few files that differ come from your own dump, named by
+`DSWT_EUROPE_ROM`. The build checks the dump's SHA-256 first and stages those
+parts only in the ignored workspace (`.git/dswt-europe/`); `--pristine` then
+reproduces the dump exactly.
 Both build modes default to one compiler job; set `ROM_BUILD_JOBS=2` (a positive
 integer without leading zeros) to opt into parallel compilation. Serial builds
 avoid the compiler failures observed with parallel macOS Docker builds.
+HeartGold, SoulSilver, Diamond and Pearl select their workspace with `ROM_GAME`
+([`client/UPSTREAM.md`](../client/UPSTREAM.md)); Diamond and Pearl use the
+Wine-based image in `tools/rom-builder-dp/Dockerfile` and, like the other games,
+need `WONDER_TRADE_PROFILE` unless built with `--pristine`.
 ROMs and downloaded inputs stay local; CI publishes neither ROMs nor game caches.
 
 ## Upstream source
