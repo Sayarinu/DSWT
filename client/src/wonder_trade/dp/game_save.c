@@ -89,47 +89,55 @@ done:
     return result;
 }
 
-/* Verify both complete halves on flash independently of the RAM selector:
- * footers, CRCs and the body digest. Each half must hold both blocks of one
- * full save; two consecutive full saves leave counters one apart, the newer
- * equal to RAM's (src/save.c: sub_02022DFC and sub_02022968). */
+/* Verify the two newest copies of both blocks on flash, independently of the
+ * RAM selector: footers, CRCs, counters and the body digest. Diamond and Pearl
+ * alternate each block between the two halves on its own (src/save.c:
+ * sub_02022E78 picks the half from unk_20220[block]), so the general and box
+ * blocks of one save can sit in different halves; pair them by counter instead.
+ * Two consecutive full saves leave block counters unk_20218[block] and one less,
+ * and global counters unk_20214 and one less (src/save.c: sub_02022DFC and
+ * sub_02022968). Failures return -2 .. -8 for the support code. */
 static int Verify(const SaveData *save, const unsigned char expected[32])
 {
-    unsigned half, block, offset, i, bit, size;
-    unsigned char page[256], footer[FOOTER_SIZE], digest[32];
+    unsigned age, half, block, offset, i, bit, size;
+    unsigned char page[256], footers[2][2][FOOTER_SIZE], digest[32];
     mbedtls_sha256_context hash;
     int result = -1;
     if (!WtGameSave_LayoutKnown(save)) return -1;
+    for (block = 0; block < 2; ++block) {
+        for (half = 0; half < 2; ++half) {
+            u32 address = half * 0x40000 + sBlocks[block].offset + sBlocks[block].size - FOOTER_SIZE;
+            if (WtFlash_ReadRange(address, footers[block][half], FOOTER_SIZE) != 0) return -2;
+        }
+    }
     mbedtls_sha256_init(&hash);
-    for (half = 0; half < 2; ++half) {
-        u32 global = 0, age = 0;
+    for (age = 0; age < 2; ++age) {
         if (mbedtls_sha256_starts(&hash, 0) != 0) goto done;
         for (block = 0; block < 2; ++block) {
+            const unsigned char *footer;
             unsigned crc = 65535;
-            u32 body = sBlocks[block].size - FOOTER_SIZE, address = half * 0x40000 + sBlocks[block].offset, counter;
+            u32 body = sBlocks[block].size - FOOTER_SIZE, address;
+            for (half = 0; half < 2 && Read32(footers[block][half] + 4) != save->unk_20218[block] - age; ++half) ;
+            if (half == 2) { result = -7; goto done; }
+            footer = footers[block][half];
+            /* global counter, block counter, size, magic, block u8, pad, CRC u16 */
+            if (Read32(footer + 8) != sBlocks[block].size || Read32(footer + 12) != FOOTER_MAGIC
+                || footer[16] != block) { result = -3; goto done; }
+            if (Read32(footer) != save->unk_20214 - age) { result = -6; goto done; }
+            address = half * 0x40000 + sBlocks[block].offset;
             for (offset = 0; offset < body; offset += size) {
                 size = body - offset;
                 if (size > sizeof(page)) size = sizeof(page);
-                if (WtFlash_ReadRange(address + offset, page, size) != 0) goto done;
+                if (WtFlash_ReadRange(address + offset, page, size) != 0) { result = -2; goto done; }
                 for (i = 0; i < size; ++i) {
                     crc ^= (unsigned)page[i] << 8;
                     for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 65535;
                 }
                 if (mbedtls_sha256_update(&hash, page, size) != 0) goto done;
             }
-            /* global counter, block counter, size, magic, block u8, pad, CRC u16 */
-            if (WtFlash_ReadRange(address + body, footer, sizeof(footer)) != 0
-                || Read32(footer + 8) != sBlocks[block].size || Read32(footer + 12) != FOOTER_MAGIC
-                || footer[16] != block || Read16(footer + 18) != crc) goto done;
-            counter = Read32(footer + 4);
-            if (block == 0) {
-                global = Read32(footer);
-                age = save->unk_20214 - global;
-                if (age > 1) goto done;
-            } else if (Read32(footer) != global) goto done;
-            if (save->unk_20218[block] - counter != age) goto done;
+            if (Read16(footer + 18) != crc) { result = -4; goto done; }
         }
-        if (mbedtls_sha256_finish(&hash, digest) != 0 || memcmp(digest, expected, 32) != 0) goto done;
+        if (mbedtls_sha256_finish(&hash, digest) != 0 || memcmp(digest, expected, 32) != 0) { result = -8; goto done; }
     }
     result = 0;
 done:
@@ -144,16 +152,18 @@ static int SaveBoth(WtGame *game, const unsigned char expected[32])
 {
     unsigned char actual[32];
     int result = -1, i;
-    if (Hash(game->save, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
+    if (Hash(game->save, actual) != 0 || memcmp(actual, expected, 32) != 0) return -11;
     if (Verify(game->save, expected) == 0) return 0;
-    if (game->save->isNewGame || !game->save->saveFileExists || !game->save->flashOkay) return -1;
+    if (game->save->isNewGame || !game->save->saveFileExists || !game->save->flashOkay) return -12;
     WtRecovery_InternalWrite(1);
     for (i = 0; i < 2; ++i) {
         game->save->largeSectorChanged = 1;
         /* 2 is a completed write (src/save.c: sub_02022E78). */
-        if (SaveGame(game->save) != 2) goto done;
+        if (SaveGame(game->save) != 2) { result = -13; goto done; }
     }
     result = Verify(game->save, expected);
+    /* A failed check after saving reports which one (-22 .. -28). */
+    if (result != 0) result -= 20;
 done:
     WtRecovery_InternalWrite(0);
     if (result != 0) WtRecovery_Block();
@@ -167,7 +177,7 @@ int WtGame_Checkpoint(WtGame *game)
     return Verify(game->save, digest) == 0 ? 0 : SaveBoth(game, digest);
 }
 
-/* The global counter covers both blocks of a half; each block also counts its own writes. */
+/* The global counter advances with each full save; each block also counts its own writes. */
 static void Counters(WtGame *game, WtJournalEntry *entry)
 {
     entry->globalCounter = game->save->unk_20214;
