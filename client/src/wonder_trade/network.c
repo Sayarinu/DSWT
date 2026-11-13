@@ -300,7 +300,9 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
             result = WtGame_Checkpoint(transport->game);
             transport->phase = WT_TRANSPORT_CONNECTING;
             if (transport->cancel) { result = -15; break; }
-            if (result != 0 || WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
+            /* A failed save checkpoint reports its step as -32xx for support. */
+            if (result != 0) { result = -3200 + (result < -99 ? -99 : result); break; }
+            if (WtEngine_Deposit(engine, transport->slot) != 0) { result = -32; break; }
             transport->slot = -1;
         }
         operation = transport->action;
