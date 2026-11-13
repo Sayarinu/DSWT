@@ -35,6 +35,7 @@
 #include "render_window.h"
 #include "save_arrays.h"
 #include "screen_fade.h"
+#include "sound_02004A44.h"
 #include "string_util.h"
 #include "system.h"
 #include "text.h"
@@ -654,6 +655,9 @@ BOOL WonderTradeApp_Init(OverlayManager *man, int *state)
     SaveData *save = SaveData_Get();
     WonderTradeApp *app;
     (void)state;
+    /* The Global Terminal's theme. Scene 10 keeps the field sound effects, and
+     * the field map restores its own music on return. */
+    if (fieldSystem != NULL) Sound_SetSceneAndPlayBGM(10, SEQ_GS_BLD_GTC, 1);
     /* A deposit first writes both copies of an existing save; refuse a game
      * that was never saved before connecting, rather than fail later. */
     if (fieldSystem != NULL && !WtGameSave_Written(save)) {

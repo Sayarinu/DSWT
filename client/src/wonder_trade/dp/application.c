@@ -36,6 +36,7 @@
 #include "string16.h"
 #include "string_util.h"
 #include "text.h"
+#include "unk_020040F4.h"
 #include "unk_020051F4.h"
 #include "wonder_trade/boot.h"
 #include "wonder_trade/flash.h"
@@ -677,6 +678,9 @@ static BOOL WonderTrade_Init(struct OverlayManager *man, u32 *state)
     WonderTradeApp *app = WonderTrade_Create(man, fieldSystem, saved ? WT_APP_CONNECTING : WT_APP_SAVE_FIRST,
         saved ? WonderTrade_Text_Connecting : WonderTrade_Text_SaveFirst, TRUE);
     (void)state;
+    /* The GTS theme. Scene 10 (Platinum's GTS scene is missing here) keeps the
+     * field sound effects, and the field map restores its own music on return. */
+    if (fieldSystem != NULL) sub_0200433C(10, SEQ_BLD_BLD_GTC, 1);
     if (saved) WonderTradeNetwork_Start(&app->network, &app->game);
     WonderTrade_Draw(app);
     return TRUE;
