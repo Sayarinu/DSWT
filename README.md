@@ -55,7 +55,6 @@ SoulSilver) are recognised but each needs its own ported and tested target first
 - [Install and trade guide](patches/INSTALL.md): what players do with a released bundle.
 - [ROM compatibility](patches/README.md): the verified inputs and the bundle contract.
 - [BPS patch tooling](tools/bps-patch/README.md) and [player app](tools/patcher-app/README.md): build, check and release patches.
-- [Building from source](docs/building.md): build the patched ROM yourself.
 
 ## How it works
 
@@ -76,7 +75,6 @@ only HTTPS is exposed.
 ```
 
 - [Wire protocol](protocol/README.md): the DS message layout and recovery rules.
-- [Operating the services](docs/operations.md): configuration, limits and telemetry.
 - [Deployment](deploy/README.md): Docker Compose on a single VPS.
 
 ## FAQ
@@ -100,8 +98,7 @@ verification and can lose access to its pending trade.
 
 **Can I run my own server?**
 Yes. The server address and key pins are built into the ROM, so you build your
-own patched ROM for your server. See [Deployment](deploy/README.md) and
-[Building from source](docs/building.md).
+own patched ROM for your server. See [Deployment](deploy/README.md).
 
 ## Contributing
 

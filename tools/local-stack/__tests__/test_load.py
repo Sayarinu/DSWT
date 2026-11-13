@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import load
@@ -42,6 +43,19 @@ class MeasurementTests(unittest.TestCase):
         self.assertTrue(all(address.startswith("127.") for address in addresses))
         self.assertTrue(all(0 < int(address.rsplit(".", 1)[1]) < 255 for address in addresses))
 
+    def test_loopback_address_boundaries(self):
+        self.assertEqual(load.source(0), "127.10.0.1")
+        self.assertEqual(load.source(249), "127.10.0.250")
+        self.assertEqual(load.source(250), "127.10.1.1")
+        self.assertEqual(load.source(62499), "127.10.249.250")
+
+    def test_idle_client_is_not_settled_until_pending_packet_is_retired(self):
+        self.assertFalse(load.settled(None))
+        self.assertFalse(load.settled({}))
+        self.assertFalse(load.settled({"phase": "queued", "pending_sha256": ""}))
+        self.assertFalse(load.settled({"phase": "idle", "pending_sha256": "packet"}))
+        self.assertTrue(load.settled({"phase": "idle", "pending_sha256": ""}))
+
     def test_every_fixed_target_must_be_met_without_weakening(self):
         self.assertEqual(load.verdict(report())["status"], "pass")
         for changed, check in ((report(per_second=9.99), "completed_pairs_per_second"),
@@ -55,6 +69,29 @@ class MeasurementTests(unittest.TestCase):
                 result = load.verdict(changed)
                 self.assertEqual(result["status"], "fail")
                 self.assertFalse(result["checks"][check])
+
+
+class ProbeTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deadline_and_latency_accounting_use_the_same_budget(self):
+        process = mock.Mock(communicate=mock.AsyncMock(return_value=(b"", b"")),
+                            wait=mock.AsyncMock())
+
+        async def timeout(awaitable, seconds):
+            await awaitable
+            self.assertEqual(seconds, 0.5)
+            raise TimeoutError
+
+        driver = load.Driver({"concurrency": 1, "offer_rate": 1,
+                              "probe": "probe", "pins": ["current", "next"]})
+        driver.measuring = True
+        with mock.patch.object(load, "PROBE_TIMEOUT", 0.5), \
+             mock.patch.object(load.asyncio, "create_subprocess_exec", new=mock.AsyncMock(return_value=process)), \
+             mock.patch.object(load.asyncio, "wait_for", new=timeout):
+            self.assertIsNone(await driver.probe({"path": "client", "source": "127.10.0.1"}, "collect"))
+        process.kill.assert_called_once_with()
+        process.wait.assert_awaited_once_with()
+        self.assertEqual(driver.failures["probe_timeout"], 1)
+        self.assertEqual(driver.latency["timeout"], [500000])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 #include "http_services.h"
 
 #include <chrono>
+#include <cstdint>
 #include <utility>
 
 namespace dswt::server {
@@ -10,6 +11,15 @@ namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
 using tcp = asio::ip::tcp;
+namespace {
+constexpr std::uint32_t kHeaderLimitBytes = 2048;
+constexpr std::uint64_t kBodyLimitBytes = 4096;
+constexpr auto kHandshakeTimeout = std::chrono::seconds(30);
+constexpr auto kRequestTimeout = std::chrono::seconds(15);
+constexpr auto kIoTimeout = std::chrono::seconds(5);
+constexpr auto kBackendTimeout = std::chrono::seconds(4);
+constexpr auto kShutdownTimeout = std::chrono::seconds(2);
+} // namespace
 
 HttpSession::HttpSession(tcp::socket socket, std::shared_ptr<HttpServices> services,
                          std::unique_ptr<HttpConnection> connection)
@@ -17,8 +27,8 @@ HttpSession::HttpSession(tcp::socket socket, std::shared_ptr<HttpServices> servi
       stream_(services_->Tls() ? Stream(std::in_place_index<1>, std::move(socket), *services_->Tls()) :
                                 Stream(std::in_place_index<0>, std::move(socket))),
       executor_(Lowest().get_executor()), deadline_(executor_) {
-  parser_.header_limit(2048);
-  parser_.body_limit(4096);
+  parser_.header_limit(kHeaderLimitBytes);
+  parser_.body_limit(kBodyLimitBytes);
   parser_.eager(true);
 }
 
@@ -30,7 +40,7 @@ beast::tcp_stream &HttpSession::Lowest() {
 
 void HttpSession::Run() {
   if (!services_->Tls()) { BeginRead(); return; }
-  Lowest().expires_after(std::chrono::seconds(30));
+  Lowest().expires_after(kHandshakeTimeout);
   std::get<1>(stream_).async_handshake(asio::ssl::stream_base::server,
       [self = shared_from_this()](beast::error_code error) {
         if (error) self->Close(); else self->BeginRead();
@@ -38,13 +48,13 @@ void HttpSession::Run() {
 }
 
 void HttpSession::BeginRead() {
-  deadline_.expires_after(std::chrono::seconds(15));
+  deadline_.expires_after(kRequestTimeout);
   deadline_.async_wait([self = shared_from_this()](beast::error_code error) { if (!error) self->Close(); });
   Read();
 }
 
 void HttpSession::Read() {
-  Lowest().expires_after(std::chrono::seconds(5));
+  Lowest().expires_after(kIoTimeout);
   std::visit([self = shared_from_this()](auto &stream) {
     http::async_read_some(stream, self->buffer_, self->parser_, [self](beast::error_code error, std::size_t) {
       if (self->phase_ != Phase::Reading) return;
@@ -59,8 +69,8 @@ void HttpSession::Read() {
 void HttpSession::Dispatch() {
   phase_ = Phase::Waiting;
   version_ = parser_.get().version();
-  context_->set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(4));
-  Lowest().expires_after(std::chrono::seconds(5));
+  context_->set_deadline(std::chrono::system_clock::now() + kBackendTimeout);
+  Lowest().expires_after(kIoTimeout);
   // Watch EOF or extra pipelined bytes while gRPC runs on a bounded worker.
   std::visit([self = shared_from_this()](auto &stream) {
     stream.async_read_some(asio::buffer(self->probe_), [self](beast::error_code error, std::size_t) {
@@ -94,7 +104,7 @@ void HttpSession::Ready(http::response<http::string_body> response) {
 
 void HttpSession::Write() {
   phase_ = Phase::Writing;
-  Lowest().expires_after(std::chrono::seconds(5));
+  Lowest().expires_after(kIoTimeout);
   std::visit([self = shared_from_this()](auto &stream) {
     http::async_write(stream, self->response_, [self](beast::error_code error, std::size_t) {
       if (error) self->Close(); else self->Shutdown();
@@ -106,7 +116,7 @@ void HttpSession::Shutdown() {
   if (phase_ == Phase::Closed) return;
   if (!services_->Tls()) { Close(); return; }
   phase_ = Phase::Closing;
-  Lowest().expires_after(std::chrono::seconds(2));
+  Lowest().expires_after(kShutdownTimeout);
   std::get<1>(stream_).async_shutdown([self = shared_from_this()](beast::error_code) { self->Close(); });
 }
 

@@ -10,12 +10,19 @@ namespace DSWT.Validator;
 // Keep its lifetime, pipe buffers and admission bound inside this module.
 public sealed class WorkerRunner : IDisposable
 {
+    internal const int MaxReplyBytes = 1024;
+    private const int DefaultWorkers = 2;
+    private const int MaxReasonCodes = 8;
+    private const int MaxReasonCodeLength = 32;
+    private static readonly TimeSpan AnalysisBudget = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan CleanupBudget = TimeSpan.FromSeconds(1);
+
     private readonly SemaphoreSlim slots;
     private readonly Func<ProcessStartInfo> command;
     private readonly TimeSpan budget;
 
-    public WorkerRunner() : this(Command, TimeSpan.FromSeconds(1), Workers(Environment.GetEnvironmentVariable("WT_VALIDATOR_WORKERS"))) { }
-    public WorkerRunner(Func<ProcessStartInfo> command, TimeSpan budget, int workers = 2)
+    public WorkerRunner() : this(Command, AnalysisBudget, Workers(Environment.GetEnvironmentVariable("WT_VALIDATOR_WORKERS"))) { }
+    public WorkerRunner(Func<ProcessStartInfo> command, TimeSpan budget, int workers = DefaultWorkers)
     {
         this.command = command;
         this.budget = budget;
@@ -25,7 +32,7 @@ public sealed class WorkerRunner : IDisposable
     // Two isolated workers by default; deployments sized for more CPU may allow up to eight.
     public static int Workers(string? value) => value switch
     {
-        null or "" => 2,
+        null or "" => DefaultWorkers,
         [>= '1' and <= '8'] => value[0] - '0',
         _ => throw new InvalidOperationException("WT_VALIDATOR_WORKERS must be 1-8"),
     };
@@ -67,9 +74,9 @@ public sealed class WorkerRunner : IDisposable
             var reply = ValidateReply.Parser.ParseFrom(await output);
             if (reply.PolicyVersion != Policy.Version ||
                 !reply.Sha256.Span.SequenceEqual(SHA256.HashData(payload)) ||
-                reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > 8 ||
+                reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > MaxReasonCodes ||
                 reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~(uint)Policy.AllDestinations) != 0 ||
-                reply.ReasonCodes.Any(r => r.Length is 0 or > 32 || r.Any(c => c is not (>= 'A' and <= 'Z' or '_'))))
+                reply.ReasonCodes.Any(r => r.Length is 0 or > MaxReasonCodeLength || r.Any(c => c is not (>= 'A' and <= 'Z' or '_'))))
                 throw new InvalidOperationException();
             return reply;
         }
@@ -87,7 +94,7 @@ public sealed class WorkerRunner : IDisposable
                     process.Kill(entireProcessTree: true);
                 if (process.Id != 0)
                 {
-                    using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                    using var cleanup = new CancellationTokenSource(CleanupBudget);
                     await process.WaitForExitAsync(cleanup.Token);
                 }
             }
@@ -99,7 +106,7 @@ public sealed class WorkerRunner : IDisposable
 
     private static async Task<byte[]> ReadBounded(Stream stream, CancellationToken cancellation)
     {
-        byte[] buffer = new byte[1025];
+        byte[] buffer = new byte[MaxReplyBytes + 1];
         int used = 0;
         while (used < buffer.Length)
         {

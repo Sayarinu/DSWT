@@ -1,4 +1,5 @@
 #include "trade_encoding.h"
+#include "wire_layout.h"
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -8,22 +9,26 @@
 #include <stdexcept>
 
 namespace dswt::server::detail {
+namespace {
+constexpr int kRandomIdentifierAttempts = 8;
+} // namespace
 
 bool NonzeroBytes(std::string_view bytes, std::size_t size) {
   return bytes.size() == size && std::any_of(bytes.begin(), bytes.end(), [](char c) { return c != 0; });
 }
 
 bool CanonicalShape(std::string_view bytes) {
-  if (bytes.size() != 136 || bytes[4] != 0 || bytes[5] != 0 ||
-      bytes[0x64] != 0 || bytes[0x65] != 0 || bytes[0x66] != 0 || bytes[0x67] != 0)
+  if (bytes.size() != wire::kPk4Size || bytes[wire::kPk4Sanity] != 0 || bytes[wire::kPk4Sanity + 1] != 0 ||
+      bytes[wire::kPk4Unused] != 0 || bytes[wire::kPk4Unused + 1] != 0 ||
+      bytes[wire::kPk4Unused + 2] != 0 || bytes[wire::kPk4Unused + 3] != 0)
     return false;
   auto word = [&](std::size_t offset) {
     return static_cast<unsigned char>(bytes[offset]) |
            (static_cast<unsigned char>(bytes[offset + 1]) << 8);
   };
   unsigned sum = 0;
-  for (std::size_t offset = 8; offset < bytes.size(); offset += 2) sum += word(offset);
-  return (sum & 65535) == static_cast<unsigned>(word(6));
+  for (std::size_t offset = wire::kPk4Blocks; offset < bytes.size(); offset += 2) sum += word(offset);
+  return (sum & 65535) == static_cast<unsigned>(word(wire::kPk4Checksum));
 }
 
 std::string HexBytes(std::string_view bytes) {
@@ -60,20 +65,20 @@ std::uint64_t Unsigned(std::string_view decimal) {
 }
 
 std::string HashBytes(std::string_view bytes) {
-  std::string digest(32, '\0');
+  std::string digest(wire::kDigestSize, '\0');
   std::size_t length = 0;
   if (EVP_Q_digest(nullptr, "SHA256", nullptr, bytes.data(), bytes.size(),
-                   reinterpret_cast<unsigned char *>(digest.data()), &length) != 1 || length != 32)
+                   reinterpret_cast<unsigned char *>(digest.data()), &length) != 1 || length != wire::kDigestSize)
     throw std::runtime_error("digest unavailable");
   return digest;
 }
 
 std::string RandomIdentifier() {
-  for (int attempt = 0; attempt < 8; ++attempt) {
-    std::string id(16, '\0');
-    if (RAND_bytes(reinterpret_cast<unsigned char *>(id.data()), 16) != 1)
+  for (int attempt = 0; attempt < kRandomIdentifierAttempts; ++attempt) {
+    std::string id(wire::kIdSize, '\0');
+    if (RAND_bytes(reinterpret_cast<unsigned char *>(id.data()), wire::kIdSize) != 1)
       throw std::runtime_error("identifier randomness unavailable");
-    if (NonzeroBytes(id, 16)) return id;
+    if (NonzeroBytes(id, wire::kIdSize)) return id;
   }
   throw std::runtime_error("identifier allocation unavailable");
 }
@@ -106,20 +111,20 @@ std::string EncodeOutcome(std::uint64_t sequence, const v1::TradeSnapshot &snaps
   };
   std::string bytes;
   AppendUnsigned(bytes, sequence, 8);
-  bytes += fixed(snapshot.trade_id(), 16);
+  bytes += fixed(snapshot.trade_id(), wire::kIdSize);
   bytes += static_cast<char>(snapshot.state());
   bytes += static_cast<char>(snapshot.delivery_kind());
-  bytes += fixed(snapshot.offered_asset_id(), 16);
-  bytes += fixed(snapshot.offered_sha256(), 32);
-  bytes += fixed(snapshot.received_asset_id(), 16);
-  bytes += fixed(snapshot.received_sha256(), 32);
-  bytes += fixed(snapshot.receipt_id(), 16);
+  bytes += fixed(snapshot.offered_asset_id(), wire::kIdSize);
+  bytes += fixed(snapshot.offered_sha256(), wire::kDigestSize);
+  bytes += fixed(snapshot.received_asset_id(), wire::kIdSize);
+  bytes += fixed(snapshot.received_sha256(), wire::kDigestSize);
+  bytes += fixed(snapshot.receipt_id(), wire::kIdSize);
   AppendUnsigned(bytes, snapshot.last_event(), 8);
   return bytes;
 }
 
 void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply) {
-  if (bytes.size() != 146) throw std::runtime_error("invalid stored outcome");
+  if (bytes.size() != wire::kOutcomeSize) throw std::runtime_error("invalid stored outcome");
   auto take = [&](std::size_t count) {
     auto value = bytes.substr(0, count);
     bytes.remove_prefix(count);
@@ -138,15 +143,15 @@ void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply) {
   };
   reply.set_operation_event(number(8));
   auto *snapshot = reply.mutable_outcome();
-  snapshot->set_trade_id(field(16));
+  snapshot->set_trade_id(field(wire::kIdSize));
   snapshot->set_state(static_cast<v1::TradeState>(number(1)));
   snapshot->set_delivery_kind(static_cast<v1::DeliveryKind>(number(1)));
-  snapshot->set_offered_asset_id(field(16));
-  snapshot->set_offered_sha256(take(32));
-  snapshot->set_received_asset_id(field(16));
-  auto received_hash = take(32);
+  snapshot->set_offered_asset_id(field(wire::kIdSize));
+  snapshot->set_offered_sha256(take(wire::kDigestSize));
+  snapshot->set_received_asset_id(field(wire::kIdSize));
+  auto received_hash = take(wire::kDigestSize);
   if (!snapshot->received_asset_id().empty()) snapshot->set_received_sha256(received_hash);
-  snapshot->set_receipt_id(field(16));
+  snapshot->set_receipt_id(field(wire::kIdSize));
   snapshot->set_last_event(number(8));
 }
 

@@ -9,30 +9,30 @@ static volatile int sInternalWrite;
 
 typedef struct BootRead {
     WtJournalIO source;
-    unsigned char banks[2][4096];
+    unsigned char banks[2][WT_JOURNAL_RECORD_SIZE];
     unsigned seen;
 } BootRead;
 
-static int Read(void *arg, int bank, unsigned char record[4096])
+static int Read(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
     BootRead *read = arg;
     if (bank < 0 || bank > 1 || read->source.read(read->source.arg, bank, record) != 0) return -1;
-    memcpy(read->banks[bank], record, 4096);
+    memcpy(read->banks[bank], record, WT_JOURNAL_RECORD_SIZE);
     read->seen |= 1u << bank;
     return 0;
 }
 
-static int NoWrite(void *arg, int bank, const unsigned char record[4096])
+static int NoWrite(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
     (void)arg; (void)bank; (void)record;
     return -1;
 }
 
-static int Blank(const unsigned char record[4096])
+static int Blank(const unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
     size_t i;
     if (record[0] != 0 && record[0] != 255) return 0;
-    for (i = 1; i < 4096; i++) if (record[i] != record[0]) return 0;
+    for (i = 1; i < WT_JOURNAL_RECORD_SIZE; i++) if (record[i] != record[0]) return 0;
     return 1;
 }
 

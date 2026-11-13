@@ -12,6 +12,15 @@
 #include <utility>
 
 namespace dswt::server::detail {
+namespace {
+constexpr std::size_t kMaximumQuotaKeys = 4096;
+constexpr std::size_t kMaximumEnrollmentNetworks = 4096;
+constexpr std::size_t kMaximumKeyBytes = 64;
+constexpr unsigned kMaximumBurstSeconds = 60;
+constexpr auto kSweepInterval = std::chrono::seconds(1);
+constexpr auto kIdleRetention = std::chrono::seconds(kMaximumBurstSeconds);
+} // namespace
+
 
 struct Quota::State {
   struct Bucket {
@@ -31,7 +40,7 @@ struct Quota::State {
 
 Quota::Quota(Limits limits, Now now) : state_(std::make_shared<State>(limits, std::move(now))) {
   if (!limits.total || !limits.per_key || !limits.burst || !limits.per_second ||
-      limits.burst > 60 * static_cast<std::uint64_t>(limits.per_second) || !state_->now)
+      limits.burst > kMaximumBurstSeconds * static_cast<std::uint64_t>(limits.per_second) || !state_->now)
     throw std::invalid_argument("invalid admission budget");
 }
 
@@ -57,20 +66,20 @@ std::unique_ptr<Quota::Permit> Quota::Acquire(std::string_view key) {
 }
 
 bool Quota::Permit::Bind(std::string_view key) {
-  if (key.empty() || key.size() > 64) return false;
+  if (key.empty() || key.size() > kMaximumKeyBytes) return false;
   std::lock_guard<std::mutex> lock(state_->mutex);
   if (!key_.empty()) return key_ == key;
   const auto now = state_->now();
   auto found = state_->buckets.find(key);
   if (found == state_->buckets.end()) {
-    if (state_->buckets.size() == 4096 && now >= state_->next_sweep) {
-      state_->next_sweep = now + std::chrono::seconds(1);
+    if (state_->buckets.size() == kMaximumQuotaKeys && now >= state_->next_sweep) {
+      state_->next_sweep = now + kSweepInterval;
       for (auto it = state_->buckets.begin(); it != state_->buckets.end();) {
-        if (it->second.active == 0 && now - it->second.touched >= std::chrono::seconds(60)) it = state_->buckets.erase(it);
+        if (it->second.active == 0 && now - it->second.touched >= kIdleRetention) it = state_->buckets.erase(it);
         else ++it;
       }
     }
-    if (state_->buckets.size() == 4096) return false;
+    if (state_->buckets.size() == kMaximumQuotaKeys) return false;
     found = state_->buckets.emplace(std::string(key), State::Bucket{static_cast<double>(state_->limits.burst), now, now}).first;
   }
   auto &bucket = found->second;
@@ -105,12 +114,12 @@ bool EnrollmentBudget::Allow(const std::string &network, std::string_view reques
     found = networks_.end();
   }
   if (found == networks_.end()) {
-    if (networks_.size() >= 4096) {
+    if (networks_.size() >= kMaximumEnrollmentNetworks) {
       for (auto it = networks_.begin(); it != networks_.end();) {
         if (now - it->second.started >= std::chrono::hours(24)) it = networks_.erase(it);
         else ++it;
       }
-      if (networks_.size() >= 4096) return false;
+      if (networks_.size() >= kMaximumEnrollmentNetworks) return false;
     }
     found = networks_.emplace(network, Network{now, {}}).first;
   }
