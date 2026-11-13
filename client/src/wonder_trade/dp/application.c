@@ -330,11 +330,11 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     ScheduleBgTilemapBufferTransfer(app->bgConfig, GF_BG_LYR_MAIN_1);
     GfGfxLoader_LoadCharData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_CARD_TILES, app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, TRUE, app->game.heapID);
     GfGfxLoader_LoadScrnData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_CARD_MAP, app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, TRUE, app->game.heapID);
-    /* Keep only the listing card, below the header and above the message box. */
+    /* Keep only the listing card, a tile clear of the header bar and above the message box. */
     card = GetBgTilemapBuffer(app->bgConfig, GF_BG_LYR_MAIN_2);
-    memmove(card + 3 * 32, card + 32, 12 * 32 * sizeof(*card));
-    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 0, 32, 3, 0);
-    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 15, 32, 9, 0);
+    memmove(card + 4 * 32, card + 32, 12 * 32 * sizeof(*card));
+    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 0, 32, 4, 0);
+    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 16, 32, 8, 0);
     ScheduleBgTilemapBufferTransfer(app->bgConfig, GF_BG_LYR_MAIN_2);
     GfGfxLoader_LoadScrnData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_BUTTON_MAP, app->bgConfig, GF_BG_LYR_SUB_2, 0, 0, TRUE, app->game.heapID);
     memcpy(app->buttonTilemap, GetBgTilemapBuffer(app->bgConfig, GF_BG_LYR_SUB_2), sizeof(app->buttonTilemap));
@@ -351,9 +351,10 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     sub_0200CD68(app->bgConfig, GF_BG_LYR_MAIN_0, WT_MESSAGE_TILE, WT_MESSAGE_PALETTE, (u8)Options_GetFrame(options), app->game.heapID);
 
     AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 2, 1, 28, 2, WT_TEXT_PALETTE, 1);
-    /* The field's own message box: 27x4 tiles at (2, 19), as text_02054590.c places it. */
-    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 2, 19, 27, 4, WT_TEXT_PALETTE, 61);
-    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 4, 18, 10, WT_TEXT_PALETTE, 223);
+    /* The field's message box (text_02054590.c), 4 tiles high, narrowed to
+     * line up with the listing card and raised clear of the bottom bar. */
+    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 3, 18, 25, 4, WT_TEXT_PALETTE, 61);
+    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 5, 18, 10, WT_TEXT_PALETTE, 223);
     AddWindowParameterized(app->bgConfig, &app->body, GF_BG_LYR_MAIN_0, 2, 5, 28, 16, WT_TEXT_PALETTE, 413);
     AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 2, 1, 28, 2, WT_SUB_TEXT_PALETTE, 1);
     for (i = 0; i < WT_MENU_MAX_ACTIONS; i++) {
@@ -361,7 +362,7 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
             WT_MENU_LEFT / 8, (u8)((WT_MENU_TOP + i * WT_MENU_SPACING) / 8),
             WT_MENU_WIDTH / 8, WT_MENU_HEIGHT / 8, WT_SUB_TEXT_PALETTE, (u16)(61 + i * 72));
     }
-    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 21, 4, 10, 10, WT_PREVIEW_PALETTE, 861);
+    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 21, 5, 10, 10, WT_PREVIEW_PALETTE, 861);
     app->previewLoaded = FALSE;
     app->graphicsReady = TRUE;
     app->touchBlocked = TRUE;
