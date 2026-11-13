@@ -144,6 +144,13 @@ class ReleaseTests(AppFixture):
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
         self.assertIn("| Pokémon Platinum us-rev1 |", notes)
+        self.assertNotIn("only the DSWT Patcher", notes)
+        manifest = {"version": "0.1.0", "source": {"commit": "a" * 40}, "upstream": {"revision": "b" * 40},
+                    "entries": [{"name": name, "game_code": code, "input": {"sha256": "c" * 64}, "source_view": view}
+                                for name, code, view in (("USA", "CPUE", "rom"), ("USA", "IPKE", "expanded-code"),
+                                                         ("USA", "IPGE", "expanded-code"))]}
+        self.assertIn("Pokémon HeartGold and Pokémon SoulSilver patches apply to the ROM with its code expanded",
+                      release.notes(manifest))
         renamed = self.root / "game/other.zip"
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):

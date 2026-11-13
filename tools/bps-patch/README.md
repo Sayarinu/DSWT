@@ -36,9 +36,12 @@ python3 tools/bps-patch/patcher.py package game/bundles/0.1.0 --output game/bund
 Each base must match a pristine-verified catalogue entry with a planned patch
 ([`patches/compatibility.json`](../../patches/compatibility.json)). Each target must
 keep its base's game code and revision and contain both profile pins exactly once.
-HeartGold and SoulSilver compress their ARM9 binary and overlays, so the profile,
-key and path checks also search that code expanded; the retail-content check
-below sees compressed code only as compressed bytes.
+HeartGold and SoulSilver compress their ARM9 binary and overlays. Their modified
+builds leave that code uncompressed, and each patch applies to the base followed
+by its code expanded (`"source_view": "expanded-code"` in the manifest), so the
+patch copies unchanged code from the player's own ROM. Generic BPS patchers
+cannot build that view; `bundle.py` and the player app do. The profile, key, path
+and retail-content checks all search compressed code expanded.
 Every patch is created twice (bytes must match), walked, and reproduced by both
 Flips and `bps.py`. The bundle is staged and renamed into place without replacing
 anything; `audit/` keeps the walker report and literals for review and is never
@@ -54,8 +57,10 @@ does not belong in a release:
 - PEM or private key markers, the repository path, the home directory or another
   build-host path absent from the retail base;
 - retail ROM content: any patch literal holding a run of 47 or more bytes copied
-  verbatim from any supplied base. Unchanged content must come from the
-  player's own ROM, so patches carry only rebuilt code and project data.
+  verbatim from any supplied base or its expanded code, or any recompressed
+  module in a target whose expanded code holds such a run. Unchanged content
+  must come from the player's own ROM, so patches carry only rebuilt code and
+  project data.
 
 `package` writes the reproducible player archive: manifest, patches,
 [`INSTALL.md`](../../patches/INSTALL.md), `LICENSE` and `NOTICE`, after

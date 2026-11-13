@@ -11,13 +11,14 @@ import os
 from pathlib import Path
 import re
 import secrets
+import struct
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 
 KIND = "dswt-bps-bundle"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_MANIFEST = 1024 * 1024
 PATCH_NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,63}\.bps")
 VARIANT = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
@@ -53,6 +54,13 @@ GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
 # European English cartridges that reuse the US game code, told apart by their
 # header revision: Platinum Europe reads CPUE revision 10.
 EUROPE_AS_US = {("CPUE", 10)}
+# What a patch applies to: the ROM itself, or the ROM followed by its compressed
+# ARM9 binary and overlays expanded in ROM order. HeartGold and SoulSilver
+# compress their code, so their patches copy unchanged code from the player's
+# own expanded ROM instead of carrying retail code, compressed or not.
+SOURCE_VIEWS = ("rom", "expanded-code")
+# The ARM9 binary ends with this marker and the offset of its module parameters.
+NITRO_FOOTER = 0xDEC00621
 
 
 class BundleError(ValueError):
@@ -109,6 +117,80 @@ def _require(condition, message):
         raise BundleError(f"Malformed manifest: {message}")
 
 
+def _blz_expand(data, label):
+    """Expand one backward-LZ (BLZ) compressed binary, as the DS loader does."""
+    if len(data) < 8:
+        raise BundleError(f"{label} has malformed compressed code")
+    end, extra = struct.unpack_from("<II", data, len(data) - 8)
+    header, compressed = end >> 24, end & 0xFFFFFF
+    if header < 8 or header > compressed or compressed > len(data):
+        raise BundleError(f"{label} has malformed compressed code")
+    out = bytearray(data) + bytearray(extra)
+    source, target, stop = len(data) - header, len(out), len(data) - compressed
+    while target > stop:
+        if source <= stop:
+            raise BundleError(f"{label} has malformed compressed code")
+        source -= 1
+        flags = data[source]
+        for _ in range(8):
+            if target <= stop:
+                break
+            if flags & 0x80:
+                source -= 2
+                token = data[source + 1] << 8 | data[source] if source >= stop else 0
+                length, distance = (token >> 12) + 3, (token & 0xFFF) + 3
+                if source < stop or length > target - stop or target - 1 + distance >= len(out):
+                    raise BundleError(f"{label} has malformed compressed code")
+                for _ in range(length):
+                    target -= 1
+                    out[target] = out[target + distance]
+            else:
+                source -= 1
+                if source < stop:
+                    raise BundleError(f"{label} has malformed compressed code")
+                target -= 1
+                out[target] = data[source]
+            flags = flags << 1 & 0xFF
+    return bytes(out)
+
+
+def compressed_code(rom, label):
+    """Return [(name, compressed bytes, expanded bytes)] for the ARM9 binary and each compressed overlay."""
+    modules = []
+    try:
+        offset, _, ram, size = struct.unpack_from("<IIII", rom, 0x20)
+        if offset + size + 8 <= len(rom) and struct.unpack_from("<I", rom, offset + size)[0] == NITRO_FOOTER:
+            params = struct.unpack_from("<I", rom, offset + size + 4)[0]
+            end = struct.unpack_from("<I", rom, offset + params + 0x14)[0] if params + 0x18 <= size else 0
+            if end:
+                if not 0 < end - ram <= size:
+                    raise BundleError(f"{label} has malformed compressed code")
+                code = rom[offset:offset + end - ram]
+                modules.append(("ARM9", code, _blz_expand(code, label)))
+        fat, fat_size, table, table_size = struct.unpack_from("<IIII", rom, 0x48)
+        for entry in range(table, table + table_size - 31, 32):
+            overlay = struct.unpack_from("<I", rom, entry)[0]
+            file_id, flags = struct.unpack_from("<II", rom, entry + 24)
+            if flags >> 24 & 1:
+                if file_id * 8 + 8 > fat_size:
+                    raise BundleError(f"{label} has malformed compressed code")
+                start, stop = struct.unpack_from("<II", rom, fat + file_id * 8)
+                if not start <= stop <= len(rom):
+                    raise BundleError(f"{label} has malformed compressed code")
+                code = rom[start:stop]
+                modules.append((f"overlay {overlay}", code, _blz_expand(code, label)))
+    except struct.error:
+        raise BundleError(f"{label} has malformed compressed code") from None
+    return modules
+
+
+def source_view(rom, view, label="ROM"):
+    """Return the bytes a patch applies to: the ROM, or the ROM followed by its expanded code."""
+    if view == "rom":
+        return rom
+    return rom + b"".join(expanded for _, _, expanded in compressed_code(rom, label))
+
+
 def load_manifest(data):
     """Parse and validate a release manifest; every later check relies on these shapes."""
     if len(data) > MAX_MANIFEST:
@@ -127,6 +209,7 @@ def load_manifest(data):
         _require(isinstance(entry, dict) and isinstance(entry.get("variant"), str)
                  and VARIANT.fullmatch(entry["variant"]) and isinstance(entry.get("name"), str), "invalid entry")
         _require(entry.get("game_code") in CARTRIDGES and type(entry.get("revision")) is int, "invalid cartridge")
+        _require(entry.get("source_view") in SOURCE_VIEWS, "invalid source view")
         for part, limit in (("input", bps.MAX_FILE), ("patch", bps.MAX_PATCH), ("output", bps.MAX_FILE)):
             value = entry.get(part)
             _require(isinstance(value, dict) and type(value.get("size")) is int and 0 < value["size"] <= limit
@@ -174,7 +257,7 @@ def patch_rom(entry, source, patch):
     if crc32_hex(source) != entry["input"]["crc32"]:
         raise BundleError("Input CRC32 does not match the manifest")
     try:
-        target = bps.apply(source, patch)
+        target = bps.apply(source_view(source, entry["source_view"]), patch)
     except bps.BPSError as error:
         raise BundleError(f"Patch failed: {error}") from None
     if (len(target) != entry["output"]["size"] or crc32_hex(target) != entry["output"]["crc32"]

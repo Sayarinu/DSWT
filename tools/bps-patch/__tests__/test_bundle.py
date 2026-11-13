@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle
-from support import BASES, TARGETS, USED, assemble, literal_patch, rom, target_copy
+from support import BASES, TARGETS, USED, assemble, blz, literal_patch, rom, target_copy, with_overlay
 from test_patcher import Fixture
 
 
@@ -46,6 +46,19 @@ class BundleTests(Fixture):
                 self.assertEqual(output.read_bytes(), TARGETS["us-rev1"])
                 self.assertEqual([path.name for path in self.out.iterdir()], ["wt.nds"])
                 output.unlink()
+
+    def test_expanded_code_view_follows_the_rom(self):
+        code = bytes(range(64)) + bytes(40)
+        compressed = blz(code, 40)
+        base = with_overlay(rom(1, "view"), compressed)
+        self.assertEqual(bundle.source_view(base, "rom"), base)
+        self.assertEqual(bundle.source_view(base, "expanded-code"), base + code)
+        self.assertEqual(bundle.source_view(BASES["us-rev1"], "expanded-code"), BASES["us-rev1"])
+        damaged = bytearray(base)
+        end = 0x400 + len(compressed)
+        damaged[end - 8:end - 4] = (0x08FFFFFF).to_bytes(4, "little")
+        with self.assertRaisesRegex(bundle.BundleError, "malformed compressed code"):
+            bundle.source_view(bytes(damaged), "expanded-code")
 
     def test_default_output_is_beside_the_input(self):
         source = self.write("Platinum.nds", BASES["us-rev0"])
@@ -107,6 +120,8 @@ class BundleTests(Fixture):
             "old private schema": lambda m: m.update(schema_version=1, kind="dswt-private-bps-bundle"),
             "size type": lambda m: m["entries"][1]["output"].update(size="4096"),
             "game code": lambda m: m["entries"][1].update(game_code="XXXX"),
+            "source view": lambda m: m["entries"][1].update(source_view="decompressed"),
+            "no source view": lambda m: m["entries"][1].pop("source_view"),
             "revision type": lambda m: m["entries"][1].update(revision="1"),
             "variant": lambda m: m["entries"][1].update(variant="../x"),
             "no entries": lambda m: m.update(entries=[]),

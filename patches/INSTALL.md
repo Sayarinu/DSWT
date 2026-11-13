@@ -31,6 +31,8 @@ app runs on Apple silicon. On Linux, mark `DSWT Patcher` executable and run it.
 With another BPS patcher, use the patch for your cartridge from the patch archive,
 such as `dswt-us-rev1.bps`. Your ROM must be full size and match the input
 SHA-256 in `manifest.json`; check the output against its output SHA-256.
+HeartGold and SoulSilver patches apply to the ROM with its compressed code
+expanded, so only DSWT Patcher can apply them.
 
 ## Trade
 
