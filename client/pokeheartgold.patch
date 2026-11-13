@@ -171,6 +171,12 @@ diff --git a/meson.build b/meson.build
 @@ -184,0 +197,2 @@ main = executable('main',
 +        wt_tls_resident,
 +        wt_tls,
+@@ -326,0 +341,2 @@ main_sbins_lz = [
++# Wonder Trade builds leave the ARM9 and overlays uncompressed, so their patches
++# hold only rebuilt code and can copy unchanged code from the expanded retail base.
+@@ -330,2 +345,0 @@ main_lz = custom_target('main.lz',
+-        '-9',
+-        '-c',
 diff --git a/meson.options b/meson.options
 --- a/meson.options
 +++ b/meson.options
