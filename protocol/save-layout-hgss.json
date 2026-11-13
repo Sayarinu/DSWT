@@ -2,7 +2,7 @@
   "version": 1,
   "upstream_pin": "client/upstream-pokeheartgold.json",
   "upstream_revision": "6bf138d6035aa6b43d6f8f4132a12df70f86dcec",
-  "verified_targets": ["heartgold-us-rev0", "soulsilver-us-rev0"],
+  "verified_targets": ["heartgold-us-rev0", "soulsilver-us-rev0", "heartgold-europe", "soulsilver-europe"],
   "flash_size": 524288,
   "half_size": 262144,
   "block_footer": {"size": 16, "format": "<IIIHH", "fields": ["counter", "size", "magic", "block", "crc"]},
