@@ -18,7 +18,8 @@ networking disabled, `--exact`, and never `--ignore-checksum`.
 Commit first; generation refuses a dirty tree. Build each pristine base and its
 modified target from that commit with the production profile, copying each ROM
 out of `game/pokeplatinum*/build/` before the next build (repeat for revision 0,
-and for revision 10 with `DSWT_EUROPE_ROM` naming your European dump):
+and for revision 10 with `DSWT_EUROPE_ROM` naming your European dump; for
+Diamond and Pearl, set `ROM_GAME` and copy from `game/pokediamond*/`):
 
 ```sh
 ROM_REVISION=1 ./scripts/build-rom.sh --pristine

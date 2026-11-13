@@ -17,8 +17,8 @@ unlisted inputs are rejected. The header game code (`ADA`, `APA`, `CPU`, `IPK` o
 `F`, `D`, `I`, `S` or `K` for Japanese, US English, European English, French,
 German, Italian, Spanish or Korean; European English Platinum reads `CPUE`
 revision 10) only explains a refusal. Every game and
-language other than US and European English Platinum is recognised but not
-supported until it has its own ported and tested target. No BIOS or ROM is bundled.
+language other than US and European English Platinum, Diamond and Pearl is
+recognised but not supported until it has its own ported and tested target. No BIOS or ROM is bundled.
 
 US Rev 0 and Rev 1 reproduce the pinned upstream SHA-1 and No-Intro SHA-256.
 Run `ROM_REVISION=0 ./scripts/build-rom.sh --pristine` and repeat with `1`;
@@ -26,15 +26,15 @@ each must pass all five upstream checks. HeartGold and SoulSilver US reproduce
 their pinned pret SHA-1s with `ROM_GAME=heartgold` or `ROM_GAME=soulsilver` and
 `--pristine` (four upstream checks each). Diamond and Pearl US Rev 5 reproduce
 theirs with `ROM_GAME=diamond` or `ROM_GAME=pearl` and `--pristine` (ARM9, ARM7
-and ROM checks each). European English Platinum is a verified
+and ROM checks each); their patches, `dswt-diamond-us-rev5.bps` and
+`dswt-pearl-us-rev5.bps`, are being tested. European English Platinum is a verified
 dump whose header reads `CPUE` revision 10, like the US cartridge, so only its
 SHA-256 tells them apart. It runs US Rev 1 code; its header area and five
 differing files are staged from your own dump, so
 `DSWT_EUROPE_ROM=/path/to/europe.nds ROM_REVISION=10 ./scripts/build-rom.sh --pristine`
 must reproduce its SHA-1 and pass the same checks; its patch is
-`dswt-europe.bps`. Diamond, Pearl,
-HeartGold and SoulSilver are verified dumps with no planned patch yet
-(`planned_patch` is `null`). Additional regional labels sharing an exact listed
+`dswt-europe.bps`. HeartGold and SoulSilver are verified dumps with no planned
+patch yet (`planned_patch` is `null`). Additional regional labels sharing an exact listed
 checksum use the same input. Any new checksum needs verification. Universal
 English support requires every intended input to have its own validated target
 while preserving that base's assets and behavior.

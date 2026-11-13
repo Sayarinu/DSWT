@@ -1,14 +1,15 @@
 # Install Wonder Trade
 
-Wonder Trade is a patch for your own copy of Pokémon Platinum. It trades a party
-Pokémon with a random player through this project's server. No ROM is included.
+Wonder Trade is a patch for your own copy of Pokémon Platinum, with Diamond and
+Pearl being tested. It trades a party Pokémon with a random player through this
+project's server. No ROM is included.
 
 ## What you need
 
 - A decrypted dump of your own US English Pokémon Platinum cartridge, Rev 0 or
-  Rev 1. Trimmed dumps work. Other games (Diamond, Pearl, HeartGold, SoulSilver),
-  versions and languages are recognised but not supported yet, and encrypted dumps
-  are refused.
+  Rev 1. Trimmed dumps work. US Diamond and Pearl Rev 5 patches are included for
+  testing. Other games (HeartGold, SoulSilver), versions and languages are
+  recognised but not supported yet, and encrypted dumps are refused.
 - melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
 - The DSWT Patcher for your computer from the release page, or the patch archive
   and a BPS patcher such as [Flips](https://github.com/Alcaro/Flips).
@@ -27,9 +28,9 @@ anyway**. On macOS, Control-click the app, choose **Open**, then confirm. The ma
 app runs on Apple silicon. On Linux, mark `DSWT Patcher` executable and run it.
 `SHA256SUMS` on the release page lists every file's checksum.
 
-With another BPS patcher, use `dswt-us-rev0.bps` or `dswt-us-rev1.bps` from the
-patch archive. Your ROM must be full size and match the input SHA-256 in
-`manifest.json`; check the output against its output SHA-256.
+With another BPS patcher, use the patch for your cartridge from the patch archive,
+such as `dswt-us-rev1.bps`. Your ROM must be full size and match the input
+SHA-256 in `manifest.json`; check the output against its output SHA-256.
 
 ## Trade
 
