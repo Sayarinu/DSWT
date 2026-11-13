@@ -3,7 +3,8 @@
 #include <cstddef>
 #include <string_view>
 
-// Byte offsets and sizes of the v1 DS envelope described in protocol/README.md.
+// Byte offsets and sizes of the v1 DS envelope described in
+// https://github.com/Sayarinu/DSWT/wiki/Protocol.
 // Mirrors client/include/wonder_trade/wire_layout.h name for name (WT_WIRE_SNAPSHOT_STATE
 // is kSnapshotState); scripts/tests/test_wire_layout.py checks both against
 // protocol/wire.py. Offsets are relative to the start of the named header, body or record.

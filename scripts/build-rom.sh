@@ -59,7 +59,7 @@ if [[ "$game" == diamond || "$game" == pearl ]]; then
     builder="$repo_root/tools/rom-builder-dp"
 fi
 if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
-    echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see client/tests/README.md)" >&2
+    echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see https://github.com/Sayarinu/DSWT/wiki/Local-Testing)" >&2
     exit 2
 fi
 

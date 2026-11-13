@@ -20,7 +20,7 @@ MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/m
 DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
                   "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
 # Everything the deployed images, the files synced to the server and the deploy itself are built from.
-DEPLOY_PATHS = ["server/**", "validator/**", "LICENSE", "NOTICE", "deploy/**", "!deploy/README.md", "!deploy/terraform/**",
+DEPLOY_PATHS = ["server/**", "validator/**", "LICENSE", "NOTICE", "deploy/**", "!deploy/terraform/**",
                 "protocol/**", ".github/workflows/deploy.yml", ".github/workflows/publish-images.yml"]
 TAILSCALE = "tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c"
 TAILSCALE_INPUTS = {"oauth-client-id": "${{ secrets.TS_OAUTH_CLIENT_ID }}", "oauth-secret": "${{ secrets.TS_OAUTH_SECRET }}",

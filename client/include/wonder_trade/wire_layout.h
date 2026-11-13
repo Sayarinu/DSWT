@@ -1,7 +1,8 @@
 #ifndef WONDER_TRADE_WIRE_LAYOUT_H
 #define WONDER_TRADE_WIRE_LAYOUT_H
 
-/* Byte offsets and sizes of the v1 DS envelope described in protocol/README.md.
+/* Byte offsets and sizes of the v1 DS envelope described in the wiki:
+ * https://github.com/Sayarinu/DSWT/wiki/Protocol
  * server/src/wire_layout.h mirrors these values for the gateway, and
  * scripts/tests/test_wire_layout.py checks both against protocol/wire.py.
  * Offsets are relative to the start of the named header, body or record. */

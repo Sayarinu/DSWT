@@ -15,7 +15,6 @@ on:
       - LICENSE
       - NOTICE
       - deploy/**
-      - "!deploy/README.md"
       - "!deploy/terraform/**"
       - protocol/**
       - .github/workflows/deploy.yml

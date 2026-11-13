@@ -74,7 +74,7 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
 #define AFFINE_OVERWRITE_MODE_DOUBLE 2
 
 /* Family 1 (Diamond and Pearl), the game's version ID (10 Diamond, 11 Pearl),
- * English (2), revision 5 (protocol/README.md, "Game variants"). */
+ * English (2), revision 5 (wiki Protocol, "Game variants"). */
 #if defined(PEARL)
 #define WT_VARIANT 0x010B0205
 #else

@@ -47,7 +47,7 @@ if resident_names.length() > 0
         native: false, pic: false)
 endif
 
-# Platinum's enrolled game variant (protocol/README.md): European English is
+# Platinum's enrolled game variant (wiki Protocol, "Game variants"): European English is
 # revision 10; US builds keep sending legacy code 1.
 if meson.project_name() == 'pokeplatinum'
     wt_tls_args += '-DWT_GAME_VARIANT=' + (get_option('revision') == '10' ? '0x020C020Au' : '1u')
