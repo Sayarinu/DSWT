@@ -133,10 +133,12 @@ class IdentifyRomTests(unittest.TestCase):
         self.assertEqual({row["size"] for row in variants if row["game_code"][:3] in ("ADA", "APA")}, {67108864})
         pin = json.loads((SCRIPT.parent.parent / "client/upstream.json").read_text())
         built = [row for row in variants if row["pristine_verified"] and row["planned_patch"] is not None]
-        self.assertEqual([row["id"] for row in built], ["us-rev0", "us-rev1", "europe"])
+        self.assertEqual([row["id"] for row in built], ["us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5",
+                                                        "heartgold-us-rev0", "soulsilver-us-rev0"])
         for row in built:
-            self.assertEqual((row["game_code"], row["revision"]), ("CPUE", row["build_revision"]))
-            self.assertEqual(row["sha1"], pin["rom_sha1"][str(row["build_revision"])])
+            self.assertEqual(row["revision"], row["build_revision"])
+            if row["game_code"] == "CPUE":
+                self.assertEqual(row["sha1"], pin["rom_sha1"][str(row["build_revision"])])
         for row in variants:
             if row["build_revision"] is None:
                 self.assertTrue(row["planned_patch"] is None or not row["pristine_verified"], row["id"])
