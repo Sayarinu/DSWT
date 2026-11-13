@@ -4,7 +4,7 @@
     {
       "id": "WonderTrade_Text_Title",
       "en_US": "WONDER TRADE",
-      "fr_FR": "ÉCHANGE MIRACLE",
+      "fr_FR": "ECHANGE MIRACLE",
       "de_DE": "WUNDERTAUSCH",
       "it_IT": "SCAMBIO PRODIGIOSO",
       "es_ES": "INTERCAMBIO PRODIGIOSO",
@@ -14,10 +14,10 @@
     {
       "id": "WonderTrade_Text_Trade",
       "en_US": "Wonder Trade",
-      "fr_FR": "Échange Miracle",
+      "fr_FR": "Echange Miracle",
       "de_DE": "Wundertausch",
-      "it_IT": "Scambio prodigioso",
-      "es_ES": "Intercambio prodigioso",
+      "it_IT": "Scambio Prodigioso",
+      "es_ES": "Intercambio Prodigioso",
       "ja_JP": "ミラクルこうかん",
       "ko_KR": "미라클교환"
     },
@@ -65,101 +65,101 @@
       "id": "WonderTrade_Text_Cancel",
       "en_US": "Cancel",
       "fr_FR": "Annuler",
-      "de_DE": "Abbrechen",
-      "it_IT": "Annulla",
+      "de_DE": "Zurück",
+      "it_IT": "Esci",
       "es_ES": "Cancelar",
-      "ja_JP": "キャンセル",
+      "ja_JP": "やめる",
       "ko_KR": "취소"
     },
     {
       "id": "WonderTrade_Text_Connecting",
       "en_US": "Connecting to Wi-Fi...\nPlease wait.",
-      "fr_FR": "Connexion au Wi-Fi...\nVeuillez patienter.",
-      "de_DE": "Verbindung mit dem\nWi-Fi... Bitte warten.",
-      "it_IT": "Connessione al\nWi-Fi... Attendi.",
-      "es_ES": "Conectando a la red\nWi-Fi... Espera un\nmomento.",
-      "ja_JP": "Wi-Fiに\nせつぞくちゅう...\nしばらく\nおまちください。",
-      "ko_KR": "Wi-Fi에 접속 중...\n잠시 기다려 주십시오."
+      "fr_FR": "Connexion à la CWF\nNintendo... Veuillez\npatienter.",
+      "de_DE": "Verbindung zur\nNintendo WFC... Bitte\nwarte einen Moment.",
+      "it_IT": "Connessione alla\nNintendo Wi-Fi\nConnection... Attendi\nun momento.",
+      "es_ES": "Conectando con la CWF\nde Nintendo... Por\nfavor, espera un\nmomento.",
+      "ja_JP": "Wi-Fiに　せつぞく　しています\nしばらく　おまちください",
+      "ko_KR": "Wi-Fi 커넥션에 접속하고 있습니다\n잠시만 기다려주십시오"
     },
     {
       "id": "WonderTrade_Text_Disconnecting",
       "en_US": "Disconnecting...\nPlease wait.",
-      "fr_FR": "Déconnexion...\nVeuillez\npatienter.",
-      "de_DE": "Verbindung wird\ngetrennt...\nBitte warten.",
-      "it_IT": "Disconnessione...\nAttendi.",
-      "es_ES": "Desconectando...\nEspera un\nmomento.",
-      "ja_JP": "せつぞくを\nおわっています...\nしばらく\nおまちください。",
-      "ko_KR": "접속을 종료하는\n중... 잠시\n기다려 주십시오."
+      "fr_FR": "Déconnexion en\ncours...\nVeuillez\npatienter.",
+      "de_DE": "Verbindung wird\nbeendet... Bitte\nwarte einen\nMoment.",
+      "it_IT": "Disconnessione\nin corso.\nAttendi un\nmomento.",
+      "es_ES": "Desconectando...\nPor favor,\nespera un\nmomento.",
+      "ja_JP": "つうしんを　しゅうりょう　します\nしばらく　おまちください",
+      "ko_KR": "통신을 종료합니다\n잠시만 기다려주십시오"
     },
     {
       "id": "WonderTrade_Text_Choose",
       "en_US": "Choose a party Pokémon\nto offer for Wonder Trade.",
-      "fr_FR": "Choisis un Pokémon de ton\néquipe à proposer pour\nl'Échange Miracle.",
+      "fr_FR": "Choisissez un Pokémon de\nvotre équipe pour\nl’Echange Miracle.",
       "de_DE": "Wähle ein Pokémon aus\ndeinem Team für den\nWundertausch.",
-      "it_IT": "Scegli un Pokémon della\nsquadra da offrire nello\nScambio prodigioso.",
-      "es_ES": "Elige un Pokémon de tu\nequipo para ofrecerlo en\nel Intercambio prodigioso.",
-      "ja_JP": "ミラクルこうかんに だす\nてもちの ポケモンを\nえらんでください。",
-      "ko_KR": "미라클교환에 내놓을 지닌\n포켓몬을 골라 주십시오."
+      "it_IT": "Scegli un Pokémon della\nsquadra per lo Scambio\nProdigioso.",
+      "es_ES": "Elige un Pokémon de tu\nequipo para el Intercambio\nProdigioso.",
+      "ja_JP": "ミラクルこうかんに　だす\nてもちの　ポケモンを　えらんでください",
+      "ko_KR": "미라클교환에 내놓을\n지닌 포켓몬을 선택해 주십시오"
     },
     {
       "id": "WonderTrade_Text_Pinging",
       "en_US": "Saving and contacting the server.\nDo not turn off the power.",
-      "fr_FR": "Sauvegarde et connexion au\nserveur. N'éteins pas la console.",
-      "de_DE": "Speichern und Verbindung zum\nServer. Schalte die Konsole nicht\naus.",
-      "it_IT": "Salvataggio e connessione al\nserver. Non spegnere la console.",
-      "es_ES": "Guardando y conectando con el\nservidor. No apagues la consola.",
-      "ja_JP": "レポートを かいて サーバーに\nせつぞくしています。 でんげんを\nきらないでください。",
-      "ko_KR": "리포트를 쓰고 서버에 접속하는\n중입니다. 전원을 끄지 마십시오."
+      "fr_FR": "Sauvegarde et connexion au\nserveur en cours... Ne pas\néteindre.",
+      "de_DE": "Speichervorgang und Verbindung\nzum Server... Bitte das System\nnicht ausschalten.",
+      "it_IT": "Salvataggio e connessione al\nserver in corso. Non spegnere la\nconsole.",
+      "es_ES": "Guardando y conectando con el\nservidor... No apagues la\nconsola.",
+      "ja_JP": "レポ－トを　かいて　サ－バ－に\nせつぞく　しています\nでんげんを　きらないでください",
+      "ko_KR": "리포트를 작성하고\n서버에 접속하고 있습니다\n전원을 끄지 마십시오"
     },
     {
       "id": "WonderTrade_Text_ConnectionError",
       "en_US": "Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again.",
-      "fr_FR": "Impossible de se connecter à\nInternet. Vérifie tes paramètres\nde Connexion Wi-Fi Nintendo et la\nportée de ton point d'accès, puis\nréessaie.",
-      "de_DE": "Keine Verbindung zum Internet.\nPrüfe deine Nintendo\nWFC-Einstellungen und ob dein\nZugangspunkt in Reichweite ist.\nVersuche es dann erneut.",
-      "it_IT": "Impossibile connettersi a\nInternet. Controlla le\nimpostazioni della Nintendo WFC e\nche il punto di accesso sia in\nportata, poi riprova.",
-      "es_ES": "No se pudo conectar a Internet.\nComprueba la configuración de la\nCWF de Nintendo y que el punto de\nacceso esté cerca, y vuelve a\nintentarlo.",
-      "ja_JP": "インターネットに せつぞく\nできませんでした。\nニンテンドーWi-Fiコネクションの\nせってい と アクセスポイントを\nかくにんして もういちど\nおためしください。",
-      "ko_KR": "인터넷에 접속할 수 없었습니다.\n닌텐도 Wi-Fi 커넥션 설정과 액세스\n포인트를 확인하고 다시 시도해\n주십시오."
+      "fr_FR": "Impossible de se connecter à\nInternet. Vérifiez vos paramètres\nde la CWF Nintendo et la portée\nde votre point d’accès, puis\nréessayez.",
+      "de_DE": "Keine Verbindung zum Internet.\nÜberprüfe die Einstellungen der\nNintendo WFC und ob dein\nZugangspunkt in Reichweite ist,\nund versuche es dann noch einmal.",
+      "it_IT": "Impossibile connettersi a\nInternet. Controlla le\nimpostazioni della Nintendo WFC e\nche il punto di accesso sia nel\nraggio d’azione, poi riprova.",
+      "es_ES": "No se ha podido conectar a\nInternet. Comprueba la\nconfiguración de la CWF de\nNintendo y que el punto de acceso\nesté cerca, y vuelve a\nintentarlo.",
+      "ja_JP": "インタ－ネットに\nせつぞく　できませんでした\nニンテンド－Wi-Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください",
+      "ko_KR": "인터넷에 접속할 수 없었습니다\n닌텐도 Wi-Fi 커넥션 설정을\n확인하고 다시 시도해 주십시오"
     },
     {
       "id": "WonderTrade_Text_PingError",
       "en_US": "Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below.",
-      "fr_FR": "Un problème est survenu pendant\nla connexion à l'Échange\nMiracle. Réessaie. Si cela se\nreproduit, note le code\nci-dessous.",
-      "de_DE": "Bei der Verbindung zum\nWundertausch ist ein Fehler\naufgetreten. Versuche es\nerneut. Notiere den Code unten,\nfalls es wieder passiert.",
-      "it_IT": "Si è verificato un problema\ndurante la connessione allo\nScambio prodigioso. Riprova. Se\nsuccede ancora, annota il\ncodice qui sotto.",
-      "es_ES": "Se produjo un error al conectar\ncon el Intercambio prodigioso.\nVuelve a intentarlo. Si se\nrepite, anota el código de\nabajo.",
-      "ja_JP": "ミラクルこうかんとの つうしんで\nもんだいが はっせいしました。\nもういちど おためしください。\nなんども おきるときは したの\nコードを ひかえてください。",
-      "ko_KR": "미라클교환과 통신하는 중에\n문제가 발생했습니다. 다시\n시도해 주십시오. 계속 발생하면\n아래 코드를 적어 두십시오."
+      "fr_FR": "Erreur de communication avec\nl’Echange Miracle. Veuillez\nréessayer. Si l’erreur se\nrépète, notez le code\nci-dessous.",
+      "de_DE": "Verbindungsfehler beim\nWundertausch. Bitte versuche es\nnoch einmal. Tritt der Fehler\nerneut auf, notiere den Code\nunten.",
+      "it_IT": "Errore di comunicazione con lo\nScambio Prodigioso. Riprova. Se\nl’errore si ripete, annota il\ncodice qui sotto.",
+      "es_ES": "Error de conexión con el\nIntercambio Prodigioso. Vuelve\na intentarlo. Si se repite,\nanota el código de abajo.",
+      "ja_JP": "つうしんエラ－が　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コ－ドを　ひかえてください",
+      "ko_KR": "통신 에러가 발생했습니다\n다시 시도해 주십시오\n계속 발생하면\n아래 코드를 적어 두십시오"
     },
     {
       "id": "WonderTrade_Text_Ineligible",
       "en_US": "Cannot offer this Pokémon.\nKeep another usable Pokémon.\nNo Eggs, mail, capsules,\nAprijuice or Spiky-eared PICHU.",
-      "fr_FR": "Impossible de proposer ce\nPokémon. Garde un autre Pokémon\napte. Pas d'Œufs, de Lettres,\nde Capsules, de Noigrumix ni de\nPichu Troizépi.",
-      "de_DE": "Dieses Pokémon kann nicht\nangeboten werden. Behalte ein\nanderes kampffähiges Pokémon.\nKeine Eier, Briefe, Kapseln,\nAprikokosäfte oder\nStrubbelohr-Pichu.",
-      "it_IT": "Non puoi offrire questo\nPokémon. Tieni un altro Pokémon\nin grado di lottare. Niente\nUova, Lettere, Capsule,\nGhicobibite o Pichu Spunzorek.",
-      "es_ES": "No puedes ofrecer este Pokémon.\nConserva otro Pokémon apto para\ncombatir. Sin Huevos, Cartas,\nCápsulas, Bonguzumos ni Pichu\nPicoreja.",
-      "ja_JP": "この ポケモンは だせません。\nたたかえる ポケモンを ほかに\nのこしてください。 タマゴ\nメール カプセル ぼんジュース\nギザみみピチューは だせません。",
-      "ko_KR": "이 포켓몬은 내놓을 수 없습니다.\n싸울 수 있는 다른 포켓몬을 남겨\n주십시오. 알, 메일, 캡슐,\n규토리주스, 삐쭉귀피츄는 안\n됩니다."
+      "fr_FR": "Ce Pokémon ne peut pas faire\nl’objet d’un échange. Gardez un\nautre Pokémon apte au combat.\nPas d’Oeufs, de Lettres, de\nCapsules Ball, de Noigrume\nDrinks ni de PICHU Troizépi.",
+      "de_DE": "Dieses Pokémon kann nicht zum\nTausch angeboten werden.\nBehalte ein anderes\nkampffähiges Pokémon. Keine\nEier, Briefe, Ballkapseln,\nAprikodrinks oder\nStrubbelohr-PICHU.",
+      "it_IT": "Quel Pokémon non può essere\nscambiato. Tieni un altro\nPokémon in grado di lottare.\nNiente Uova, Messaggi, Capsule,\nGhicosucco o PICHU Spunzorek.",
+      "es_ES": "No se puede intercambiar ese\nPokémon. Conserva otro Pokémon\nque pueda combatir. Sin huevos,\ncartas, cápsulas, Bongurchata\nni PICHU Picoreja.",
+      "ja_JP": "その　ポケモンは　だせません！\nたたかえる　ポケモンを\nほかに　のこしてください\nタマゴ　メ－ル　カプセル\nボンドリンク　ギザみみピチュ－は\nだせません",
+      "ko_KR": "그 포켓몬은 내놓을 수 없습니다!\n싸울 수 있는 포켓몬을\n남겨 주십시오\n알, 메일, 캡슐, 규드링크,\n삐쭉귀 피츄는 안 됩니다"
     },
     {
       "id": "WonderTrade_Text_Duplicate",
       "en_US": "An identical or damaged Pokémon\nin your party or PC blocks this.",
-      "fr_FR": "Un Pokémon identique ou\nendommagé dans ton équipe ou ton\nPC bloque cette offre.",
-      "de_DE": "Ein gleiches oder beschädigtes\nPokémon in deinem Team oder PC\nverhindert dies.",
-      "it_IT": "Un Pokémon identico o\ndanneggiato nella squadra o nel\nPC lo impedisce.",
-      "es_ES": "Un Pokémon idéntico o dañado en\ntu equipo o PC lo impide.",
-      "ja_JP": "てもちか パソコンに おなじ\nポケモンか こわれた ポケモンが\nいるので だせません。",
-      "ko_KR": "지닌 포켓몬이나 PC에 똑같거나\n손상된 포켓몬이 있어 내놓을 수\n없습니다."
+      "fr_FR": "Un Pokémon identique ou\nendommagé dans votre équipe ou\nvos Boîtes du PC bloque\nl’échange.",
+      "de_DE": "Ein gleiches oder beschädigtes\nPokémon in deinem Team oder in\ndeinen PC-Boxen verhindert den\nTausch.",
+      "it_IT": "Un Pokémon identico o\ndanneggiato nella squadra o nei\nBox PC impedisce lo scambio.",
+      "es_ES": "Un Pokémon idéntico o dañado en\ntu equipo o en las cajas de PC\nimpide el intercambio.",
+      "ja_JP": "てもちか　ボックスに　おなじ\nポケモンか　こわれた　ポケモンが\nいるので　だせません",
+      "ko_KR": "지닌 포켓몬이나 박스에\n똑같거나 손상된 포켓몬이\n있어 내놓을 수 없습니다"
     },
     {
       "id": "WonderTrade_Text_Explanation",
       "en_US": "Trade a party Pokémon with a\nrandom player. It waits safely\non the server until matched.\nCheck back to collect it, or\ncancel before a match.\nOne offer per save.",
-      "fr_FR": "Échange un Pokémon de ton\néquipe avec un joueur au\nhasard. Il attend en sécurité\nsur le serveur. Reviens pour\nle récupérer, ou annule avant\nun échange. Une offre par\nsauvegarde.",
-      "de_DE": "Tausche ein Pokémon aus deinem\nTeam mit einem zufälligen\nSpieler. Es wartet sicher auf\ndem Server. Komm zurück, um es\nabzuholen, oder brich vorher\nab. Ein Angebot pro\nSpielstand.",
-      "it_IT": "Scambia un Pokémon della\nsquadra con un giocatore a\ncaso. Attende al sicuro sul\nserver. Torna a ritirarlo o\nannulla prima dello scambio.\nUn'offerta per salvataggio.",
-      "es_ES": "Intercambia un Pokémon de tu\nequipo con un jugador al azar.\nEspera seguro en el servidor.\nVuelve para recogerlo o\ncancela antes del intercambio.\nUna oferta por partida.",
-      "ja_JP": "てもちの ポケモンを だれかと\nこうかんします。 あいてが\nみつかるまで サーバーで\nあずかります。 あとで\nうけとるか そのまえに\nとりけしてください。 ひとつの\nレポートに ひとつまでです。",
-      "ko_KR": "지닌 포켓몬을 무작위\n플레이어와 교환합니다. 상대가\n정해질 때까지 서버에서\n안전하게 기다립니다. 나중에\n받거나 그 전에 취소하십시오.\n리포트 하나에 하나씩입니다."
+      "fr_FR": "Echangez un Pokémon de votre\néquipe avec un Dresseur au\nhasard. Il attend en sécurité\nsur le serveur. Revenez pour\nrécupérer le résultat, ou\nannulez avant l’échange. Une\noffre par sauvegarde.",
+      "de_DE": "Tausche ein Pokémon aus deinem\nTeam mit einem zufälligen\nTrainer. Es wartet sicher auf\ndem Server. Komm zurück, um\ndas Ergebnis abzuholen, oder\nbrich vorher ab. Ein Angebot\npro Spielstand.",
+      "it_IT": "Scambia un Pokémon della\nsquadra con un Allenatore a\ncaso. Attende al sicuro sul\nserver. Torna a ritirare il\nrisultato o annulla prima\ndello scambio. Un’offerta per\nsalvataggio.",
+      "es_ES": "Intercambia un Pokémon de tu\nequipo con un Entrenador al\nazar. Espera seguro en el\nservidor. Vuelve para recoger\nel resultado o cancela antes\ndel intercambio. Una oferta\npor partida.",
+      "ja_JP": "てもちの　ポケモンを\nだれかと　こうかん　します\nあいてが　みつかるまで\nサ－バ－で　あずかります\nあとで　うけとるか\nそのまえに　とりけしてください\nひとつの　レポ－トに　ひとつまで",
+      "ko_KR": "지닌 포켓몬을\n누군가와 교환합니다\n상대가 정해질 때까지\n서버에서 맡아 둡니다\n나중에 받거나\n그 전에 취소해 주십시오\n리포트 하나에 하나까지"
     },
     {
       "id": "WonderTrade_Text_Diagnostics",
@@ -168,17 +168,17 @@
       "de_DE": "Verbindungsdetails",
       "it_IT": "Dettagli connessione",
       "es_ES": "Detalles de conexión",
-      "ja_JP": "せつぞくの じょうほう",
+      "ja_JP": "せつぞくの　じょうほう",
       "ko_KR": "접속 정보"
     },
     {
       "id": "WonderTrade_Text_ErrorCode",
       "en_US": "Support code",
-      "fr_FR": "Code d'assistance",
+      "fr_FR": "Code d’assistance",
       "de_DE": "Support-Code",
       "it_IT": "Codice assistenza",
       "es_ES": "Código de asistencia",
-      "ja_JP": "サポートコード",
+      "ja_JP": "サポ－トコ－ド",
       "ko_KR": "지원 코드"
     },
     {
@@ -188,7 +188,7 @@
       "de_DE": "Verbindung ms",
       "it_IT": "Connessione ms",
       "es_ES": "Conexión ms",
-      "ja_JP": "せつぞく ms",
+      "ja_JP": "せつぞく　ms",
       "ko_KR": "접속 ms"
     },
     {
@@ -198,7 +198,7 @@
       "de_DE": "TLS-Bytes",
       "it_IT": "Byte TLS",
       "es_ES": "Bytes TLS",
-      "ja_JP": "TLS バイト",
+      "ja_JP": "TLS　バイト",
       "ko_KR": "TLS 바이트"
     },
     {
@@ -208,58 +208,58 @@
       "de_DE": "Stack-Bytes",
       "it_IT": "Byte stack",
       "es_ES": "Bytes pila",
-      "ja_JP": "スタック バイト",
+      "ja_JP": "スタック　バイト",
       "ko_KR": "스택 바이트"
     },
     {
       "id": "WonderTrade_Text_FrameMs",
       "en_US": "Frame gap ms",
-      "fr_FR": "Écart image ms",
+      "fr_FR": "Ecart image ms",
       "de_DE": "Bildlücke ms",
       "it_IT": "Pausa frame ms",
       "es_ES": "Pausa fotograma ms",
-      "ja_JP": "フレーム ms",
+      "ja_JP": "フレ－ム　ms",
       "ko_KR": "프레임 ms"
     },
     {
       "id": "WonderTrade_Text_CheckingSave",
       "en_US": "Checking saved game...\nPlease wait.",
       "fr_FR": "Vérification de la\nsauvegarde... Veuillez\npatienter.",
-      "de_DE": "Spielstand wird\ngeprüft... Bitte\nwarten.",
-      "it_IT": "Verifica del\nsalvataggio...\nAttendi.",
-      "es_ES": "Comprobando la\npartida... Espera un\nmomento.",
-      "ja_JP": "レポートを\nかくにんしています...\nしばらく\nおまちください。",
-      "ko_KR": "리포트를 확인하는\n중... 잠시 기다려\n주십시오."
+      "de_DE": "Spielstand wird\ngeprüft... Bitte warte\neinen Moment.",
+      "it_IT": "Verifica del\nsalvataggio in corso.\nAttendi un momento.",
+      "es_ES": "Comprobando la\npartida... Por favor,\nespera un momento.",
+      "ja_JP": "レポ－トを　かくにん　しています\nしばらく　おまちください",
+      "ko_KR": "리포트를 확인하고 있습니다\n잠시만 기다려주십시오"
     },
     {
       "id": "WonderTrade_Text_RecoveryRequired",
       "en_US": "Trade recovery required.\nConnect to try again.\n\nKeep this save and its\nrecovery files.",
-      "fr_FR": "Récupération de\nl'échange nécessaire.\nConnecte-toi pour\nréessayer.\n\nGarde cette sauvegarde\net ses fichiers de\nrécupération.",
-      "de_DE": "Tausch muss\nwiederhergestellt\nwerden. Verbinde dich,\num es erneut zu\nversuchen.\n\nBehalte diesen\nSpielstand und seine\nWiederherstellungsdateien.",
-      "it_IT": "Serve il ripristino\ndello scambio.\nConnettiti per\nriprovare.\n\nConserva questo\nsalvataggio e i suoi\nfile di ripristino.",
-      "es_ES": "Hay que recuperar el\nintercambio. Conéctate\npara reintentarlo.\n\nConserva esta partida y\nsus archivos de\nrecuperación.",
-      "ja_JP": "こうかんの ふっきゅうが\nひつようです。\nせつぞくして もういちど\nおためしください。\n\nこの レポートと\nふっきゅうファイルを\nのこしてください。",
-      "ko_KR": "교환 복구가 필요합니다.\n접속해서 다시 시도해\n주십시오.\n\n이 리포트와 복구 파일을\n보관하십시오."
+      "fr_FR": "L’échange doit être\nrécupéré. Connectez-vous\npour réessayer.\n\nConservez cette\nsauvegarde et ses\nfichiers de\nrécupération.",
+      "de_DE": "Der Tausch muss\nwiederhergestellt\nwerden. Verbinde dich,\num es noch einmal zu\nversuchen.\n\nBehalte diesen\nSpielstand und seine\nWiederherstellungsdateien.",
+      "it_IT": "Lo scambio deve essere\nripristinato. Connettiti\nper riprovare.\n\nConserva questo\nsalvataggio e i suoi\nfile di ripristino.",
+      "es_ES": "Hay que recuperar el\nintercambio. Conéctate\npara volver a\nintentarlo.\n\nConserva esta partida y\nsus archivos de\nrecuperación.",
+      "ja_JP": "こうかんの　ふっきゅうが\nひつようです\nせつぞくして　もういちど\nためしてください\n\nこの　レポ－トと\nふっきゅうファイルを\nのこしてください",
+      "ko_KR": "교환 복구가 필요합니다\n접속해서 다시 시도해 주십시오\n\n이 리포트와\n복구 파일을 보관해 주십시오"
     },
     {
       "id": "WonderTrade_Text_Confirm",
       "en_US": "Offer the selected Pokémon?\nIt will leave your party.",
-      "fr_FR": "Proposer ce Pokémon ? Il\nquittera ton équipe.",
+      "fr_FR": "Proposer ce Pokémon? Il\nquittera votre équipe.",
       "de_DE": "Dieses Pokémon anbieten? Es\nverlässt dein Team.",
-      "it_IT": "Offrire questo Pokémon?\nLascerà la squadra.",
+      "it_IT": "Vuoi offrire questo\nPokémon? Lascerà la\nsquadra.",
       "es_ES": "¿Ofrecer este Pokémon?\nSaldrá de tu equipo.",
-      "ja_JP": "この ポケモンを だしますか?\nてもちから いなくなります。",
-      "ko_KR": "이 포켓몬을 내놓겠습니까?\n지닌 포켓몬에서 빠집니다."
+      "ja_JP": "この　ポケモンを　だしますか？\nてもちから　いなくなります",
+      "ko_KR": "이 포켓몬을 내놓겠습니까?\n지닌 포켓몬에서 빠집니다"
     },
     {
       "id": "WonderTrade_Text_Queued",
       "en_US": "Your trade is pending. Choose\nCollect result to check it.",
-      "fr_FR": "Ton échange est en attente.\nChoisis Récupérer pour\nvérifier.",
-      "de_DE": "Dein Tausch läuft noch. Wähle\nErgebnis abholen, um\nnachzusehen.",
+      "fr_FR": "Votre échange est en attente.\nChoisissez Récupérer pour\nvérifier.",
+      "de_DE": "Dein Tausch ist noch offen.\nWähle Ergebnis abholen, um\nnachzusehen.",
       "it_IT": "Lo scambio è in attesa.\nScegli Ritira risultato per\ncontrollare.",
       "es_ES": "Tu intercambio está\npendiente. Elige Recoger\nresultado para comprobarlo.",
-      "ja_JP": "こうかんを まっています。\nけっかを うけとるで\nたしかめてください。",
-      "ko_KR": "교환을 기다리는 중입니다.\n결과 받기를 골라\n확인하십시오."
+      "ja_JP": "こうかんを　まっています\nけっかを　うけとるで\nたしかめてください",
+      "ko_KR": "교환을 기다리고 있습니다\n결과 받기를 선택해\n확인해 주십시오"
     },
     {
       "id": "WonderTrade_Text_Collect",
@@ -268,13 +268,13 @@
       "de_DE": "Ergebnis abholen",
       "it_IT": "Ritira risultato",
       "es_ES": "Recoger resultado",
-      "ja_JP": "けっかを うけとる",
+      "ja_JP": "けっかを　うけとる",
       "ko_KR": "결과 받기"
     },
     {
       "id": "WonderTrade_Text_CancelOffer",
       "en_US": "Cancel offer",
-      "fr_FR": "Annuler l'offre",
+      "fr_FR": "Annuler l’offre",
       "de_DE": "Angebot zurückziehen",
       "it_IT": "Annulla offerta",
       "es_ES": "Cancelar oferta",
@@ -284,112 +284,112 @@
     {
       "id": "WonderTrade_Text_ConfirmCollect",
       "en_US": "Collect your trade result? Trade\nevolution keeps current moves.",
-      "fr_FR": "Récupérer le résultat ? Une\névolution par échange garde les\ncapacités actuelles.",
-      "de_DE": "Ergebnis abholen? Bei einer\nTausch-Entwicklung bleiben die\nAttacken gleich.",
-      "it_IT": "Ritirare il risultato? Con\nl'evoluzione per scambio le\nmosse restano uguali.",
+      "fr_FR": "Récupérer le résultat? Une\névolution par échange conserve\nles capacités actuelles.",
+      "de_DE": "Ergebnis abholen? Bei einer\nEntwicklung durch Tausch bleiben\ndie Attacken gleich.",
+      "it_IT": "Vuoi ritirare il risultato? Con\nl’evoluzione tramite scambio le\nmosse restano uguali.",
       "es_ES": "¿Recoger el resultado? Si\nevoluciona por intercambio,\nconserva sus movimientos.",
-      "ja_JP": "けっかを うけとりますか?\nこうかんで しんかしても わざは\nそのままです。",
-      "ko_KR": "결과를 받겠습니까? 교환으로\n진화해도 기술은 그대로입니다."
+      "ja_JP": "けっかを　うけとりますか？\nこうかんで　しんかしても\nわざは　そのままです",
+      "ko_KR": "결과를 받겠습니까?\n교환으로 진화해도\n기술은 그대로입니다"
     },
     {
       "id": "WonderTrade_Text_ConfirmCancel",
       "en_US": "Cancel an unmatched offer? If\nmatched, collect it instead.",
-      "fr_FR": "Annuler une offre sans\npartenaire ? Si un échange a\neu lieu, récupère-le.",
-      "de_DE": "Ein Angebot ohne Partner\nzurückziehen? Gab es schon\neinen Tausch, hole ihn ab.",
-      "it_IT": "Annullare un'offerta senza\npartner? Se c'è stato uno\nscambio, ritiralo.",
-      "es_ES": "¿Cancelar una oferta sin\npareja? Si ya hubo\nintercambio, recógelo.",
-      "ja_JP": "あいての いない こうかんを\nとりけしますか? こうかん\nずみなら うけとってください。",
-      "ko_KR": "상대가 없는 교환을\n취소하겠습니까? 이미\n교환되었으면 받아 주십시오."
+      "fr_FR": "Annuler une offre sans\npartenaire? S’il y a eu un\néchange, récupérez-le.",
+      "de_DE": "Ein Angebot ohne Partner\nzurückziehen? Gab es schon\neinen Tausch, hol ihn ab.",
+      "it_IT": "Vuoi annullare un’offerta\nsenza partner? Se c’è stato\nuno scambio, ritiralo.",
+      "es_ES": "¿Cancelar una oferta sin\ncompañero? Si ya hubo\nintercambio, recógelo.",
+      "ja_JP": "あいての　いない　こうかんを\nとりけしますか？\nこうかん　ずみなら\nうけとってください",
+      "ko_KR": "상대가 없는 교환을\n취소하겠습니까?\n이미 교환되었으면\n받아 주십시오"
     },
     {
       "id": "WonderTrade_Text_Completed",
       "en_US": "Trade completed! Your Pokémon\nis in your party or PC.",
-      "fr_FR": "Échange terminé ! Ton Pokémon\nest dans ton équipe ou ton\nPC.",
-      "de_DE": "Tausch abgeschlossen! Dein\nPokémon ist in deinem Team\noder PC.",
+      "fr_FR": "L’échange est terminé! Votre\nPokémon est dans votre équipe\nou dans le PC.",
+      "de_DE": "Tausch abgeschlossen! Dein\nPokémon ist in deinem Team\noder im PC.",
       "it_IT": "Scambio completato! Il\nPokémon è nella squadra o nel\nPC.",
-      "es_ES": "¡Intercambio completado! Tu\nPokémon está en tu equipo o\nPC.",
-      "ja_JP": "こうかん かんりょう!\nポケモンは てもちか\nパソコンに います。",
-      "ko_KR": "교환 완료! 포켓몬은 지닌\n포켓몬이나 PC에 있습니다."
+      "es_ES": "¡Intercambio completado! Tu\nPokémon está en tu equipo o\nen el PC.",
+      "ja_JP": "こうかん　かんりょう！\nポケモンは　てもちか\nボックスに　います",
+      "ko_KR": "교환 완료!\n포켓몬은 지닌 포켓몬이나\n박스에 있습니다"
     },
     {
       "id": "WonderTrade_Text_Received",
       "en_US": "You received",
-      "fr_FR": "Tu as reçu",
+      "fr_FR": "Vous avez reçu",
       "de_DE": "Du hast erhalten:",
       "it_IT": "Hai ricevuto",
       "es_ES": "Has recibido",
-      "ja_JP": "うけとった ポケモン",
+      "ja_JP": "うけとった　ポケモン",
       "ko_KR": "받은 포켓몬"
     },
     {
       "id": "WonderTrade_Text_OriginalTrainer",
       "en_US": "From",
-      "fr_FR": "De",
-      "de_DE": "Von",
-      "it_IT": "Da",
-      "es_ES": "De",
+      "fr_FR": "DO",
+      "de_DE": "OT",
+      "it_IT": "AO",
+      "es_ES": "EO",
       "ja_JP": "おや",
       "ko_KR": "어버이"
     },
     {
       "id": "WonderTrade_Text_Returned",
       "en_US": "Offer cancelled. Your Pokémon\nis back in your party or PC.",
-      "fr_FR": "Offre annulée. Ton Pokémon\nest de retour dans ton équipe\nou ton PC.",
-      "de_DE": "Angebot zurückgezogen. Dein\nPokémon ist wieder in deinem\nTeam oder PC.",
+      "fr_FR": "Offre annulée. Votre Pokémon\nest de retour dans votre\néquipe ou dans le PC.",
+      "de_DE": "Angebot zurückgezogen. Dein\nPokémon ist wieder in deinem\nTeam oder im PC.",
       "it_IT": "Offerta annullata. Il Pokémon\nè tornato nella squadra o nel\nPC.",
-      "es_ES": "Oferta cancelada. Tu Pokémon\nha vuelto a tu equipo o PC.",
-      "ja_JP": "とりけしました。 ポケモンは\nてもちか パソコンに\nもどりました。",
-      "ko_KR": "취소했습니다. 포켓몬은 지닌\n포켓몬이나 PC로 돌아왔습니다."
+      "es_ES": "Oferta cancelada. Tu Pokémon\nha vuelto a tu equipo o al\nPC.",
+      "ja_JP": "とりけしました\nポケモンは　てもちか\nボックスに　もどりました",
+      "ko_KR": "취소했습니다\n포켓몬은 지닌 포켓몬이나\n박스로 돌아왔습니다"
     },
     {
       "id": "WonderTrade_Text_Rejected",
       "en_US": "The server rejected the offer.\nYour Pokémon has been restored.",
-      "fr_FR": "Le serveur a refusé l'offre.\nTon Pokémon t'a été rendu.",
-      "de_DE": "Der Server hat das Angebot\nabgelehnt. Du hast dein Pokémon\nzurück.",
-      "it_IT": "Il server ha rifiutato\nl'offerta. Il Pokémon ti è\nstato restituito.",
+      "fr_FR": "Le serveur a refusé l’offre.\nVotre Pokémon vous a été rendu.",
+      "de_DE": "Der Server hat das Angebot\nabgelehnt. Du hast dein Pokémon\nzurückbekommen.",
+      "it_IT": "Il server ha rifiutato\nl’offerta. Il Pokémon ti è\nstato restituito.",
       "es_ES": "El servidor ha rechazado la\noferta. Has recuperado tu\nPokémon.",
-      "ja_JP": "サーバーが こうかんを\nことわりました。 ポケモンは\nもどりました。",
-      "ko_KR": "서버가 교환을 거부했습니다.\n포켓몬이 돌아왔습니다."
+      "ja_JP": "サ－バ－が　こうかんを\nことわりました\nポケモンは　もどりました",
+      "ko_KR": "서버가 교환을 거부했습니다\n포켓몬이 돌아왔습니다"
     },
     {
       "id": "WonderTrade_Text_Superseded",
       "en_US": "Another copy of this save traded\nfirst. Your Pokémon is restored.",
-      "fr_FR": "Une autre copie de cette\nsauvegarde a échangé en premier.\nTon Pokémon t'a été rendu.",
-      "de_DE": "Eine andere Kopie dieses\nSpielstands hat zuerst\ngetauscht. Du hast dein Pokémon\nzurück.",
-      "it_IT": "Un'altra copia di questo\nsalvataggio ha scambiato prima.\nIl Pokémon ti è stato\nrestituito.",
+      "fr_FR": "Une autre copie de cette\nsauvegarde a fait l’échange en\npremier. Votre Pokémon vous a\nété rendu.",
+      "de_DE": "Eine andere Kopie dieses\nSpielstands hat zuerst\ngetauscht. Du hast dein Pokémon\nzurückbekommen.",
+      "it_IT": "Un’altra copia di questo\nsalvataggio ha scambiato per\nprima. Il Pokémon ti è stato\nrestituito.",
       "es_ES": "Otra copia de esta partida\nintercambió primero. Has\nrecuperado tu Pokémon.",
-      "ja_JP": "この レポートの べつの コピーが\nさきに こうかんしました。\nポケモンは もどりました。",
-      "ko_KR": "이 리포트의 다른 사본이 먼저\n교환했습니다. 포켓몬이\n돌아왔습니다."
+      "ja_JP": "この　レポ－トの　べつの　コピ－が\nさきに　こうかん　しました\nポケモンは　もどりました",
+      "ko_KR": "이 리포트의 다른 사본이\n먼저 교환했습니다\n포켓몬이 돌아왔습니다"
     },
     {
       "id": "WonderTrade_Text_Waiting",
       "en_US": "No partner yet. Your Pokémon is\nstill waiting. Check again later.",
-      "fr_FR": "Pas encore de partenaire. Ton\nPokémon attend toujours. Reviens\nplus tard.",
-      "de_DE": "Noch kein Partner. Dein Pokémon\nwartet noch. Schau später wieder\nvorbei.",
+      "fr_FR": "Pas encore de partenaire. Votre\nPokémon attend toujours. Revenez\nplus tard.",
+      "de_DE": "Noch kein Tauschpartner. Dein\nPokémon wartet noch. Schau später\nwieder vorbei.",
       "it_IT": "Nessun partner per ora. Il\nPokémon è ancora in attesa.\nRiprova più tardi.",
-      "es_ES": "Aún no hay pareja. Tu Pokémon\nsigue esperando. Vuelve más\ntarde.",
-      "ja_JP": "まだ あいてが いません。\nポケモンは まっています。 あとで\nまた みてください。",
-      "ko_KR": "아직 상대가 없습니다. 포켓몬이\n기다리는 중입니다. 나중에 다시\n확인하십시오."
+      "es_ES": "Todavía no hay compañero. Tu\nPokémon sigue esperando. Vuelve\nmás tarde.",
+      "ja_JP": "まだ　あいてが　いません\nポケモンは　まっています\nあとで　また　みてください",
+      "ko_KR": "아직 상대가 없습니다\n포켓몬이 기다리고 있습니다\n나중에 다시 확인해 주십시오"
     },
     {
       "id": "WonderTrade_Text_NoRoom",
       "en_US": "Your result is still pending. Make\nroom in your party or PC first.",
-      "fr_FR": "Ton résultat reste en attente.\nLibère de la place dans ton équipe\nou ton PC, puis récupère-le.",
-      "de_DE": "Dein Ergebnis wartet noch. Schaffe\nPlatz im Team oder PC und hole es\ndann ab.",
+      "fr_FR": "Votre résultat reste en attente.\nFaites de la place dans votre\néquipe ou dans le PC, puis\nrécupérez-le.",
+      "de_DE": "Dein Ergebnis bleibt offen.\nSchaffe Platz im Team oder im PC\nund hol es dann ab.",
       "it_IT": "Il risultato resta in attesa. Fai\nspazio nella squadra o nel PC, poi\nritiralo.",
-      "es_ES": "Tu resultado sigue pendiente. Haz\nsitio en tu equipo o PC y\nrecógelo.",
-      "ja_JP": "けっかは まだ あずかっています。\nてもちか パソコンを あけてから\nうけとってください。",
-      "ko_KR": "결과를 아직 맡고 있습니다. 지닌\n포켓몬이나 PC를 비운 뒤 받아\n주십시오."
+      "es_ES": "Tu resultado sigue pendiente. Haz\nsitio en tu equipo o en el PC y\nrecógelo.",
+      "ja_JP": "けっかは　まだ　あずかっています\nてもちか　ボックスを　あけてから\nうけとってください",
+      "ko_KR": "결과를 아직 맡고 있습니다\n지닌 포켓몬이나 박스를\n비운 뒤 받아 주십시오"
     },
     {
       "id": "WonderTrade_Text_KeepPlaying",
       "en_US": "Wonder Trade needs more play.\nKeep playing, then try again.",
-      "fr_FR": "L'Échange Miracle a besoin\nd'un peu plus de jeu.\nContinue à jouer, puis\nréessaie.",
-      "de_DE": "Für den Wundertausch musst du\nnoch etwas spielen. Spiel\nweiter und versuche es dann\nerneut.",
-      "it_IT": "Lo Scambio prodigioso\nrichiede ancora un po' di\ngioco. Continua a giocare e\nriprova.",
-      "es_ES": "El Intercambio prodigioso\nnecesita algo más de juego.\nSigue jugando y vuelve a\nintentarlo.",
-      "ja_JP": "ミラクルこうかんの じゅんびに\nもうすこし あそんでください。\nそのあと もういちど\nおためしください。",
-      "ko_KR": "미라클교환을 준비하려면 조금\n더 플레이해야 합니다.\n플레이한 뒤 다시 시도해\n주십시오."
+      "fr_FR": "L’Echange Miracle a besoin\nd’un peu plus de jeu.\nContinuez à jouer, puis\nréessayez.",
+      "de_DE": "Für den Wundertausch musst du\nnoch etwas weiterspielen.\nVersuche es dann noch einmal.",
+      "it_IT": "Lo Scambio Prodigioso\nrichiede ancora un po’ di\ngioco. Continua a giocare e\nriprova.",
+      "es_ES": "El Intercambio Prodigioso\nnecesita algo más de juego.\nSigue jugando y vuelve a\nintentarlo.",
+      "ja_JP": "ミラクルこうかんの　じゅんびに\nもうすこし　あそんでください\nそのあと　もういちど\nためしてください",
+      "ko_KR": "미라클교환을 준비하려면\n조금 더 플레이해야 합니다\n플레이한 뒤 다시\n시도해 주십시오"
     },
     {
       "id": "WonderTrade_Text_ConfirmAction",
@@ -404,11 +404,11 @@
     {
       "id": "WonderTrade_Text_RecoveryAction",
       "en_US": "Connect and retry",
-      "fr_FR": "Se connecter et réessayer",
-      "de_DE": "Verbinden und erneut versuchen",
+      "fr_FR": "Connexion et nouvel essai",
+      "de_DE": "Verbinden und wiederholen",
       "it_IT": "Connetti e riprova",
       "es_ES": "Conectar y reintentar",
-      "ja_JP": "せつぞくして もういちど",
+      "ja_JP": "せつぞくして　もういちど",
       "ko_KR": "접속해서 다시 시도"
     },
     {
@@ -418,8 +418,8 @@
       "de_DE": "Dieses Spiel kann das erhaltene\nPokémon nicht aufnehmen. Es\nbleibt auf dem Server.",
       "it_IT": "Questo gioco non può accogliere\nil Pokémon ricevuto. Resta sul\nserver.",
       "es_ES": "Este juego no puede tener el\nPokémon recibido. Se queda en el\nservidor.",
-      "ja_JP": "この ソフトでは うけとった\nポケモンを あずかれません。\nサーバーに のこります。",
-      "ko_KR": "이 소프트로는 받은 포켓몬을 맡을\n수 없습니다. 서버에 남습니다."
+      "ja_JP": "この　ソフトでは　うけとった\nポケモンを　あずかれません\nサ－バ－に　のこります",
+      "ko_KR": "이 소프트로는 받은\n포켓몬을 맡을 수 없습니다\n서버에 남습니다"
     },
     {
       "id": "WonderTrade_Text_Level",
@@ -434,12 +434,12 @@
     {
       "id": "WonderTrade_Text_SaveFirst",
       "en_US": "Save your adventure before\nusing Wonder Trade.",
-      "fr_FR": "Sauvegarde ta partie avant\nd'utiliser l'Échange\nMiracle.",
+      "fr_FR": "Sauvegardez votre aventure\navant d’utiliser l’Echange\nMiracle.",
       "de_DE": "Speichere dein Abenteuer,\nbevor du den Wundertausch\nnutzt.",
-      "it_IT": "Salva l'avventura prima di\nusare lo Scambio\nprodigioso.",
-      "es_ES": "Guarda tu aventura antes\nde usar el Intercambio\nprodigioso.",
-      "ja_JP": "ミラクルこうかんを つかう\nまえに レポートを\nかいてください。",
-      "ko_KR": "미라클교환을 쓰기 전에\n리포트를 써 주십시오."
+      "it_IT": "Salva l’avventura prima di\nusare lo Scambio\nProdigioso.",
+      "es_ES": "Guarda tu aventura antes\nde usar el Intercambio\nProdigioso.",
+      "ja_JP": "ミラクルこうかんを　つかう\nまえに　レポ－トを\nかいてください",
+      "ko_KR": "미라클교환을 쓰기 전에\n리포트를 작성해 주십시오"
     }
   ]
 }
