@@ -27,6 +27,7 @@
 #include "msgdata.h"
 #include "options.h"
 #include "party.h"
+#include "play_timer.h"
 #include "player_data.h"
 #include "poke_overlay.h"
 #include "pokemon.h"
@@ -652,6 +653,10 @@ static WonderTradeApp *WonderTrade_Create(struct OverlayManager *man, FieldSyste
     memset(app, 0, sizeof(*app));
     app->fieldSystem = fieldSystem;
     app->game.save = sub_020225F8(); app->game.heapID = HEAP_ID_WONDER_TRADE;
+    /* The main loop adds play time to the save every second (PlayTimerUpdate);
+     * pause it, as Platinum does, so the save stays still while Wonder Trade
+     * hashes, verifies and saves it. */
+    PlayTimerInit();
     app->selectedSlot = -1;
     app->messages = NewMsgDataFromNarc(MSGDATA_LOAD_DIRECT, NARC_MSGDATA_MSG, NARC_msg_narc_0624_bin, HEAP_ID_WONDER_TRADE);
     app->bgConfig = BgConfig_Alloc(HEAP_ID_WONDER_TRADE);
@@ -908,6 +913,7 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
 static BOOL WonderTrade_Exit(struct OverlayManager *man, u32 *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
+    if (app->fieldSystem) PlayTimerStart(Save_PlayerData_GetIGTAddr(app->game.save));
     (void)state;
     WonderTrade_FreeGraphics(app);
     Heap_Free(app->bgConfig);
