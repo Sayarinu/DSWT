@@ -342,3 +342,37 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 +    startMenu->state = START_MENU_STATE_RETURN;
 +    return FALSE;
 +}
+diff --git a/tools/msgenc/charmap.txt b/tools/msgenc/charmap.txt
+--- a/tools/msgenc/charmap.txt
++++ b/tools/msgenc/charmap.txt
+@@ -492,15 +492,15 @@
+-0400=가
+-0401=각
+-0402=간
+-0403=갇
+-0404=갈
+-0405=갉
+-0406=갊
+-0407=감
+-0408=갑
+-0409=값
+-040A=갓
+-040B=갔
+-040C=강
+-040D=갖
+-040E=갗
++0401=가
++0402=각
++0403=간
++0404=갇
++0405=갈
++0406=갉
++0407=갊
++0408=감
++0409=갑
++040A=값
++040B=갓
++040C=갔
++040D=강
++040E=갖
++040F=갗
