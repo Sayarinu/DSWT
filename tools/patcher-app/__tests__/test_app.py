@@ -144,6 +144,8 @@ class ReleaseTests(AppFixture):
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
         self.assertIn("| Pokémon Platinum us-rev1 |", notes)
+        self.assertIn("apply only through DSWT Patcher", notes)
+        self.assertNotIn("any\nBPS patcher", notes)
         renamed = self.root / "game/other.zip"
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):

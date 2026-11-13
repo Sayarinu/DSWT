@@ -17,7 +17,6 @@ import secrets
 import shutil
 import signal
 import stat
-import struct
 import subprocess
 import sys
 import tarfile
@@ -44,8 +43,6 @@ MAX_MANIFEST = 1024 * 1024
 MAX_PROFILE = 64 * 1024
 OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 UNSUPPORTED_RENAME = {errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV}
-# The ARM9 binary ends with this marker and the offset of its module parameters.
-NITRO_FOOTER = 0xDEC00621
 
 
 class PatchError(ValueError):
@@ -438,72 +435,36 @@ def forbidden_secrets(paths):
     return [(label, value) for label, value in found if len(value) >= 16]
 
 
-def _blz_expand(data, label):
-    """Expand one backward-LZ (BLZ) compressed binary, as the DS loader does."""
-    if len(data) < 8:
-        raise PatchError(f"{label} has malformed compressed code")
-    end, extra = struct.unpack_from("<II", data, len(data) - 8)
-    header, compressed = end >> 24, end & 0xFFFFFF
-    if header < 8 or header > compressed or compressed > len(data):
-        raise PatchError(f"{label} has malformed compressed code")
-    out = bytearray(data) + bytearray(extra)
-    source, target, stop = len(data) - header, len(out), len(data) - compressed
-    while target > stop:
-        if source <= stop:
-            raise PatchError(f"{label} has malformed compressed code")
-        source -= 1
-        flags = data[source]
-        for _ in range(8):
-            if target <= stop:
-                break
-            if flags & 0x80:
-                source -= 2
-                token = data[source + 1] << 8 | data[source] if source >= stop else 0
-                length, distance = (token >> 12) + 3, (token & 0xFFF) + 3
-                if source < stop or length > target - stop or target - 1 + distance >= len(out):
-                    raise PatchError(f"{label} has malformed compressed code")
-                for _ in range(length):
-                    target -= 1
-                    out[target] = out[target + distance]
-            else:
-                source -= 1
-                if source < stop:
-                    raise PatchError(f"{label} has malformed compressed code")
-                target -= 1
-                out[target] = data[source]
-            flags = flags << 1 & 0xFF
-    return bytes(out)
+def compressed_code(rom, label):
+    try:
+        return bundle.compressed_code(rom, label)
+    except bundle.BundleError as error:
+        raise PatchError(str(error)) from None
+
+
+def source_view(rom):
+    try:
+        return bundle.source_view(rom, "Base ROM")
+    except bundle.BundleError as error:
+        raise PatchError(str(error)) from None
 
 
 def code_views(rom, label):
     """Return the ROM and its compressed ARM9 code expanded: the static binary and each overlay.
 
-    HeartGold and SoulSilver compress their code, which hides profile pins, keys and
-    paths from a byte search of the ROM, so the release checks search these too."""
-    views = [rom]
-    try:
-        offset, _, ram, size = struct.unpack_from("<IIII", rom, 0x20)
-        if offset + size + 8 <= len(rom) and struct.unpack_from("<I", rom, offset + size)[0] == NITRO_FOOTER:
-            params = struct.unpack_from("<I", rom, offset + size + 4)[0]
-            end = struct.unpack_from("<I", rom, offset + params + 0x14)[0] if params + 0x18 <= size else 0
-            if end:
-                if not 0 < end - ram <= size:
-                    raise PatchError(f"{label} has malformed compressed code")
-                views.append(_blz_expand(rom[offset:offset + end - ram], label))
-        fat, fat_size, table, table_size = struct.unpack_from("<IIII", rom, 0x48)
-        for entry in range(table, table + table_size - 31, 32):
-            file_id, flags = struct.unpack_from("<II", rom, entry + 24)
-            if flags >> 24 & 1:
-                if file_id * 8 + 8 > fat_size:
-                    raise PatchError(f"{label} has malformed compressed code")
-                start, stop = struct.unpack_from("<II", rom, fat + file_id * 8)
-                views.append(_blz_expand(rom[start:stop], label))
-    except struct.error:
-        raise PatchError(f"{label} has malformed compressed code") from None
-    return views
+    HeartGold and SoulSilver compress their code, which hides profile pins, keys,
+    paths and retail code from a byte search of the ROM, so the release checks
+    search these too."""
+    return [rom] + [expanded for _, _, expanded in compressed_code(rom, label)]
 
 
-def release_check(variant, bases, target, patch, report, secrets, root, base_views, target_views):
+def _retail_run(data, retail):
+    """True if data holds a run of VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes found in any retail view."""
+    windows = (data[k:k + VERBATIM_WINDOW] for k in range(0, len(data) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE))
+    return any(window in view for window in windows for view in retail)
+
+
+def release_check(variant, base, target, patch, report, secrets, root, base_views, target_views):
     """Fail if a patch or its target carries anything beyond the project's own build output.
 
     The key and path checks search the expanded code views of the target and bases too."""
@@ -516,14 +477,23 @@ def release_check(variant, bases, target, patch, report, secrets, root, base_vie
         if (sum(view.count(encoded) for view in target_views)
                 > max(sum(view.count(encoded) for view in views) for views in base_views)):
             problems.append(f"build-host or key text {marker!r}")
+    # Retail code counts expanded too: a literal must not copy it from any base or
+    # from any base's expanded code.
+    retail = [view for views in base_views for view in views]
     for item in report["literals"]["items"]:
         if item["length"] < VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
             continue
-        literal = patch[item["patch_offset"]:item["patch_offset"] + item["length"]]
-        windows = (literal[k:k + VERBATIM_WINDOW] for k in range(0, len(literal) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE))
-        if any(window in base for window in windows for base in bases):
+        if _retail_run(patch[item["patch_offset"]:item["patch_offset"] + item["length"]], retail):
             problems.append(f"retail ROM content copied into a literal at target offset {item['target_offset']:#x}")
             break
+    # Recompressed code encodes retail code without copying its bytes, so expand
+    # every compressed module the target does not copy unchanged from its base.
+    unchanged = {code for _, code, _ in compressed_code(base, "Base ROM")}
+    recompressed = [name for name, code, expanded in compressed_code(target, "Target ROM")
+                    if code not in unchanged and _retail_run(expanded, retail)]
+    if recompressed:
+        more = f" and {len(recompressed) - 3} more" if len(recompressed) > 3 else ""
+        problems.append(f"retail code recompressed in {', '.join(recompressed[:3])}{more}; build that code uncompressed")
     if problems:
         raise PatchError(f"Release check failed for {variant['id']}: " + "; ".join(problems))
 
@@ -564,7 +534,9 @@ def _check_target(variant, base, target, authority, pins):
 
 
 def _generate(stage, flips, variant, base, target):
-    """Create the patch twice, require identical bytes, walk it and round-trip it with both appliers."""
+    """Create the patch twice, require identical bytes, walk it and round-trip it with both appliers.
+
+    base is the source view the patch applies to: the ROM followed by its expanded code."""
     prefix = variant["id"]
     stage.write(f"{prefix}.source", base)
     stage.write(f"{prefix}.target", target)
@@ -613,13 +585,12 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
             raise PatchError(f"{variant['id']} was supplied more than once")
         target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
         inputs.append((variant, base, target, *_check_target(variant, base, target, authority, pins)))
-    bases = [base for _, base, _, _, _ in inputs]
     base_views = [views for _, _, _, views, _ in inputs]
     entries, files = [], {}
     with Stage(parent, f"{name}.partial") as stage:
         for variant, base, target, _, target_views in inputs:
-            patch, report = _generate(stage, flips, variant, base, target)
-            release_check(variant, bases, target, patch, report, secrets_found, root, base_views, target_views)
+            patch, report = _generate(stage, flips, variant, source_view(base), target)
+            release_check(variant, base, target, patch, report, secrets_found, root, base_views, target_views)
             literals = literal_bytes(patch, report)
             prefix, filename = variant["id"], variant["planned_patch"]
             cartridge = bundle.cartridge(base)
@@ -629,13 +600,18 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
             entries.append({
                 "variant": prefix, "name": variant["name"],
                 "game_code": cartridge["game_code"], "revision": cartridge["revision"], "language": cartridge["language"],
-                "input": {"size": len(base), "sha256": variant["sha256"], "crc32": report["source"]["crc32"]},
+                "input": {"size": len(base), "sha256": variant["sha256"], "crc32": crc32_hex(base)},
                 "patch": {"file": filename, "size": len(patch), "sha256": report["patch"]["sha256"], "crc32": report["patch"]["crc32"]},
                 "output": {"size": len(target), "sha256": sha256(target), "crc32": report["target"]["crc32"]},
                 "actions": report["actions"],
                 "literals": {"count": report["literals"]["count"], "bytes": report["literals"]["bytes"],
                              "sha256": sha256(literals)},
             })
+            try:  # the player's applier must reproduce the target from the plain ROM
+                if bundle.patch_rom(entries[-1], base, patch) != target:
+                    raise PatchError(f"Bundle entry for {prefix} did not reproduce the target")
+            except bundle.BundleError as error:
+                raise PatchError(f"Bundle entry for {prefix} failed: {error}") from None
         entries.sort(key=lambda entry: entry["variant"])
         manifest = {
             "schema_version": bundle.SCHEMA_VERSION, "kind": bundle.KIND, "version": version,

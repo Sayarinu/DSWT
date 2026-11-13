@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle
-from support import BASES, TARGETS, USED, assemble, literal_patch, rom, target_copy
+from support import BASES, TARGETS, USED, assemble, blz, literal_patch, rom, target_copy, with_overlay
 from test_patcher import Fixture
 
 
@@ -46,6 +46,18 @@ class BundleTests(Fixture):
                 self.assertEqual(output.read_bytes(), TARGETS["us-rev1"])
                 self.assertEqual([path.name for path in self.out.iterdir()], ["wt.nds"])
                 output.unlink()
+
+    def test_expanded_code_view_follows_the_rom(self):
+        code = bytes(range(64)) + bytes(40)
+        compressed = blz(code, 40)
+        base = with_overlay(rom(1, "view"), compressed)
+        self.assertEqual(bundle.source_view(base), base + code)
+        self.assertEqual(bundle.source_view(BASES["us-rev1"]), BASES["us-rev1"])  # nothing compressed
+        damaged = bytearray(base)
+        end = 0x400 + len(compressed)
+        damaged[end - 8:end - 4] = (0x08FFFFFF).to_bytes(4, "little")
+        with self.assertRaisesRegex(bundle.BundleError, "malformed compressed code"):
+            bundle.source_view(bytes(damaged))
 
     def test_default_output_is_beside_the_input(self):
         source = self.write("Platinum.nds", BASES["us-rev0"])

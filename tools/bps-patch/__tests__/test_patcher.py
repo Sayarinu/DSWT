@@ -101,7 +101,7 @@ class CreateTests(Fixture):
         manifest = self.create(flips=flips)
         bundle = self.root / "game/bundle"
         self.assertEqual(flips.calls, ["create", "create", "apply"] * 2)
-        self.assertEqual((manifest["schema_version"], manifest["kind"]), (2, "dswt-bps-bundle"))
+        self.assertEqual((manifest["schema_version"], manifest["kind"]), (3, "dswt-bps-bundle"))
         self.assertNotIn("publication_permitted", manifest)
         self.assertEqual(manifest["release_checks"]["private_keys_checked"], 0)
         self.assertEqual(manifest["connection_profile_sha256"], hashlib.sha256(self.profile.read_bytes()).hexdigest())
@@ -185,29 +185,42 @@ class CreateTests(Fixture):
         self.assertEqual(manifest["release_checks"]["verbatim_retail_run_limit"], 47)
 
     def test_checks_search_compressed_code(self):
-        # Like HeartGold, the base and target keep their code in a compressed overlay.
-        base = with_overlay(rom(1, "compressed-base"), blz(bytes(range(16)) + bytes(120), 120))
+        # Like HeartGold, the base keeps its code in a compressed overlay; the patch
+        # applies to the base followed by that code expanded.
+        retail_code = hashlib.sha512(b"retail overlay").digest() + bytes(40)
+        base = with_overlay(rom(1, "compressed-base"), blz(retail_code, 40))
         self.catalog["variants"].append(dict(self.catalog["variants"][1], id="compressed", planned_patch="dswt-c.bps",
                                              sha256=hashlib.sha256(base).hexdigest()))
         base_path = self.write("compressed-base.nds", base)
+        profile = b"wt.dswt.games:443" + PINS[0] + PINS[1]
 
         def compressed(payload, damage=False):
-            code = bytearray(blz(payload + bytes(300), 300))
+            code = bytearray(blz(payload + bytes(40), 40))
             if damage:
                 code[-8:-4] = (0x08FFFFFF).to_bytes(4, "little")
             return [(base_path, self.write("compressed.nds", with_overlay(rom(1, "compressed"), bytes(code))))]
-        profile = b"wt.dswt.games:443" + PINS[0] + PINS[1]
+
+        def uncompressed(payload):  # the same overlay, stored uncompressed
+            data = bytearray(with_overlay(rom(1, "compressed", payload=payload), bytes(64)))
+            data[0x35C:0x360] = bytes(4)
+            return [(base_path, self.write("compressed.nds", bytes(data)))]
         self.assertNotIn(PINS[0], compressed(profile)[0][1].read_bytes())
         manifest = self.create(pairs=compressed(profile))
         self.assertEqual([entry["variant"] for entry in manifest["entries"]], ["compressed"])
+        patch_file = self.root / "game/bundle/dswt-c.bps"
+        expanded = base + retail_code
+        self.assertEqual(bps.apply(expanded, patch_file.read_bytes()), (self.inputs / "compressed.nds").read_bytes())
         (self.inputs / "current.key").write_bytes(KEY)
-        for name, payload, message in (("key", profile + SCALAR, "private key current.key"),
-                                       ("profile twice", profile + PINS[0], "connection profile"),
-                                       ("damaged", profile, "malformed compressed code")):
+        for name, pairs, message in (
+                ("key", lambda: compressed(profile + SCALAR), "private key current.key"),
+                ("profile twice", lambda: compressed(profile + PINS[0]), "connection profile"),
+                ("damaged", lambda: compressed(profile, damage=True), "malformed compressed code"),
+                ("recompressed retail code", lambda: compressed(profile + retail_code[:48]), "retail code recompressed"),
+                ("expanded retail code", lambda: uncompressed(profile + retail_code[:48]), "retail ROM content")):
             with self.subTest(name):
                 (self.inputs / "compressed.nds").unlink()
                 with self.assertRaisesRegex(patcher.PatchError, message):
-                    self.create(pairs=compressed(payload, damage=name == "damaged"), output=self.root / "game/other")
+                    self.create(pairs=pairs(), output=self.root / "game/other")
                 self.assertFalse((self.root / "game/other").exists())
 
     def test_explicit_keys_replace_the_default_and_must_be_pem(self):
