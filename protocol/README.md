@@ -198,12 +198,12 @@ the gateway cannot invoke them. Validator RPCs grant no ownership authority.
 | --- | --- |
 | Local selection → escrow | Keep original source unchanged until complete original image, canonical payload, source locator, operation and before/after inventory hashes are verified in both journal banks. |
 | Escrow → submit-ready | Remove source, force and verify full saves into both retail backup copies; retain original in both journal banks. Only then send Submit. |
-| Submit → QUEUED | Validate first; atomically create owned asset/offer, outcome and event. Definitive rejection is recorded and permits restoring escrow through the same two-copy save sequence. |
+| Submit → QUEUED | Validate first; atomically create owned asset/offer, outcome and event. Definitive rejection is recorded and permits restoring escrow through the same two-copy save sequence: into the original slot while the save still matches the escrow, otherwise into the first free party or PC slot, with destination images persisted first like a return. With no room it stays in the journal until there is. |
 | QUEUED → MATCHED | Lock two distinct owners/offers in a consistent order; atomically exchange asset ownership and create both immutable delivery receipts/events. Never expose half a pair. |
 | QUEUED → RETURN_READY | Cancellation races under the same locks. A committed match wins; otherwise keep the original asset owned by its depositor and issue a return receipt. |
 | Ready → Collect | Read-only replay of the same receipt/payload. No removal, expiry or new assignment, including after an acknowledgement. Full local storage leaves it pending. |
 | Collect → locally applied | Verify receipt/digest; for a match, check the game can hold the Pokémon (species, form, held item, ball) or leave the trade pending with nothing recorded. Persist incoming bytes and destination pre/post images in both journals. Import once into a free slot and apply ordinary game trade effects for a match (none for a return). Verify full saves into both retail copies, then mirror the applied receipt and final digest in both journals before gameplay resumes. |
-| Applied → ACKNOWLEDGED | Send the persisted acknowledgement with receipt, delivered/applied digests and journal generation. Record it idempotently; do not delete replay data. Only its final outcome releases the identity for another deposit. |
+| Applied → ACKNOWLEDGED | Prepare the acknowledgement on the next visit if boot applied the delivery (it needs a fresh request ID), persist it, then send it with receipt, delivered/applied digests and journal generation. Record it idempotently; do not delete replay data. Only its final outcome releases the identity for another deposit. |
 
 Never restore a submitted original from a timeout or `NOT_FOUND` alone. Only a
 recorded rejection for that exact operation, its return receipt, or proof that
@@ -299,8 +299,15 @@ persisted pre/post images and save counters using the retail loader's wrap rules
 complete only the uniquely proven
 transition. A mismatch preserves evidence and blocks trading. Two successful
 full saves make both retail fallback copies reflect the transition before the
-next network boundary; one `SAVE_RESULT_OK` alone is insufficient. Ordinary
-play may resume while queued, since both copies already exclude the original.
+next network boundary; one `SAVE_RESULT_OK` alone is insufficient.
+
+Boot never waits for the network. It first finishes local steps: an interrupted
+removal reaches submit-ready, a rejected offer is restored, and a collected
+delivery is applied. Ordinary play then resumes while enrolling, submit-ready,
+queued, received, applied or restoring, since both copies already exclude the
+original or include the delivery. Steps that need the server finish on the next
+Wonder Trade visit. A later save proves itself by save counters not older than
+the journal's. Boot stops only when a local step fails or recovery is required.
 
 Layout evidence: pinned upstream [`savedata.c`](https://github.com/pret/pokeplatinum/blob/1dc13dcea40c04ab53f1f607de46023dc409ef20/src/savedata.c),
 [`save_table.c`](https://github.com/pret/pokeplatinum/blob/1dc13dcea40c04ab53f1f607de46023dc409ef20/src/savedata/save_table.c),

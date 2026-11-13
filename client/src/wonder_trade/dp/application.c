@@ -906,7 +906,8 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
             else if (app->network.refused) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_CannotHold);
             else if (app->network.superseded && app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Superseded);
             else if (app->network.waiting) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Waiting);
-            else if (app->network.tradePhase == WT_JOURNAL_RECEIVED) WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_NoRoom);
+            else if (app->network.tradePhase == WT_JOURNAL_RECEIVED || app->network.tradePhase == WT_JOURNAL_RESTORING)
+                WonderTrade_Show(app, WT_APP_MENU, WonderTrade_Text_NoRoom);
             else WonderTrade_Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WonderTrade_Text_Choose : WonderTrade_Text_Queued);
         }
         return FALSE;
