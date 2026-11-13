@@ -18,6 +18,10 @@ struct WtGame {
  * protocol/save-layout-hgss.json, with every retail block and extra chunk
  * ending before the first journal bank. Anything else is never written. */
 int WtGameSave_LayoutKnown(const SaveData *);
+/* FALSE until the player has saved this game once. A deposit first writes
+ * both halves of an existing save, so the screen asks for a save before it
+ * connects. */
+BOOL WtGameSave_Written(const SaveData *);
 int WtGameSave_Eligible(SaveData *, unsigned slot);
 /* FALSE when the deposit's absence check would refuse: an identical copy would
  * remain, or another Pokémon cannot be read. */

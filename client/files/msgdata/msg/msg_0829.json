@@ -47,11 +47,11 @@
     },
     {
       "id": "WonderTrade_Text_ConnectionError",
-      "en_US": "Could not connect to Wi-Fi.\nCheck your WFC settings,\nthen retry."
+      "en_US": "Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again."
     },
     {
       "id": "WonderTrade_Text_PingError",
-      "en_US": "Could not verify the server\nor saved connection state.\nCheck the connection code."
+      "en_US": "Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below."
     },
     {
       "id": "WonderTrade_Text_Ineligible",
@@ -71,7 +71,7 @@
     },
     {
       "id": "WonderTrade_Text_ErrorCode",
-      "en_US": "Connection code"
+      "en_US": "Support code"
     },
     {
       "id": "WonderTrade_Text_ConnectMs",
@@ -172,6 +172,10 @@
     {
       "id": "WonderTrade_Text_Level",
       "en_US": "Lv."
+    },
+    {
+      "id": "WonderTrade_Text_SaveFirst",
+      "en_US": "Save your adventure before\nusing Wonder Trade."
     }
   ]
 }
