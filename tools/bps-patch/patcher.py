@@ -442,6 +442,13 @@ def compressed_code(rom, label):
         raise PatchError(str(error)) from None
 
 
+def source_view(rom):
+    try:
+        return bundle.source_view(rom, "Base ROM")
+    except bundle.BundleError as error:
+        raise PatchError(str(error)) from None
+
+
 def code_views(rom, label):
     """Return the ROM and its compressed ARM9 code expanded: the static binary and each overlay.
 
@@ -529,7 +536,7 @@ def _check_target(variant, base, target, authority, pins):
 def _generate(stage, flips, variant, base, target):
     """Create the patch twice, require identical bytes, walk it and round-trip it with both appliers.
 
-    base is the source view the patch applies to: the ROM, or the ROM and its expanded code."""
+    base is the source view the patch applies to: the ROM followed by its expanded code."""
     prefix = variant["id"]
     stage.write(f"{prefix}.source", base)
     stage.write(f"{prefix}.target", target)
@@ -582,8 +589,7 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
     entries, files = [], {}
     with Stage(parent, f"{name}.partial") as stage:
         for variant, base, target, _, target_views in inputs:
-            view = "expanded-code" if compressed_code(base, "Base ROM") else "rom"
-            patch, report = _generate(stage, flips, variant, bundle.source_view(base, view), target)
+            patch, report = _generate(stage, flips, variant, source_view(base), target)
             release_check(variant, base, target, patch, report, secrets_found, root, base_views, target_views)
             literals = literal_bytes(patch, report)
             prefix, filename = variant["id"], variant["planned_patch"]
@@ -594,7 +600,6 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
             entries.append({
                 "variant": prefix, "name": variant["name"],
                 "game_code": cartridge["game_code"], "revision": cartridge["revision"], "language": cartridge["language"],
-                "source_view": view,
                 "input": {"size": len(base), "sha256": variant["sha256"], "crc32": crc32_hex(base)},
                 "patch": {"file": filename, "size": len(patch), "sha256": report["patch"]["sha256"], "crc32": report["patch"]["crc32"]},
                 "output": {"size": len(target), "sha256": sha256(target), "crc32": report["target"]["crc32"]},

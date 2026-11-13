@@ -36,12 +36,13 @@ python3 tools/bps-patch/patcher.py package game/bundles/0.1.0 --output game/bund
 Each base must match a pristine-verified catalogue entry with a planned patch
 ([`patches/compatibility.json`](../../patches/compatibility.json)). Each target must
 keep its base's game code and revision and contain both profile pins exactly once.
-HeartGold and SoulSilver compress their ARM9 binary and overlays. Their modified
-builds leave that code uncompressed, and each patch applies to the base followed
-by its code expanded (`"source_view": "expanded-code"` in the manifest), so the
-patch copies unchanged code from the player's own ROM. Generic BPS patchers
-cannot build that view; `bundle.py` and the player app do. The profile, key, path
-and retail-content checks all search compressed code expanded.
+Every patch applies to the base followed by its compressed ARM9 binary and
+overlays expanded, so it copies unchanged code from the player's own ROM.
+HeartGold and SoulSilver compress that code, and their modified builds leave it
+uncompressed; Platinum, Diamond and Pearl have nothing to expand. Generic BPS
+patchers cannot build that source, so only `bundle.py` and DSWT Patcher apply
+patches, for every game. The profile, key, path and retail-content checks all
+search compressed code expanded.
 Every patch is created twice (bytes must match), walked, and reproduced by both
 Flips and `bps.py`. The bundle is staged and renamed into place without replacing
 anything; `audit/` keeps the walker report and literals for review and is never

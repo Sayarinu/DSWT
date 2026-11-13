@@ -158,7 +158,7 @@ def synthetic_bundle(directory):
     digests = lambda data: {"size": len(data), "sha256": bundle.sha256(data), "crc32": bundle.crc32_hex(data)}
     manifest = {"schema_version": bundle.SCHEMA_VERSION, "kind": bundle.KIND, "version": "smoke", "entries": [{
         "variant": "smoke", "name": "Smoke test", "game_code": "CPUE", "revision": 7, "language": "English",
-        "source_view": "rom", "input": digests(source), "patch": dict(digests(patch), file="smoke.bps"),
+        "input": digests(source), "patch": dict(digests(patch), file="smoke.bps"),
         "output": digests(target)}]}
     directory.mkdir()
     (directory / "manifest.json").write_text(json.dumps(manifest))

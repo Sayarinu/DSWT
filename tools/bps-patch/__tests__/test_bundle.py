@@ -51,14 +51,13 @@ class BundleTests(Fixture):
         code = bytes(range(64)) + bytes(40)
         compressed = blz(code, 40)
         base = with_overlay(rom(1, "view"), compressed)
-        self.assertEqual(bundle.source_view(base, "rom"), base)
-        self.assertEqual(bundle.source_view(base, "expanded-code"), base + code)
-        self.assertEqual(bundle.source_view(BASES["us-rev1"], "expanded-code"), BASES["us-rev1"])
+        self.assertEqual(bundle.source_view(base), base + code)
+        self.assertEqual(bundle.source_view(BASES["us-rev1"]), BASES["us-rev1"])  # nothing compressed
         damaged = bytearray(base)
         end = 0x400 + len(compressed)
         damaged[end - 8:end - 4] = (0x08FFFFFF).to_bytes(4, "little")
         with self.assertRaisesRegex(bundle.BundleError, "malformed compressed code"):
-            bundle.source_view(bytes(damaged), "expanded-code")
+            bundle.source_view(bytes(damaged))
 
     def test_default_output_is_beside_the_input(self):
         source = self.write("Platinum.nds", BASES["us-rev0"])
@@ -120,8 +119,6 @@ class BundleTests(Fixture):
             "old private schema": lambda m: m.update(schema_version=1, kind="dswt-private-bps-bundle"),
             "size type": lambda m: m["entries"][1]["output"].update(size="4096"),
             "game code": lambda m: m["entries"][1].update(game_code="XXXX"),
-            "source view": lambda m: m["entries"][1].update(source_view="decompressed"),
-            "no source view": lambda m: m["entries"][1].pop("source_view"),
             "revision type": lambda m: m["entries"][1].update(revision="1"),
             "variant": lambda m: m["entries"][1].update(variant="../x"),
             "no entries": lambda m: m.update(entries=[]),

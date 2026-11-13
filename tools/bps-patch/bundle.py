@@ -54,11 +54,10 @@ GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
 # European English cartridges that reuse the US game code, told apart by their
 # header revision: Platinum Europe reads CPUE revision 10.
 EUROPE_AS_US = {("CPUE", 10)}
-# What a patch applies to: the ROM itself, or the ROM followed by its compressed
-# ARM9 binary and overlays expanded in ROM order. HeartGold and SoulSilver
-# compress their code, so their patches copy unchanged code from the player's
-# own expanded ROM instead of carrying retail code, compressed or not.
-SOURCE_VIEWS = ("rom", "expanded-code")
+# Every patch applies to the ROM followed by its compressed ARM9 binary and
+# overlays expanded in ROM order, so it copies unchanged code from the player's
+# own ROM instead of carrying retail code, compressed or not. A game without
+# compressed code (Platinum, Diamond, Pearl) adds nothing.
 # The ARM9 binary ends with this marker and the offset of its module parameters.
 NITRO_FOOTER = 0xDEC00621
 
@@ -184,10 +183,8 @@ def compressed_code(rom, label):
     return modules
 
 
-def source_view(rom, view, label="ROM"):
-    """Return the bytes a patch applies to: the ROM, or the ROM followed by its expanded code."""
-    if view == "rom":
-        return rom
+def source_view(rom, label="ROM"):
+    """Return the bytes a patch applies to: the ROM followed by its expanded code."""
     return rom + b"".join(expanded for _, _, expanded in compressed_code(rom, label))
 
 
@@ -209,7 +206,6 @@ def load_manifest(data):
         _require(isinstance(entry, dict) and isinstance(entry.get("variant"), str)
                  and VARIANT.fullmatch(entry["variant"]) and isinstance(entry.get("name"), str), "invalid entry")
         _require(entry.get("game_code") in CARTRIDGES and type(entry.get("revision")) is int, "invalid cartridge")
-        _require(entry.get("source_view") in SOURCE_VIEWS, "invalid source view")
         for part, limit in (("input", bps.MAX_FILE), ("patch", bps.MAX_PATCH), ("output", bps.MAX_FILE)):
             value = entry.get(part)
             _require(isinstance(value, dict) and type(value.get("size")) is int and 0 < value["size"] <= limit
@@ -257,7 +253,7 @@ def patch_rom(entry, source, patch):
     if crc32_hex(source) != entry["input"]["crc32"]:
         raise BundleError("Input CRC32 does not match the manifest")
     try:
-        target = bps.apply(source_view(source, entry["source_view"]), patch)
+        target = bps.apply(source_view(source), patch)
     except bps.BPSError as error:
         raise BundleError(f"Patch failed: {error}") from None
     if (len(target) != entry["output"]["size"] or crc32_hex(target) != entry["output"]["crc32"]

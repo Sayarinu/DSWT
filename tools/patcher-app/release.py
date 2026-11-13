@@ -36,16 +36,12 @@ def archive_name(version):
 
 def notes(manifest):
     rows = "\n".join(f"| {build.bundle.title(entry)} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
-    expanded = sorted({build.bundle.GAMES[entry["game_code"][:3]][0] for entry in manifest["entries"]
-                       if entry["source_view"] == "expanded-code"})
-    only_patcher = (f"\n{' and '.join(expanded)} patches apply to the ROM with its code expanded, so only the"
-                    " DSWT Patcher applies them.") if expanded else ""
     return f"""Wonder Trade for your own copy of a supported Pokémon game.
 
 Download the patcher for your computer, open it, choose a clean dump of your cartridge
 and save the patched ROM. Trimmed dumps work; the original file is never changed.
-Advanced users can apply the BPS patches in `{archive_name(manifest['version'])}` with any
-BPS patcher; read its `INSTALL.md` first.{only_patcher}
+The patches in `{archive_name(manifest['version'])}` apply only through DSWT Patcher, which
+unpacks your ROM's compressed code first; generic BPS patchers are not supported.
 
 | Supported cartridge | ROM SHA-256 |
 | --- | --- |

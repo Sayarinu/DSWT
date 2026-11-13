@@ -11,8 +11,9 @@ random player through this project's server. No ROM is included.
   SoulSilver patches are included for testing. Other versions and languages are
   recognised but not supported yet, and encrypted dumps are refused.
 - melonDS 1.1, which is the tested emulator. Physical DS hardware is not supported yet.
-- The DSWT Patcher for your computer from the release page, or the patch archive
-  and a BPS patcher such as [Flips](https://github.com/Alcaro/Flips).
+- The DSWT Patcher for your computer from the release page. Generic BPS
+  patchers such as Flips are not supported: DSWT Patcher unpacks your ROM's
+  compressed code before patching.
 
 ## Patch your game
 
@@ -27,12 +28,6 @@ The apps are not code-signed. On Windows, choose **More info**, then **Run
 anyway**. On macOS, Control-click the app, choose **Open**, then confirm. The macOS
 app runs on Apple silicon. On Linux, mark `DSWT Patcher` executable and run it.
 `SHA256SUMS` on the release page lists every file's checksum.
-
-With another BPS patcher, use the patch for your cartridge from the patch archive,
-such as `dswt-us-rev1.bps`. Your ROM must be full size and match the input
-SHA-256 in `manifest.json`; check the output against its output SHA-256.
-HeartGold and SoulSilver patches apply to the ROM with its compressed code
-expanded, so only DSWT Patcher can apply them.
 
 ## Trade
 

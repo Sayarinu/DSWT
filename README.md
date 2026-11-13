@@ -39,8 +39,8 @@ for legality and are designed to survive dropped connections and crashes.
 Download **DSWT Patcher** for Windows, macOS or Linux from the
 [releases](https://github.com/Sayarinu/DSWT/releases), choose your own ROM and
 save the patched copy. It recognises your cartridge, accepts trimmed dumps and
-verifies the result. Each release also has the BPS patches, installation
-instructions and a `manifest.json` of checksums. **DSWT never distributes ROMs.**
+verifies the result. Each release also has the patch archive DSWT Patcher uses,
+installation instructions and a `manifest.json` of checksums. **DSWT never distributes ROMs.**
 
 Supported today:
 

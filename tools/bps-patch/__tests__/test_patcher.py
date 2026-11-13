@@ -109,7 +109,6 @@ class CreateTests(Fixture):
         for entry in manifest["entries"]:
             self.assertEqual((entry["game_code"], entry["language"]), ("CPUE", "English"))
             self.assertEqual(entry["revision"], BASES[entry["variant"]][0x1E])
-            self.assertEqual(entry["source_view"], "rom")
             data = (bundle / entry["patch"]["file"]).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), entry["patch"]["sha256"])
             self.assertEqual(bps.apply(BASES[entry["variant"]], data), TARGETS[entry["variant"]])
@@ -207,8 +206,7 @@ class CreateTests(Fixture):
             return [(base_path, self.write("compressed.nds", bytes(data)))]
         self.assertNotIn(PINS[0], compressed(profile)[0][1].read_bytes())
         manifest = self.create(pairs=compressed(profile))
-        self.assertEqual([(entry["variant"], entry["source_view"]) for entry in manifest["entries"]],
-                         [("compressed", "expanded-code")])
+        self.assertEqual([entry["variant"] for entry in manifest["entries"]], ["compressed"])
         patch_file = self.root / "game/bundle/dswt-c.bps"
         expanded = base + retail_code
         self.assertEqual(bps.apply(expanded, patch_file.read_bytes()), (self.inputs / "compressed.nds").read_bytes())
