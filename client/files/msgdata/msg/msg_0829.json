@@ -43,7 +43,7 @@
     },
     {
       "id": "WonderTrade_Text_Pinging",
-      "en_US": "Saving and contacting the\nWonder Trade server...\nDo not turn off the power."
+      "en_US": "Saving and contacting Wonder Trade...\nDo not turn off the power."
     },
     {
       "id": "WonderTrade_Text_ConnectionError",
@@ -59,7 +59,7 @@
     },
     {
       "id": "WonderTrade_Text_Duplicate",
-      "en_US": "An identical or damaged\nPokémon in your party or PC\nstops this one being offered."
+      "en_US": "An identical or damaged Pokémon in\nyour party or PC blocks this offer."
     },
     {
       "id": "WonderTrade_Text_Explanation",
@@ -103,7 +103,7 @@
     },
     {
       "id": "WonderTrade_Text_Queued",
-      "en_US": "Your trade is pending.\nChoose Collect result to\ncheck its status."
+      "en_US": "Your trade is pending. Choose\nCollect result to check its status."
     },
     {
       "id": "WonderTrade_Text_Collect",
@@ -115,15 +115,15 @@
     },
     {
       "id": "WonderTrade_Text_ConfirmCollect",
-      "en_US": "Collect your trade result?\nTrade evolution keeps the\ncurrent moves."
+      "en_US": "Collect your trade result? Trade\nevolution keeps the current moves."
     },
     {
       "id": "WonderTrade_Text_ConfirmCancel",
-      "en_US": "Cancel an unmatched offer?\nIf matched, collect instead.\nEvolution keeps current moves."
+      "en_US": "Cancel an unmatched offer? If matched,\ncollect instead. Evolution keeps moves."
     },
     {
       "id": "WonderTrade_Text_Completed",
-      "en_US": "Trade completed!\nYour Pokémon is saved in\nyour party or PC."
+      "en_US": "Trade completed! Your Pokémon is\nsaved in your party or PC."
     },
     {
       "id": "WonderTrade_Text_Received",
@@ -135,27 +135,27 @@
     },
     {
       "id": "WonderTrade_Text_Returned",
-      "en_US": "Offer cancelled.\nYour original Pokémon\nis saved in your party or PC."
+      "en_US": "Offer cancelled. Your original Pokémon\nis saved in your party or PC."
     },
     {
       "id": "WonderTrade_Text_Rejected",
-      "en_US": "The server rejected the offer.\nYour original Pokémon\nhas been restored."
+      "en_US": "The server rejected the offer. Your\noriginal Pokémon has been restored."
     },
     {
       "id": "WonderTrade_Text_Superseded",
-      "en_US": "Another copy of this save\ntraded first. Your Pokémon\nhas been restored."
+      "en_US": "Another copy of this save traded first.\nYour Pokémon has been restored."
     },
     {
       "id": "WonderTrade_Text_Waiting",
-      "en_US": "No trade partner yet.\nYour Pokémon is still\nwaiting. Check again later."
+      "en_US": "No trade partner yet. Your Pokémon is\nstill waiting. Check again later."
     },
     {
       "id": "WonderTrade_Text_NoRoom",
-      "en_US": "Your result is kept pending.\nMake space in your party\nor PC, then collect again."
+      "en_US": "Your result is kept pending. Make space\nin your party or PC, then collect again."
     },
     {
       "id": "WonderTrade_Text_KeepPlaying",
-      "en_US": "A little more play is needed\nto prepare Wonder Trade.\nKeep playing, then try again."
+      "en_US": "More play is needed to prepare Wonder\nTrade. Keep playing, then try again."
     },
     {
       "id": "WonderTrade_Text_ConfirmAction",
@@ -167,7 +167,7 @@
     },
     {
       "id": "WonderTrade_Text_CannotHold",
-      "en_US": "This game cannot hold the\nPokémon you received. It\nstays pending on the server."
+      "en_US": "This game can’t hold the Pokémon you\nreceived. It stays on the server."
     },
     {
       "id": "WonderTrade_Text_Level",

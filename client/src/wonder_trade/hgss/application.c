@@ -78,7 +78,7 @@ enum WonderTradeAppState {
 
 /* Main BG0 and BG1 share one character block. Tiles: */
 #define WT_TITLE_TILE 1        /* 28x2 */
-#define WT_MESSAGE_TILE 57     /* 27x6 */
+#define WT_MESSAGE_TILE 57     /* 27x4 */
 #define WT_DETAILS_TILE 219    /* 18x10 */
 #define WT_BODY_TILE 399       /* 28x16; the card shares it, never shown together */
 #define WT_PREVIEW_TILE 847    /* 10x10 */
@@ -287,13 +287,15 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
     BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, sboxPalette->pRawData, 0x20, WT_PAL_SBOX * 0x20);
     Heap_Free(sbox);
 
-    AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 2, 1, 28, 2, WT_PAL_FONT, WT_TITLE_TILE);
-    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 2, 17, 27, 6, WT_PAL_FONT, WT_MESSAGE_TILE);
-    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 4, 18, 10, WT_PAL_FONT, WT_DETAILS_TILE);
+    /* Titles sit inside the backdrop's panel, one tile in from its inner edge. */
+    AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 3, 2, 28, 2, WT_PAL_FONT, WT_TITLE_TILE);
+    /* The field's own message box: 27x4 tiles at (2, 19), as in dialog_box.c. */
+    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 2, 19, 27, 4, WT_PAL_FONT, WT_MESSAGE_TILE);
+    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 5, 18, 10, WT_PAL_FONT, WT_DETAILS_TILE);
     AddWindowParameterized(app->bgConfig, &app->body, GF_BG_LYR_MAIN_0, 2, 5, 28, 16, WT_PAL_FONT, WT_BODY_TILE);
-    AddWindowParameterized(app->bgConfig, &app->card, GF_BG_LYR_MAIN_1, 2, 4, 29, 10, WT_PAL_FONT, WT_BODY_TILE);
-    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 21, 4, 10, 10, WT_PAL_PREVIEW, WT_PREVIEW_TILE);
-    AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 2, 1, 28, 2, WT_PAL_FONT, WT_SUB_TITLE_TILE);
+    AddWindowParameterized(app->bgConfig, &app->card, GF_BG_LYR_MAIN_1, 2, 5, 28, 10, WT_PAL_FONT, WT_BODY_TILE);
+    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 20, 5, 10, 10, WT_PAL_PREVIEW, WT_PREVIEW_TILE);
+    AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 3, 2, 28, 2, WT_PAL_FONT, WT_SUB_TITLE_TILE);
     for (i = 0; i < WT_MENU_MAX_ACTIONS; i++) {
         AddWindowParameterized(app->bgConfig, &app->buttons[i], GF_BG_LYR_SUB_0,
             WT_MENU_LEFT / 8 + 1, (WT_MENU_TOP + i * WT_MENU_SPACING) / 8 + 1,
@@ -549,8 +551,7 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         }
         ScheduleWindowCopyToVram(&app->body);
     } else {
-        /* The player's own message box, as in conversations. */
-        app->message.tilemapTop = preview ? 17 : 9;
+        /* The player's own message box, where conversations show it. */
         FillWindowPixelBuffer(&app->message, 15);
         DrawFrameAndWindow2(&app->message, TRUE, WT_MESSAGE_FRAME_TILE, WT_PAL_MESSAGE_FRAME);
         WonderTrade_Print(app, &app->message, FONT_MESSAGE, app->statusMessage, 0, 0, WT_COLOR_TEXT);
