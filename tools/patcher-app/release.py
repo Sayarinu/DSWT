@@ -35,8 +35,8 @@ def archive_name(version):
 
 
 def notes(manifest):
-    rows = "\n".join(f"| {entry['name']} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
-    return f"""Wonder Trade for your own copy of Pokémon Platinum.
+    rows = "\n".join(f"| {build.bundle.title(entry)} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
+    return f"""Wonder Trade for your own copy of a supported Pokémon game.
 
 Download the patcher for your computer, open it, choose a clean dump of your cartridge
 and save the patched ROM. Trimmed dumps work; the original file is never changed.

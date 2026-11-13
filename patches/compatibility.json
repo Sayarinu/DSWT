@@ -96,9 +96,9 @@
       "sha1": "4fcded0e2713dc03929845de631d0932ea2b5a37",
       "crc32": "c180a0e9",
       "reference": "https://github.com/pret/pokeheartgold/blob/6bf138d6035aa6b43d6f8f4132a12df70f86dcec/heartgold.us/rom.sha1",
-      "build_revision": null,
+      "build_revision": 0,
       "pristine_verified": true,
-      "planned_patch": null
+      "planned_patch": "dswt-heartgold-us-rev0.bps"
     },
     {
       "id": "soulsilver-us-rev0",
@@ -112,9 +112,9 @@
       "sha1": "f8dc38ea20c17541a43b58c5e6d18c1732c7e582",
       "crc32": "d8ea6090",
       "reference": "https://github.com/pret/pokeheartgold/blob/6bf138d6035aa6b43d6f8f4132a12df70f86dcec/soulsilver.us/rom.sha1",
-      "build_revision": null,
+      "build_revision": 0,
       "pristine_verified": true,
-      "planned_patch": null
+      "planned_patch": "dswt-soulsilver-us-rev0.bps"
     }
   ]
 }

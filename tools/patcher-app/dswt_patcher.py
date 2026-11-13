@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DSWT patcher: add Wonder Trade to a clean dump of your own Pokémon Platinum cartridge.
+"""DSWT patcher: add Wonder Trade to a clean dump of your own Gen IV Pokémon cartridge.
 
 Run without arguments for the window. `--input ROM [--output FILE]` patches from the
 command line, and `--self-test` checks the embedded release bundle.
@@ -186,7 +186,7 @@ class Window:
         finish(result, error)
 
     def pick(self):
-        path = self.filedialog.askopenfilename(title="Choose your Pokémon Platinum ROM",
+        path = self.filedialog.askopenfilename(title="Choose your Pokémon ROM",
                                                filetypes=[("Nintendo DS ROM", "*.nds"), ("All files", "*")])
         if not path:
             return
@@ -201,7 +201,7 @@ class Window:
             self.say(str(error), "error")
             return
         self.rom, self.entry, self.selected, self.outcome = path, entry, 1, "Ready"
-        self.say(f"This is {entry['name']}. Choose SAVE PATCHED ROM to add Wonder Trade.")
+        self.say(f"This is {bundle.title(entry)}. Choose SAVE PATCHED ROM to add Wonder Trade.")
 
     def save(self):
         suggestion = bundle.default_output(self.rom)
@@ -221,8 +221,8 @@ class Window:
         self.say(f"Saved {Path(result[1]).name}.\n\n{SAVE_ADVICE}", "done")
 
     def help(self):
-        supported = ", ".join(entry["name"] for entry in self.manifest["entries"])
-        self.say("DSWT adds Wonder Trade to your own copy of Pokémon Platinum.\n\n"
+        supported = ", ".join(bundle.title(entry) for entry in self.manifest["entries"])
+        self.say("DSWT adds Wonder Trade to your own copy of a supported Pokémon game.\n\n"
                  f"Supported: {supported}. Trimmed dumps work; encrypted dumps do not.\n\n{SAVE_ADVICE}")
 
     # Drawing ------------------------------------------------------------------------------
@@ -274,9 +274,12 @@ class Window:
         for index, line in enumerate(name[:2]):
             self.text(line if index == 0 or len(name) <= 2 else line[:-3] + "...", x, y + 11 + 10 * index)
         self.text("VERSION", x, y + 38, "label")
-        self.text(self.entry["name"] if self.entry else "-", x, y + 49)
-        self.text("STATUS", x, y + 66, "label")
-        self.text(self.outcome, x, y + 77, {"Refused": "error", "Patched": "done"}.get(self.outcome, "text"))
+        # The game on one line and its version on the next, such as "HeartGold" and "USA Rev 0".
+        game = bundle.GAMES[self.entry["game_code"][:3]][0].removeprefix("Pokémon ") if self.entry else "-"
+        self.text(game, x, y + 49)
+        self.text(self.entry["name"] if self.entry else "", x, y + 59)
+        self.text("STATUS", x, y + 74, "label")
+        self.text(self.outcome, x, y + 85, {"Refused": "error", "Patched": "done"}.get(self.outcome, "text"))
 
         self.panel(self.MENU)
         left, top = self.MENU[0], self.MENU[1]
@@ -340,7 +343,7 @@ def main(argv=None):
             result = json.dumps(self_test(args.bundle))
         elif args.input:
             entry, output = bundle.patch_file(args.bundle, args.input, args.output)
-            result = f"Patched {entry['name']}: {output}\n{SAVE_ADVICE}"
+            result = f"Patched {bundle.title(entry)}: {output}\n{SAVE_ADVICE}"
         else:
             Window(args.bundle).run()
             return 0

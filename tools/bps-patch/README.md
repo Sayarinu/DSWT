@@ -17,7 +17,8 @@ networking disabled, `--exact`, and never `--ignore-checksum`.
 
 Commit first; generation refuses a dirty tree. Build each pristine base and its
 modified target from that commit with the production profile, copying each ROM
-out of `game/pokeplatinum*/build/` before the next build:
+out of `game/pokeplatinum*/build/` before the next build (for HeartGold and
+SoulSilver, set `ROM_GAME` and copy from `game/pokeheartgold*/build/`):
 
 ```sh
 ROM_REVISION=1 ./scripts/build-rom.sh --pristine

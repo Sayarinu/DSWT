@@ -17,19 +17,20 @@ unlisted inputs are rejected. The header game code (`ADA`, `APA`, `CPU`, `IPK` o
 `F`, `D`, `I`, `S` or `K` for Japanese, US English, European English, French,
 German, Italian, Spanish or Korean; European English Platinum reads `CPUE`
 revision 10) only explains a refusal. Every game and
-language other than US English Platinum is recognised but not supported until it
-has its own ported and tested target. No BIOS or ROM is bundled.
+language other than US English Platinum, HeartGold and SoulSilver is recognised but
+not supported until it has its own ported and tested target. No BIOS or ROM is bundled.
 
 US Rev 0 and Rev 1 reproduce the pinned upstream SHA-1 and No-Intro SHA-256.
 Run `ROM_REVISION=0 ./scripts/build-rom.sh --pristine` and repeat with `1`;
 each must pass all five upstream checks. HeartGold and SoulSilver US reproduce
 their pinned pret SHA-1s with `ROM_GAME=heartgold` or `ROM_GAME=soulsilver` and
-`--pristine` (four upstream checks each). European English Platinum is a verified
-dump whose header reads `CPUE` revision 10, like the US cartridge, so only its
-SHA-256 tells them apart; it has no compatible build yet (LUNE-325). Diamond, Pearl,
-HeartGold and SoulSilver are verified dumps with no planned patch yet
-(`planned_patch` is `null`). Additional regional labels sharing an exact listed
-checksum use the same input. Any new checksum needs verification. Universal
+`--pristine` (four upstream checks each); their patches,
+`dswt-heartgold-us-rev0.bps` and `dswt-soulsilver-us-rev0.bps`, are being tested.
+European English Platinum is a verified dump whose header reads `CPUE` revision
+10, like the US cartridge, so only its SHA-256 tells them apart; it has no
+compatible build yet (LUNE-325). Diamond and Pearl are verified dumps with no
+planned patch yet (`planned_patch` is `null`). Additional regional labels sharing
+an exact listed checksum use the same input. Any new checksum needs verification. Universal
 English support requires every intended input to have its own validated target
 while preserving that base's assets and behavior.
 

@@ -89,6 +89,11 @@ def describe(info):
     return f"{info['game']} ({info['region']}, {info['language']}, Rev {info['revision']})"
 
 
+def title(entry):
+    """Name a manifest entry with its game, such as "Pokémon HeartGold USA Rev 0"."""
+    return f"{GAMES[entry['game_code'][:3]][0]} {entry['name']}"
+
+
 def restore(data, size):
     """Pad a trimmed dump back to the cartridge size with the erased-flash value it held."""
     if len(data) >= size or len(data) < HEADER_SIZE:
@@ -154,7 +159,7 @@ def select(manifest, data):
     supported = [entry for entry in entries if entry["game_code"] == info["game_code"]
                  and entry["revision"] == info["revision"]]
     if not supported:
-        names = ", ".join(sorted({f"{GAMES[entry['game_code'][:3]][0]} {entry['name']}" for entry in entries}))
+        names = ", ".join(sorted({title(entry) for entry in entries}))
         raise BundleError(f"{describe(info)} is not supported yet. Supported: {names}.")
     if len(data) < HEADER_SIZE + 1 or len(data) > supported[0]["input"]["size"]:
         raise BundleError(f"{describe(info)} has an unexpected size; use a clean, decrypted dump.")
