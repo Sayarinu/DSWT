@@ -1,4 +1,6 @@
 /game/
+# Scripts used only for testing stay local (AGENTS.md).
+/testing-scripts/
 /.vscode/
 .env
 .env.*
