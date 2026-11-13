@@ -2,7 +2,7 @@
   "version": 1,
   "upstream_pin": "client/upstream-pokediamond.json",
   "upstream_revision": "b623abef1b4dfe204ca50aab42447ac00c134290",
-  "verified_targets": ["diamond-us-rev5", "pearl-us-rev5"],
+  "verified_targets": ["diamond-us-rev5", "pearl-us-rev5", "diamond-europe-rev5", "pearl-europe-rev5"],
   "flash_size": 524288,
   "half_size": 262144,
   "block_footer": {"size": 20, "format": "<IIIIBxH", "fields": ["counter", "block_counter", "size", "magic", "block", "crc"]},

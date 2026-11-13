@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "checked_on": "2026-11-12",
+  "checked_on": "2026-11-13",
   "input_format": "Full-size decrypted Nintendo DS ROM",
   "inventory_source": "https://datomatic.no-intro.org/index.php?page=search&s=28",
   "variants": [
@@ -115,6 +115,74 @@
       "build_revision": 0,
       "pristine_verified": true,
       "planned_patch": "dswt-soulsilver-us-rev0.bps"
+    },
+    {
+      "id": "diamond-europe-rev5",
+      "game": "Pokémon Diamond",
+      "name": "Europe (English)",
+      "game_code": "ADAE",
+      "revision": 13,
+      "language": "English",
+      "size": 67108864,
+      "sha256": "726b2c6b0bdca37bf68881542cf7d1c26f0f8579ae1585491b0c73bc1d3fc63e",
+      "sha1": "66d2fbfb0dbc1f86a3d726971196989b950092bc",
+      "crc32": "dcf7050b",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Diamond Version (Europe) (Rev 5))",
+      "build_revision": 13,
+      "build_base": "diamond-us-rev5",
+      "pristine_verified": true,
+      "planned_patch": "dswt-diamond-europe-rev5.bps"
+    },
+    {
+      "id": "pearl-europe-rev5",
+      "game": "Pokémon Pearl",
+      "name": "Europe (English)",
+      "game_code": "APAE",
+      "revision": 13,
+      "language": "English",
+      "size": 67108864,
+      "sha256": "7c8fbfe3b4b87f02bb9a962d1bb5a1332b38508c620b26749693bbba29c16c0c",
+      "sha1": "b5652db288c75417de159d93d297689c885dbbd1",
+      "crc32": "ba6d0397",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Pearl Version (Europe) (Rev 5))",
+      "build_revision": 13,
+      "build_base": "pearl-us-rev5",
+      "pristine_verified": true,
+      "planned_patch": "dswt-pearl-europe-rev5.bps"
+    },
+    {
+      "id": "heartgold-europe",
+      "game": "Pokémon HeartGold",
+      "name": "Europe (English)",
+      "game_code": "IPKE",
+      "revision": 10,
+      "language": "English",
+      "size": 134217728,
+      "sha256": "86a977f863c87759f4001fdc47182090e0bfd08f52fa7e74d55db705f96bc335",
+      "sha1": "eb47ab4ba0326ae842135f62c7ec68cf85c9785f",
+      "crc32": "b64a5efb",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - HeartGold Version (Europe))",
+      "build_revision": 10,
+      "build_base": "heartgold-us-rev0",
+      "pristine_verified": true,
+      "planned_patch": "dswt-heartgold-europe.bps"
+    },
+    {
+      "id": "soulsilver-europe",
+      "game": "Pokémon SoulSilver",
+      "name": "Europe (English)",
+      "game_code": "IPGE",
+      "revision": 10,
+      "language": "English",
+      "size": 134217728,
+      "sha256": "94ad298c32bbcc623d042ca20f46cfcaa399a8e814260cc5645dfe5f4c167c17",
+      "sha1": "27a25c23aa1c0ecabe48a30a004b96c9dbc97730",
+      "crc32": "968cde08",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - SoulSilver Version (Europe))",
+      "build_revision": 10,
+      "build_base": "soulsilver-us-rev0",
+      "pristine_verified": true,
+      "planned_patch": "dswt-soulsilver-europe.bps"
     }
   ]
 }

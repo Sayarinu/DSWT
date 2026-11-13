@@ -6,7 +6,7 @@ https://github.com/Sayarinu/DSWT/wiki.
 
 ## What you need
 
-- A dump of your own US English cartridge: Pokémon Platinum (Rev 0 or Rev 1),
+- A dump of your own English cartridge, US or European: Pokémon Platinum,
   Diamond or Pearl (Rev 5), or HeartGold or SoulSilver. Trimmed dumps work.
   Other versions and languages are recognised but not supported yet.
 - melonDS 1.1. Physical DS hardware isn't supported yet.

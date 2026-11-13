@@ -28,7 +28,8 @@ def seed_record(seed, generation):
 
 
 LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json")
-TARGETS = ("us-rev0", "us-rev1", "europe", "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-us-rev5", "pearl-us-rev5")
+TARGETS = ("us-rev0", "us-rev1", "europe", "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-us-rev5", "pearl-us-rev5",
+           "heartgold-europe", "soulsilver-europe", "diamond-europe-rev5", "pearl-europe-rev5")
 
 
 def layout_for(target):

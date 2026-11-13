@@ -32,9 +32,9 @@ DSWT is a patch: you need a dump of your own cartridge. **DSWT never distributes
 
 | Game | Version |
 |---|---|
-| Pokémon Platinum | US English, Rev 0 and Rev 1 |
-| Pokémon Diamond and Pearl | US English, Rev 5 |
-| Pokémon HeartGold and SoulSilver | US English |
+| Pokémon Platinum | English: US Rev 0 and Rev 1, Europe |
+| Pokémon Diamond and Pearl | English: US Rev 5, Europe Rev 5 |
+| Pokémon HeartGold and SoulSilver | English: US, Europe |
 
 Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)** once the first release is out, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
 

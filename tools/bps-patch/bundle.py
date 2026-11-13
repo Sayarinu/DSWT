@@ -52,8 +52,9 @@ REGIONS = {
 CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, (game, _) in GAMES.items() for letter in REGIONS}
 GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
 # European English cartridges that reuse the US game code, told apart by their
-# header revision: Platinum Europe reads CPUE revision 10.
-EUROPE_AS_US = {("CPUE", 10)}
+# header revision: Platinum reads CPUE revision 10, Diamond and Pearl revision 13,
+# HeartGold and SoulSilver revision 10.
+EUROPE_AS_US = {("CPUE", 10), ("ADAE", 13), ("APAE", 13), ("IPKE", 10), ("IPGE", 10)}
 # Every patch applies to the ROM followed by its compressed ARM9 binary and
 # overlays expanded in ROM order, so it copies unchanged code from the player's
 # own ROM instead of carrying retail code, compressed or not. A game without

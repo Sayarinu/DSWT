@@ -55,6 +55,11 @@ typedef struct WtGameConfig {
 
 extern const WtGameConfig gWtGameConfig;
 
+/* Enroll's game variant code for this cartridge: the configured variant, with
+ * the revision taken from the running cartridge's header where one build
+ * serves several retail revisions (wiki Protocol, "Game variants"). */
+uint32_t WtGame_EnrollVariant(void);
+
 /* Memory from the game's heap; NULL when exhausted. */
 void *WtGame_Alloc(WtGame *, size_t);
 void WtGame_Free(WtGame *, void *);

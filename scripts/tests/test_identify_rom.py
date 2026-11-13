@@ -115,7 +115,8 @@ class IdentifyRomTests(unittest.TestCase):
         self.assertEqual(catalog["schema_version"], identify_rom.SCHEMA_VERSION)
         variants = catalog["variants"]
         self.assertEqual([row["id"] for row in variants], [
-            "us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5", "heartgold-us-rev0", "soulsilver-us-rev0"])
+            "us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5", "heartgold-us-rev0", "soulsilver-us-rev0",
+            "diamond-europe-rev5", "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe"])
         for key in ("id", "sha256", "sha1", "crc32"):
             self.assertEqual(len({row[key] for row in variants}), len(variants))
         patches = [row["planned_patch"] for row in variants if row["planned_patch"] is not None]
@@ -134,12 +135,20 @@ class IdentifyRomTests(unittest.TestCase):
         pin = json.loads((SCRIPT.parent.parent / "client/upstream.json").read_text())
         built = [row for row in variants if row["pristine_verified"] and row["planned_patch"] is not None]
         self.assertEqual([row["id"] for row in built], ["us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5",
-                                                        "heartgold-us-rev0", "soulsilver-us-rev0"])
+                                                        "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-europe-rev5",
+                                                        "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe"])
         for row in built:
             self.assertEqual(row["revision"], row["build_revision"])
             if row["game_code"] == "CPUE":
                 self.assertEqual(row["sha1"], pin["rom_sha1"][str(row["build_revision"])])
+        rows = {row["id"]: row for row in variants}
         for row in variants:
+            # A regional target is built from a US cartridge with the same game code.
+            if "build_base" in row:
+                base = rows[row["build_base"]]
+                self.assertEqual((base["game_code"], base["language"]), (row["game_code"], row["language"]))
+                self.assertNotEqual(base["revision"], row["revision"])
+                self.assertIn((row["game_code"], row["revision"]), identify_rom.bundle.EUROPE_AS_US)
             if row["build_revision"] is None:
                 self.assertTrue(row["planned_patch"] is None or not row["pristine_verified"], row["id"])
         hgss = json.loads((SCRIPT.parent.parent / "client/upstream-pokeheartgold.json").read_text())
