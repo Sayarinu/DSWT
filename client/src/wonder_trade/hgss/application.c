@@ -40,6 +40,7 @@
 #include "text.h"
 #include "unk_02005D10.h"
 #include "unk_020210A0.h"
+#include "unk_02018380.h"
 #include "wonder_trade/boot.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/hgss/game_save.h"
@@ -630,6 +631,10 @@ static WonderTradeApp *WonderTrade_Create(OverlayManager *man, FieldSystem *fiel
     memset(app, 0, sizeof(*app));
     app->fieldSystem = fieldSystem;
     app->game.save = SaveData_Get(); app->game.heapID = HEAP_ID_WONDER_TRADE;
+    /* The main loop adds play time to the save every second (sub_020183B0);
+     * pause it, as Platinum does, so the save stays still while Wonder Trade
+     * hashes, verifies and saves it. */
+    sub_02018380();
     app->selectedSlot = -1;
     app->messages = NewMsgDataFromNarc(MSGDATA_LOAD_DIRECT, NARC_msgdata_msg, msg_0829, HEAP_ID_WONDER_TRADE);
     app->bgConfig = BgConfig_Alloc(HEAP_ID_WONDER_TRADE);
@@ -900,6 +905,7 @@ BOOL WonderTradeApp_Exit(OverlayManager *man, int *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
     (void)state;
+    if (app->fieldSystem) sub_0201838C(Save_PlayerData_GetIGTAddr(app->game.save));
     WonderTrade_FreeGraphics(app);
     Heap_Free(app->partyMenu);
     Heap_Free(app->partySnapshot);
