@@ -147,6 +147,11 @@ done:
     return result;
 }
 
+BOOL WtGameSave_Written(const SaveData *save)
+{
+    return !save->isNewGame && save->saveFileExists;
+}
+
 /* HeartGold and SoulSilver write only changed PC boxes. Marking every box
  * modified before each of two consecutive saves writes a full image to both
  * halves. */
