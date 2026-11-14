@@ -32,7 +32,7 @@ DSWT is a patch: you need a dump of your own cartridge. **DSWT never distributes
 
 | Game | Version |
 |---|---|
-| Pokémon Platinum | English: US Rev 0 and Rev 1, Europe |
+| Pokémon Platinum | English: US Rev 0 and Rev 1, Europe; French, German, Italian, Spanish |
 | Pokémon Diamond and Pearl | English: US Rev 5, Europe Rev 5 |
 | Pokémon HeartGold and SoulSilver | English: US, Europe |
 

@@ -420,6 +420,16 @@
       "es_ES": "Este juego no puede tener el Pokémon\nrecibido. Se queda en el servidor.",
       "ja_JP": "この　ソフトでは　うけとった\nポケモンを　あずかれません\nサ－バ－に　のこります",
       "ko_KR": "이 소프트로는 받은\n포켓몬을 맡을 수 없습니다\n서버에 남습니다"
+    },
+    {
+      "id": "WonderTrade_Text_MenuLabel",
+      "en_US": "WONDER TRADE",
+      "fr_FR": "ECHANGE MIRACLE",
+      "de_DE": "WUNDERTAUSCH",
+      "it_IT": "SCAMBIO PRODIG.",
+      "es_ES": "INT. PRODIGIOSO",
+      "ja_JP": "ミラクルこうかん",
+      "ko_KR": "미라클교환"
     }
   ]
 }

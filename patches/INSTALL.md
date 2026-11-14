@@ -6,8 +6,11 @@ https://github.com/Sayarinu/DSWT/wiki.
 
 ## What you need
 
-- A dump of your own English cartridge, US or European: Pokémon Platinum,
-  Diamond or Pearl (Rev 5), or HeartGold or SoulSilver. Trimmed dumps work.
+- A dump of your own cartridge. Trimmed dumps work.
+  - English, US or European: Pokémon Platinum, Diamond or Pearl (Rev 5),
+    HeartGold or SoulSilver.
+  - French, German, Italian or Spanish: Pokémon Platinum.
+
   Other versions and languages are recognised but not supported yet.
 - melonDS 1.1. Physical DS hardware isn't supported yet.
 - DSWT Patcher for your computer. Other patching tools such as Flips don't work.
@@ -28,8 +31,11 @@ page lists every file's checksum.
 
 ## Trade
 
-Open the menu and choose **Wonder Trade**. A brand-new save may ask you to keep
-playing for a moment first, to gather randomness that secures your connection.
+Open the menu and choose **Wonder Trade**: **ECHANGE MIRACLE**, **WUNDERTAUSCH**,
+**SCAMBIO PRODIG.** or **INT. PRODIGIOSO** in French, German, Italian and
+Spanish Platinum. Its screens use your game's language. A brand-new save may ask
+you to keep playing for a moment first, to gather randomness that secures your
+connection.
 
 1. Choose **Wonder Trade**, pick a party Pokémon and confirm. It leaves your
    party and waits on the server. You can offer one Pokémon at a time.
