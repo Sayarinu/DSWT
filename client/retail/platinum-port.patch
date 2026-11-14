@@ -1,0 +1,54 @@
+Port-only changes for adding Wonder Trade to a retail Platinum.
+
+Retail code that is not replaced still reads StartMenu at its retail offsets,
+so the Wonder Trade fields go after them. main.c's wake flag stays the
+retail game's own variable, which retail code outside main.c also sets.
+
+diff -ruN a/include/start_menu.h b/include/start_menu.h
+--- a/include/start_menu.h
++++ b/include/start_menu.h
+@@ -14,6 +14,7 @@
+ #define MAX_START_MENU_OPTIONS 8
+ 
+ typedef struct StartMenu {
++    /* Unpatched retail code reads this layout: keep every field where it was. */
+     Window primaryWindow;
+     Window secondaryWindow;
+     Menu *menu;
+@@ -21,18 +22,21 @@
+     u16 cursorPos;
+     u16 state;
+     u32 input;
+-    u8 options[MAX_START_MENU_OPTIONS];
++    u8 retailOptions[MAX_START_MENU_OPTIONS - 1];
+     SpriteResourceManager spriteManager;
+-    ManagedSprite *sprites[MAX_START_MENU_OPTIONS + 1];
++    ManagedSprite *retailSprites[MAX_START_MENU_OPTIONS];
+     u32 spriteCount;
+     u32 hideOptionFlags;
+-    u8 rowSpacing;
+     BOOL inUnionRoom;
+     FieldTaskFunc callback;
+     ItemUseContext itemUseCtx;
+     FieldMoveContext fieldMoveContext;
+     void *taskData;
+     void *additionalTaskContext;
++    /* Wonder Trade additions, after the retail fields. */
++    u8 options[MAX_START_MENU_OPTIONS];
++    ManagedSprite *sprites[MAX_START_MENU_OPTIONS + 1];
++    u8 rowSpacing;
+ } StartMenu;
+ 
+ enum StartMenuState {
+diff -ruN a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -61,7 +61,7 @@
+ // This variable doesn't really makes sense. If it's set to off, the game will
+ // repeatedly try to restore the backlight to its saved state.
+ static PMBackLightSwitch sSavedBacklightState;
+-BOOL gIgnoreCartridgeForWake;
++extern BOOL gIgnoreCartridgeForWake;
+ extern const ApplicationManagerTemplate gOpeningCutsceneAppTemplate;
+ 
+ void NitroMain(void)

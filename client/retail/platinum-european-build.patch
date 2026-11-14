@@ -1,0 +1,41 @@
+Code differences of the European Platinum cartridges from US Rev 1.
+
+The French, German, Italian and Spanish builds handle one more reset type
+in CheckHeapCanary and release the card lock after reading the save result.
+
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -232,6 +232,9 @@
+     int v0 = CommManager_GetResetType();
+ 
+     switch (v0) {
++    case 5:
++        HeapCanaryFailed(0, v0);
++        break;
+     case 1:
+         HeapCanaryFailed(1, v0);
+         break;
+diff --git a/src/savedata.c b/src/savedata.c
+--- a/src/savedata.c
++++ b/src/savedata.c
+@@ -1292,9 +1292,6 @@
+             return TRUE;
+         }
+ 
+-        CARD_UnlockBackup(lockID);
+-        OS_ReleaseLockID(lockID);
+-
+         switch (CARD_GetResultCode()) {
+         case CARD_RESULT_SUCCESS:
+             *result = TRUE;
+@@ -1310,6 +1307,9 @@
+             break;
+         }
+ 
++        CARD_UnlockBackup(lockID);
++        OS_ReleaseLockID(lockID);
++
+         return TRUE;
+     }
+ 

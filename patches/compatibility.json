@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "checked_on": "2026-11-13",
+  "checked_on": "2026-11-14",
   "input_format": "Full-size decrypted Nintendo DS ROM",
   "inventory_source": "https://datomatic.no-intro.org/index.php?page=search&s=28",
   "variants": [
@@ -183,6 +183,74 @@
       "build_base": "soulsilver-us-rev0",
       "pristine_verified": true,
       "planned_patch": "dswt-soulsilver-europe.bps"
+    },
+    {
+      "id": "france",
+      "game": "Pokémon Platinum",
+      "name": "France (French)",
+      "game_code": "CPUF",
+      "revision": 0,
+      "language": "French",
+      "size": 134217728,
+      "sha256": "1cfd024519116c1c6285d6af2dbdfcec778e9d74c7c18585e22032e81aaa7eb8",
+      "sha1": "41ea92f794560e347cd9509f5ec9e9d479a4bbf1",
+      "crc32": "a54a9984",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Version Platine (France))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-france.bps"
+    },
+    {
+      "id": "germany",
+      "game": "Pokémon Platinum",
+      "name": "Germany (German)",
+      "game_code": "CPUD",
+      "revision": 0,
+      "language": "German",
+      "size": 134217728,
+      "sha256": "9ffc28ff2b2d8fab60454548f92e60dd5d44f0dcc456e6e00e756424b3259217",
+      "sha1": "d40f19ac24d67c721a4ab25e1c013154443d75b4",
+      "crc32": "37e9d9e5",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Platin-Edition (Germany))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-germany.bps"
+    },
+    {
+      "id": "italy",
+      "game": "Pokémon Platinum",
+      "name": "Italy (Italian)",
+      "game_code": "CPUI",
+      "revision": 0,
+      "language": "Italian",
+      "size": 134217728,
+      "sha256": "9738c8fdb1adad1b4209531b692dd0cb7fb86329b30f54a72837128cdb3eb353",
+      "sha1": "19148e7a38e731680fb2a045ed112b115be90fc2",
+      "crc32": "0ddbe664",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Versione Platino (Italy))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-italy.bps"
+    },
+    {
+      "id": "spain",
+      "game": "Pokémon Platinum",
+      "name": "Spain (Spanish)",
+      "game_code": "CPUS",
+      "revision": 0,
+      "language": "Spanish",
+      "size": 134217728,
+      "sha256": "b420059bb0b982e7ddcc9d33f21b85547e443f77f6424ff0ff7522d386d05fab",
+      "sha1": "12faf0dbcf0fb558438e464afbfe7c5b5e79e8c6",
+      "crc32": "9b4c38ae",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Edicion Platino (Spain))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-spain.bps"
     }
   ]
 }
