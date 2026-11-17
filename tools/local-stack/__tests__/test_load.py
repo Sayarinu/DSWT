@@ -71,6 +71,74 @@ class MeasurementTests(unittest.TestCase):
                 self.assertFalse(result["checks"][check])
 
 
+class ProductionMeasurementTests(unittest.TestCase):
+    def test_fake_clients_never_share_a_network_with_real_ones(self):
+        real = {load.source(index) for index in range(62500)}
+        fake = {load.flood_source(index) for index in range(62500)}
+        self.assertEqual(len(fake), 62500)
+        self.assertFalse(real & fake)
+        self.assertEqual(load.flood_source(0), "127.20.0.1")
+
+    def test_vps_cores_parse_lists_and_ranges(self):
+        self.assertEqual(load.cpu_list("2,3"), [2, 3])
+        self.assertEqual(load.cpu_list("4-5"), [4, 5])
+        self.assertEqual(load.cpu_list("0,6-7"), [0, 6, 7])
+
+    def test_resource_peaks_parse_docker_stats(self):
+        samples = [{"containers": [{"Name": "a", "CPUPerc": "12.5%", "MemUsage": "100MiB / 1GiB", "PIDs": "7"}]},
+                   {"containers": [{"Name": "a", "CPUPerc": "80.25%", "MemUsage": "1.5GiB / 2GiB", "PIDs": "5"}]}]
+        self.assertEqual(load.peaks(samples), {"a": {"cpu_percent": 80.25, "memory_bytes": int(1.5 * 2 ** 30), "pids": 7}})
+
+    def test_storage_growth_scales_to_a_day(self):
+        first = {"wal_bytes": 0, "archive_bytes": None, "database_bytes": 100}
+        last = {"wal_bytes": 3_600_000_000, "archive_bytes": 5, "database_bytes": 100}
+        measured = load.growth(first, last, 3600)
+        self.assertEqual(measured["wal_bytes"], {"added": 3_600_000_000, "per_hour": 3_600_000_000, "gb_per_day": 86.4})
+        self.assertNotIn("archive_bytes", measured)
+        self.assertEqual(measured["database_bytes"]["added"], 0)
+        self.assertIsNone(load.growth(None, last, 3600))
+
+    def test_error_rate_counts_transport_failures_and_timeouts(self):
+        rate = load.error_rate({"1": [1, 2, 3], "2": [4]}, {"transport:send": 1, "probe_timeout": 1, "retryable_run": 9})
+        self.assertEqual(rate, {"attempts": 4, "failed": 2, "rate": 0.5})
+        self.assertIsNone(load.error_rate({}, {})["rate"])
+
+    def test_fake_traffic_must_run_and_stay_within_the_wal_budget(self):
+        passing = dict(report(), fake_traffic={"enrollments": 10, "submissions": 0,
+                                               "calibration": {"production_cap_bytes_per_day": 10 ** 9}})
+        self.assertEqual(load.verdict(passing)["status"], "pass")
+        over = dict(report(), fake_traffic={"enrollments": 10, "submissions": 0,
+                                            "calibration": {"production_cap_bytes_per_day": 6 * 10 ** 9}})
+        self.assertFalse(load.verdict(over)["checks"]["fake_enrollment_wal_within_budget"])
+        idle = dict(report(), fake_traffic={"enrollments": 0, "submissions": 0, "calibration": None})
+        self.assertFalse(load.verdict(idle)["checks"]["fake_traffic_ran"])
+
+
+class ProbeAccountingTests(unittest.IsolatedAsyncioTestCase):
+    async def run_probe(self, driver, client):
+        output = b'{"wire_operation": 2, "wire_result": 0, "elapsed_us": 1000}\n{"summary": true}\n'
+        process = mock.Mock(communicate=mock.AsyncMock(return_value=(output, b"")), returncode=0)
+        with mock.patch.object(load.asyncio, "create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            return await driver.probe(client, "submit")
+
+    async def test_fake_and_overload_samples_stay_out_of_the_targets(self):
+        driver = load.Driver({"concurrency": 1, "offer_rate": 1, "overload_rate": 5, "probe": "probe", "pins": ["c", "n"]})
+        driver.measuring = True
+        await self.run_probe(driver, {"path": "fake", "legal": False, "source": "127.20.0.1"})
+        self.assertEqual(driver.latency, {})
+        self.assertEqual(driver.flood_latency, {"2": [1000]})
+        self.assertEqual(driver.active, set())
+        driver.overloaded = True
+        await self.run_probe(driver, {"path": "real", "legal": True, "source": "127.10.0.1"})
+        self.assertEqual(driver.latency, {})
+        self.assertEqual(driver.overload_latency, {"2": [1000]})
+        driver.overloaded = False
+        await self.run_probe(driver, {"path": "real", "legal": True, "source": "127.10.0.1"})
+        self.assertEqual(driver.latency, {"2": [1000]})
+        self.assertEqual(driver.results["2:0"], 2)
+        self.assertEqual(driver.tokens.maxsize, 10)
+
+
 class ProbeTimeoutTests(unittest.IsolatedAsyncioTestCase):
     async def test_deadline_and_latency_accounting_use_the_same_budget(self):
         process = mock.Mock(communicate=mock.AsyncMock(return_value=(b"", b"")),
