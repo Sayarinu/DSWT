@@ -224,6 +224,8 @@ class Target:
         self.run(f"install -d -m 0700 {REMOTE}/tls {REMOTE}/secrets && install -d -m 0755 {REMOTE}/observability")
         rsync = ["rsync", "-rt", "--delete", "--chmod=D755,F644", "-e", transport]
         subprocess.run([*rsync, f"{ROOT}/deploy/observability/", f"{self.address}:{REMOTE}/observability/"], check=True)
+        self.run(f"install -d -m 0755 {REMOTE}/postgres")
+        subprocess.run([*rsync, f"{ROOT}/deploy/postgres/", f"{self.address}:{REMOTE}/postgres/"], check=True)
         subprocess.run(["rsync", "-t", "--chmod=F644", "-e", transport, f"{ROOT}/deploy/compose.yaml",
                         f"{self.address}:{REMOTE}/compose.yaml"], check=True)
         subprocess.run(["rsync", "-t", "--chmod=F755", "-e", transport, f"{ROOT}/server/wal-archive.sh",
@@ -323,7 +325,7 @@ class Target:
 
     def start(self):
         self.compose("stop", *reversed(APPLICATIONS))
-        # Recreated so the database mounts the wal-archive.sh just synced; a bind mount keeps the replaced file.
+        # Recreated so the database mounts the wal-archive.sh and access rules just synced; a bind mount keeps the replaced file.
         self.compose("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120", "database")
         self.prepare_database()
         self.backup()
