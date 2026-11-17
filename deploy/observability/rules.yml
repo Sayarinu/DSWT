@@ -48,6 +48,13 @@ groups:
         for: 5m
         labels: {severity: critical}
         annotations: {summary: The server disk has less than 15% free space}
+      # rotate-archive.sh prunes the archive past 4 GB; twice that means pruning is failing
+      # or copies are not leaving the server, and the disk follows.
+      - alert: WalArchiveGrowing
+        expr: dswt_wal_archive_bytes > 8e9
+        for: 15m
+        labels: {severity: critical}
+        annotations: {summary: The local WAL archive is over 8 GB; check rotate-archive.sh and the backup uploader}
       - alert: MemoryPressure
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
         for: 5m
