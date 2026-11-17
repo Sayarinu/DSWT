@@ -121,6 +121,8 @@ jobs:
       - name: Deploy
         env:
           DSWT_REGISTRY_TOKEN: ${{ github.token }}
+          DSWT_SERVER_DIGEST: ${{ needs.publish.outputs.server_digest }}
+          DSWT_VALIDATOR_DIGEST: ${{ needs.publish.outputs.validator_digest }}
           DSWT_TAILNET_HOST: ${{ secrets.DSWT_TAILNET_HOST }}
         run: |
           DSWT_SSH_HOST="$DSWT_TAILNET_HOST" python3 deploy/dswt.py deploy --ssh-key "$RUNNER_TEMP/dswt-deploy/id_ed25519" \
