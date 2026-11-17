@@ -375,8 +375,23 @@ def build_images(version):
         subprocess.run(["docker", "build", "-f", dockerfile, *target, "-t", f"{image}:{version}", "."], cwd=ROOT, check=True)
 
 
+def published_digests():
+    """The digests the publish job audited and pushed, if this deploy was given them."""
+    digests = {image: os.environ.get(f"DSWT_{image.removeprefix('dswt-').upper()}_DIGEST", "").strip() for image in IMAGES}
+    if not any(digests.values()):
+        # A tag can be moved after the audit, so CI must name the exact images it publishes.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise ValueError("CI deploys need the digests the publish job pushed")
+        return None
+    for image, digest in digests.items():
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise ValueError(f"No valid published digest for {image}")
+    return digests
+
+
 def pull_images(version):
     """Fetch the audited images. The login lasts for this call, and the server never holds one."""
+    digests = published_digests()
     # CI passes its own read-only token; here, gh's login is used.
     token = os.environ.get("DSWT_REGISTRY_TOKEN") or subprocess.check_output(["gh", "auth", "token"], text=True).strip()
     host = subprocess.check_output(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
@@ -388,7 +403,7 @@ def pull_images(version):
         subprocess.run([*docker, "login", "ghcr.io", "--username", user, "--password-stdin"], input=token, text=True,
                        env=environment, check=True, stdout=subprocess.DEVNULL)
         for image in IMAGES:
-            published = f"{REGISTRY}/{image}:{version}"
+            published = f"{REGISTRY}/{image}@{digests[image]}" if digests else f"{REGISTRY}/{image}:{version}"
             if subprocess.run([*docker, "pull", "--quiet", published], env=environment, check=False).returncode:
                 raise RuntimeError(f"No published {image} for {version}. Run the Publish service images workflow, "
                                    "deploy a commit it published, or pass --build")

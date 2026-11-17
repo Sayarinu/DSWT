@@ -22,6 +22,13 @@ DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_P
 # Everything the deployed images, the files synced to the server and the deploy itself are built from.
 DEPLOY_PATHS = ["server/**", "validator/**", "LICENSE", "NOTICE", "deploy/**", "!deploy/terraform/**",
                 "protocol/**", ".github/workflows/deploy.yml", ".github/workflows/publish-images.yml"]
+# The publisher hands the deployer the digests it audited and pushed, so a moved tag can't change what deploys.
+PUBLISHED_DIGESTS = {f"{image}_digest": "${{ steps.push.outputs.%s }}" % image for image in ("server", "validator")}
+PUBLISHED_OUTPUTS = {f"{image}_digest": {"description": f"Manifest digest of the published {image} image",
+                                         "value": "${{ jobs.publish.outputs.%s_digest }}" % image}
+                     for image in ("server", "validator")}
+DEPLOYED_DIGESTS = {f"DSWT_{image.upper()}_DIGEST": "${{ needs.publish.outputs.%s_digest }}" % image
+                    for image in ("server", "validator")}
 TAILSCALE = "tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c"
 TAILSCALE_INPUTS = {"oauth-client-id": "${{ secrets.TS_OAUTH_CLIENT_ID }}", "oauth-secret": "${{ secrets.TS_OAUTH_SECRET }}",
                     "tags": "tag:ci"}
@@ -118,13 +125,14 @@ def workflow(data):
 
 def publisher(data):
     """Run by hand or by the deployer, from main only, able to write packages and nothing else."""
-    require(data.get("on") == {"workflow_dispatch": "", "workflow_call": ""},
+    require(data.get("on") == {"workflow_dispatch": "", "workflow_call": {"outputs": PUBLISHED_OUTPUTS}},
             "Publishing must only run by hand or from the deploy workflow, without inputs or secrets")
     jobs = data.get("jobs")
-    require(isinstance(jobs, dict) and len(jobs) == 1, "Publishing needs exactly one job")
-    job = next(iter(jobs.values()))
+    require(isinstance(jobs, dict) and set(jobs) == {"publish"}, "Publishing needs exactly one job")
+    job = jobs["publish"]
     require(isinstance(job, dict) and job.get("if") == "github.ref == 'refs/heads/main'", "Publishing must only run from main")
     require(job.get("permissions") == {"contents": "read", "packages": "write"}, "Publishing may only write packages")
+    require(job.get("outputs") == PUBLISHED_DIGESTS, "Publishing must hand the deploy the digests it pushed")
     # What remains must satisfy every contribution rule, without the two exceptions granted here.
     reviewed = copy.deepcopy(data)
     reviewed["on"] = "workflow_dispatch"
@@ -196,6 +204,7 @@ def deployer(data):
     require(all(isinstance(step, dict) and "run" not in step for step in steps[:joins[0]]),
             "Join the tailnet before running commands")
     del steps[joins[0]]
+    pinned = set()
     for step in steps:
         if not isinstance(step, dict):
             continue
@@ -209,6 +218,9 @@ def deployer(data):
                 del variables[name]
             elif name == "DSWT_REGISTRY_TOKEN" and value == "${{ github.token }}":
                 del variables[name]
+            elif DEPLOYED_DIGESTS.get(name) == value:
+                pinned.add(name)
+    require(pinned == set(DEPLOYED_DIGESTS), "Deploy exactly the digests the publish job pushed")
     workflow(reviewed)
 
 
