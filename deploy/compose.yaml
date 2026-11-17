@@ -51,7 +51,7 @@ services:
     environment:
       POSTGRES_USER: dswt_admin
       POSTGRES_DB: dswt
-      # Only the mounted socket is reachable.
+      # Only the mounted socket is reachable, and postgres/pg_hba.conf limits who may use which role there.
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_INITDB_ARGS: --wal-segsize=1
     command:
@@ -70,12 +70,18 @@ services:
       - archive_mode=on
       - -c
       - archive_command=test ! -e /archive/.hold && /usr/local/bin/wal-archive.sh archive /archive %p %f
+      # Services connect only as dswt_service; dswt_admin is for root and postgres inside this container.
+      - -c
+      - hba_file=/etc/dswt-postgres/pg_hba.conf
+      - -c
+      - ident_file=/etc/dswt-postgres/pg_ident.conf
     volumes:
       - data:/var/lib/postgresql/data
       - socket:/var/run/postgresql
       - archive:/archive
       - metrics:/metrics
       - {type: bind, source: ./wal-archive.sh, target: /usr/local/bin/wal-archive.sh, read_only: true}
+      - {type: bind, source: ./postgres, target: /etc/dswt-postgres, read_only: true}
     healthcheck:
       test: [CMD, pg_isready, -h, /var/run/postgresql, -U, dswt_admin, -d, dswt]
       interval: 5s

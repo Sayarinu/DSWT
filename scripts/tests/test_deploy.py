@@ -175,6 +175,22 @@ class DeployTests(unittest.TestCase):
             self.assertNotIn("ci-token", " ".join(arguments))
             self.assertNotIn("DSWT_REGISTRY_TOKEN", options.get("env", {}))
 
+    def test_published_digests_are_pulled_instead_of_the_tag(self):
+        server, validator = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+        calls = self.pull({"DSWT_REGISTRY_TOKEN": "ci-token", "GITHUB_ACTIONS": "true", "DSWT_SERVER_DIGEST": server,
+                           "DSWT_VALIDATOR_DIGEST": validator, "PATH": os.environ.get("PATH", "")})
+        pulls = [arguments[-1] for arguments, _ in calls if "pull" in arguments]
+        self.assertEqual(pulls, [f"{dswt.REGISTRY}/dswt-server@{server}", f"{dswt.REGISTRY}/dswt-validator@{validator}"])
+        tags = [arguments[-2:] for arguments, _ in calls if "tag" in arguments]
+        self.assertEqual(tags, [[pulls[0], "dswt-server:0123456789ab"], [pulls[1], "dswt-validator:0123456789ab"]])
+
+    def test_ci_refuses_to_pull_a_movable_tag(self):
+        for environment in ({"GITHUB_ACTIONS": "true"},
+                            {"DSWT_SERVER_DIGEST": "sha256:" + "a" * 64},
+                            {"DSWT_SERVER_DIGEST": "sha256:" + "a" * 64, "DSWT_VALIDATOR_DIGEST": "latest"}):
+            with self.subTest(environment=environment), self.assertRaisesRegex(ValueError, "digest"):
+                self.pull(dict(environment, DSWT_REGISTRY_TOKEN="ci-token"))
+
     def test_registry_token_falls_back_to_gh(self):
         calls = self.pull({"PATH": os.environ.get("PATH", "")})
         self.assertIn(["gh", "auth", "token"], [arguments for arguments, _ in calls])
