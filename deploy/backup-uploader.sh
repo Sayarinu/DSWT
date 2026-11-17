@@ -1,7 +1,8 @@
 #!/bin/sh
-# Copies each finished WAL file and base backup to R2, encrypted by the `backup` rclone
-# remote, then marks it. wal-archive.sh waits for that mark, so PostgreSQL only counts a
-# segment as archived, and trades only complete, once it is off the server.
+# Copies each finished WAL file (gzip-compressed, as NAME.gz) and base backup to R2,
+# encrypted by the `backup` rclone remote, then marks it. wal-archive.sh waits for that
+# mark, so PostgreSQL only counts a segment as archived, and trades only complete, once
+# it is off the server. Also reports the local archive's size for alerting.
 #
 #   backup-uploader.sh [once]
 set -u
@@ -12,8 +13,10 @@ marks=$archive/.uploaded
 retention_days=30
 heartbeat_seconds=300
 retention_seconds=3600
+size_seconds=60
 checked=0
 pruned=0
+sized=0
 umask 022
 mkdir -p "$marks"
 
@@ -25,7 +28,13 @@ ship_files() {
             *) continue ;;
         esac
         [ -f "$path" ] && [ ! -e "$marks/$name" ] || continue
-        rclone copyto "$path" "backup:wal/$name" || return 1
+        # Forced WAL switches leave segments mostly empty, so they compress well.
+        bundle=$marks/.wal.gz
+        if ! gzip -c "$path" >"$bundle" || ! rclone copyto "$bundle" "backup:wal/$name.gz"; then
+            rm -f "$bundle"
+            return 1
+        fi
+        rm -f "$bundle"
         : >"$marks/$name"
     done
 }
@@ -83,8 +92,17 @@ write_metric() {
         mv "$metrics/.backup.prom.tmp" "$metrics/backup.prom"
 }
 
+write_archive_size() {
+    kilobytes=$(du -sk "$archive" | cut -f1) || return 1
+    printf 'dswt_wal_archive_bytes %s\n' "$((kilobytes * 1024))" >"$metrics/.archive.prom.tmp" &&
+        mv "$metrics/.archive.prom.tmp" "$metrics/archive.prom"
+}
+
 while :; do
     now=$(date +%s)
+    if [ $((now - sized)) -ge "$size_seconds" ] && write_archive_size; then
+        sized=$now
+    fi
     if ship_files && ship_base; then
         forget_marks
         # With nothing to upload, proves R2 and the key still work.

@@ -1,9 +1,80 @@
 #include "postgres.h"
 
+#include <poll.h>
+
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace dswt::server::detail {
 namespace {
+
+using Clock = std::chrono::steady_clock;
+
+// A backend's private memory grows from about 5 MB to 12 MB over its first
+// minutes, so a session is retired after this long. That keeps two dozen
+// sessions inside the database's share of the VPS for one new session a minute
+// per worker.
+std::atomic<Clock::duration> session_lifetime{std::chrono::seconds(60)};
+
+// Opening a session forks a PostgreSQL backend, which dominated database CPU on
+// the 2-core VPS. Idle sessions are kept per connection string instead.
+class IdleSessions {
+public:
+  struct Idle {
+    PGconn *connection;
+    Clock::time_point opened;
+  };
+
+  std::optional<Idle> Take(const std::string &info) {
+    for (;;) {
+      Idle session{};
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto &idle = idle_[info];
+        if (idle.empty()) return std::nullopt;
+        session = idle.back();
+        idle.pop_back();
+      }
+      PGconn *connection = session.connection;
+      // An idle session has nothing to say. Anything waiting on its socket, such as
+      // the error a terminating or restarting server sends before closing, retires it.
+      pollfd socket{PQsocket(connection), POLLIN, 0};
+      if (socket.fd >= 0 && poll(&socket, 1, 0) == 0 && PQstatus(connection) == CONNECTION_OK &&
+          PQtransactionStatus(connection) == PQTRANS_IDLE && !Expired(session.opened))
+        return session;
+      PQfinish(connection);
+    }
+  }
+
+  void Give(const std::string &info, Idle session) {
+    if (PQstatus(session.connection) == CONNECTION_OK &&
+        PQtransactionStatus(session.connection) == PQTRANS_IDLE && !Expired(session.opened)) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto &idle = idle_[info];
+      if (idle.size() < kMaxIdle) { idle.push_back(session); return; }
+    }
+    PQfinish(session.connection);
+  }
+
+private:
+  static bool Expired(Clock::time_point opened) {
+    return Clock::now() - opened >= session_lifetime.load();
+  }
+
+  static constexpr std::size_t kMaxIdle = 16;
+  std::mutex mutex_;
+  std::unordered_map<std::string, std::vector<Idle>> idle_;
+};
+
+// Never destroyed, so no request can outlive it at process exit.
+IdleSessions &Sessions() {
+  static auto *sessions = new IdleSessions;
+  return *sessions;
+}
 
 Result CheckResult(PGresult *raw) {
   Result result(raw, PQclear);
@@ -25,7 +96,16 @@ DatabaseError::DatabaseError(std::string state, std::string constraint)
     : std::runtime_error("database command failed (SQLSTATE " + state + ")"),
       state_(std::move(state)), constraint_(std::move(constraint)) {}
 
-Database::Database(const std::string &info) {
+void SetSessionLifetimeForTesting(std::chrono::steady_clock::duration lifetime) {
+  session_lifetime.store(lifetime);
+}
+
+Database::Database(const std::string &info) : info_(info), opened_(Clock::now()) {
+  if (auto idle = Sessions().Take(info_)) {
+    connection_.reset(idle->connection);
+    opened_ = idle->opened;
+    return;
+  }
   const char *keys[] = {"dbname", "connect_timeout", "application_name",
                         nullptr};
   const char *values[] = {info.c_str(), "3", "dswt-ledger", nullptr};
@@ -50,6 +130,10 @@ Database::Database(const std::string &info) {
       std::string(PQgetvalue(settings.get(), 0, 2)) != "on" ||
       std::string(PQgetvalue(settings.get(), 0, 3)) != "f")
     throw std::runtime_error("writable durable database settings are required");
+}
+
+Database::~Database() {
+  if (connection_) Sessions().Give(info_, {connection_.release(), opened_});
 }
 
 Result Database::Execute(const char *sql) {
