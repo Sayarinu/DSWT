@@ -8,6 +8,7 @@ target, and every check must pass before a ROM is written.
 """
 
 import collections
+import difflib
 import hashlib
 import importlib.util
 import json
@@ -27,11 +28,26 @@ RETAIL = ROOT / "client/retail"
 # Port-only source changes: keep the retail StartMenu layout that unpatched code reads.
 PORT_PATCH = RETAIL / "platinum-port.patch"
 # id: (catalogue variant, language enumerator, text column, build deltas)
+EUROPEAN = "platinum-european-build.patch"
 LANGUAGES = {
-    "fr": ("france", "LANGUAGE_FRENCH", "fr_FR", "platinum-european-build.patch"),
-    "de": ("germany", "LANGUAGE_GERMAN", "de_DE", "platinum-european-build.patch"),
-    "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", "platinum-european-build.patch"),
-    "es": ("spain", "LANGUAGE_SPANISH", "es_ES", "platinum-european-build.patch"),
+    "fr": ("france", "LANGUAGE_FRENCH", "fr_FR", (EUROPEAN,)),
+    "de": ("germany", "LANGUAGE_GERMAN", "de_DE", (EUROPEAN,)),
+    "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", (EUROPEAN,)),
+    "es": ("spain", "LANGUAGE_SPANISH", "es_ES", (EUROPEAN,)),
+    "ja": ("japan", "LANGUAGE_JAPANESE", "ja_JP", ("platinum-japanese-build.patch",)),
+    "ko": ("platinum-korea", "LANGUAGE_KOREAN", "ko_KR", (EUROPEAN, "platinum-korean-build.patch")),
+}
+# Game functions that differ from US Rev 1 only in reviewed, language-specific details. Each is
+# placed where the retail callers point, and only if exactly this many of its bytes differ.
+REVIEWED = {
+    "ja": {
+        "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+        "String_FormatInt": 1,  # a literal data address
+        "Text_AddPrinterWithParamsAndColor": 17,  # leaves the template's unused last byte alone
+    },
+    "ko": {
+        "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+    },
 }
 US_VARIANT = "us-rev1"
 TEXT_ARCHIVE = "msgdata/pl_msg.narc"
@@ -90,6 +106,26 @@ def text_bank_ids(header):
     return {name: int(value) for name, value in re.findall(r"#define (TEXT_BANK_\w+)\s+(\d+)", header)}
 
 
+def text_bank_remap(us_members, members):
+    """US text bank number -> retail number. Japanese and Korean leave some banks out, so later
+    banks move; every language keeps each bank's encryption key (its second header word)."""
+    key = lambda member: struct.unpack_from("<H", member, 2)[0]
+    matcher = difflib.SequenceMatcher(None, [key(m) for m in us_members], [key(m) for m in members], autojunk=False)
+    remap = {}
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            remap.update(zip(range(i1, i2), range(j1, j2)))
+    return remap
+
+
+def remapped_text_banks(header, remap, wonder_trade):
+    """generated/text_banks.h with every bank renumbered; a bank the retail game lacks gets 0xFFFF."""
+    def number(name, value):
+        return wonder_trade if name == "TEXT_BANK_WONDER_TRADE" else remap.get(int(value), 0xFFFF)
+    header = re.sub(r"^(\s+(TEXT_BANK_\w+)\s+= )(\d+),", lambda m: f"{m[1]}{number(m[2], m[3])},", header, flags=re.M)
+    return re.sub(r"^(#define (TEXT_BANK_\w+)\s+)(\d+)$", lambda m: f"{m[1]}{number(m[2], m[3])}", header, flags=re.M)
+
+
 def arena_literal(arm9, arena):
     """The single word in the static binary that holds the arena start."""
     found = [i for i in range(0, len(arm9) - 3, 4) if nds.u32(arm9, i) == arena]
@@ -126,7 +162,10 @@ class Target:
         require(language in LANGUAGES, f"unsupported language {language}")
         self.language = language
         self.variant_id, self.language_name, self.text_key, deltas = LANGUAGES[language]
-        self.deltas = RETAIL / deltas
+        self.deltas = [RETAIL / name for name in deltas]
+        layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
+        korean = self.variant_id.endswith(layout["korean_target_suffix"])
+        self.save_magic = layout["footer_magic"]["korean" if korean else "international"]
         self.workspace, self.pristine, self.work = (Path(p).resolve() for p in (workspace, pristine, work))
         self.log = log
         catalogue = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
@@ -164,9 +203,30 @@ class Target:
         self.headers = sorted(name for name in changed if name.startswith("include/") and name.endswith(".h"))
         require(self.files, "the workspace changes no upstream sources; prepare it with prepare-game.py")
 
+    def text_banks(self):
+        """Renumber the text banks the module uses when the retail archive numbers them differently."""
+        header = (self.workspace / "build/generated/text_banks.h").read_text()
+        ids = text_bank_ids(header)
+        self.text_fid = nds.file_ids(self.rom)[TEXT_ARCHIVE]
+        start, end = nds.file_span(self.rom, self.text_fid)
+        self.text_members, self.text_names = nds.narc_split(self.rom[start:end])
+        us_start, us_end = nds.file_span(self.us_rom, nds.file_ids(self.us_rom)[TEXT_ARCHIVE])
+        us_members, _ = nds.narc_split(self.us_rom[us_start:us_end])
+        require(len(us_members) == ids["TEXT_BANK_WONDER_TRADE"], "the US text archive does not end where Wonder Trade's bank goes")
+        remap = text_bank_remap(us_members, self.text_members)
+        if all(remap.get(i) == i for i in range(len(us_members))) and len(self.text_members) == len(us_members):
+            self.banks_header, self.bank_ids = None, ids
+            return
+        require(remap.get(ids["TEXT_BANK_START_MENU"]) is not None, "the retail game has no start menu text bank")
+        self.banks_header = remapped_text_banks(header, remap, len(self.text_members))
+        self.bank_ids = text_bank_ids(self.banks_header)
+        self.log(f"text banks renumbered: start menu {ids['TEXT_BANK_START_MENU']} -> {self.bank_ids['TEXT_BANK_START_MENU']}, "
+                 f"Wonder Trade {ids['TEXT_BANK_WONDER_TRADE']} -> {self.bank_ids['TEXT_BANK_WONDER_TRADE']}")
+
     def _stage(self, tree, files, read, patches):
         shutil.rmtree(tree, ignore_errors=True)
-        for name in files:
+        touched = [name for patch in self.deltas for name in prepare_game.patched_paths(patch)]
+        for name in dict.fromkeys([*files, *touched]):
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_bytes(read(name))
         (tree / "include").mkdir(exist_ok=True)
@@ -174,11 +234,14 @@ class Target:
             result = subprocess.run(["patch", "-s", "-p1", "--fuzz=0", "--no-backup-if-mismatch", "-d", str(tree), "-i", str(patch)],
                                     capture_output=True, text=True)
             require(result.returncode == 0, f"{patch.name} does not apply: {result.stdout}{result.stderr}")
+        if self.banks_header is not None:
+            (tree / "include/generated").mkdir(parents=True, exist_ok=True)
+            (tree / "include/generated/text_banks.h").write_text(self.banks_header)
 
     # --- 1. The language's upstream code must compile to the retail bytes ------------------------
     def check_variant(self):
         tree = self.work / "pristine"
-        self._stage(tree, self.files + self.headers, lambda name: git(self.workspace, "show", f"HEAD:{name}"), [self.deltas])
+        self._stage(tree, self.files + self.headers, lambda name: git(self.workspace, "show", f"HEAD:{name}"), self.deltas)
         objects = toolchain.compile_objects(self.workspace, tree, tree / "include", self.work / "pristine-obj",
                                             self.language_name, self.files)
         self.pristine_objects = {self._file_of(path): elf.Elf(path.read_bytes()) for path in objects}
@@ -299,11 +362,12 @@ class Target:
     # --- 2. Compile Wonder Trade for this language ------------------------------------------------
     def compile_port(self):
         tree = self.work / "port"
-        self._stage(tree, self.files + self.headers, lambda name: (self.workspace / name).read_bytes(), [self.deltas, PORT_PATCH])
+        self._stage(tree, self.files + self.headers, lambda name: (self.workspace / name).read_bytes(), [*self.deltas, PORT_PATCH])
         self.code = variant_code((self.pristine / "include/constants/versions.h").read_text(), self.language_name, self.rom[0x1E])
         tls = subprocess.run(["python3", str(ROOT / "scripts/prepare-tls.py")], check=True, capture_output=True, text=True).stdout.strip()
         objects = toolchain.compile_objects(self.workspace, tree, tree / "include", self.work / "port-obj", self.language_name,
-                                            self.files, wonder_trade=True, variant=self.code, tls=tls)
+                                            self.files, wonder_trade=True, variant=self.code, tls=tls,
+                                            defines={"WT_SAVE_MAGIC": f"{self.save_magic:#010x}"})
         library = self.workspace / "build/src/wonder_trade/libwonder_trade_tls.a.p"
         sources = list(objects) + sorted(library.glob("*.o"))
         require(len(sources) > len(objects), f"{library} has no objects; build the workspace first")
@@ -331,6 +395,13 @@ class Target:
             return self._autoload_start(us), False
         if us is None:
             return None
+        if us.num not in self.map.addr and name in REVIEWED.get(self.language, {}):
+            at = self.map.voted(us)
+            require(at is not None, f"no retail call agrees where {name} is")
+            differ = self.map.differing(us, at)
+            expected = REVIEWED[self.language][name]
+            require(differ == expected, f"{name} at {at:#x} differs from US in {differ} bytes, not the {expected} reviewed")
+            return (at & ~1) | int(us.num in self.image.thumb), True
         if us.num in self.map.addr:
             at = self.map.addr[us.num]
             return ((at & ~1) | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
@@ -571,13 +642,11 @@ class Target:
         require(at is not None, "InitHeapSystem was not found in the retail game")
         self.heap_site, self.heap_count = ((at & ~1) + us_at - us_function.start, us_value), wt_value
         # Text banks.
-        ids = text_bank_ids((self.workspace / "build/generated/text_banks.h").read_text())
+        ids = self.bank_ids
         menu = json.loads((self.workspace / "res/text/start_menu.json").read_text())["messages"]
         entry = next(i for i, message in enumerate(menu) if message["id"] == MENU_ENTRY)
         require(entry == len(menu) - 1, f"{MENU_ENTRY} is not the last start menu message")
-        self.text_fid = nds.file_ids(self.rom)[TEXT_ARCHIVE]
-        start, end = nds.file_span(self.rom, self.text_fid)
-        members, names = nds.narc_split(self.rom[start:end])
+        members, names = self.text_members, self.text_names
         require(len(members) == ids["TEXT_BANK_WONDER_TRADE"], "the retail text archive does not end where Wonder Trade's bank goes")
         self.text = self._text(members, names, ids["TEXT_BANK_START_MENU"], entry)
 
@@ -623,6 +692,7 @@ class Target:
 
     def build(self):
         self.replaced_files()
+        self.text_banks()
         self.map_symbols()
         self.check_variant()
         self.witnesses()

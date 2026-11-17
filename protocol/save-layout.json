@@ -1,7 +1,7 @@
 {
   "version": 1,
   "upstream_revision": "1dc13dcea40c04ab53f1f607de46023dc409ef20",
-  "verified_targets": ["us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain"],
+  "verified_targets": ["us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain", "japan", "platinum-korea"],
   "footer_magic": {"international": 537265699, "korean": 537331971},
   "korean_target_suffix": "-korea",
   "languages": ["Japanese", "English", "French", "German", "Italian", "Spanish", "Korean"],

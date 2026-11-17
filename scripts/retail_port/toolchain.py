@@ -33,7 +33,7 @@ def docker(mounts, script, workdir=None):
     return result.stdout
 
 
-def _flags(arguments, language, variant):
+def _flags(arguments, language, variant, defines=None):
     out = []
     for argument in arguments:
         if argument in ("-gccdep", "-MD"):
@@ -43,10 +43,12 @@ def _flags(arguments, language, variant):
         elif argument.startswith("-DWT_GAME_VARIANT=") and variant is not None:
             argument = f"-DWT_GAME_VARIANT={variant:#010x}u"
         out.append(argument)
-    return out
+    extra = [f"-D{name}={value}" for name, value in (defines or {}).items()]
+    first = next((i for i, argument in enumerate(out) if argument.startswith("-D")), 0)
+    return out[:first] + extra + out[first:]
 
 
-def compile_script(workspace, language, files, wonder_trade, variant=None):
+def compile_script(workspace, language, files, wonder_trade, variant=None, defines=None):
     """Shell commands that build a precompiled header and the given objects into build/port-out.
 
     files are workspace-relative upstream sources read from SOURCES instead; with
@@ -56,7 +58,7 @@ def compile_script(workspace, language, files, wonder_trade, variant=None):
     rule = next((i for i, line in enumerate(ninja) if line.startswith(PCH_RULE)), None)
     if rule is None or not ninja[rule + 1].strip().startswith("ARGS ="):
         raise ToolchainError("build.ninja has no precompiled header rule; build the workspace first")
-    pch = _flags(shlex.split(ninja[rule + 1].split("=", 1)[1]), language, variant)
+    pch = _flags(shlex.split(ninja[rule + 1].split("=", 1)[1]), language, variant, defines)
     commands = [[MWCC, "-wrap:sdk", "2.0/sp2p2", f"-I{HEADERS}", *pch, "-precompile",
                  f"{OUTPUT}/global_pch.h.mch", "../include/pch/global_pch.h"]]
     seen = set()
@@ -64,7 +66,7 @@ def compile_script(workspace, language, files, wonder_trade, variant=None):
         name = entry["file"].removeprefix("../")
         if not (name in files or (wonder_trade and name.startswith("src/wonder_trade/") and name.endswith(".c"))):
             continue
-        arguments = _flags(shlex.split(entry["command"]), language, variant)
+        arguments = _flags(shlex.split(entry["command"]), language, variant, defines)
         if "-DPOKEPLATINUM_REVISION=1" not in arguments:
             raise ToolchainError(f"{name} is not built as Platinum Rev 1 code")
         arguments[arguments.index("-o") + 1] = f"{OUTPUT}/{name.replace('/', '_')}.o"
@@ -83,7 +85,7 @@ def compile_script(workspace, language, files, wonder_trade, variant=None):
     return "\n".join(lines) + "\n"
 
 
-def compile_objects(workspace, sources, headers, out, language, files, wonder_trade=False, variant=None, tls=None):
+def compile_objects(workspace, sources, headers, out, language, files, wonder_trade=False, variant=None, tls=None, defines=None):
     """Compile into out: files from sources (a tree like the workspace), headers searched first."""
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -91,7 +93,7 @@ def compile_objects(workspace, sources, headers, out, language, files, wonder_tr
               str(Path(sources).resolve()): SOURCES, str(Path(headers).resolve()): HEADERS}
     if tls:
         mounts[str(Path(tls).resolve())] = "/tls"
-    docker(mounts, compile_script(workspace, language, files, wonder_trade, variant))
+    docker(mounts, compile_script(workspace, language, files, wonder_trade, variant, defines))
     return sorted(out.glob("*.o"))
 
 
