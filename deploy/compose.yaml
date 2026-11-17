@@ -171,7 +171,8 @@ services:
     environment:
       <<: *database-client
       DSWT_DATABASE_URL: host=/run/dswt-database port=5432 dbname=dswt user=dswt_service
-      WT_MATCHER_WORKERS: "1"
+      # Each match waits on WAL archiving; more workers let those waits overlap.
+      WT_MATCHER_WORKERS: "8"
     volumes: [socket:/run/dswt-database]
 
   prometheus:

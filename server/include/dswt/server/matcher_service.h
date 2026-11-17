@@ -9,7 +9,7 @@
 
 namespace dswt::server {
 
-namespace detail { class RecoveryGate; }
+namespace detail { class RecoveryGate; class ChosenPairs; }
 
 // Register only on the separately authorized worker endpoint, never the public
 // game backend. Each call retains one pair or a definitive no-pair outcome.
@@ -25,6 +25,7 @@ public:
 private:
   std::string connection_info_;
   std::shared_ptr<detail::RecoveryGate> recovery_;
+  std::shared_ptr<detail::ChosenPairs> chosen_;
 };
 
 } // namespace dswt::server
