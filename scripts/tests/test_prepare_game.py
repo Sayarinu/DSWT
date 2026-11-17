@@ -67,6 +67,20 @@ class PrepareGameTests(unittest.TestCase):
         shutil.rmtree(self.upstream)
         self.assertEqual(prepare_game.prepare(self.root), workspace)
 
+    def test_patched_file_checked_out_with_crlf_endings(self):
+        (self.upstream / ".gitattributes").write_text("src/start_menu.c text eol=crlf\n")
+        self.git("add", ".")
+        self.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "CRLF")
+        self.pin.update(revision=self.git("rev-parse", "HEAD").decode().strip(),
+                        tree=self.git("rev-parse", "HEAD^{tree}").decode().strip())
+        (self.root / "client/upstream.json").write_text(json.dumps(self.pin))
+        workspace = prepare_game.prepare(self.root)
+        self.assertEqual((workspace / "src/start_menu.c").read_text(), "patched\n")
+        self.assertEqual(prepare_game.prepare(self.root), workspace)
+        (workspace / "src/start_menu.c").write_text("developer changes\n")
+        with self.assertRaises(RuntimeError):
+            prepare_game.prepare(self.root)
+
     def test_local_edits_are_preserved(self):
         workspace = prepare_game.prepare(self.root)
         for name in ("src/start_menu.c", "src/wonder_trade/application.c", "untouched.txt"):
