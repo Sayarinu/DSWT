@@ -374,6 +374,25 @@ TEST(DatabaseSessionTest, OpenTransactionIsNeverReused) {
   EXPECT_EQ(Value(database, "SELECT pg_current_xact_id_if_assigned() IS NULL"), "t");
 }
 
+TEST(DatabaseSessionTest, SessionsAreRetiredOnceTheyReachTheirLifetime) {
+  detail::SetSessionLifetimeForTesting(std::chrono::milliseconds(200));
+  std::string pid;
+  {
+    detail::Database database("");
+    pid = Value(database, "SELECT pg_backend_pid()::text");
+  }
+  {
+    detail::Database database("");
+    EXPECT_EQ(Value(database, "SELECT pg_backend_pid()::text"), pid);
+    // The request outlives the session's lifetime; it finishes, then the session closes.
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_EQ(Value(database, "SELECT 1"), "1");
+  }
+  detail::Database database("");
+  EXPECT_NE(Value(database, "SELECT pg_backend_pid()::text"), pid);
+  detail::SetSessionLifetimeForTesting(std::chrono::seconds(60));
+}
+
 TEST(DatabaseSessionTest, SessionClosedByTheServerIsNeverReused) {
   std::string closed;
   {
