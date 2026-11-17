@@ -537,10 +537,11 @@ class Load:
         self.offsite["first_segment"] = self.runner.sql("SELECT pg_walfile_name(pg_current_wal_insert_lsn())")
 
     def check_offsite(self):
-        """Every WAL file archived while off-site copies were required has an identical copy there."""
+        """Every WAL file archived while off-site copies were required has an identical compressed copy there."""
         script = ('missing=0; total=0; for path in /archive/*; do name=${path##*/}; case $name in '
                   '????????????????????????) { [ "$name" \\< "$1" ] || [ "$name" \\> "$2" ]; } && continue; total=$((total+1)); '
-                  'cmp -s "$path" "/offsite/wal/$name" || missing=$((missing+1));; esac; done; echo "$total $missing"')
+                  'gunzip -c "/offsite/wal/$name.gz" 2>/dev/null | cmp -s "$path" - || missing=$((missing+1));; esac; done; '
+                  'echo "$total $missing"')
         # Archiving stops at the last segment PostgreSQL finished; later ones are still open.
         last = self.runner.sql("SELECT last_archived_wal FROM pg_stat_archiver")
         output = self.local.run(["run", "--rm", "--network", "none", "--user", "999:999", "-v",

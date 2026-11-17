@@ -1,5 +1,6 @@
 """Exercise deploy/backup-uploader.sh against a fake rclone that uses local directories."""
 
+import gzip
 import os
 from pathlib import Path
 import subprocess
@@ -57,11 +58,28 @@ class UploaderTests(unittest.TestCase):
         self.base("000000010000000000000003")
         self.run_once()
         self.assertEqual({path.name for path in (self.remote / "wal").iterdir()},
-                         {"000000010000000000000003", "000000010000000000000003.00000028.backup"})
+                         {"000000010000000000000003.gz", "000000010000000000000003.00000028.backup.gz"})
+        for name in ("000000010000000000000003", "000000010000000000000003.00000028.backup"):
+            self.assertEqual(gzip.decompress((self.remote / "wal" / f"{name}.gz").read_bytes()), name.encode())
         self.assertTrue((self.remote / "bases/000000010000000000000003.tar.gz").exists())
         marks = {path.name for path in (self.archive / ".uploaded").iterdir()}
         self.assertEqual(marks, {"000000010000000000000003", "000000010000000000000003.00000028.backup", "base-000000010000000000000003"})
+        self.assertFalse((self.archive / ".uploaded/.wal.gz").exists())
         self.assertIn("dswt_backup_last_success_timestamp_seconds", (self.metrics / "backup.prom").read_text())
+
+    def test_reports_the_local_archive_size(self):
+        (self.archive / "000000010000000000000003").write_bytes(bytes(1 << 20))
+        self.run_once()
+        name, value = (self.metrics / "archive.prom").read_text().split()
+        self.assertEqual(name, "dswt_wal_archive_bytes")
+        self.assertGreaterEqual(int(value), 1 << 20)
+
+    def test_compressed_upload_failure_leaves_no_mark_or_partial(self):
+        self.segment("000000010000000000000003")
+        self.run_once(FAIL="1")
+        self.assertFalse((self.archive / ".uploaded/000000010000000000000003").exists())
+        self.assertFalse((self.archive / ".uploaded/.wal.gz").exists())
+        self.assertFalse((self.remote / "wal").exists())
 
     def test_failed_upload_leaves_no_mark_or_metric(self):
         self.segment("000000010000000000000003")
@@ -75,20 +93,21 @@ class UploaderTests(unittest.TestCase):
         (self.archive / "000000010000000000000003").unlink()
         self.run_once()
         self.assertFalse((self.archive / ".uploaded/000000010000000000000003").exists())
-        self.assertTrue((self.remote / "wal/000000010000000000000003").exists())
+        self.assertTrue((self.remote / "wal/000000010000000000000003.gz").exists())
 
     def test_retention_keeps_the_newest_base_and_the_wal_it_needs(self):
         (self.remote / "bases").mkdir()
         for first in ("000000010000000000000003", "000000010000000000000008"):
             (self.remote / "bases" / f"{first}.tar.gz").touch()
         (self.remote / "wal").mkdir()
-        for name in ("000000010000000000000007", "000000010000000000000008", "000000010000000000000008.00000028.backup",
-                     "000000010000000000000009"):
+        # Plain files from before compression and compressed ones from after, side by side.
+        for name in ("000000010000000000000006", "000000010000000000000007.gz", "000000010000000000000008",
+                     "000000010000000000000008.00000028.backup.gz", "000000010000000000000009.gz"):
             (self.remote / "wal" / name).touch()
         self.run_once()
         self.assertEqual({path.name for path in (self.remote / "bases").iterdir()}, {"000000010000000000000008.tar.gz"})
         self.assertEqual({path.name for path in (self.remote / "wal").iterdir()},
-                         {"000000010000000000000008", "000000010000000000000008.00000028.backup", "000000010000000000000009"})
+                         {"000000010000000000000008", "000000010000000000000008.00000028.backup.gz", "000000010000000000000009.gz"})
 
 
 if __name__ == "__main__":
