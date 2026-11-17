@@ -322,10 +322,35 @@ enum Language {
             with self.subTest(language=language):
                 self.assertTrue(label[key])
                 self.assertLessEqual(len(label[key]), 15)
-                self.assertTrue((platinum.RETAIL / deltas).is_file())
+                self.assertTrue(all((platinum.RETAIL / name).is_file() for name in deltas))
                 self.assertEqual(catalogue[variant]["port_base"], platinum.US_VARIANT)
                 self.assertIn(variant, layout["verified_targets"])
         self.assertTrue(platinum.PORT_PATCH.is_file())
+
+    def test_text_banks_are_aligned_by_their_keys(self):
+        bank = lambda count, key: struct.pack("<HH", count, key)
+        us = [bank(1, 10), bank(2, 11), bank(3, 12), bank(4, 13), bank(5, 14)]
+        # A Japanese archive lacks bank 1 and translates bank 3 to a different length.
+        japanese = [bank(1, 10), bank(3, 12), bank(9, 13), bank(5, 14)]
+        self.assertEqual(platinum.text_bank_remap(us, japanese), {0: 0, 2: 1, 3: 2, 4: 3})
+        self.assertEqual(platinum.text_bank_remap(us, us), {i: i for i in range(5)})
+
+    def test_text_bank_header_is_renumbered(self):
+        header = ("enum TextBank {\n    TEXT_BANK_A                          = 0,\n    TEXT_BANK_GONE                       = 1,\n"
+                  "    TEXT_BANK_START_MENU                 = 2,\n    TEXT_BANK_WONDER_TRADE               = 3,\n};\n"
+                  "#define TEXT_BANK_A                          0\n#define TEXT_BANK_GONE                       1\n"
+                  "#define TEXT_BANK_START_MENU                 2\n#define TEXT_BANK_WONDER_TRADE               3\n")
+        out = platinum.remapped_text_banks(header, {0: 0, 2: 1}, 2)
+        self.assertEqual(platinum.text_bank_ids(out),
+                         {"TEXT_BANK_A": 0, "TEXT_BANK_GONE": 0xFFFF, "TEXT_BANK_START_MENU": 1, "TEXT_BANK_WONDER_TRADE": 2})
+        self.assertIn("TEXT_BANK_START_MENU                 = 1,", out)
+        self.assertIn("TEXT_BANK_GONE                       = 65535,", out)
+
+    def test_reviewed_differences_are_counted_exactly(self):
+        for language, names in platinum.REVIEWED.items():
+            with self.subTest(language=language):
+                self.assertIn(language, platinum.LANGUAGES)
+                self.assertTrue(all(type(count) is int and count > 0 for count in names.values()))
 
     def test_placeable_names_are_looked_up_once(self):
         calls = []

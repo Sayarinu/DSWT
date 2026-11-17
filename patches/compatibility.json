@@ -251,6 +251,40 @@
       "port_base": "us-rev1",
       "pristine_verified": true,
       "planned_patch": "dswt-spain.bps"
+    },
+    {
+      "id": "japan",
+      "game": "Pokémon Platinum",
+      "name": "Japan (Japanese)",
+      "game_code": "CPUJ",
+      "revision": 0,
+      "language": "Japanese",
+      "size": 134217728,
+      "sha256": "532f3044b58ce5da524abf9b411150b25d445e371dec1b19c5a091376c209182",
+      "sha1": "5b460ab10358fba74d14a704db0d9517172ee3b6",
+      "crc32": "be130bc9",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pocket Monsters - Platinum (Japan))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-japan.bps"
+    },
+    {
+      "id": "platinum-korea",
+      "game": "Pokémon Platinum",
+      "name": "Korea (Korean)",
+      "game_code": "CPUK",
+      "revision": 0,
+      "language": "Korean",
+      "size": 134217728,
+      "sha256": "b7f37ec3085a8bb468de5ec9478042faadc81632053035bd6c1f335beaf495e7",
+      "sha1": "a8386c3af4c9c01a9968e39347358ed07ddf7bdd",
+      "crc32": "70ae5c10",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pocket Monsters Pt - Giratina (Korea))",
+      "build_revision": null,
+      "port_base": "us-rev1",
+      "pristine_verified": true,
+      "planned_patch": "dswt-korea.bps"
     }
   ]
 }
