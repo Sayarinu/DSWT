@@ -158,7 +158,9 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
             raise RuntimeError(f"Refusing a symlink in the game workspace: {name}")
         if (name in base or name in previous) and not dest.exists():
             raise RuntimeError(f"Local deletion of {name}; keep this workspace aside before rebuilding")
-        if dest.exists() and dest.read_bytes() not in (base.get(name), content):
+        # A checkout applies .gitattributes (such as eol=crlf), so compare with that form too.
+        checkout = git(workspace, "cat-file", "--filters", f"HEAD:{name}") if name in base else None
+        if dest.exists() and dest.read_bytes() not in (base.get(name), checkout, content):
             raise RuntimeError(f"Local changes in {name}; keep this workspace aside before rebuilding")
     for name, content in desired.items():
         dest = workspace / name
