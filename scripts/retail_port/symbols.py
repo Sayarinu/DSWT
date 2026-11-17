@@ -181,6 +181,26 @@ class SymbolMap:
             return False
         return all(not keep[i] or body[offset + i] == data[i] for i in range(len(data)))
 
+    def differing(self, symbol, address):
+        """How many unrelocated bytes of a US function differ from the target at an address."""
+        got = self._masked(symbol)
+        if got is None:
+            return None
+        module, _, data, keep = got
+        base, body = self.modules[module]
+        offset = (address & ~1) - base
+        if not 0 <= offset <= len(body) - len(data):
+            return None
+        return sum(1 for i in range(len(data)) if keep[i] and body[offset + i] != data[i])
+
+    def voted(self, symbol):
+        """The address most calls and references from placed functions agree on, or None if tied."""
+        counter = self.votes.get(symbol.num)
+        if not counter:
+            return None
+        (best, count), *rest = counter.most_common(2)
+        return None if rest and count <= rest[0][1] else best
+
     def _propagate(self):
         votes = collections.defaultdict(collections.Counter)
         frontier = list(self.addr)
@@ -222,6 +242,7 @@ class SymbolMap:
                 else:
                     self.how[num] = f"refs x{count}"
                 self.addr[num] = best
+        self.votes = votes
 
     def _neighbours(self):
         order = collections.defaultdict(list)

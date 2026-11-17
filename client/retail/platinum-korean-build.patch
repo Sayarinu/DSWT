@@ -1,0 +1,17 @@
+Code differences of the Korean Platinum cartridge from US Rev 1, applied after
+platinum-european-build.patch.
+
+Korean save blocks carry their own footer magic number.
+
+diff --git a/include/constants/savedata/savedata.h b/include/constants/savedata/savedata.h
+--- a/include/constants/savedata/savedata.h
++++ b/include/constants/savedata/savedata.h
+@@ -36,7 +36,7 @@
+ 
+ #define SECONDARY_FOOTER_SIZE 8
+ 
+-#define SECTOR_SIGNATURE 0x20060623
++#define SECTOR_SIGNATURE 0x20070903
+ 
+ #define PRIMARY_SECTOR_START 0
+ #define BACKUP_SECTOR_START  64
