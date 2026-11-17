@@ -1,9 +1,58 @@
 #include "postgres.h"
 
+#include <poll.h>
+
+#include <mutex>
+#include <unordered_map>
 #include <utility>
 
 namespace dswt::server::detail {
 namespace {
+
+// Opening a session forks a PostgreSQL backend, which dominated database CPU on
+// the 2-core VPS. Idle sessions are kept per connection string instead.
+class IdleSessions {
+public:
+  PGconn *Take(const std::string &info) {
+    for (;;) {
+      PGconn *connection = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto &idle = idle_[info];
+        if (idle.empty()) return nullptr;
+        connection = idle.back();
+        idle.pop_back();
+      }
+      // An idle session has nothing to say. Anything waiting on its socket, such as
+      // the error a terminating or restarting server sends before closing, retires it.
+      pollfd socket{PQsocket(connection), POLLIN, 0};
+      if (socket.fd >= 0 && poll(&socket, 1, 0) == 0 && PQstatus(connection) == CONNECTION_OK &&
+          PQtransactionStatus(connection) == PQTRANS_IDLE)
+        return connection;
+      PQfinish(connection);
+    }
+  }
+
+  void Give(const std::string &info, PGconn *connection) {
+    if (PQstatus(connection) == CONNECTION_OK && PQtransactionStatus(connection) == PQTRANS_IDLE) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto &idle = idle_[info];
+      if (idle.size() < kMaxIdle) { idle.push_back(connection); return; }
+    }
+    PQfinish(connection);
+  }
+
+private:
+  static constexpr std::size_t kMaxIdle = 16;
+  std::mutex mutex_;
+  std::unordered_map<std::string, std::vector<PGconn *>> idle_;
+};
+
+// Never destroyed, so no request can outlive it at process exit.
+IdleSessions &Sessions() {
+  static auto *sessions = new IdleSessions;
+  return *sessions;
+}
 
 Result CheckResult(PGresult *raw) {
   Result result(raw, PQclear);
@@ -25,7 +74,11 @@ DatabaseError::DatabaseError(std::string state, std::string constraint)
     : std::runtime_error("database command failed (SQLSTATE " + state + ")"),
       state_(std::move(state)), constraint_(std::move(constraint)) {}
 
-Database::Database(const std::string &info) {
+Database::Database(const std::string &info) : info_(info) {
+  if (auto *idle = Sessions().Take(info_)) {
+    connection_.reset(idle);
+    return;
+  }
   const char *keys[] = {"dbname", "connect_timeout", "application_name",
                         nullptr};
   const char *values[] = {info.c_str(), "3", "dswt-ledger", nullptr};
@@ -50,6 +103,10 @@ Database::Database(const std::string &info) {
       std::string(PQgetvalue(settings.get(), 0, 2)) != "on" ||
       std::string(PQgetvalue(settings.get(), 0, 3)) != "f")
     throw std::runtime_error("writable durable database settings are required");
+}
+
+Database::~Database() {
+  if (connection_) Sessions().Give(info_, connection_.release());
 }
 
 Result Database::Execute(const char *sql) {
