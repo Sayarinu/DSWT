@@ -6,6 +6,14 @@ name: Publish service images
 on:
   workflow_dispatch:
   workflow_call:
+    # The deploy pulls exactly these digests, never a tag that could be moved after the audit.
+    outputs:
+      server_digest:
+        description: Manifest digest of the published server image
+        value: ${{ jobs.publish.outputs.server_digest }}
+      validator_digest:
+        description: Manifest digest of the published validator image
+        value: ${{ jobs.publish.outputs.validator_digest }}
 
 permissions:
   contents: read
@@ -19,6 +27,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      server_digest: ${{ steps.push.outputs.server }}
+      validator_digest: ${{ steps.push.outputs.validator }}
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -43,6 +54,7 @@ jobs:
             game/image-audit/*.filesystem.json
             game/image-audit/validator.resources.json
       - name: Publish to private GHCR packages
+        id: push
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -54,6 +66,7 @@ jobs:
               "oci:game/image-audit/$service.oci" "docker://ghcr.io/$owner/dswt-$service:${GITHUB_SHA::12}"
             test "$(cat digest)" = "$expected"
             echo "dswt-$service:${GITHUB_SHA::12} $expected" >> "$GITHUB_STEP_SUMMARY"
+            echo "$service=$expected" >> "$GITHUB_OUTPUT"
           done
           jq -r '.images | to_entries[] | "\(.key) findings: \(.value.scan.vulnerabilities_by_severity | tostring)"' game/image-audit/report.json >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the newest five versions
