@@ -164,6 +164,8 @@ services:
   # No network at all: it only needs the database socket.
   matcher:
     <<: *server
+    # Two processes of 8 workers pair about 1.2 trades/s on the VPS, its validation limit.
+    scale: 2
     network_mode: none
     depends_on:
       database: {condition: service_healthy}
