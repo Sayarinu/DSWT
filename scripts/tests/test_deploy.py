@@ -125,6 +125,27 @@ class DeployTests(unittest.TestCase):
         self.assertIn("--ignore-existing", tls[0])
         self.assertIn(str(self.local / "tls/current.pem"), tls[0])
 
+    def test_sync_installs_scheduled_archive_pruning(self):
+        target = self.target(self.pem)
+        calls = self.sync_calls(target)
+        scripts = [call for call in calls if str(dswt.ROOT / "deploy/rotate-archive.sh") in call]
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("--chmod=F755", scripts[0])
+        crontab = [call.args[0] for call in target.run.call_args_list if "crontab" in call.args[0]]
+        self.assertEqual(len(crontab), 1)
+        # Replaces any earlier entry instead of adding one per deploy.
+        self.assertIn("grep -v rotate-archive.sh", crontab[0])
+        self.assertIn(f"{dswt.REMOTE}/rotate-archive.sh", crontab[0])
+        self.assertTrue(dswt.ROTATION.startswith("*/10 * * * * "))
+
+    def test_tidy_rotates_through_the_shared_script(self):
+        target = self.target(self.pem)
+        target.compose = mock.Mock()
+        target.tidy()
+        scripts = [call.args[0] for call in target.run.call_args_list]
+        self.assertEqual(scripts[0], f"{dswt.REMOTE}/rotate-archive.sh now")
+        self.assertFalse([call for call in target.compose.call_args_list if "pg_basebackup" in call.args])
+
     def test_sync_without_local_tls_files_uploads_none_and_still_checks_the_pin(self):
         calls = self.sync_calls(self.target(self.pem))
         self.assertFalse([call for call in calls if any(str(self.local / "tls") in str(part) for part in call)])

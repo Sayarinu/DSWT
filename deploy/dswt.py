@@ -29,6 +29,8 @@ REMOTE_USER = "dswt"
 ADMIN = "dswt_admin"
 VOLUMES = ("data", "socket", "archive", "prometheus", "alertmanager", "metrics")
 RESTORE_TABLES = ("save_identities", "payloads", "offers", "ownership", "matches", "receipts", "trade_events", "audit_journal")
+# Checks the archive's size every 10 minutes; rotate-archive.sh holds the threshold.
+ROTATION = f"*/10 * * * * {REMOTE}/rotate-archive.sh 2>&1 | logger -t dswt-archive"
 APPLICATIONS = ("netns", "validator", "gateway", "backend", "matcher", "prometheus", "alertmanager",
                 "node-exporter", "grafana")
 
@@ -152,6 +154,8 @@ def restore_check():
             docker(*copy, "copyto", f"backup:bases/{base}", "/r/base.tar.gz")
             docker(*copy, "copy", "backup:wal", "/r/wal")
             docker("run", "-d", "--name", name, "--network", "none", "--user", "999:999", "-v", f"{name}:/r", "--entrypoint", "sh", postgres, "-c",
+                   # WAL uploaded since LUNE-753 is gzip-compressed; older files are plain.
+                   "for f in /r/wal/*.gz; do [ ! -e \"$f\" ] || gunzip -f \"$f\" || exit 1; done && "
                    "install -d -m 0700 /r/data && tar -xzf /r/base.tar.gz -C /r/data && touch /r/data/recovery.signal && "
                    "exec postgres -D /r/data -c listen_addresses= -c archive_mode=off -c restore_command='cp /r/wal/%f %p'")
             sql = lambda query: docker("exec", name, "psql", "-XAt", "-U", ADMIN, "-d", "dswt", "-c", query)
@@ -229,7 +233,10 @@ class Target:
         subprocess.run(["rsync", "-t", "--chmod=F644", "-e", transport, f"{ROOT}/deploy/compose.yaml",
                         f"{self.address}:{REMOTE}/compose.yaml"], check=True)
         subprocess.run(["rsync", "-t", "--chmod=F755", "-e", transport, f"{ROOT}/server/wal-archive.sh",
-                        f"{ROOT}/deploy/backup-uploader.sh", f"{self.address}:{REMOTE}/"], check=True)
+                        f"{ROOT}/deploy/backup-uploader.sh", f"{ROOT}/deploy/rotate-archive.sh", f"{self.address}:{REMOTE}/"],
+                       check=True)
+        # Prune the local WAL archive between releases, not only when one deploys.
+        self.run(f"(crontab -l 2>/dev/null | grep -v rotate-archive.sh; echo {shlex.quote(ROTATION)}) | crontab -")
         # Only the current key goes to the server, and an installed key is never overwritten.
         # Without a local copy, as in CI, the server must already hold it.
         tls = [LOCAL / "tls/current.key", LOCAL / "tls/current.pem"]
@@ -314,12 +321,8 @@ class Target:
 
     def tidy(self):
         """Run after a verified release: only then is the old archive chain safe to replace."""
-        archive = ("exec", "-T", "--user", "postgres", "database")
-        self.compose(*archive, "rm", "-rf", "/archive/base.next")
-        self.compose(*archive, "pg_basebackup", "-h", "/var/run/postgresql", "-U", ADMIN, "-D", "/archive/base.next",
-                     "-X", "stream", "-c", "fast")
-        self.compose(*archive, "pg_verifybackup", "/archive/base.next")
-        self.compose(*archive, "/usr/local/bin/wal-archive.sh", "rotate", "/archive", "/archive/base.next")
+        # The same script and lock as the scheduled pruning, so the two never rotate at once.
+        self.run(f"{REMOTE}/rotate-archive.sh now")
         self.run("docker image prune --all --force >/dev/null")
         self.run("df -h / | tail -1")
 

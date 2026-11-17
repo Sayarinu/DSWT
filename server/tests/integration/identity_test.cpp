@@ -7,10 +7,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <exception>
 #include <future>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 
 namespace dswt::server {
 namespace {
@@ -338,6 +340,77 @@ TEST_F(IdentityTest, ConflictingConcurrentEnrollmentHasOneAuthorizedWinner) {
   const auto winner = a ? *a : *b;
   EXPECT_EQ(store.Authenticate(winner, credential), static_cast<bool>(a));
   EXPECT_EQ(store.Authenticate(winner, Credential(0x52)), static_cast<bool>(b));
+}
+
+std::string Value(detail::Database &database, const char *sql) {
+  auto row = database.Execute(sql);
+  return PQgetvalue(row.get(), 0, 0);
+}
+
+TEST(DatabaseSessionTest, CleanSessionsAreReusedWithoutRequestState) {
+  std::string pid;
+  { detail::Database database(""); pid = Value(database, "SELECT pg_backend_pid()::text"); }
+  { detail::Database database(""); EXPECT_EQ(Value(database, "SELECT pg_backend_pid()::text"), pid); }
+  {
+    detail::Database database("");
+    detail::Transaction transaction(database);
+    database.Execute("SET LOCAL statement_timeout = '1s'");
+  }
+  detail::Database database("");
+  EXPECT_EQ(Value(database, "SELECT pg_backend_pid()::text"), pid);
+  EXPECT_EQ(Value(database, "SHOW statement_timeout"), "10s");
+  EXPECT_EQ(Value(database, "SELECT current_setting('synchronous_commit')"), "on");
+}
+
+TEST(DatabaseSessionTest, OpenTransactionIsNeverReused) {
+  std::string pid;
+  {
+    detail::Database database("");
+    pid = Value(database, "SELECT pg_backend_pid()::text");
+    database.Execute("BEGIN");
+  }
+  detail::Database database("");
+  EXPECT_NE(Value(database, "SELECT pg_backend_pid()::text"), pid);
+  EXPECT_EQ(Value(database, "SELECT pg_current_xact_id_if_assigned() IS NULL"), "t");
+}
+
+TEST(DatabaseSessionTest, SessionsAreRetiredOnceTheyReachTheirLifetime) {
+  detail::SetSessionLifetimeForTesting(std::chrono::milliseconds(200));
+  std::string pid;
+  {
+    detail::Database database("");
+    pid = Value(database, "SELECT pg_backend_pid()::text");
+  }
+  {
+    detail::Database database("");
+    EXPECT_EQ(Value(database, "SELECT pg_backend_pid()::text"), pid);
+    // The request outlives the session's lifetime; it finishes, then the session closes.
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_EQ(Value(database, "SELECT 1"), "1");
+  }
+  detail::Database database("");
+  EXPECT_NE(Value(database, "SELECT pg_backend_pid()::text"), pid);
+  detail::SetSessionLifetimeForTesting(std::chrono::seconds(60));
+}
+
+TEST(DatabaseSessionTest, SessionClosedByTheServerIsNeverReused) {
+  std::string closed;
+  {
+    detail::Database survivor("");
+    {
+      detail::Database victim("");
+      closed = Value(victim, "SELECT pg_backend_pid()::text");
+    }
+    // The victim now waits idle beneath the survivor; end it from the server side.
+    survivor.Parameters("SELECT pg_terminate_backend($1::integer)", {closed});
+    for (int poll = 0; poll < 100 && Value(survivor, ("SELECT count(*) FROM pg_stat_activity WHERE pid=" + closed).c_str()) != "0";
+         ++poll)
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  detail::Database first(""), second("");
+  EXPECT_NE(Value(first, "SELECT pg_backend_pid()::text"), closed);
+  EXPECT_NE(Value(second, "SELECT pg_backend_pid()::text"), closed);
+  EXPECT_EQ(Value(second, "SELECT 1"), "1");
 }
 
 } // namespace
