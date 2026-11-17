@@ -1,0 +1,22 @@
+Code differences of the Japanese Platinum cartridge from US Rev 1.
+
+The Safari and Park Ball counts in the start menu are printed with the
+Japanese charset.
+
+diff --git a/src/start_menu.c b/src/start_menu.c
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -650,11 +650,11 @@
+     if (!inPalPark) {
+         u16 *safariBallCount = FieldOverworldState_GetSafariBallCount(SaveData_GetFieldOverworldState(fieldSystem->saveData));
+ 
+-        StringTemplate_SetNumber(template, 0, *safariBallCount, 2, PADDING_MODE_NONE, CHARSET_MODE_EN);
++        StringTemplate_SetNumber(template, 0, *safariBallCount, 2, PADDING_MODE_NONE, CHARSET_MODE_JP);
+     } else {
+         int parkBallCount = FieldSystem_GetParkBallCount(fieldSystem);
+ 
+-        StringTemplate_SetNumber(template, 0, parkBallCount, 2, PADDING_MODE_NONE, CHARSET_MODE_EN);
++        StringTemplate_SetNumber(template, 0, parkBallCount, 2, PADDING_MODE_NONE, CHARSET_MODE_JP);
+     }
+ 
+     StringTemplate_Format(template, countString, fmtString);
