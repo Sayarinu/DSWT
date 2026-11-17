@@ -410,7 +410,7 @@
     {
       "id": 8,
       "type": "stat",
-      "title": "Pokémon waiting for a partner",
+      "title": "Waiting for a partner",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -464,7 +464,7 @@
     {
       "id": 9,
       "type": "stat",
-      "title": "Trades waiting to be collected",
+      "title": "Waiting to be collected",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -518,7 +518,7 @@
     {
       "id": 10,
       "type": "stat",
-      "title": "Longest wait for a partner",
+      "title": "Longest partner wait",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -580,7 +580,7 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "Trades completed (last hour)",
+      "title": "Trades in the last hour",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -626,7 +626,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dswt_completed_pairs - dswt_completed_pairs offset 1h",
+          "expr": "dswt_completed_pairs - min_over_time(dswt_completed_pairs[1h])",
           "instant": true
         }
       ],
@@ -635,7 +635,7 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "Trades per minute (last 5 min)",
+      "title": "Trades per minute",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -681,7 +681,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(dswt_completed_pairs - dswt_completed_pairs offset 5m) / 5",
+          "expr": "clamp_min(deriv(dswt_completed_pairs[5m]) * 60, 0)",
           "instant": true
         }
       ],
@@ -690,7 +690,7 @@
     {
       "id": 13,
       "type": "stat",
-      "title": "Response time p95 (5 min)",
+      "title": "Response time (p95)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -912,12 +912,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(dswt_matched_pairs - dswt_matched_pairs offset 5m) / 5",
+          "expr": "clamp_min(deriv(dswt_matched_pairs[5m]) * 60, 0)",
           "legendFormat": "matched"
         },
         {
           "refId": "B",
-          "expr": "(dswt_completed_pairs - dswt_completed_pairs offset 5m) / 5",
+          "expr": "clamp_min(deriv(dswt_completed_pairs[5m]) * 60, 0)",
           "legendFormat": "completed by both players"
         }
       ]
@@ -959,7 +959,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (operation, result) (rate(dswt_requests_total{service=\"gateway\"}[1m]))",
+          "expr": "sum by (operation, result) (rate(dswt_requests_total{service=\"gateway\"}[1m])) > 0",
           "legendFormat": "{{operation}} {{result}}"
         }
       ]
@@ -1030,8 +1030,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le, service, operation) (rate(dswt_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{service}} {{operation}}"
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(dswt_request_duration_seconds_bucket{service=\"gateway\"}[5m])))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dswt_request_duration_seconds_bucket{service=\"backend\",operation=\"legality\"}[5m])))",
+          "legendFormat": "legality check"
         }
       ]
     },
@@ -1072,8 +1077,18 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (__name__, service) (rate({__name__=~\"dswt_(operation_replays|admission_rejections|dropped_logs)_total\"}[5m]))",
-          "legendFormat": "{{__name__}} {{service}}"
+          "expr": "sum by (service) (rate(dswt_operation_replays_total[5m]))",
+          "legendFormat": "replays {{service}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (service) (rate(dswt_admission_rejections_total[5m]))",
+          "legendFormat": "refused {{service}}"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (service) (rate(dswt_dropped_logs_total[5m]))",
+          "legendFormat": "dropped logs {{service}}"
         }
       ]
     },
