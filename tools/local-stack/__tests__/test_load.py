@@ -99,8 +99,10 @@ class ProductionMeasurementTests(unittest.TestCase):
         self.assertIsNone(load.growth(None, last, 3600))
 
     def test_error_rate_counts_transport_failures_and_timeouts(self):
-        rate = load.error_rate({"1": [1, 2, 3], "2": [4]}, {"transport:send": 1, "probe_timeout": 1, "retryable_run": 9})
-        self.assertEqual(rate, {"attempts": 4, "failed": 2, "rate": 0.5})
+        rate = load.error_rate({"1": [1, 2, 3], "2": [4]}, {"transport:send": 1, "probe_timeout": 1, "retryable_run": 9,
+                                                         "reply:-102": 1})
+        self.assertEqual(rate, {"attempts": 4, "failed": 2, "rate": 0.5, "wait_or_retry_replies": 1,
+                                "wait_or_retry_rate": 0.25})
         self.assertIsNone(load.error_rate({}, {})["rate"])
 
     def test_fake_traffic_must_run_and_stay_within_the_wal_budget(self):
@@ -137,6 +139,21 @@ class ProbeAccountingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(driver.latency, {"2": [1000]})
         self.assertEqual(driver.results["2:0"], 2)
         self.assertEqual(driver.tokens.maxsize, 10)
+
+
+class ReplyAccountingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_reply_asking_to_wait_is_one_sample_not_a_transport_failure(self):
+        output = (b'{"wire_operation": 2, "wire_result": 2, "elapsed_us": 1000}\n'
+                  b'{"transport_stage": "engine-reply", "result": -102, "failed_operation": 2, "elapsed_us": 1001}\n'
+                  b'{"transport_stage": "tls", "result": -1, "failed_operation": 2, "elapsed_us": 5}\n{"summary": true}\n')
+        process = mock.Mock(communicate=mock.AsyncMock(return_value=(output, b"")), returncode=1)
+        driver = load.Driver({"concurrency": 1, "offer_rate": 1, "probe": "probe", "pins": ["c", "n"]})
+        driver.measuring = True
+        with mock.patch.object(load.asyncio, "create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            await driver.probe({"path": "real", "legal": True, "source": "127.10.0.1"}, "submit")
+        self.assertEqual(driver.latency, {"2": [1000, 5]})
+        self.assertEqual(driver.failures["reply:-102"], 1)
+        self.assertEqual(driver.failures["transport:tls"], 1)
 
 
 class ProbeTimeoutTests(unittest.IsolatedAsyncioTestCase):

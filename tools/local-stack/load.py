@@ -128,10 +128,13 @@ def growth(first, last, seconds):
 
 
 def error_rate(latency, failures):
-    """Failed attempts (transport failures and timeouts) over every attempt the clients made."""
+    """Failed attempts (transport failures and timeouts) over every attempt the clients made, and apart
+    from them the delivered replies that asked the client to wait or retry, such as PROCESSING."""
     attempts = sum(len(values) for values in latency.values())
     failed = sum(count for name, count in failures.items() if name.startswith("transport:") or name == "probe_timeout")
-    return {"attempts": attempts, "failed": failed, "rate": round(failed / attempts, 6) if attempts else None}
+    waits = sum(count for name, count in failures.items() if name.startswith("reply:"))
+    return {"attempts": attempts, "failed": failed, "rate": round(failed / attempts, 6) if attempts else None,
+            "wait_or_retry_replies": waits, "wait_or_retry_rate": round(waits / attempts, 6) if attempts else None}
 
 
 def percentile(values, fraction):
@@ -241,8 +244,11 @@ class Driver:
         for line in output.splitlines():
             event = json.loads(line)
             if "transport_stage" in event:
-                # A failed attempt still costs the client its elapsed time; keep it in the latency sample.
-                if self.measuring:
+                if self.measuring and event["transport_stage"] == "engine-reply":
+                    # A delivered reply asking the client to wait or retry; its wire line already holds the sample.
+                    self.failures[prefix + "reply:" + str(event["result"])] += 1
+                elif self.measuring:
+                    # A failed attempt still costs the client its elapsed time; keep it in the latency sample.
                     self.failures[prefix + "transport:" + event["transport_stage"]] += 1
                     latency.setdefault(str(event["failed_operation"]), []).append(event["elapsed_us"])
             elif "wire_operation" in event:
