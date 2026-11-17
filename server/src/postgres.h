@@ -2,6 +2,7 @@
 
 #include <libpq-fe.h>
 
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -22,14 +23,25 @@ private:
   std::string constraint_;
 };
 
+// Sessions older than this are closed when their request ends (60 s by default).
+void SetSessionLifetimeForTesting(std::chrono::steady_clock::duration lifetime);
+
+// One request's connection. Its PostgreSQL session is reused by a later request
+// only after this one ends cleanly outside a transaction; requests change no
+// session state beyond the fixed settings applied when it was opened.
 class Database {
 public:
   explicit Database(const std::string &connection_info);
+  ~Database();
+  Database(const Database &) = delete;
+  Database &operator=(const Database &) = delete;
   Result Execute(const char *sql);
   Result Parameters(const char *sql, const std::vector<std::string> &values);
 
 private:
   friend class Transaction;
+  std::string info_;
+  std::chrono::steady_clock::time_point opened_;
   std::unique_ptr<PGconn, decltype(&PQfinish)> connection_{nullptr, PQfinish};
 };
 

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <csignal>
 #include <future>
+#include <limits>
 #include <set>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -450,6 +451,40 @@ TEST_F(MatcherTest, UncoveredDepositsCannotMatchAndCommittedPairWaitsForRecovery
   const auto recovered = Match(operation);
   EXPECT_EQ(recovered.result(), v1::RESULT_OK);
   EXPECT_EQ(Match(operation).SerializeAsString(), recovered.SerializeAsString());
+}
+
+TEST_F(MatcherTest, PairChosenWhileWaitingMatchesOnceThatWaitIsArchived) {
+  std::vector<Client> clients;
+  for (int index = 0; index < 4; ++index) clients.push_back(Queue());
+  // The archive covers exactly what was written by the end of the first attempt.
+  std::atomic<bool> recording{true};
+  std::atomic<std::uint64_t> seen{0}, archived{0};
+  MatcherService waiting("", [&](std::uint64_t position) {
+    if (recording) { seen = std::max<std::uint64_t>(seen, position); return false; }
+    return position <= archived;
+  });
+  const auto operation = Identifier();
+  EXPECT_EQ(Match(operation, &waiting).result(), v1::RESULT_PROCESSING);
+  recording = false;
+  archived = seen.load();
+  clients.push_back(Queue());  // Later WAL, which the archive does not cover yet.
+  const auto matched = [&] {
+    unsigned count = 0;
+    for (const auto &client : clients) count += Status(client.auth).trade().state() == v1::TRADE_MATCHED;
+    return count;
+  };
+  EXPECT_EQ(matched(), 0u);
+  // The retry matches the pair whose owners were observed during the first wait,
+  // and still withholds the outcome until the match itself is archived.
+  const auto pending = Match(operation, &waiting);
+  EXPECT_EQ(pending.result(), v1::RESULT_PROCESSING);
+  EXPECT_TRUE(pending.first_trade_id().empty());
+  EXPECT_EQ(matched(), 2u);
+  archived = std::numeric_limits<std::uint64_t>::max();
+  const auto reply = Match(operation, &waiting);
+  EXPECT_EQ(reply.result(), v1::RESULT_OK);
+  EXPECT_EQ(Match(operation, &waiting).SerializeAsString(), reply.SerializeAsString());
+  EXPECT_EQ(matched(), 2u);
 }
 
 TEST_F(MatcherTest, MidTransactionFailureRollsBackBothOwnersAndRedactsDiagnostics) {

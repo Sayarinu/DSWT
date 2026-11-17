@@ -5,8 +5,10 @@
 #include "trade_encoding.h"
 #include "dswt/server/telemetry.h"
 
+#include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace dswt::server {
@@ -57,6 +59,8 @@ const std::string kAnchor = kSelected +
 const std::string kPeer = kSelected +
     "FROM " + kQueued + "AND i.save_id<>$1::uuid AND d.destinations&$2::integer<>0 "
     "AND $3::integer&" + kGame + "<>0 ORDER BY random() LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
+// One offer of a pair this worker chose earlier, if it is still queued and its owner unlocked.
+const std::string kChosen = kSelected + "FROM " + kQueued + "AND o.trade_id=$1::uuid FOR UPDATE OF i SKIP LOCKED";
 const std::string kPairAvailable =
     "SELECT EXISTS (SELECT 1 FROM " + kCandidates + " a JOIN " + kCandidates + " b ON a.save_id<b.save_id "
     "AND a.destinations&b.game<>0 AND b.destinations&a.game<>0)";
@@ -91,6 +95,20 @@ std::optional<std::pair<Offer, Offer>> Select(Database &database) {
       return std::pair{std::move(first), std::move(second)};
     }
     tried += (tried.empty() ? "" : ",") + HexBytes(first.trade);
+  }
+}
+
+// The pair an operation chose before, relocked. Anything that changed since
+// (matched, cancelled, busy) gives nothing, and the caller selects afresh.
+std::optional<std::pair<Offer, Offer>> Reselect(Database &database, const std::pair<std::string, std::string> &trades) {
+  auto first = database.Parameters(kChosen.c_str(), {HexBytes(trades.first)});
+  if (PQntuples(first.get()) != 1) return std::nullopt;
+  auto second = database.Parameters(kChosen.c_str(), {HexBytes(trades.second)});
+  if (PQntuples(second.get()) != 1) return std::nullopt;
+  try {
+    return std::pair{Locked(database, first), Locked(database, second)};
+  } catch (const SelectionChanged &) {
+    return std::nullopt;
   }
 }
 
@@ -147,8 +165,40 @@ bool Retry(const detail::DatabaseError &error) {
 
 } // namespace
 
+namespace detail {
+
+// The pair each waiting operation chose. Retrying the same pair lets the coverage
+// of its owners, first observed while the operation waited, complete with it;
+// a fresh random peer on every retry would restart that wait each time.
+class ChosenPairs {
+public:
+  std::optional<std::pair<std::string, std::string>> Find(const std::string &operation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = pairs_.find(operation);
+    if (found == pairs_.end()) return std::nullopt;
+    return found->second;
+  }
+  void Remember(const std::string &operation, const Offer &first, const Offer &second) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Forgetting only costs a later retry its head start, never safety.
+    if (pairs_.size() >= 4096 && !pairs_.count(operation)) pairs_.erase(pairs_.begin());
+    pairs_[operation] = {first.trade, second.trade};
+  }
+  void Forget(const std::string &operation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pairs_.erase(operation);
+  }
+
+private:
+  std::mutex mutex_;
+  std::unordered_map<std::string, std::pair<std::string, std::string>> pairs_;
+};
+
+} // namespace detail
+
 MatcherService::MatcherService(std::string connection_info, RecoveryBarrier recovery)
-    : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))) {}
+    : connection_info_(std::move(connection_info)), recovery_(std::make_shared<detail::RecoveryGate>(std::move(recovery))),
+      chosen_(std::make_shared<detail::ChosenPairs>()) {}
 
 bool MatcherService::PairAvailable() const {
   try {
@@ -173,28 +223,43 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
         // never take this lock; busy workers return promptly and reuse their ID.
         auto lock = database.Execute("SELECT pg_try_advisory_xact_lock(578892145138)");
         if (std::string(PQgetvalue(lock.get(), 0, 0)) != "t") { Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK; }
-        if (Prior(database, request->operation_id())) {
+        const auto &operation = request->operation_id();
+        if (Prior(database, operation)) {
+          chosen_->Forget(operation);
           Telemetry::Global().Replay();
           transaction.Commit();
-          Publish(database, *recovery_, request->operation_id(), *reply);
+          Publish(database, *recovery_, operation, *reply);
           return grpc::Status::OK;
         }
-        if (!recovery_->Covers(database, "operation" + request->operation_id(), 0)) {
+        const auto chosen = chosen_->Find(operation);
+        std::optional<std::pair<Offer, Offer>> pair;
+        if (chosen) pair = Reselect(database, *chosen);
+        if (!recovery_->Covers(database, "operation" + operation, 0)) {
+          // Choose the pair during this wait, so its owners' coverage is first
+          // observed now and completes in the same archive cycle as the operation's.
+          if (!pair) pair = Select(database);
+          if (pair) {
+            recovery_->Covers(database, "identity" + pair->first.owner, pair->first.highwater);
+            recovery_->Covers(database, "identity" + pair->second.owner, pair->second.highwater);
+            chosen_->Remember(operation, pair->first, pair->second);
+          }
           Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
         }
-        const auto pair = Select(database);
+        if (!pair) pair = Select(database);
         if (pair) {
           const auto *first = &pair->first, *second = &pair->second;
           if (!recovery_->Covers(database, "identity" + first->owner, first->highwater) ||
               !recovery_->Covers(database, "identity" + second->owner, second->highwater)) {
+            chosen_->Remember(operation, *first, *second);
             Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
           }
-          Pair(database, *first, *second, request->operation_id());
+          Pair(database, *first, *second, operation);
         } else {
-          database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(request->operation_id())});
+          database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(operation)});
         }
         transaction.Commit();
-        Publish(database, *recovery_, request->operation_id(), *reply);
+        chosen_->Forget(operation);
+        Publish(database, *recovery_, operation, *reply);
         trace.Trade(reply->first_trade_id());
         return grpc::Status::OK;
       } catch (const SelectionChanged &) {
