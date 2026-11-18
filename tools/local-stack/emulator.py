@@ -344,6 +344,21 @@ class Emulator:
             raise ValueError("No running owned emulator")
         self.local.run(["kill", "--signal", "KILL", state["Id"]], capture=True, timeout=15)
         self.logs()
+        self.recover()
+
+    def recover(self):
+        """Fold a killed emulator's write log into the save, as its next start would.
+
+        Commits after the last checkpoint are durable only in the store's log, so
+        evidence read after a kill comes from the recovered, verified store."""
+        deadline = time.monotonic() + 15
+        while (state := self.owned_container()) and state["State"]["Running"]:
+            if time.monotonic() >= deadline: raise TimeoutError("Killed emulator is still running")
+            time.sleep(0.25)
+        self.local.run(["run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+                        "--security-opt", "no-new-privileges:true", "--user", f"{os.getuid()}:{os.getgid()}",
+                        "--mount", f"type=bind,source={self.directory},target=/profile", self.manifest()["image"],
+                        "/checks/dswt-save-store", "prepare", "/profile/platinum.sav"], capture=True, timeout=60)
 
     def quit(self, timeout=30):
         self.events([{"op": "quit"}])

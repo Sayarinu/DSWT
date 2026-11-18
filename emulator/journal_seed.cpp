@@ -136,7 +136,7 @@ int ReadBank(void *arg, int bank, unsigned char record[4096]) {
     try {
         auto &context = *static_cast<Context *>(arg);
         Require(bank == 0 || bank == 1);
-        const auto actual = ReadOwned(context.path);
+        const auto actual = context.save ? context.save->Image() : ReadOwned(context.path);
         CheckTail(actual, static_cast<unsigned>(bank));
         std::memcpy(record, actual.data() + kBanks[bank], 4096);
         return 0;
@@ -192,5 +192,7 @@ void RefreshJournalSeed(const std::string &path, const std::string &target) {
     std::copy(seed.begin(), seed.end(), context.entry.seed);
     OPENSSL_cleanse(seed.data(), seed.size());
     Require(WtJournal_Commit(&context.journal, &context.entry) == 0);
+    save.Checkpoint();
+    Require(ReadOwned(path) == save.Image());
 }
 }

@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -17,23 +18,46 @@ namespace {
 std::atomic<unsigned> serial{0};
 std::atomic<bool> phase_ready{false};
 
+bool JournalAt(const unsigned char *record, const char *phase) {
+    // A test selector, not journal validation or ownership authority.
+    // The host/SDK verifiers still check the complete published records.
+    const unsigned value = record[6] | (static_cast<unsigned>(record[7]) << 8);
+    return std::memcmp(record, "DSWJ\1\0", 6) == 0 && std::memcmp(record + 4092, "CMIT", 4) == 0 &&
+        value == std::strtoul(phase, nullptr, 10);
+}
+
+std::uint32_t U32(const unsigned char *at) { return at[0] | at[1] << 8 | at[2] << 16 | static_cast<std::uint32_t>(at[3]) << 24; }
+
+void Ready() {
+    phase_ready.store(true);
+    ::syscall(SYS_write, STDERR_FILENO, "PHASE_READY\n", 12);
+}
+
 void ObservePhase(const void *bytes, std::size_t size) {
     const auto *phase = std::getenv("DSWT_FAULT_JOURNAL_PHASE");
     if (!phase || phase_ready.load() || !std::getenv("DSWT_FAULT_ARMED")) return;
     const auto *data = static_cast<const unsigned char *>(bytes);
+    // A write-log record carries the changed 4 KiB blocks of the image.
+    if (size >= 88 && std::memcmp(data, "DSWLR001", 8) == 0 && U32(data + 8) == size) {
+        std::size_t offset = 56;
+        for (std::uint32_t i = 0, count = U32(data + 52); i < count && offset + 8 <= size - 32; ++i) {
+            const auto start = U32(data + offset), length = U32(data + offset + 4);
+            offset += 8;
+            if (length > size - 32 - offset) return;
+            for (const auto bank : {0x30000U, 0x70000U}) {
+                if (bank >= start && bank + 4096 <= start + length && JournalAt(data + offset + (bank - start), phase)) {
+                    Ready();
+                    return;
+                }
+            }
+            offset += length;
+        }
+        return;
+    }
     const std::size_t prefix = size == 524288 + 96 && std::memcmp(data, "DSWHS001", 8) == 0 ? 64 : 0;
     if (size != 524288 + (prefix ? 96 : 0)) return;
     for (const auto bank : {0x30000U, 0x70000U}) {
-        const auto *record = data + prefix + bank;
-        // A test selector, not journal validation or ownership authority.
-        // The host/SDK verifiers still check the complete published records.
-        const unsigned value = record[6] | (static_cast<unsigned>(record[7]) << 8);
-        if (std::memcmp(record, "DSWJ\1\0", 6) == 0 && std::memcmp(record + 4092, "CMIT", 4) == 0 &&
-            value == std::strtoul(phase, nullptr, 10)) {
-            phase_ready.store(true);
-            ::syscall(SYS_write, STDERR_FILENO, "PHASE_READY\n", 12);
-            return;
-        }
+        if (JournalAt(data + prefix + bank, phase)) { Ready(); return; }
     }
 }
 
@@ -54,7 +78,7 @@ bool Hit(int fd, bool directory = false) {
         if (S_ISDIR(info.st_mode)) {
             if (path != parent && path != store) return false;
         } else if (path.rfind(parent + "/.dswt-pending-", 0) != 0 &&
-                   path.rfind(store + "/.dswt-pending-", 0) != 0) return false;
+                   path.rfind(store + "/.dswt-pending-", 0) != 0 && path != store + "/LOG") return false;
     }
     const auto *selected = std::getenv("DSWT_FAULT_AT");
     return selected && ++serial == std::strtoul(selected, nullptr, 10);

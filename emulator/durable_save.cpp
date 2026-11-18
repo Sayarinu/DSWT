@@ -193,13 +193,111 @@ void Publish(int store, int parent, const std::string &name, const Head &head, c
     Atomic(store, "HEAD", EncodeHead(head));
     Atomic(parent, name, data);
 }
+
+// The write log: a sealed header naming the generation it starts from, then one
+// sealed record per Commit holding the changed 4 KiB blocks and the digest of
+// the whole image they produce.
+constexpr std::size_t kBlock = 4096, kLogHeader = 96, kRecordFixed = 8 + 4 + 8 + 32 + 4 + 32;
+constexpr std::size_t kLogCheckpoint = 16u << 20, kLogMaximum = 64u << 20;
+constexpr char kLogMagic[] = "DSWLG001", kRecordMagic[] = "DSWLR001";
+
+std::uint32_t U32(const Bytes &bytes, std::size_t offset) {
+    const auto value = Field<4>(bytes, offset);
+    return value[0] | value[1] << 8 | value[2] << 16 | static_cast<std::uint32_t>(value[3]) << 24;
+}
+void Append32(Bytes &bytes, std::uint32_t number) {
+    for (unsigned i = 0; i < 4; ++i) bytes.push_back(static_cast<std::uint8_t>(number >> (i * 8)));
+}
+Bytes EncodeLogHeader(const Lineage &lineage, std::uint64_t base, const Digest &digest) {
+    Bytes bytes(kLogMagic, kLogMagic + 8);
+    Append(bytes, lineage); Append(bytes, base); Append(bytes, digest);
+    Seal(bytes);
+    return bytes;
+}
+
+struct Record {
+    std::uint64_t generation;
+    Digest digest;
+    std::vector<std::pair<std::uint32_t, Bytes>> blocks;
+};
+Bytes EncodeRecord(const Record &record) {
+    Bytes bytes(kRecordMagic, kRecordMagic + 8);
+    std::size_t total = kRecordFixed;
+    for (const auto &block : record.blocks) total += 8 + block.second.size();
+    Append32(bytes, static_cast<std::uint32_t>(total));
+    Append(bytes, record.generation); Append(bytes, record.digest);
+    Append32(bytes, static_cast<std::uint32_t>(record.blocks.size()));
+    for (const auto &block : record.blocks) {
+        Append32(bytes, block.first); Append32(bytes, static_cast<std::uint32_t>(block.second.size()));
+        bytes.insert(bytes.end(), block.second.begin(), block.second.end());
+    }
+    Seal(bytes);
+    Require(bytes.size() == total);
+    return bytes;
+}
+
+struct Log {
+    Lineage lineage{};
+    std::uint64_t base = 0;
+    Digest digest{};
+    std::vector<Record> records;
+    bool torn = false;
+};
+// Every record must be complete and sealed, except that a torn final record (a
+// write no Commit acknowledged) is dropped. Anything else is preserved evidence.
+Log DecodeLog(const Bytes &bytes) {
+    Require(bytes.size() >= kLogHeader && Magic(bytes, kLogMagic));
+    const Bytes header(bytes.begin(), bytes.begin() + kLogHeader);
+    Require(Sealed(header));
+    Log log{Field<16>(header, 8), Generation(Bytes(header.begin() + 16, header.end())), Field<32>(header, 32), {}, false};
+    std::size_t at = kLogHeader;
+    while (at < bytes.size()) {
+        const auto left = bytes.size() - at;
+        const auto tail = [&] { log.torn = true; at = bytes.size(); };
+        if (left < 12) {
+            const auto known = std::min<std::size_t>(left, 8);
+            Require(std::equal(bytes.begin() + at, bytes.begin() + at + known, kRecordMagic) ||
+                std::all_of(bytes.begin() + at, bytes.end(), [](auto b) { return b == 0; }));
+            tail(); continue;
+        }
+        if (!std::equal(bytes.begin() + at, bytes.begin() + at + 8, kRecordMagic)) {
+            Require(std::all_of(bytes.begin() + at, bytes.end(), [](auto b) { return b == 0; }));
+            tail(); continue;
+        }
+        const auto total = U32(bytes, at + 8);
+        Require(total >= kRecordFixed && total <= kRecordFixed + 8 * (kSaveSize / kBlock) + kSaveSize);
+        if (total > left) { tail(); continue; }
+        const Bytes record(bytes.begin() + at, bytes.begin() + at + total);
+        if (!Sealed(record)) { Require(at + total == bytes.size()); tail(); continue; }
+        Record parsed{Generation(Bytes(record.begin() + 4, record.end())), Field<32>(record, 20), {}};
+        const auto count = U32(record, 52);
+        std::size_t offset = 56;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const auto start = U32(record, offset), length = U32(record, offset + 4);
+            offset += 8;
+            Require(length > 0 && length % kBlock == 0 && start % kBlock == 0 && start <= kSaveSize &&
+                length <= kSaveSize - start && offset + length <= total - 32);
+            parsed.blocks.emplace_back(start, Bytes(record.begin() + offset, record.begin() + offset + length));
+            offset += length;
+        }
+        Require(offset == total - 32 && count > 0);
+        Require(parsed.generation == log.base + log.records.size() + 1);
+        log.records.push_back(std::move(parsed));
+        at += total;
+    }
+    return log;
+}
 } // namespace
 
 struct DurableSave::Impl {
     Descriptor parent, lock;
-    std::unique_ptr<Descriptor> store;
+    std::unique_ptr<Descriptor> store, log;
     std::string name, store_name;
     Head head;
+    Bytes image;
+    std::uint64_t generation = 0;
+    Digest digest{};
+    std::size_t log_size = 0, pending = 0;
     std::mutex mutex;
     bool usable = true;
 
@@ -233,10 +331,14 @@ struct DurableSave::Impl {
             store = std::make_unique<Descriptor>(::openat(parent.Get(), staging.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
             const auto snapshot = Snapshot(head, data);
             Atomic(store->Get(), "A", snapshot); Atomic(store->Get(), "B", snapshot); Atomic(store->Get(), "HEAD", EncodeHead(head));
+            Atomic(store->Get(), "LOG", EncodeLogHeader(head.lineage, head.generation, head.digest));
             Descriptor raw(::openat(parent.Get(), name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
             Sync(raw.Get());
             if (::renameat(parent.Get(), staging.c_str(), parent.Get(), store_name.c_str()) != 0) Fail();
             Sync(parent.Get());
+            store = std::make_unique<Descriptor>(::openat(parent.Get(), store_name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+            image = data; generation = head.generation; digest = head.digest;
+            OpenLog();
         } else {
             store = std::make_unique<Descriptor>(::openat(parent.Get(), store_name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
             const auto info = Info(store->Get(), true);
@@ -245,57 +347,133 @@ struct DurableSave::Impl {
         }
     }
 
+    ~Impl() {
+        // Best effort: every committed record is already durable in the log.
+        try { std::lock_guard<std::mutex> guard(mutex); if (usable && pending) Compact(); } catch (...) {}
+    }
+
+    void OpenLog() {
+        log = std::make_unique<Descriptor>(::openat(store->Get(), "LOG", O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW));
+        const auto info = Info(log->Get(), false);
+        log_size = static_cast<std::size_t>(info.st_size);
+    }
+
     void Recover(Mode mode) {
         head = DecodeHead(Read(store->Get(), "HEAD", 128));
         Bytes partial_first, partial_second;
         const auto first = LoadSnapshot(store->Get(), "A", head, partial_first);
         const auto second = LoadSnapshot(store->Get(), "B", head, partial_second);
         Require(first || second);
+        std::optional<Log> found;
+        try { found = DecodeLog(Read(store->Get(), "LOG", kLogMaximum)); }
+        catch (const std::system_error &error) { if (error.code().value() != ENOENT) throw; }
+        // A snapshot or head ahead of the last checkpoint must be proven by a logged
+        // record. Without a log (an older store), only one publication can be in flight.
+        const auto proven = [&](std::uint64_t at, const Digest &value) {
+            if (at == head.generation) return value == head.digest;
+            if (!found) return at == head.generation + 1;
+            if (at < found->base || at - found->base > found->records.size()) return false;
+            return at == found->base ? value == found->digest : found->records[at - found->base - 1].digest == value;
+        };
+        if (found) {
+            Require(found->lineage == head.lineage && found->base <= head.generation);
+            if (head.generation != found->base) {
+                Require(head.generation - found->base <= found->records.size() &&
+                    found->records[head.generation - found->base - 1].digest == head.digest);
+            } else Require(found->digest == head.digest);
+        }
+        for (const auto *snapshot : {&first, &second}) {
+            if (*snapshot) Require(Generation(**snapshot) >= head.generation && proven(Generation(**snapshot), Field<32>(**snapshot, 32)));
+        }
+        if (first && second && Generation(*first) == Generation(*second)) Require(*first == *second);
         const auto &selected = !first ? *second : !second || Generation(*first) >= Generation(*second) ? *first : *second;
         // Repair truncation only when the surviving checked image proves every
         // remaining byte. Unknown/foreign evidence is never overwritten.
         Require(std::equal(partial_first.begin(), partial_first.end(), selected.begin()) &&
             std::equal(partial_second.begin(), partial_second.end(), selected.begin()));
-        const auto generation = Generation(selected);
-        Require(generation >= head.generation && generation - head.generation <= 1);
-        if (first && second) {
-            const auto low = std::min(Generation(*first), Generation(*second));
-            Require(generation - low <= 1 && (Generation(*first) != Generation(*second) || *first == *second));
-        }
-        const auto digest = Field<32>(selected, 32);
-        if (generation == head.generation) Require(digest == head.digest);
+        const auto selected_digest = Field<32>(selected, 32);
         const auto raw = Read(parent.Get(), name, kSaveSize);
         if (raw.size() == kSaveSize) {
             const auto hash = Hash(raw);
-            Require(hash == head.digest || hash == head.previous || hash == digest);
+            Require(hash == head.digest || hash == head.previous || hash == selected_digest);
         } else {
             const auto prefix = [&](const std::optional<Bytes> &snapshot) {
                 return snapshot && std::equal(raw.begin(), raw.end(), snapshot->begin() + 64);
             };
             Require(prefix(first) || prefix(second));
         }
+        image.assign(selected.begin() + 64, selected.begin() + 64 + kSaveSize);
+        generation = Generation(selected); digest = selected_digest;
+        if (found) {
+            for (const auto &record : found->records) {
+                if (record.generation <= generation) continue;
+                Require(record.generation == generation + 1);
+                for (const auto &block : record.blocks) std::copy(block.second.begin(), block.second.end(), image.begin() + block.first);
+                Require(Hash(image) == record.digest);
+                generation = record.generation; digest = record.digest;
+            }
+        }
         if (mode == Mode::Existing) {
-            Require(first && second && *first == *second && generation == head.generation && raw.size() == kSaveSize && Hash(raw) == digest);
+            Require(first && second && *first == *second && generation == head.generation && Generation(selected) == generation &&
+                raw.size() == kSaveSize && Hash(raw) == digest && found && found->base == generation &&
+                found->records.empty() && !found->torn);
+            OpenLog();
             return;
         }
-        if (generation != head.generation) head.previous = head.digest;
-        head.generation = generation; head.digest = digest;
-        const Bytes data(selected.begin() + 64, selected.begin() + 64 + kSaveSize);
-        Publish(store->Get(), parent.Get(), name, head, data);
+        Compact();
+    }
+
+    // Fold the log into the checked snapshots, the head and the raw save, then
+    // start a new log from that generation.
+    void Compact() {
+        Head next = head;
+        if (generation != head.generation) next.previous = head.digest;
+        next.generation = generation; next.digest = digest;
+        if (log && ::close(log->Release()) != 0) Fail();
+        log.reset();
+        Publish(store->Get(), parent.Get(), name, next, image);
+        head = next;
+        Atomic(store->Get(), "LOG", EncodeLogHeader(head.lineage, head.generation, head.digest));
+        OpenLog();
+        pending = 0;
     }
 
     void Commit(const std::uint8_t *data, std::size_t length) {
         std::lock_guard<std::mutex> guard(mutex);
-        Require(usable && data && length == kSaveSize && head.generation != std::numeric_limits<std::uint64_t>::max());
+        Require(usable && data && length == kSaveSize && log && generation != std::numeric_limits<std::uint64_t>::max());
         usable = false;
-        const auto expected = head;
-        Recover(Mode::Existing);
-        Require(head.generation == expected.generation && head.lineage == expected.lineage && head.digest == expected.digest && head.previous == expected.previous);
-        const Bytes bytes(data, data + length);
-        Head next = head;
-        ++next.generation; next.previous = head.digest; next.digest = Hash(bytes);
-        Publish(store->Get(), parent.Get(), name, next, bytes);
-        head = next;
+        Record record{generation + 1, {}, {}};
+        for (std::size_t at = 0; at < kSaveSize; at += kBlock) {
+            if (std::memcmp(data + at, image.data() + at, kBlock) == 0) continue;
+            if (!record.blocks.empty() && record.blocks.back().first + record.blocks.back().second.size() == at)
+                record.blocks.back().second.insert(record.blocks.back().second.end(), data + at, data + at + kBlock);
+            else record.blocks.emplace_back(static_cast<std::uint32_t>(at), Bytes(data + at, data + at + kBlock));
+        }
+        if (record.blocks.empty()) { usable = true; return; }
+        record.digest = Hash(data, length);
+        const auto bytes = EncodeRecord(record);
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const auto count = ::write(log->Get(), bytes.data() + offset, bytes.size() - offset);
+            if (count < 0 && errno == EINTR) continue;
+            if (count < 0) Fail();
+            Require(count > 0);
+            offset += static_cast<std::size_t>(count);
+        }
+        Sync(log->Get());
+        std::copy(data, data + length, image.begin());
+        generation = record.generation; digest = record.digest;
+        log_size += bytes.size(); ++pending;
+        if (log_size > kLogCheckpoint) Compact();
+        usable = true;
+    }
+
+    void Checkpoint() {
+        std::lock_guard<std::mutex> guard(mutex);
+        Require(usable);
+        if (!pending) return;
+        usable = false;
+        Compact();
         usable = true;
     }
 };
@@ -304,6 +482,12 @@ DurableSave::DurableSave(const std::string &path, Mode mode)
     : impl_(std::make_unique<Impl>(std::filesystem::absolute(path).lexically_normal().string(), mode)) {}
 DurableSave::~DurableSave() = default;
 void DurableSave::Commit(const std::uint8_t *data, std::size_t length) { impl_->Commit(data, length); }
+void DurableSave::Checkpoint() { impl_->Checkpoint(); }
+std::vector<std::uint8_t> DurableSave::Image() const {
+    std::lock_guard<std::mutex> guard(impl_->mutex);
+    Require(impl_->usable);
+    return impl_->image;
+}
 bool DurableSave::SupportsHostDurability() const {
     struct statfs filesystem{};
     if (::fstatfs(impl_->parent.Get(), &filesystem) != 0) Fail();
