@@ -1,0 +1,17 @@
+Code differences of the Korean HeartGold and SoulSilver cartridges from US,
+applied after heartgold-mail-template.patch.
+
+Korean save blocks carry their own footer magic number.
+
+diff --git a/include/save.h b/include/save.h
+--- a/include/save.h
++++ b/include/save.h
+@@ -15,7 +15,7 @@
+ #define WRITE_STATUS_SUCCESS    2
+ #define WRITE_STATUS_TOTAL_FAIL 3
+ 
+-#define SAVE_CHUNK_MAGIC 0x20060623
++#define SAVE_CHUNK_MAGIC 0x20070903
+ 
+ struct SaveArrayHeader {
+     int id;

@@ -27,17 +27,25 @@ from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_gam
 # game: (define, decompilation version name)
 GAMES = {"heartgold": ("HEARTGOLD", "VERSION_HEARTGOLD"), "soulsilver": ("SOULSILVER", "VERSION_SOULSILVER")}
 # id: (catalogue country, language enumerator, text column, build deltas)
+# Game functions that differ from US only in reviewed, language-specific details. Each is
+# placed where the retail callers point, and only if exactly this many of its bytes differ.
+REVIEWED = {
+    "ko": {"GetSpeciesName": 1},  # the species name bank number
+}
+MAIL = "heartgold-mail-template.patch"
 LANGUAGES = {
     "fr": ("france", "LANGUAGE_FRENCH", "fr_FR", ()),
     "de": ("germany", "LANGUAGE_GERMAN", "de_DE", ()),
-    "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", ("heartgold-italian-build.patch",)),
+    "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", (MAIL,)),
     "es": ("spain", "LANGUAGE_SPANISH", "es_ES", ()),
+    "ko": ("korea", "LANGUAGE_KOREAN", "ko_KR", (MAIL, "heartgold-korean-build.patch")),
 }
 MESSAGES = "a/0/2/7"  # NARC_msgdata_msg
 ICONS = "a/0/1/4"  # NARC_a_0_1_4, where the menu icon's palette comes from
 WT_BANK = 829  # msg_0829, the bank the decompilation appends
 HEAP_FUNCTION = "sub_0201A1B4"  # calls Heap_InitSystem(..., HEAP_ID_MAX, ...)
 ASM = "asm/overlay_27.s"
+MESSAGE_NARC = 0x1B  # NARC_msgdata_msg, the message archive's number
 PORT_PATCH = RETAIL / "heartgold-port.patch"  # port-only source changes
 # Sources of the wonder_trade overlay (main.lsf.in); everything else is resident.
 OVERLAY_SOURCES = ("application.c", "network.c", "tls.c", "http.c", "wire.c", "seed.c", "journal.c",
@@ -89,6 +97,9 @@ class Target(platinum.Target):
         self.modules = nds.modules(self.rom)
         self.banks_header = None
 
+    def reviewed(self):
+        return REVIEWED.get(self.language, {})
+
     # --- Mapping --------------------------------------------------------------------------------------
     def map_symbols(self):
         self.image = symbols.UsImage((self.pristine / self.build_dir / "main.nef").read_bytes(), self.us_rom)
@@ -112,10 +123,28 @@ class Target(platinum.Target):
         self.text_fid, self.icon_fid = ids[MESSAGES], ids[ICONS]
         members, self.text_names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.text_fid))])
         us_members, _ = nds.narc_split(self.us_rom[slice(*nds.file_span(self.us_rom, nds.file_ids(self.us_rom)[MESSAGES]))])
+        require(len(us_members) == WT_BANK, "the US message archive does not end where Wonder Trade's bank goes")
         remap = platinum.text_bank_remap(us_members, members)
-        require(len(members) == len(us_members) == WT_BANK and all(remap.get(i) == i for i in range(WT_BANK)),
-                "the retail message archive numbers its banks differently from US")
         self.text_members = members
+        self.naix, self.bank_remap = None, None
+        if len(members) != WT_BANK or any(remap.get(i) != i for i in range(WT_BANK)):
+            # Japanese and Korean leave some banks out: number the ones the code uses like the
+            # cartridge does, by each bank's key, and append Wonder Trade's after the last.
+            naix = (self.workspace / self.build_dir / "files/msgdata/msg.naix").read_text()
+            lines = []
+            for line in naix.splitlines():
+                words = line.split()
+                if len(words) == 3 and words[0] == "#define" and words[1].startswith("msg_") and words[2].isdigit():
+                    number = int(words[2])
+                    if number == WT_BANK:
+                        lines.append(f"#define {words[1]} {len(members)}")
+                    elif remap.get(number) is not None:
+                        lines.append(f"#define {words[1]} {remap[number]}")
+                    continue  # a bank the cartridge does not have stays undefined
+                lines.append(line)
+            self.naix = "\n".join(lines) + "\n"
+            self.bank_remap = dict(remap)
+            self.log(f"message banks renumbered: {len(members)} banks, Wonder Trade's is {len(members)}")
         self.icon_members, self.icon_names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.icon_fid))])
         self.icon_member = len(self.icon_members)
 
@@ -126,11 +155,14 @@ class Target(platinum.Target):
         require(english in config, "include/config.h no longer selects English this way")
         (tree / "include").mkdir(parents=True, exist_ok=True)
         (tree / "include/config.h").write_text(config.replace(english, f"#if 1\n#define GAME_LANGUAGE {self.language_name}"))
+        if self.naix is not None:
+            (tree / "include/msgdata").mkdir(parents=True, exist_ok=True)
+            (tree / "include/msgdata/msg.naix").write_text(self.naix)
 
     # --- 1. Upstream code, including the overlay 27 assembly, must match the retail bytes --------------
     def check_variant(self):
         super().check_variant()
-        asm = elf.Elf((self.pristine / self.build_dir / "main.nef.p/asm_overlay_27.s.o").read_bytes())
+        asm = elf.Elf(self._renumbered_banks((self.pristine / self.build_dir / "main.nef.p/asm_overlay_27.s.o").read_bytes()))
         self.pristine_objects[ASM] = asm
         problems = self._locate(ASM, asm)
         require(not problems, "overlay 27 differs from the retail game:\n  " + "\n  ".join(problems))
@@ -177,12 +209,42 @@ class Target(platinum.Target):
         for path, name in inputs:
             data = path.read_bytes()
             if name == "asm_overlay_27.s.o":
-                data = self._shared_overlay_data(data)
+                data = self._shared_overlay_data(self._renumbered_banks(data))
             (out / name).write_bytes(elf.numbered_sections(elf.with_inline_addends(data)))
             self.objects[str(out / name)] = elf.Elf((out / name).read_bytes())
         self.port_objects = {self._file_of(out / name): self.objects[str(out / name)] for path, name in inputs
                              if self._file_of(out / name) in self.files}
         self.log(f"compiled {len(objects)} objects for variant {self.code:#010x}")
+
+    def _renumbered_banks(self, data):
+        """Overlay 27's assembly with the cartridge's message bank numbers.
+
+        The assembly names banks by number, as NewMsgDataFromNarc(..., NARC_msgdata_msg, bank, ...)
+        with the bank in a Thumb mov r2, #imm before the call; the C code gets them from msg.naix."""
+        if self.bank_remap is None:
+            return data
+        obj = elf.Elf(data)
+        text = next(i for i, s in enumerate(obj.sections) if s["name"] == ".text")
+        body = obj.section_bytes(text)
+        start = obj.sections[text]["off"]
+        out = bytearray(data)
+        changed = 0
+        for offset, kind, index, _ in obj.relocs.get(text, ()):
+            if kind != elf.R_ARM_THM_CALL or obj.symbols[index]["name"] != "NewMsgDataFromNarc":
+                continue
+            window = range(offset - 2, max(offset - 12, -2), -2)
+            words = {k: struct.unpack_from("<H", body, k)[0] for k in window if k >= 0}
+            if not any(word == 0x2100 | MESSAGE_NARC for word in words.values()):
+                continue  # another archive
+            site = next((k for k, word in words.items() if word >> 8 == 0x22), None)
+            require(site is not None, f"{ASM} loads a message bank at {offset:#x} other than by mov r2, #imm")
+            bank = body[site]
+            new = self.bank_remap.get(bank)
+            require(new is not None and new < 256, f"{ASM} uses message bank {bank}, which the cartridge does not have")
+            out[start + site] = new
+            changed += new != bank
+        self.log(f"{ASM}: {changed} message bank numbers renumbered")
+        return bytes(out)
 
     def _shared_overlay_data(self, data):
         """The relinked overlay 27 functions keep using the game's own overlay 27 variables.

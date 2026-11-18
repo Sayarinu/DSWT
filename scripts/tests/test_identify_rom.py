@@ -119,6 +119,7 @@ class IdentifyRomTests(unittest.TestCase):
             "diamond-europe-rev5", "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe",
             "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
             "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain",
+            "heartgold-korea", "soulsilver-korea",
             "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
             "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for key in ("id", "sha256", "sha1", "crc32"):
@@ -143,8 +144,9 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe",
                                                         "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
                                                         "soulsilver-france", "soulsilver-germany", "soulsilver-italy",
-                                                        "soulsilver-spain", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
-                                                        "france", "germany", "italy", "spain", "japan", "platinum-korea"])
+                                                        "soulsilver-spain", "heartgold-korea", "soulsilver-korea",
+                                                        "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
+                                                                                                    "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for row in built:
             if "port_base" in row:
                 continue

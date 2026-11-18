@@ -89,7 +89,8 @@ const Layout &LayoutFor(const std::string &target) {
             target == "soulsilver-europe" || target == "heartgold-france" || target == "heartgold-germany" ||
             target == "heartgold-italy" || target == "heartgold-spain" ||
             target == "soulsilver-france" || target == "soulsilver-germany" ||
-            target == "soulsilver-italy" || target == "soulsilver-spain");
+            target == "soulsilver-italy" || target == "soulsilver-spain" || target == "heartgold-korea" ||
+            target == "soulsilver-korea");
     return kHeartGoldSoulSilver;
 }
 
