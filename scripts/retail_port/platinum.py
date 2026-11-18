@@ -440,14 +440,10 @@ class Target:
         if us is None:
             return None
         if us.num not in self.map.addr and name in self.reviewed():
-            at = self.map.voted(us)
-            if at is None and name in TEMPLATE_INITS:
-                at = self._template_init(*TEMPLATE_INITS[name])
-            require(at is not None, f"no retail call agrees where {name} is")
-            differ = self.map.differing(us, at)
-            expected = self.reviewed()[name]
-            require(differ == expected, f"{name} at {at:#x} differs from US in {differ} bytes, not the {expected} reviewed")
-            return (at & ~1) | int(us.num in self.image.thumb), True
+            # An init reached only through the game's app templates has no call to vote on it.
+            template = self._template_init(*TEMPLATE_INITS[name]) if name in TEMPLATE_INITS else None
+            extra = () if template is None else (template,)
+            return symbols.reviewed_address(self.map, us, self.reviewed()[name], extra), True
         if us.num in self.map.addr:
             at = self.map.addr[us.num]
             return ((at & ~1) | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)

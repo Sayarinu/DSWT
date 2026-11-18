@@ -143,9 +143,11 @@ def dp_commands(workspace, sources, version, tls):
     return commands
 
 
-def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_trade=False, tls=None, defines=None):
+def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_trade=False, tls=None, defines=None,
+                       compiler=None):
     """Compile Diamond or Pearl objects into out with make's own commands: files from sources
-    (a tree like the workspace), the headers directory searched first."""
+    (a tree like the workspace), the headers directory searched first, and the game's own
+    files with another compiler version (such as "2.0/sp1p6") if one is given."""
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     names = list(files)
@@ -166,6 +168,10 @@ def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_
         if name in files:
             words[-1] = f"{SOURCES}/{name}"
         kind = "wonder_trade" if name.startswith("arm9/src/wonder_trade/") else "game"
+        if compiler and kind == "game":
+            # A cartridge built later than US used a newer compiler for the game's own code.
+            at = next(i for i, w in enumerate(words) if w.endswith("mwccarm.exe"))
+            words[at] = f"../tools/mwccarm/{compiler}/mwccarm.exe"
         lines.append(f"{DP_LICENSE} MWCIncludes={shlex.quote(DP_INCLUDES[kind])} {shlex.join(words)}")
     mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
               str(Path(sources).resolve()): SOURCES, str(Path(headers).resolve()): HEADERS}

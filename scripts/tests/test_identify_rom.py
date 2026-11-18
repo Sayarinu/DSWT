@@ -121,6 +121,7 @@ class IdentifyRomTests(unittest.TestCase):
             "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain",
             "heartgold-korea", "soulsilver-korea",
             "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
+            "diamond-korea", "pearl-korea",
             "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for key in ("id", "sha256", "sha1", "crc32"):
             self.assertEqual(len({row[key] for row in variants}), len(variants))
@@ -145,8 +146,10 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
                                                         "soulsilver-france", "soulsilver-germany", "soulsilver-italy",
                                                         "soulsilver-spain", "heartgold-korea", "soulsilver-korea",
-                                                        "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
-                                                                                                    "france", "germany", "italy", "spain", "japan", "platinum-korea"])
+                                                        "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain",
+                                                        "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
+                                                        "diamond-korea", "pearl-korea",
+                                                        "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for row in built:
             if "port_base" in row:
                 continue

@@ -314,6 +314,22 @@ class MatchTest(unittest.TestCase):
         self.assertIsNone(symbols.unique_match(modules, "arm9", b"\x09", [True]))
         self.assertEqual(symbols.reference_target(elf.R_ARM_ABS32, struct.pack("<I", 0x02000010), 0, 0x10), 0x02000000)
 
+    def test_reviewed_function_is_the_one_guess_with_the_reviewed_difference(self):
+        class Table:
+            us = type("Image", (), {"thumb": {7}})()
+
+            def __init__(self, guesses, differing):
+                self.guesses = lambda symbol: guesses
+                self.differing = lambda symbol, at: differing[at]
+        symbol = symbols.Symbol(7, 0x02000101, 24, elf.STT_FUNC, 1, "sub_02000100")
+        # A caller and the neighbour before it agree; the neighbour after it moved with added code.
+        table = Table({0x02000560, 0x02000570}, {0x02000560: 7, 0x02000570: 16})
+        self.assertEqual(symbols.reviewed_address(table, symbol, 7), 0x02000561)
+        with self.assertRaisesRegex(ValueError, "no call or neighbour"):
+            symbols.reviewed_address(table, symbol, 4)
+        with self.assertRaisesRegex(ValueError, "0x2000560, 0x2000570"):
+            symbols.reviewed_address(Table({0x02000560, 0x02000570}, {0x02000560: 7, 0x02000570: 7}), symbol, 7)
+
     def test_ar_members(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "lib.a"
@@ -490,6 +506,16 @@ class DiamondPearlTest(unittest.TestCase):
         self.assertIn('<language name="English">ECHANGE MIRACLE</language>', out)
         with self.assertRaises(platinum.PortError):
             dp.localized_gmm(source, "German")
+
+    def test_reviewed_and_library_tables_name_known_languages(self):
+        for table in (dp.REVIEWED, dp.LIBRARIES, dp.LIBRARY_REVIEWED):
+            for language, names in table.items():
+                with self.subTest(language=language):
+                    self.assertIn(language, dp.LANGUAGES)
+                    self.assertTrue(names)
+        for language, names in dp.LIBRARY_REVIEWED.items():
+            self.assertTrue(set(names) <= set(dp.LIBRARIES[language].values()))
+            self.assertTrue(all(type(count) is int and count > 0 for count in names.values()))
 
     def test_sdk_library_reads_loose_objects(self):
         with tempfile.TemporaryDirectory() as directory:

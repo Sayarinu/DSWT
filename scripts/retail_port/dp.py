@@ -25,17 +25,71 @@ from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_gam
 # game: (make GAME_VERSION and define, decompilation version name)
 GAMES = {"diamond": ("DIAMOND", "VERSION_DIAMOND"), "pearl": ("PEARL", "VERSION_PEARL")}
 # id: (catalogue country, language enumerator, .gmm and Wonder Trade text column, build deltas)
+# Korean was built later than US, with a newer compiler for the game's own code.
+COMPILERS = {"ko": "2.0/sp1p6"}
 LANGUAGES = {
     "fr": ("france", "LANGUAGE_FRENCH", "French", "fr_FR", ()),
     "de": ("germany", "LANGUAGE_GERMAN", "German", "de_DE", ()),
     "it": ("italy", "LANGUAGE_ITALIAN", "Italian", "it_IT", ()),
     "es": ("spain", "LANGUAGE_SPANISH", "Spanish", "es_ES", ()),
+    "ko": ("korea", "LANGUAGE_KOREAN", "Korean", "ko_KR", ("diamond-korean-build.patch",)),
+}
+# Game functions a language changes in reviewed details: name -> bytes that differ from US.
+REVIEWED = {
+    "ko": {
+        "GetSpeciesName": 1,  # the species name bank number
+        "ov81_02237E40": 1,  # a literal data address
+        "sub_020372D4": 1,  # the call to its neighbour, which grew
+        "sub_02037304": 7,  # two added calls after the trade sequence ends
+        "ov04_021DD904": 24,  # DWC_Free, a NitroDWC between Diamond's and Platinum's
+    },
+}
+# Korean ships the newer libraries Platinum has (NitroSDK 4.2.30001, NitroWiFi 2.1.30003 and
+# NitroDWC 2.2.30008), with the same structures and calls: the functions the module uses are
+# found by Platinum's build of them, so it never mixes in Diamond's older copies.
+# Diamond name -> Platinum name.
+LIBRARIES = {
+    "ko": {
+        "NNS_FndAllocFromExpHeapEx": "NNS_FndAllocFromExpHeapEx",
+        "NNS_FndCreateExpHeapEx": "NNS_FndCreateExpHeapEx",
+        "NNS_FndFreeToExpHeap": "NNS_FndFreeToExpHeap",
+        "OS_CreateThread": "OS_CreateThread",
+        "OS_GetLowEntropyData": "OS_GetLowEntropyData",
+        "OS_GetThreadPriority": "OS_GetThreadPriority",
+        "OS_GetTick": "OS_GetTick",
+        "OS_JoinThread": "OS_JoinThread",
+        "OS_Sleep": "OS_Sleep",
+        "OS_WakeupThreadDirect": "OS_WakeupThreadDirect",
+        "SOCL_CreateSocket": "SOCL_CreateSocket",
+        "SOCL_Connect": "SOCL_Connect",
+        "SOCLi_ReadFrom": "SOCL_ReadFrom",  # 2.1 reads in SOCL_ReadFrom itself, same arguments
+        "SOCL_WriteTo": "SOCL_WriteTo",
+        "SOCL_Close": "SOCL_Close",
+        "SOCL_IsClosed": "SOCL_IsClosed",
+        "SOCLi_TrashSocket": "SOCLi_TrashSocket",
+        "WCM_DisconnectAsync": "WCM_DisconnectAsync",
+        "WCM_GetPhase": "WCM_GetPhase",
+        "ov04_021DD968": "DWC_SetMemFunc",
+        "ov04_021DD944": "DWC_Alloc",
+        "ov04_021DD6F0": "DWC_ClearError",
+        "ov04_021EBC60": "DWC_AC_Create",
+        "ov04_021EBB80": "DWC_AC_Process",
+        "ov04_021EBAE8": "DWC_AC_GetStatus",
+        "ov04_021EB9D8": "DWC_AC_Destroy",
+    },
+}
+# Platinum library functions a language changes in reviewed details: name -> bytes that differ.
+LIBRARY_REVIEWED = {
+    "ko": {
+        "DWC_AC_Create": 16,  # calls into its own file, whose functions moved
+    },
 }
 MESSAGES = "msgdata/msg.narc"
 MENU_GRAPHICS = "graphic/menu_gra.narc"
 START_MENU_BANK = 323
 WT_BANK = 624  # narc_0624, the bank the decompilation appends
 MENU_ICON = 11  # menu_gra member narc_0011, the one the decompilation appends
+MESSAGE_NARC = 0x1A  # NARC_msgdata_msg, the message archive's number
 ASM = "arm9/asm/unk_02035068.s"
 PORT_PATCH = RETAIL / "diamond-port.patch"  # port-only source changes, if any
 FAMILY = 1
@@ -64,7 +118,7 @@ def localized_gmm(text, language):
 class Target(platinum.Target):
     """One retail Diamond or Pearl to port."""
 
-    def __init__(self, game, language, rom_path, workspace, pristine, work, log=print):
+    def __init__(self, game, language, rom_path, workspace, pristine, work, log=print, library=None):
         require(game in GAMES, f"unsupported game {game}")
         require(language in LANGUAGES, f"unsupported language {language}")
         self.game, self.language = game, language
@@ -94,6 +148,13 @@ class Target(platinum.Target):
         for tree in (self.workspace, self.pristine):
             require(git(tree, "rev-parse", "HEAD").decode().strip() == pin, f"{tree} is not at upstream {pin}")
         self.modules = nds.modules(self.rom)
+        self.library = None
+        if language in LIBRARIES:
+            require(library is not None, f"{self.variant_id} also needs the pristine Platinum build")
+            self.library = Path(library).resolve()
+            self.library_rom = (self.library / "build/pokeplatinum.us.nds").read_bytes()
+            require(sha256(self.library_rom) == catalogue[platinum.US_VARIANT]["sha256"],
+                    f"{self.library} is not a pristine {platinum.US_VARIANT} build; build it with ROM_REVISION=1 --pristine")
         self.banks_header = None
         self.object_names = {}
 
@@ -102,6 +163,53 @@ class Target(platinum.Target):
         self.image = symbols.UsImage((self.pristine / self.arm9_build / "arm9.elf").read_bytes(), self.us_rom)
         self.map = symbols.SymbolMap(self.image, self.us_rom, self.rom)
         self.log(f"mapped {len(self.map.addr)} US symbols")
+        self.library_addr = self._map_library() if self.library is not None else {}
+
+    def _map_library(self):
+        """Diamond name -> address of each listed library function, found by Platinum's bytes in
+        the module Diamond keeps it in (Platinum keeps the socket library in an overlay)."""
+        image = symbols.UsImage((self.library / "build/main.nef").read_bytes(), self.library_rom)
+        modules = nds.modules(self.library_rom)
+        found, pending = {}, {}
+        for name, theirs in LIBRARIES[self.language].items():
+            ours, symbol = self.image.unique(name), image.unique(theirs)
+            require(ours is not None and symbol is not None, f"{name} or Platinum's {theirs} is not a single symbol")
+            got = symbols.masked(image, modules, symbol, symbol.size)
+            require(got is not None, f"Platinum's {theirs} has no bytes to match")
+            module, thumb = self.image.module(ours), symbol.num in image.thumb
+            at = symbols.unique_match(self.modules, module, got[2], got[3], 2 if thumb else 4)
+            if at is None:
+                pending[name] = (symbol, module, got[2], got[3])
+            else:
+                found[name] = (symbol, module, at | int(thumb))
+        reviewed = LIBRARY_REVIEWED.get(self.language, {})
+        for name, (symbol, module, data, keep) in pending.items():
+            if symbol.name not in reviewed:
+                continue
+            # Placed at Platinum's distance from a placed function of its Platinum section, where
+            # its bytes differ in exactly the reviewed number of places.
+            base, body = self.modules[module]
+            hits = set()
+            for other, where, at in found.values():
+                guess = (at & ~1) + symbol.start - other.start
+                offset = guess - base
+                if (where, other.section) != (module, symbol.section) or not 0 <= offset <= len(body) - len(data):
+                    continue
+                if sum(keep[i] and body[offset + i] != data[i] for i in range(len(data))) == reviewed[symbol.name]:
+                    hits.add(guess | int(symbol.num in image.thumb))
+            require(len(hits) == 1, f"{symbol.name} is not where its neighbours put it with the reviewed differences")
+            found[name] = (symbol, module, hits.pop())
+        self.log(f"{len(found)} of {len(LIBRARIES[self.language])} library functions found by Platinum's build")
+        return {name: at for name, (_, _, at) in found.items()}
+
+    def reviewed(self):
+        return REVIEWED.get(self.language, {})
+
+    def _resolve(self, name):
+        if name in LIBRARIES.get(self.language, {}):
+            at = self.library_addr.get(name)
+            return None if at is None else (at, True)
+        return super()._resolve(name)
 
     def replaced_files(self):
         _, desired = prepare_game.overlay_files(ROOT, self.workspace, prepare_game.GAMES["dp"])
@@ -123,10 +231,29 @@ class Target(platinum.Target):
         self.text_fid, self.icon_fid = ids[MESSAGES], ids[MENU_GRAPHICS]
         members, self.text_names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.text_fid))])
         us_members, _ = nds.narc_split(self.us_rom[slice(*nds.file_span(self.us_rom, nds.file_ids(self.us_rom)[MESSAGES]))])
+        require(len(us_members) == WT_BANK, "the US message archive does not end where Wonder Trade's bank goes")
         remap = platinum.text_bank_remap(us_members, members)
-        require(len(members) == len(us_members) == WT_BANK and all(remap.get(i) == i for i in range(WT_BANK)),
-                "the retail message archive numbers its banks differently from US")
         self.text_members = members
+        self.naix, self.bank_remap, self.start_menu_bank = None, None, START_MENU_BANK
+        if len(members) != WT_BANK or any(remap.get(i) != i for i in range(WT_BANK)):
+            # Japanese and Korean leave some banks out: number the ones the code uses like the
+            # cartridge does, by each bank's key, and append Wonder Trade's after the last.
+            self.bank_remap = dict(remap)
+            self.bank_remap[WT_BANK] = len(members)
+            require(remap.get(START_MENU_BANK) is not None, "the retail game has no start menu text bank")
+            self.start_menu_bank = remap[START_MENU_BANK]
+            lines = []
+            for line in (self.workspace / "files/msgdata/msg.naix").read_text().splitlines():
+                words = line.replace(",", " ").split()
+                if len(words) == 3 and words[0].startswith("NARC_msg_narc_") and words[1] == "=" and words[2].isdigit():
+                    number = self.bank_remap.get(int(words[2]))
+                    if number is not None:
+                        lines.append(f"    {words[0]} = {number},")
+                    continue  # a bank the cartridge does not have stays undefined
+                lines.append(line)
+            self.naix = "\n".join(lines) + "\n"
+            self.log(f"message banks renumbered: {len(members)} banks, start menu {self.start_menu_bank}, "
+                     f"Wonder Trade's {len(members)}")
         self.icon_members, self.icon_names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.icon_fid))])
         require(len(self.icon_members) == MENU_ICON, f"the retail menu graphics archive does not end at member {MENU_ICON}")
 
@@ -143,13 +270,16 @@ class Target(platinum.Target):
         archive = subprocess.run(["git", "-C", str(self.workspace), "archive", "HEAD", "include"],
                                  check=True, capture_output=True).stdout
         subprocess.run(["tar", "-x", "--skip-old-files", "-C", str(tree)], input=archive, check=True)
+        if self.naix is not None:
+            (tree / "include/msgdata").mkdir(parents=True, exist_ok=True)
+            (tree / "include/msgdata/msg.naix").write_text(self.naix)
 
     def _file_of(self, path):
         return self.object_names.get(Path(path).name, Path(path).name)
 
     def _compile(self, tree, out, **options):
         return toolchain.compile_dp_objects(self.workspace, tree, tree / "include", out, self.files, self.version,
-                                            tls=self._tls(), **options)
+                                            tls=self._tls(), compiler=COMPILERS.get(self.language), **options)
 
     @staticmethod
     def _tls():
@@ -162,8 +292,8 @@ class Target(platinum.Target):
         self._stage(tree, self.files + self.headers, lambda name: git(self.workspace, "show", f"HEAD:{name}"), self.deltas)
         objects = self._compile(tree, self.work / "pristine-obj")
         self.pristine_objects = {self._file_of(path): elf.Elf(path.read_bytes()) for path in objects}
-        self.pristine_objects[ASM] = elf.Elf(elf.with_function_sizes(
-            (self.pristine / self.arm9_build / "asm/unk_02035068.o").read_bytes()))
+        self.pristine_objects[ASM] = elf.Elf(self._renumbered_banks(elf.with_function_sizes(
+            (self.pristine / self.arm9_build / "asm/unk_02035068.o").read_bytes())))
         self.located, self.located_data, problems = {}, {}, []
         for name in [*self.files, ASM]:
             problems += self._locate(name, self.pristine_objects[name])
@@ -189,7 +319,7 @@ class Target(platinum.Target):
         self._stage(tree, sources + self.headers, lambda name: (self.workspace / name).read_bytes(), patches)
         objects = toolchain.compile_dp_objects(self.workspace, tree, tree / "include", self.work / "port-obj", sources,
                                                self.version, wonder_trade=True, tls=self._tls(),
-                                               defines=self.port_defines())
+                                               defines=self.port_defines(), compiler=COMPILERS.get(self.language))
         build = self.workspace / self.arm9_build
         tls = sorted((build / "wt_tls").rglob("*.o"))
         require(tls, f"{build / 'wt_tls'} has no objects; build the workspace first")
@@ -205,12 +335,42 @@ class Target(platinum.Target):
         for path, name in inputs:
             data = path.read_bytes()
             if name == asm:
-                data = self._shared_tables(elf.with_function_sizes(data), wanted)
+                data = self._shared_tables(self._renumbered_banks(elf.with_function_sizes(data)), wanted)
             (out / name).write_bytes(elf.numbered_sections(elf.with_inline_addends(data)))
             self.objects[str(out / name)] = elf.Elf((out / name).read_bytes())
         self.port_objects = {self._file_of(name): self.objects[str(out / name)] for _, name in inputs
                              if self._file_of(name) in self.files}
         self.log(f"compiled {len(objects)} objects for variant {self.code:#010x}")
+
+    def _renumbered_banks(self, data):
+        """The start menu assembly with the cartridge's message bank numbers.
+
+        It loads banks as NewMsgDataFromNarc(..., NARC_msgdata_msg, bank, ...) with the bank
+        in a literal (ldr r2, =bank); the C code gets them from msg.naix."""
+        if self.bank_remap is None:
+            return data
+        obj = elf.Elf(data)
+        text = next(i for i, s in enumerate(obj.sections) if s["name"] == ".text")
+        body = obj.section_bytes(text)
+        start = obj.sections[text]["off"]
+        out = bytearray(data)
+        changed = 0
+        for offset, kind, index, _ in obj.relocs.get(text, ()):
+            if kind != elf.R_ARM_THM_CALL or obj.symbols[index]["name"] != "NewMsgDataFromNarc":
+                continue
+            words = {k: struct.unpack_from("<H", body, k)[0] for k in range(offset - 2, max(offset - 12, -2), -2) if k >= 0}
+            if not any(word == 0x2100 | MESSAGE_NARC for word in words.values()):
+                continue  # another archive
+            site = next((k for k, word in words.items() if word >> 8 == 0x4A), None)  # ldr r2, [pc, #imm]
+            require(site is not None, f"{ASM} loads a message bank at {offset:#x} other than from a literal")
+            literal = ((site + 4) & ~3) + (words[site] & 0xFF) * 4
+            bank = struct.unpack_from("<I", body, literal)[0]
+            new = self.bank_remap.get(bank)
+            require(new is not None, f"{ASM} uses message bank {bank}, which the cartridge does not have")
+            struct.pack_into("<I", out, start + literal, new)
+            changed += new != bank
+        self.log(f"{ASM}: {changed} message bank numbers renumbered")
+        return bytes(out)
 
     def _shared_tables(self, data, wanted):
         """Tables of the relinked assembly that other objects name stay the game's own.
@@ -328,7 +488,7 @@ class Target(platinum.Target):
         work.mkdir(parents=True)
         msg_mk = (self.workspace / "files/msgdata/msg.mk").read_text()
         # The start menu bank gains the menu label as its last entry.
-        (work / "start_menu.bin").write_bytes(self.text_members[START_MENU_BANK])
+        (work / "start_menu.bin").write_bytes(self.text_members[self.start_menu_bank])
         self._msgenc(work, "-d", "start_menu.bin", "start_menu.txt")
         lines = (work / "start_menu.txt").read_text(encoding="utf-8").splitlines()
         wt_rows = list(ET.parse(self.workspace / f"files/msgdata/msg/narc_{START_MENU_BANK:04d}.gmm").getroot().iter("row"))
@@ -343,14 +503,15 @@ class Target(platinum.Target):
         self._msgenc(work, "-e", "wonder_trade.gmm", "wonder_trade.bin", "--gmm", "-H", "wonder_trade.h",
                      "-k", hex(gmm_key(msg_mk, WT_BANK)))
         members = list(self.text_members)
-        members[START_MENU_BANK] = (work / "start_menu_wt.bin").read_bytes()
+        members[self.start_menu_bank] = (work / "start_menu_wt.bin").read_bytes()
         members.append((work / "wonder_trade.bin").read_bytes())
         self.text = nds.narc_join(members, self.text_names)
         # The menu icon, appended to the menu graphics.
         wt_rom = (self.workspace / f"build/{self.game}.us/poke{self.game}.us.nds").read_bytes()
         wt_icons, _ = nds.narc_split(wt_rom[slice(*nds.file_span(wt_rom, nds.file_ids(wt_rom)[MENU_GRAPHICS]))])
-        require(len(wt_icons) == MENU_ICON + 1 and wt_icons[:MENU_ICON] == self.icon_members,
-                "the Wonder Trade build's menu graphics differ from the retail game's apart from the icon")
+        us_icons, _ = nds.narc_split(self.us_rom[slice(*nds.file_span(self.us_rom, nds.file_ids(self.us_rom)[MENU_GRAPHICS]))])
+        require(len(wt_icons) == MENU_ICON + 1 and wt_icons[:MENU_ICON] == us_icons,
+                "the Wonder Trade build's menu graphics differ from US apart from the icon")
         self.icons = nds.narc_join([*self.icon_members, wt_icons[MENU_ICON]], self.icon_names)
 
     def _msgenc(self, work, mode, source, output, *options):

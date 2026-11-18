@@ -2,7 +2,7 @@
   "version": 1,
   "upstream_pin": "client/upstream-pokediamond.json",
   "upstream_revision": "b623abef1b4dfe204ca50aab42447ac00c134290",
-  "verified_targets": ["diamond-us-rev5", "pearl-us-rev5", "diamond-europe-rev5", "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain"],
+  "verified_targets": ["diamond-us-rev5", "pearl-us-rev5", "diamond-europe-rev5", "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea"],
   "footer_magic": {"international": 537265699, "korean": 537331971},
   "korean_target_suffix": "-korea",
   "languages": ["Japanese", "English", "French", "German", "Italian", "Spanish", "Korean"],

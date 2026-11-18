@@ -176,6 +176,15 @@ class SymbolMap:
             if hit is not None:
                 self.addr[symbol.num] = hit | (symbol.address & 1)
                 self.how[symbol.num] = "bytes"
+        # Two different US functions can never share an address: when byte matching puts two there
+        # (short functions that differ only in what they call), neither placement is trusted.
+        seen = collections.defaultdict(list)
+        for num, at in self.addr.items():
+            seen[(self.us.module(self._bynum[num]), at & ~1)].append(num)  # overlays share addresses
+        for nums in seen.values():
+            if len({self._bynum[num].start for num in nums}) > 1:  # aliases of one function may share
+                for num in nums:
+                    del self.addr[num], self.how[num]
 
     def matches(self, symbol, address):
         got = self._masked(symbol)
@@ -207,6 +216,32 @@ class SymbolMap:
             return None
         (best, count), *rest = counter.most_common(2)
         return None if rest and count <= rest[0][1] else best
+
+    def guesses(self, symbol):
+        """Where an unplaced function may be: the address calls from placed functions agree on,
+        and where each placed neighbour, up to two either side in its US section, puts it."""
+        found = set()
+        voted = self.voted(symbol)
+        if voted is not None:
+            found.add(voted & ~1)
+        rows = self._order().get(symbol.section, [])
+        if symbol in rows:
+            i = rows.index(symbol)
+            for other in rows[max(i - 2, 0):i] + rows[i + 1:i + 3]:
+                if other.num in self.addr:
+                    found.add((self.addr[other.num] & ~1) + (symbol.start - other.start))
+        return found
+
+    def _order(self):
+        """Section index -> its mappable symbols in address order."""
+        if not hasattr(self, "_rows"):
+            self._rows = collections.defaultdict(list)
+            for symbol in self.us.syms:
+                if self._masked(symbol) is not None:
+                    self._rows[symbol.section].append(symbol)
+            for rows in self._rows.values():
+                rows.sort(key=lambda symbol: symbol.address)
+        return self._rows
 
     def _propagate(self):
         votes = collections.defaultdict(collections.Counter)
@@ -252,12 +287,7 @@ class SymbolMap:
         self.votes = votes
 
     def _neighbours(self):
-        order = collections.defaultdict(list)
-        for symbol in self.us.syms:
-            if self._masked(symbol) is not None:
-                order[symbol.section].append(symbol)
-        for rows in order.values():
-            rows.sort(key=lambda symbol: symbol.address)
+        order = self._order()
         changed = True
         while changed:
             changed = False
@@ -274,6 +304,18 @@ class SymbolMap:
                                 self.how[symbol.num] = "neighbour"
                                 changed = True
                             break
+
+
+def reviewed_address(table, symbol, expected, extra=()):
+    """A function the target changes in reviewed details: the one guess, or extra candidate,
+    where its bytes differ from the image's in exactly the reviewed number of places, with
+    the Thumb bit set as the image has it."""
+    candidates = table.guesses(symbol) | {at & ~1 for at in extra}
+    found = {at for at in candidates if table.differing(symbol, at) == expected}
+    if len(found) != 1:
+        where = ", ".join(f"{at:#x}" for at in sorted(found)) or "no call or neighbour"
+        raise ValueError(f"{symbol.name}: {where} differs in the {expected} reviewed bytes")
+    return found.pop() | int(symbol.num in table.us.thumb)
 
 
 def reference_target(kind, word, at, addend):
