@@ -92,8 +92,27 @@ enum WonderTradeAppState {
 #define WT_GTS_BACKDROP_MAP 29
 #define WT_GTS_BUTTON_MAP 30
 /* Background tiles and palettes, as in Platinum's Wonder Trade screen. */
-#define WT_FRAME_TILE 961
+/* Character tiles of the text windows. Tile 0 stays blank; each window's tiles
+ * follow the previous one's (width x height), and the frames follow the preview. */
+#define WT_BLANK_TILE_SIZE 0x20
+#define WT_TITLE_TILE 1
+#define WT_MESSAGE_WINDOW_TILE 61
+#define WT_DETAILS_TILE 223
+#define WT_BODY_TILE 413
+#define WT_PREVIEW_TILE (WT_BODY_TILE + 28 * 16)
+#define WT_FRAME_TILE (WT_PREVIEW_TILE + 10 * 10)
 #define WT_MESSAGE_TILE 970
+#define WT_SUB_TITLE_TILE 1
+#define WT_ACTION_TILE 61
+#define WT_ACTION_TILES ((WT_MENU_WIDTH / 8) * (WT_MENU_HEIGHT / 8))
+/* The listing card keeps rows 1-12 of its GTS map, moved down to row 4. */
+#define WT_SCREEN_TILES_W 32
+#define WT_SCREEN_TILES_H 24
+#define WT_CARD_SOURCE_ROW 1
+#define WT_CARD_ROW 4
+#define WT_CARD_ROWS 12
+#define WT_PALETTE_SIZE 32
+#define WT_GTS_PALETTE_COUNT 3
 #define WT_PREVIEW_PALETTE 4
 #define WT_TEXT_PALETTE 6
 #define WT_FRAME_PALETTE 7
@@ -321,48 +340,50 @@ static void WonderTrade_InitGraphics(WonderTradeApp *app)
         WonderTrade_InitBg(app->bgConfig, base, GX_BG_SCRBASE_0xf800, GX_BG_CHARBASE_0x00000, 0);
         WonderTrade_InitBg(app->bgConfig, (u8)(base + 1), GX_BG_SCRBASE_0xf000, GX_BG_CHARBASE_0x08000, 2);
         WonderTrade_InitBg(app->bgConfig, (u8)(base + 2), GX_BG_SCRBASE_0xe800, i ? GX_BG_CHARBASE_0x08000 : GX_BG_CHARBASE_0x0c000, 1);
-        BG_ClearCharDataRange(base, 0x20, 0, app->game.heapID);
+        BG_ClearCharDataRange(base, WT_BLANK_TILE_SIZE, 0, app->game.heapID);
         GfGfxLoader_LoadCharData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_BACKDROP_TILES, app->bgConfig, base + 1, 0, 0, TRUE, app->game.heapID);
         GfGfxLoader_LoadScrnData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_BACKDROP_MAP, app->bgConfig, base + 1, 0, 0, TRUE, app->game.heapID);
     }
 
-    BgTilemapRectChangePalette(app->bgConfig, GF_BG_LYR_MAIN_1, 0, 0, 32, 24, WT_BACKDROP_PALETTE);
+    BgTilemapRectChangePalette(app->bgConfig, GF_BG_LYR_MAIN_1, 0, 0, WT_SCREEN_TILES_W, WT_SCREEN_TILES_H, WT_BACKDROP_PALETTE);
     ScheduleBgTilemapBufferTransfer(app->bgConfig, GF_BG_LYR_MAIN_1);
     GfGfxLoader_LoadCharData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_CARD_TILES, app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, TRUE, app->game.heapID);
     GfGfxLoader_LoadScrnData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_CARD_MAP, app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, TRUE, app->game.heapID);
     /* Keep only the listing card, a tile clear of the header bar and above the message box. */
     card = GetBgTilemapBuffer(app->bgConfig, GF_BG_LYR_MAIN_2);
-    memmove(card + 4 * 32, card + 32, 12 * 32 * sizeof(*card));
-    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 0, 32, 4, 0);
-    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 16, 32, 8, 0);
+    memmove(card + WT_CARD_ROW * WT_SCREEN_TILES_W, card + WT_CARD_SOURCE_ROW * WT_SCREEN_TILES_W,
+        WT_CARD_ROWS * WT_SCREEN_TILES_W * sizeof(*card));
+    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, 0, WT_SCREEN_TILES_W, WT_CARD_ROW, 0);
+    FillBgTilemapRect(app->bgConfig, GF_BG_LYR_MAIN_2, 0, 0, WT_CARD_ROW + WT_CARD_ROWS, WT_SCREEN_TILES_W,
+        WT_SCREEN_TILES_H - WT_CARD_ROW - WT_CARD_ROWS, 0);
     ScheduleBgTilemapBufferTransfer(app->bgConfig, GF_BG_LYR_MAIN_2);
     GfGfxLoader_LoadScrnData(NARC_GRAPHIC_WORLDTRADE, WT_GTS_BUTTON_MAP, app->bgConfig, GF_BG_LYR_SUB_2, 0, 0, TRUE, app->game.heapID);
     memcpy(app->buttonTilemap, GetBgTilemapBuffer(app->bgConfig, GF_BG_LYR_SUB_2), sizeof(app->buttonTilemap));
 
-    GfGfxLoader_GXLoadPal(NARC_GRAPHIC_WORLDTRADE, WT_GTS_PALETTE, GF_PAL_LOCATION_MAIN_BG, GF_PAL_SLOT_0_OFFSET, 3 * 32, app->game.heapID);
-    BG_LoadPlttData(GF_PAL_LOCATION_MAIN_BG, (void *)sBackdropPalette, sizeof(sBackdropPalette), (enum GFPalSlotOffset)(WT_BACKDROP_PALETTE * 32));
+    GfGfxLoader_GXLoadPal(NARC_GRAPHIC_WORLDTRADE, WT_GTS_PALETTE, GF_PAL_LOCATION_MAIN_BG, GF_PAL_SLOT_0_OFFSET, WT_GTS_PALETTE_COUNT * WT_PALETTE_SIZE, app->game.heapID);
+    BG_LoadPlttData(GF_PAL_LOCATION_MAIN_BG, (void *)sBackdropPalette, sizeof(sBackdropPalette), (enum GFPalSlotOffset)(WT_BACKDROP_PALETTE * WT_PALETTE_SIZE));
     BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, (void *)sBackdropPalette, sizeof(sBackdropPalette), GF_PAL_SLOT_0_OFFSET);
-    BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, (void *)sButtonPalette, sizeof(sButtonPalette), (enum GFPalSlotOffset)(WT_BUTTON_PALETTE * 32));
-    BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, (void *)sSelectedPalette, sizeof(sSelectedPalette), (enum GFPalSlotOffset)(WT_SELECTED_PALETTE * 32));
-    LoadFontPal1(GF_PAL_LOCATION_MAIN_BG, (enum GFPalSlotOffset)(WT_TEXT_PALETTE * 32), app->game.heapID);
-    LoadFontPal1(GF_PAL_LOCATION_SUB_BG, (enum GFPalSlotOffset)(WT_SUB_TEXT_PALETTE * 32), app->game.heapID);
+    BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, (void *)sButtonPalette, sizeof(sButtonPalette), (enum GFPalSlotOffset)(WT_BUTTON_PALETTE * WT_PALETTE_SIZE));
+    BG_LoadPlttData(GF_PAL_LOCATION_SUB_BG, (void *)sSelectedPalette, sizeof(sSelectedPalette), (enum GFPalSlotOffset)(WT_SELECTED_PALETTE * WT_PALETTE_SIZE));
+    LoadFontPal1(GF_PAL_LOCATION_MAIN_BG, (enum GFPalSlotOffset)(WT_TEXT_PALETTE * WT_PALETTE_SIZE), app->game.heapID);
+    LoadFontPal1(GF_PAL_LOCATION_SUB_BG, (enum GFPalSlotOffset)(WT_SUB_TEXT_PALETTE * WT_PALETTE_SIZE), app->game.heapID);
     /* The game's own window and, in the player's chosen frame, message box. */
     LoadUserFrameGfx1(app->bgConfig, GF_BG_LYR_MAIN_0, WT_FRAME_TILE, WT_FRAME_PALETTE, 0, app->game.heapID);
     sub_0200CD68(app->bgConfig, GF_BG_LYR_MAIN_0, WT_MESSAGE_TILE, WT_MESSAGE_PALETTE, (u8)Options_GetFrame(options), app->game.heapID);
 
-    AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 2, 1, 28, 2, WT_TEXT_PALETTE, 1);
+    AddWindowParameterized(app->bgConfig, &app->title, GF_BG_LYR_MAIN_0, 2, 1, 28, 2, WT_TEXT_PALETTE, WT_TITLE_TILE);
     /* The field's message box (text_02054590.c), 4 tiles high, narrowed to
      * line up with the listing card and raised clear of the bottom bar. */
-    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 3, 18, 25, 4, WT_TEXT_PALETTE, 61);
-    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 5, 18, 10, WT_TEXT_PALETTE, 223);
-    AddWindowParameterized(app->bgConfig, &app->body, GF_BG_LYR_MAIN_0, 2, 5, 28, 16, WT_TEXT_PALETTE, 413);
-    AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 2, 1, 28, 2, WT_SUB_TEXT_PALETTE, 1);
+    AddWindowParameterized(app->bgConfig, &app->message, GF_BG_LYR_MAIN_0, 3, 18, 25, 4, WT_TEXT_PALETTE, WT_MESSAGE_WINDOW_TILE);
+    AddWindowParameterized(app->bgConfig, &app->details, GF_BG_LYR_MAIN_0, 2, 5, 18, 10, WT_TEXT_PALETTE, WT_DETAILS_TILE);
+    AddWindowParameterized(app->bgConfig, &app->body, GF_BG_LYR_MAIN_0, 2, 5, 28, 16, WT_TEXT_PALETTE, WT_BODY_TILE);
+    AddWindowParameterized(app->bgConfig, &app->subTitle, GF_BG_LYR_SUB_0, 2, 1, 28, 2, WT_SUB_TEXT_PALETTE, WT_SUB_TITLE_TILE);
     for (i = 0; i < WT_MENU_MAX_ACTIONS; i++) {
         AddWindowParameterized(app->bgConfig, &app->actions[i], GF_BG_LYR_SUB_0,
             WT_MENU_LEFT / 8, (u8)((WT_MENU_TOP + i * WT_MENU_SPACING) / 8),
-            WT_MENU_WIDTH / 8, WT_MENU_HEIGHT / 8, WT_SUB_TEXT_PALETTE, (u16)(61 + i * 72));
+            WT_MENU_WIDTH / 8, WT_MENU_HEIGHT / 8, WT_SUB_TEXT_PALETTE, (u16)(WT_ACTION_TILE + i * WT_ACTION_TILES));
     }
-    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 21, 5, 10, 10, WT_PREVIEW_PALETTE, 861);
+    AddWindowParameterized(app->bgConfig, &app->preview, GF_BG_LYR_MAIN_0, 21, 5, 10, 10, WT_PREVIEW_PALETTE, WT_PREVIEW_TILE);
     app->previewLoaded = FALSE;
     app->graphicsReady = TRUE;
     app->touchBlocked = TRUE;
@@ -454,7 +475,7 @@ static void WonderTrade_Preview(WonderTradeApp *app, struct SomeDrawPokemonStruc
         }
         Heap_Free(resource);
         GfGfxLoader_GXLoadPal((NarcId)sprite->unk0, sprite->unk4, GF_PAL_LOCATION_MAIN_BG,
-            (enum GFPalSlotOffset)(WT_PREVIEW_PALETTE * 32), 32, app->game.heapID);
+            (enum GFPalSlotOffset)(WT_PREVIEW_PALETTE * WT_PALETTE_SIZE), WT_PALETTE_SIZE, app->game.heapID);
         app->previewTemplate = *sprite;
         app->previewLoaded = TRUE;
     }
