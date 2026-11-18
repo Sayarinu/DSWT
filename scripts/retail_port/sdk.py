@@ -32,12 +32,15 @@ def members(path):
 
 
 class Library:
-    """Global definitions across SDK archives; the first archive to define a name wins."""
+    """Global definitions across SDK archives and loose objects; the first to define a name wins.
+
+    The Diamond and Pearl build compiles the SDK into separate objects instead of archives."""
 
     def __init__(self, paths):
         self.objects, self.globals = [], {}
         for path in paths:
-            for _, body in members(path):
+            data = Path(path).read_bytes()
+            for _, body in ([(Path(path).name, data)] if data[:4] == b"\x7fELF" else members(path)):
                 if body[:4] != b"\x7fELF":
                     continue
                 obj = elf.Elf(body)
