@@ -6,7 +6,7 @@ SHT_SYMTAB, SHT_NOBITS, SHT_RELA, SHT_REL = 2, 8, 4, 9
 SHF_WRITE, SHF_EXECINSTR = 1, 4
 STT_NOTYPE, STT_OBJECT, STT_FUNC, STT_SECTION, STT_ARM_TFUNC = 0, 1, 2, 3, 13
 SHN_UNDEF, SHN_LORESERVE = 0, 0xFF00
-R_ARM_PC24, R_ARM_ABS32, R_ARM_REL32, R_ARM_THM_CALL = 1, 2, 3, 10
+R_ARM_NONE, R_ARM_PC24, R_ARM_ABS32, R_ARM_REL32, R_ARM_THM_CALL = 0, 1, 2, 3, 10
 R_ARM_CALL, R_ARM_JUMP24 = 28, 29
 ARM_BRANCHES = (R_ARM_PC24, R_ARM_CALL, R_ARM_JUMP24)
 MAPPING = ("$a", "$t", "$d")
@@ -166,16 +166,36 @@ def with_inline_addends(data):
             data[info] = symbol["bind"] << 4 | STT_NOTYPE
         elif symbol["type"] == STT_FUNC and mode_at(marks.get(symbol["shndx"], ()), symbol["value"]) == "$t":
             data[info] = symbol["bind"] << 4 | STT_ARM_TFUNC
-    for shndx, rows in obj.relocs.items():
-        section = obj.sections[shndx]
+    # Metrowerks sets the Thumb bit of a code address it takes through a section
+    # symbol when the target is Thumb code; GNU ld does not.
+    for rela in obj.sections:
+        if rela["type"] != SHT_RELA or rela["info"] not in obj.relocs:
+            continue
+        section = obj.sections[rela["info"]]
         if section["name"].startswith(".debug") or section["name"].startswith(".rel"):
             continue
-        for offset, kind, _, addend in rows:
-            at = section["off"] + offset
+        for k, (offset, info, addend) in enumerate(struct.iter_unpack("<IIi", obj.data[rela["off"]:rela["off"] + rela["size"]])):
+            at, kind = section["off"] + offset, info & 0xFF
+            if kind == R_ARM_NONE:
+                continue  # resolved in place already
             if kind == R_ARM_ABS32:
+                symbol = obj.symbols[info >> 8]
+                if (symbol["type"] == STT_SECTION and not addend & 1
+                        and mode_at(marks.get(symbol["shndx"], ()), addend) == "$t"):
+                    addend |= 1
+                    struct.pack_into("<i", data, rela["off"] + 12 * k + 8, addend)
                 struct.pack_into("<i", data, at, addend)
             elif kind == R_ARM_THM_CALL:
                 struct.pack_into("<HH", data, at, *thumb_call_field(struct.unpack_from("<H", data, at + 2)[0], addend))
+            elif kind == R_ARM_PC24:
+                # ARM-mode code (HeartGold builds its Wonder Trade core as ARM): the field
+                # holds the word addend; a BL may become BLX, so it is retagged as a call.
+                word = struct.unpack_from("<I", data, at)[0]
+                if addend % 4 or not -(1 << 25) <= addend < (1 << 25):
+                    raise ElfError(f"ARM branch addend {addend} cannot be held in place")
+                struct.pack_into("<I", data, at, word & 0xFF000000 | (addend >> 2) & 0xFFFFFF)
+                retag = R_ARM_CALL if word >> 24 == 0xEB else R_ARM_JUMP24
+                struct.pack_into("<I", data, rela["off"] + 12 * k + 4, info & ~0xFF | retag)
             else:
                 raise ElfError(f"relocation type {kind} needs an in-place addend")
     return bytes(data)

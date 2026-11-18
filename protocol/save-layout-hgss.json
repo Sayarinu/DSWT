@@ -2,7 +2,7 @@
   "version": 1,
   "upstream_pin": "client/upstream-pokeheartgold.json",
   "upstream_revision": "6bf138d6035aa6b43d6f8f4132a12df70f86dcec",
-  "verified_targets": ["heartgold-us-rev0", "soulsilver-us-rev0", "heartgold-europe", "soulsilver-europe"],
+  "verified_targets": ["heartgold-us-rev0", "soulsilver-us-rev0", "heartgold-europe", "soulsilver-europe", "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain"],
   "footer_magic": {"international": 537265699, "korean": 537331971},
   "korean_target_suffix": "-korea",
   "languages": ["Japanese", "English", "French", "German", "Italian", "Spanish", "Korean"],

@@ -17,7 +17,7 @@
       "fr_FR": "Echange Miracle",
       "de_DE": "Wundertausch",
       "it_IT": "Scambio Prodigioso",
-      "es_ES": "Intercambio Prodigioso",
+      "es_ES": "Int. Prodigioso",
       "ja_JP": "ミラクルこうかん",
       "ko_KR": "미라클교환"
     },
@@ -275,7 +275,7 @@
       "id": "WonderTrade_Text_CancelOffer",
       "en_US": "Cancel offer",
       "fr_FR": "Annuler l’offre",
-      "de_DE": "Angebot zurückziehen",
+      "de_DE": "Zurückziehen",
       "it_IT": "Annulla offerta",
       "es_ES": "Cancelar oferta",
       "ja_JP": "とりけす",
@@ -440,6 +440,16 @@
       "es_ES": "Guarda antes de usar el\nIntercambio Prodigioso.",
       "ja_JP": "つかう　まえに\nレポ－トを　かいてください",
       "ko_KR": "쓰기 전에\n리포트를 작성해 주십시오"
+    },
+    {
+      "id": "WonderTrade_Text_MenuLabel",
+      "en_US": "WONDER TRADE",
+      "fr_FR": "ECH. MIRACLE",
+      "de_DE": "WUNDERTAUSCH",
+      "it_IT": "SCAMBIO PR.",
+      "es_ES": "INT. PRODIG.",
+      "ja_JP": "ミラクルこうかん",
+      "ko_KR": "미라클교환"
     }
   ]
 }
