@@ -1,7 +1,8 @@
-Code differences of the Italian HeartGold cartridge from US.
+Code differences of the Italian, Japanese and Korean HeartGold and SoulSilver
+cartridges from US.
 
-The new-game mail template for ADVENTURE and EXCITED uses another sentence in
-Italian: bank 293, message 15, instead of bank 292, message 4.
+The new-game mail template for ADVENTURE and EXCITED uses another sentence:
+bank 293, message 15, instead of bank 292, message 4.
 
 diff --git a/src/overlay_36.c b/src/overlay_36.c
 --- a/src/overlay_36.c
