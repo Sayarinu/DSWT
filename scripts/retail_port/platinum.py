@@ -285,12 +285,16 @@ class Target:
             at = self.map.addr.get(us.num)
             if at is None:
                 at = self._by_neighbour(us)
+            body = obj.section_bytes(shndx)[offset:offset + size]
+            mask = relocated(obj, shndx)
+            if at is None and size >= 16:
+                # A function the language changes: look for this build's own bytes, once.
+                keep = [offset + i not in mask for i in range(size)]
+                at = symbols.unique_match(self.modules, module, body, keep, 2)
             if at is None:
                 problems.append(f"{filename}: {name} was not found in the retail game")
                 continue
             at &= ~1
-            body = obj.section_bytes(shndx)[offset:offset + size]
-            mask = relocated(obj, shndx)
             got = image[at - base:at - base + size]
             differ = [i for i in range(size) if offset + i not in mask and (i >= len(got) or body[i] != got[i])]
             if differ:
@@ -303,11 +307,16 @@ class Target:
                 continue
             candidates = sorted(self._us_candidates(symbol["name"], (elf.STT_OBJECT,)), key=lambda c: abs(c.start - near))
             at = self.map.addr.get(candidates[0].num) if candidates else None
+            body = obj.section_bytes(shndx)[symbol["value"]:symbol["value"] + symbol["size"]]
+            mask = relocated(obj, shndx)
+            if at is None and candidates and symbol["size"] >= 8:
+                # Data the language changes (a build delta) is not where US bytes or references
+                # place it: look for this build's own bytes, once, in the file's module.
+                keep = [symbol["value"] + i not in mask for i in range(symbol["size"])]
+                at = symbols.unique_match(self.modules, module, body, keep, 4)
             if at is None:
                 problems.append(f"{filename}: data {symbol['name']} was not found in the retail game")
                 continue
-            body = obj.section_bytes(shndx)[symbol["value"]:symbol["value"] + symbol["size"]]
-            mask = relocated(obj, shndx)
             # Overlays share addresses: look in the file's own module first.
             got = next((data[at - start:at - start + symbol["size"]] for start, data in [self.modules[module], *self.modules.values()]
                         if start <= at < start + len(data)), b"")
@@ -391,6 +400,10 @@ class Target:
         return {"WT_SAVE_MAGIC": f"{self.save_magic:#010x}"}
 
     # --- 3. Resolve and link ------------------------------------------------------------------------
+    def reviewed(self):
+        """Game functions this language changes in reviewed details: name -> differing bytes."""
+        return REVIEWED.get(self.language, {})
+
     def resolve(self, name):
         """(address, is code) of a game symbol the module uses, or None.
 
@@ -419,11 +432,11 @@ class Target:
             return self._autoload_start(us), False
         if us is None:
             return None
-        if us.num not in self.map.addr and name in REVIEWED.get(self.language, {}):
+        if us.num not in self.map.addr and name in self.reviewed():
             at = self.map.voted(us)
             require(at is not None, f"no retail call agrees where {name} is")
             differ = self.map.differing(us, at)
-            expected = REVIEWED[self.language][name]
+            expected = self.reviewed()[name]
             require(differ == expected, f"{name} at {at:#x} differs from US in {differ} bytes, not the {expected} reviewed")
             return (at & ~1) | int(us.num in self.image.thumb), True
         if us.num in self.map.addr:
