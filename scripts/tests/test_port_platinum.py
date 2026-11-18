@@ -389,6 +389,38 @@ enum Language {
                 self.assertIn(language, platinum.LANGUAGES)
                 self.assertTrue(all(type(count) is int and count > 0 for count in names.values()))
 
+    def test_game_overlays_may_load_elsewhere_but_symbols_stay_inside(self):
+        def rom(ram):
+            data = bytearray(0x200)
+            struct.pack_into("<II", data, 0x50, 0x100, 32)
+            struct.pack_into("<8I", data, 0x100, 95, ram, 0x1000, 0x100, 0, 0, 1, 0)
+            return bytes(data)
+
+        class Symbol:
+            def __init__(self, address):
+                self.address, self.num, self.name = address, address, f"symbol_{address:x}"
+
+        class Image:
+            def unique(self, name):
+                return {"SDK_OVERLAY_trade_sequence_ID": Symbol(95), "TradeSequence_Init": Symbol(0x02250000)}.get(name)
+
+            def module(self, symbol):
+                return 95
+
+        target = object.__new__(platinum.Target)
+        target.us_rom, target.rom, target.image, target.witnessed = rom(0x02250000), rom(0x02260000), Image(), {}
+        # US Rev 1 loads overlay 95 at 0x02250000, the retail game at 0x02260000.
+        self.assertEqual(target._overlay_id(Symbol(95)), 95)
+        target._resolve = lambda name: {"SDK_OVERLAY_trade_sequence_ID": (95, False)}.get(name, (0x02260101, True))
+        self.assertEqual(target.resolve("SDK_OVERLAY_trade_sequence_ID"), (95, False))
+        self.assertEqual(target.resolve("TradeSequence_Init"), (0x02260101, True))
+        target._resolve = lambda name: (0x02250101, True)
+        with self.assertRaisesRegex(platinum.PortError, "outside overlay 95"):
+            target.resolve("TradeSequence_Init")
+        target.rom = bytes(0x200)
+        with self.assertRaisesRegex(platinum.PortError, "not in the retail game"):
+            target._overlay_id(Symbol(95))
+
     def test_placeable_names_are_looked_up_once(self):
         calls = []
 
