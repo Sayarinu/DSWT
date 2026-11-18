@@ -457,6 +457,7 @@ int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
     received->hasNickname = BoxPokemon_GetValue(&box, MON_DATA_HAS_NICKNAME, NULL);
     BoxPokemon_GetValue(&box, MON_DATA_NICKNAME, received->nickname);
     BoxPokemon_GetValue(&box, MON_DATA_OT_NAME, received->originalTrainer);
+    received->originalTrainerGender = BoxPokemon_GetValue(&box, MON_DATA_OT_GENDER, NULL);
     return 0;
 }
 
