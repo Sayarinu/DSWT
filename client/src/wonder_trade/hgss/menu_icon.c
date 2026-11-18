@@ -185,7 +185,7 @@ static void WtMenuIcon_DrawLabel(void *menu, BOOL shown) {
     FillWindowPixelBuffer(window, 0);
     if (shown) {
         MsgData *messages = NewMsgDataFromNarc(MSGDATA_LOAD_DIRECT, NARC_msgdata_msg, msg_0829, MENU_HEAP_ID);
-        String *label = NewString_ReadMsgData(messages, WonderTrade_Text_Title);
+        String *label = NewString_ReadMsgData(messages, WonderTrade_Text_MenuLabel);
         u32 width = FontID_String_GetWidth(FONT_SYSTEM, label, 0);
         u32 x = width < MENU_LABEL_WIDTH ? (MENU_LABEL_WIDTH - width) / 2 : 0;
 
