@@ -30,14 +30,21 @@ typedef struct WtGame WtGame;
 #define WT_GAME_NAME_LENGTH 10
 #define WT_GAME_TRAINER_NAME_LENGTH 7
 
+/* The journal's Pokémon images (WtJournalEntry original and destinationAfter). */
+#define WT_GAME_IMAGE_SIZE 236
+
 /* What the player received, for display only. Names use the game's 16-bit
  * character encoding and end with its terminator. */
 typedef struct WtReceivedPokemon {
     uint16_t species;
-    uint8_t gender, form, shiny;
+    uint8_t gender, form, shiny, originalTrainerGender;
     uint32_t personality;
     int hasNickname;
     uint16_t nickname[WT_GAME_NAME_LENGTH + 1], originalTrainer[WT_GAME_TRAINER_NAME_LENGTH + 1];
+    /* For the game's own trade animation, filled by the core: the image of the
+     * Pokémon the player sent and the received one as saved. Each begins with
+     * the game's box Pokémon; the words keep that aligned. */
+    uint32_t sent[WT_GAME_IMAGE_SIZE / 4], image[WT_GAME_IMAGE_SIZE / 4];
 } WtReceivedPokemon;
 
 /* Save footer magic for this build's language; Korean builds define 0x20070903. */

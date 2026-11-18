@@ -25,6 +25,7 @@
 #include "mail.h"
 #include "menu_input_state.h"
 #include "msgdata.h"
+#include "overlay_71.h"
 #include "options.h"
 #include "party.h"
 #include "party_menu.h"
@@ -39,6 +40,7 @@
 #include "string_util.h"
 #include "system.h"
 #include "text.h"
+#include "trade_anim.h"
 #include "unk_02005D10.h"
 #include "unk_020210A0.h"
 #include "unk_02018380.h"
@@ -61,6 +63,8 @@ enum WonderTradeAppState {
     WT_APP_MENU,
     WT_APP_PICKER_FADE,
     WT_APP_PICKER,
+    WT_APP_TRADE_FADE,
+    WT_APP_TRADE,
     WT_APP_CONFIRM,
     WT_APP_COLLECT_CONFIRM,
     WT_APP_CANCEL_CONFIRM,
@@ -73,6 +77,19 @@ enum WonderTradeAppState {
 };
 
 #define WT_HEAP_SIZE 0x80000
+
+FS_EXTERN_OVERLAY(OVY_71);
+
+/* The game's own trade animation, as NPC, link and GTS trades play it. */
+static const OverlayManagerTemplate sWonderTradeSequenceTemplate = {
+    TradeSequence_Init, TradeSequence_Main, TradeSequence_Exit, FS_OVERLAY_ID(OVY_71)
+};
+
+/* TradeSequence_Init creates HEAP_ID_56 and HEAP_ID_57 of this size from HEAP_ID_3. */
+#define WT_TRADE_SEQUENCE_HEAP 0x18000
+/* Its Wi-Fi background and the full exchange, as GTS trades show. */
+#define WT_TRADE_SEQUENCE_WIFI 3
+#define WT_TRADE_SEQUENCE_EXCHANGE 1
 #define WT_BOOT_STACK_SIZE 0x8000
 #define WT_FADE_FRAMES 6
 #define WT_PRESS_FRAMES 8
@@ -122,6 +139,9 @@ typedef struct WonderTradeApp {
     BOOL previewLoaded;
     OverlayManager *picker;
     PartyMenuArgs *partyMenu;
+    OverlayManager *sequence;
+    TRADE_ANIM_WORK tradeAnimation;
+    PlayerProfile *partner;
     Party *partySnapshot;
     int state;
     int statusMessage;
@@ -625,6 +645,51 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
     }
 }
 
+/* Play the trade animation before a received Pokémon's card. FALSE leaves the
+ * card to show alone: the images are missing or the animation has no memory. */
+static BOOL WonderTrade_StartSequence(WonderTradeApp *app)
+{
+    WtReceivedPokemon *received = &app->network.received;
+    BoxPokemon *sent = (BoxPokemon *)received->sent, *image = (BoxPokemon *)received->image;
+    BOOL room;
+    if (!app->fieldSystem || !app->network.hasReceived || !app->graphicsReady
+        || GetBoxMonData(sent, MON_DATA_SPECIES, NULL) == 0
+        || GetBoxMonData(image, MON_DATA_SPECIES, NULL) == 0) return FALSE;
+    /* Release builds compile out the heap asserts, so a failed probe changes nothing. */
+    if (!Heap_Create(HEAP_ID_3, HEAP_ID_56, WT_TRADE_SEQUENCE_HEAP)) return FALSE;
+    room = Heap_Create(HEAP_ID_3, HEAP_ID_57, WT_TRADE_SEQUENCE_HEAP);
+    if (room) Heap_Destroy(HEAP_ID_57);
+    Heap_Destroy(HEAP_ID_56);
+    if (!room) return FALSE;
+    /* The original trainer is the partner the animation names. */
+    app->partner = PlayerProfile_New(HEAP_ID_WONDER_TRADE);
+    Save_Profile_PlayerName_Set(app->partner, received->originalTrainer);
+    PlayerProfile_SetTrainerGender(app->partner, received->originalTrainerGender);
+    app->tradeAnimation.my_boxmon = sent;
+    app->tradeAnimation.trade_boxmon = image;
+    app->tradeAnimation.trade_profile = app->partner;
+    app->tradeAnimation.time_of_day = WT_TRADE_SEQUENCE_WIFI;
+    app->tradeAnimation.is_ingame = WT_TRADE_SEQUENCE_EXCHANGE;
+    app->tradeAnimation.options = Save_PlayerData_GetOptionsAddr(WonderTrade_Save(app));
+    app->state = WT_APP_TRADE_FADE;
+    WonderTrade_FadeOut(app);
+    return TRUE;
+}
+
+static void WonderTrade_FinishSequence(WonderTradeApp *app)
+{
+    Heap_Free(app->partner);
+    app->partner = NULL;
+    memset(&app->tradeAnimation, 0, sizeof(app->tradeAnimation));
+    mbedtls_platform_zeroize(app->network.received.sent, sizeof(app->network.received.sent));
+    mbedtls_platform_zeroize(app->network.received.image, sizeof(app->network.received.image));
+    app->state = WT_APP_MESSAGE;
+    app->statusMessage = WonderTrade_Text_Completed;
+    app->cursor = 0;
+    WonderTrade_InitGraphics(app);
+    Sound_SetSceneAndPlayBGM(10, SEQ_GS_BLD_GTC, 1);
+}
+
 static WonderTradeApp *WonderTrade_Create(OverlayManager *man, FieldSystem *fieldSystem, int state, int message, BOOL visible)
 {
     WonderTradeApp *app;
@@ -866,6 +931,22 @@ BOOL WonderTradeApp_Main(OverlayManager *man, int *state)
         }
         return FALSE;
     }
+    if (app->state == WT_APP_TRADE_FADE) {
+        if (IsPaletteFadeFinished()) {
+            WonderTrade_FreeGraphics(app);
+            app->sequence = OverlayManager_New(&sWonderTradeSequenceTemplate, &app->tradeAnimation, HEAP_ID_WONDER_TRADE);
+            app->state = WT_APP_TRADE;
+        }
+        return FALSE;
+    }
+    if (app->state == WT_APP_TRADE) {
+        if (OverlayManager_Run(app->sequence)) {
+            OverlayManager_Delete(app->sequence);
+            app->sequence = NULL;
+            WonderTrade_FinishSequence(app);
+        }
+        return FALSE;
+    }
     if (app->state == WT_APP_CLOSING) {
         if (app->network.state == WT_NET_CLOSED) return WonderTrade_Leave(app);
         return FALSE;
@@ -890,8 +971,10 @@ BOOL WonderTradeApp_Main(OverlayManager *man, int *state)
             app->selectedSlot = -1;
             if (app->network.needsEntropy) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_KeepPlaying);
             else if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
-            else if (app->network.completed) WonderTrade_Show(app, WT_APP_MESSAGE,
-                app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
+            else if (app->network.completed && app->network.returned) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Returned);
+            else if (app->network.completed) {
+                if (!WonderTrade_StartSequence(app)) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Completed);
+            }
             else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
             else if (app->network.refused) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_CannotHold);
             else if (app->network.superseded && app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Superseded);
@@ -911,6 +994,7 @@ BOOL WonderTradeApp_Exit(OverlayManager *man, int *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
     (void)state;
+    mbedtls_platform_zeroize(&app->network.received, sizeof(app->network.received));
     if (app->fieldSystem) sub_0201838C(Save_PlayerData_GetIGTAddr(app->game.save));
     WonderTrade_FreeGraphics(app);
     Heap_Free(app->partyMenu);

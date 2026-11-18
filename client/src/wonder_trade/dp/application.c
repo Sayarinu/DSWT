@@ -57,6 +57,9 @@ extern void sub_02008904(u8 *pixels, u32 personality, u32 bothFrames);
 /* asm/unk_0206F3FC.s: the party screen, as the field's "choose a Pokémon"
  * script command (sub_020379F8) opens it. */
 extern const struct OverlayManagerTemplate UNK_020F96DC;
+/* asm/unk_020606B0.s: the trade animation (overlay 81), as the field's NPC
+ * trade task (sub_020606D0) runs it. */
+extern const struct OverlayManagerTemplate UNK_020F7630;
 
 enum WonderTradeAppState {
     WT_APP_BOOT,
@@ -66,6 +69,8 @@ enum WonderTradeAppState {
     WT_APP_MENU,
     WT_APP_PICKER_FADE,
     WT_APP_PICKER,
+    WT_APP_TRADE_FADE,
+    WT_APP_TRADE,
     WT_APP_CONFIRM,
     WT_APP_COLLECT_CONFIRM,
     WT_APP_CANCEL_CONFIRM,
@@ -149,6 +154,23 @@ typedef struct WonderTradePartyMenu {
 } WonderTradePartyMenu;
 typedef char WonderTradePartyMenuSize[sizeof(WonderTradePartyMenu) == 0x40 ? 1 : -1];
 
+/* The trade animation's arguments, 0x18 bytes, as the union room trade
+ * (sub_020381FC) fills them. It only reads them, and both Pokémon. */
+typedef struct WonderTradeSequence {
+    struct BoxPokemon *sent, *received;
+    PlayerProfile *partner;
+    int background;
+    int type;
+    struct Options *options;
+} WonderTradeSequence;
+typedef char WonderTradeSequenceSize[sizeof(WonderTradeSequence) == 0x18 ? 1 : -1];
+/* The Wi-Fi background and the full exchange, as a Wi-Fi union room trade shows. */
+#define WT_TRADE_SEQUENCE_WIFI 3
+#define WT_TRADE_SEQUENCE_EXCHANGE 1
+/* Overlay 81's init creates heaps 0x39 and 0x3A of this size from HEAP_ID_MAIN. */
+#define WT_TRADE_SEQUENCE_HEAP 0x18000
+typedef char WonderTradeSequenceHeaps[HEAP_ID_57 == 0x39 && HEAP_ID_58 == 0x3A && HEAP_ID_MAIN == 3 ? 1 : -1];
+
 typedef struct WonderTradeBootWorker {
     OSThread thread;
     WtFlashAccess flash;
@@ -172,6 +194,9 @@ typedef struct WonderTradeApp {
     WaitingIcon *waitingIcon;
     struct MsgData *messages;
     struct OverlayManager *picker;
+    struct OverlayManager *sequence;
+    WonderTradeSequence tradeAnimation;
+    PlayerProfile *partner;
     struct Party partySnapshot;
     WonderTradePartyMenu partyMenu;
     int state;
@@ -669,6 +694,52 @@ static void WonderTrade_FinishPicker(WonderTradeApp *app)
     }
 }
 
+/* Play the trade animation before a received Pokémon's card. FALSE leaves the
+ * card to show alone: the images are missing or the animation has no memory. */
+static BOOL WonderTrade_StartSequence(WonderTradeApp *app)
+{
+    WtReceivedPokemon *received = &app->network.received;
+    struct BoxPokemon *sent = (struct BoxPokemon *)received->sent, *image = (struct BoxPokemon *)received->image;
+    BOOL room;
+    if (!app->fieldSystem || !app->network.hasReceived
+        || GetBoxMonData(sent, MON_DATA_SPECIES, NULL) == 0
+        || GetBoxMonData(image, MON_DATA_SPECIES, NULL) == 0) return FALSE;
+    /* A failed probe changes nothing: the heap asserts reset only during the
+     * game's own link play, which Wonder Trade never starts. */
+    if (!Heap_Create(HEAP_ID_MAIN, HEAP_ID_57, WT_TRADE_SEQUENCE_HEAP)) return FALSE;
+    room = Heap_Create(HEAP_ID_MAIN, HEAP_ID_58, WT_TRADE_SEQUENCE_HEAP);
+    if (room) Heap_Destroy(HEAP_ID_58);
+    Heap_Destroy(HEAP_ID_57);
+    if (!room) return FALSE;
+    /* The original trainer is the partner the animation names. */
+    app->partner = PlayerProfile_New(HEAP_ID_WONDER_TRADE);
+    CopyU16StringArray(PlayerProfile_GetNamePtr(app->partner), received->originalTrainer);
+    PlayerProfile_SetTrainerGender(app->partner, received->originalTrainerGender);
+    app->tradeAnimation.sent = sent;
+    app->tradeAnimation.received = image;
+    app->tradeAnimation.partner = app->partner;
+    app->tradeAnimation.background = WT_TRADE_SEQUENCE_WIFI;
+    app->tradeAnimation.type = WT_TRADE_SEQUENCE_EXCHANGE;
+    app->tradeAnimation.options = Save_PlayerData_GetOptionsAddr(app->game.save);
+    app->state = WT_APP_TRADE_FADE;
+    WonderTrade_Fade(app, WT_FADE_OUT);
+    return TRUE;
+}
+
+static void WonderTrade_FinishSequence(WonderTradeApp *app)
+{
+    Heap_Free(app->partner);
+    app->partner = NULL;
+    memset(&app->tradeAnimation, 0, sizeof(app->tradeAnimation));
+    mbedtls_platform_zeroize(app->network.received.sent, sizeof(app->network.received.sent));
+    mbedtls_platform_zeroize(app->network.received.image, sizeof(app->network.received.image));
+    app->state = WT_APP_MESSAGE;
+    app->statusMessage = WonderTrade_Text_Completed;
+    app->cursor = 0;
+    WonderTrade_InitGraphics(app);
+    sub_0200433C(10, SEQ_BLD_BLD_GTC, 1);
+}
+
 static WonderTradeApp *WonderTrade_Create(struct OverlayManager *man, FieldSystem *fieldSystem, int state, int message, BOOL visible)
 {
     WonderTradeApp *app;
@@ -874,7 +945,7 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
         app->fading = FALSE;
         if (app->leaving) return TRUE;
     }
-    if (app->redraw && app->state != WT_APP_PICKER_FADE) WonderTrade_Draw(app);
+    if (app->redraw && app->state != WT_APP_PICKER_FADE && app->state != WT_APP_TRADE_FADE) WonderTrade_Draw(app);
     if (app->state == WT_APP_BOOT) return WonderTrade_BootPoll(app);
     if (app->state == WT_APP_RECOVERY || app->state == WT_APP_SAVE_FIRST) {
         WonderTrade_HandleInput(app);
@@ -896,6 +967,21 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
             OverlayManager_Delete(app->picker);
             app->picker = NULL;
             WonderTrade_FinishPicker(app);
+        }
+        return FALSE;
+    }
+    if (app->state == WT_APP_TRADE_FADE) {
+        /* The fade out has finished; the animation sets up its own screens. */
+        WonderTrade_FreeGraphics(app);
+        app->sequence = OverlayManager_New(&UNK_020F7630, (s32 *)&app->tradeAnimation, HEAP_ID_WONDER_TRADE);
+        app->state = WT_APP_TRADE;
+        return FALSE;
+    }
+    if (app->state == WT_APP_TRADE) {
+        if (OverlayManager_Run(app->sequence)) {
+            OverlayManager_Delete(app->sequence);
+            app->sequence = NULL;
+            WonderTrade_FinishSequence(app);
         }
         return FALSE;
     }
@@ -921,8 +1007,10 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
             app->selectedSlot = -1;
             if (app->network.needsEntropy) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_KeepPlaying);
             else if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
-            else if (app->network.completed) WonderTrade_Show(app, WT_APP_MESSAGE,
-                app->network.returned ? WonderTrade_Text_Returned : WonderTrade_Text_Completed);
+            else if (app->network.completed && app->network.returned) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Returned);
+            else if (app->network.completed) {
+                if (!WonderTrade_StartSequence(app)) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Completed);
+            }
             else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
             else if (app->network.refused) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_CannotHold);
             else if (app->network.superseded && app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Superseded);
@@ -941,6 +1029,7 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
 static BOOL WonderTrade_Exit(struct OverlayManager *man, u32 *state)
 {
     WonderTradeApp *app = OverlayManager_GetData(man);
+    mbedtls_platform_zeroize(&app->network.received, sizeof(app->network.received));
     if (app->fieldSystem) PlayTimerStart(Save_PlayerData_GetIGTAddr(app->game.save));
     (void)state;
     WonderTrade_FreeGraphics(app);
