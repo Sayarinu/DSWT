@@ -42,13 +42,20 @@ LANGUAGES = {
 REVIEWED = {
     "ja": {
         "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+        "TradeSequence_Init": 1,  # the trade text bank number
         "String_FormatInt": 1,  # a literal data address
         "Text_AddPrinterWithParamsAndColor": 17,  # leaves the template's unused last byte alone
     },
     "ko": {
         "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+        "TradeSequence_Init": 1,  # the trade text bank number
     },
 }
+# Init functions the game reaches only through its own app templates,
+# {Init, Main, Exit, overlay ID}, so no call site votes on where they are:
+# init: (main, exit, overlay ID). Every template must agree on the address.
+TEMPLATE_INITS = {"TradeSequence_Init": ("TradeSequence_Main", "TradeSequence_Exit", 95)}
+
 US_VARIANT = "us-rev1"
 TEXT_ARCHIVE = "msgdata/pl_msg.narc"
 MENU_LABEL = "WonderTrade_Text_MenuLabel"
@@ -421,6 +428,8 @@ class Target:
             return None
         if us.num not in self.map.addr and name in REVIEWED.get(self.language, {}):
             at = self.map.voted(us)
+            if at is None and name in TEMPLATE_INITS:
+                at = self._template_init(*TEMPLATE_INITS[name])
             require(at is not None, f"no retail call agrees where {name} is")
             differ = self.map.differing(us, at)
             expected = REVIEWED[self.language][name]
@@ -438,6 +447,21 @@ class Target:
         if at is None:
             return None
         return (at | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
+
+    def _template_init(self, main, exit_, overlay):
+        """Init's address from the game's app templates holding its placed main and exit."""
+        placed = [self.map.addr.get(self.image.unique(name).num) if self.image.unique(name) else None for name in (main, exit_)]
+        if None in placed:
+            return None
+        main_at, exit_at = ((at & ~1) | int(self.image.unique(name).num in self.image.thumb) for at, name in zip(placed, (main, exit_)))
+        found = set()
+        for _, (_, body) in self.modules.items():
+            for offset in range(0, len(body) - 15, 4):
+                init, m, e, o = struct.unpack_from("<4I", body, offset)
+                if (m, e, o) == (main_at, exit_at, overlay):
+                    found.add(init)
+        require(len(found) <= 1, f"the game's templates disagree where {main}'s init is")
+        return (next(iter(found)) & ~1) if found else None
 
     @property
     def us_modules(self):

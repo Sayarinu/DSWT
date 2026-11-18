@@ -421,6 +421,34 @@ enum Language {
         with self.assertRaisesRegex(platinum.PortError, "not in the retail game"):
             target._overlay_id(Symbol(95))
 
+    def test_template_only_inits_are_found_through_agreeing_templates(self):
+        class Symbol:
+            def __init__(self, num):
+                self.num = num
+
+        class Image:
+            thumb = {1, 2}
+
+            def unique(self, name):
+                return Symbol({"Main": 1, "Exit": 2}[name])
+
+        class Map:
+            addr = {1: 0x02246100, 2: 0x02246200}
+
+        def template(init):
+            return struct.pack("<4I", init, 0x02246101, 0x02246201, 95)
+
+        target = object.__new__(platinum.Target)
+        target.image, target.map = Image(), Map()
+        target.modules = {"arm9": (0x02000000, bytes(8) + template(0x02246001) + template(0x02246001)),
+                          94: (0x02240000, template(0x02246001))}
+        self.assertEqual(target._template_init("Main", "Exit", 95), 0x02246000)
+        target.modules[94] = (0x02240000, template(0x02246401))
+        with self.assertRaisesRegex(platinum.PortError, "disagree"):
+            target._template_init("Main", "Exit", 95)
+        target.modules = {"arm9": (0x02000000, template(0x02246001)[:12] + struct.pack("<I", 94))}
+        self.assertIsNone(target._template_init("Main", "Exit", 95))
+
     def test_placeable_names_are_looked_up_once(self):
         calls = []
 
