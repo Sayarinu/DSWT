@@ -14,5 +14,6 @@
     <PackageReference Include="Grpc.AspNetCore.Server" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0" PrivateAssets="All" />
     <Protobuf Include="../server/proto/trade.proto" GrpcServices="Both" />
+    <EmbeddedResource Include="name-allowlist.txt" LogicalName="DSWT.Validator.name-allowlist.txt" />
   </ItemGroup>
 </Project>

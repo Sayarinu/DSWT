@@ -11,7 +11,7 @@
 
 namespace dswt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt3";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt4";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
@@ -95,6 +95,20 @@ TEST_F(LegalityClientTest, RejectsLegalOfferThatFitsNoGame) {
   auto result = client.CheckNewSubmission(payload);
   EXPECT_EQ(result.verdict, LegalityVerdict::Illegal);
   EXPECT_EQ(result.reasons, std::vector<std::string>{"INCOMPATIBLE_GAME"});
+}
+
+TEST_F(LegalityClientTest, ReportsInappropriateNameAlongsideLegalityReasons) {
+  validator.respond = [](auto *, auto *reply) {
+    reply->set_legal(false);
+    reply->clear_destinations();
+    reply->add_reason_codes("ILLEGAL_RNG");
+    reply->add_reason_codes("INAPPROPRIATE_NAME");
+    return grpc::Status::OK;
+  };
+  LegalityClient client(address, kPolicy);
+  auto result = client.CheckNewSubmission(payload);
+  EXPECT_EQ(result.verdict, LegalityVerdict::Illegal);
+  EXPECT_EQ(result.reasons, (std::vector<std::string>{"ILLEGAL_RNG", "INAPPROPRIATE_NAME"}));
 }
 
 TEST_F(LegalityClientTest, RejectsMalformedUnboundOrAmbiguousReplies) {

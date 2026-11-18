@@ -19,7 +19,7 @@ public enum Destination : uint
 public static class Policy
 {
     // Bump for changes to the adapter, core, resources or parsing settings.
-    public const string Version = "pkhex-26.08.26-74b88906-dswt3";
+    public const string Version = "pkhex-26.08.26-74b88906-dswt4";
     public const int PayloadSize = 136;
     public const Destination AllDestinations = Destination.DP | Destination.Pt | Destination.HGSS;
 
@@ -72,6 +72,10 @@ public static class Policy
         var analysis = new LegalityAnalysis(pk);
         if (!analysis.Parsed || !pk.Data[..PayloadSize].SequenceEqual(data))
             throw new InvalidOperationException("analysis unavailable");
+        // Another player sees these names, so they follow the newest games' online rules.
+        var inappropriate = HasInappropriateName(pk);
+        if (analysis.Valid && inappropriate)
+            return Reject("INAPPROPRIATE_NAME");
         if (analysis.Valid)
         {
             // Legal, but no DP, Pt or HGSS save can hold it.
@@ -83,6 +87,8 @@ public static class Policy
         }
 
         var reasons = new SortedSet<string>(StringComparer.Ordinal);
+        if (inappropriate)
+            reasons.Add("INAPPROPRIATE_NAME");
         foreach (var result in analysis.Results.Where(r => !r.Valid))
             reasons.Add(result.Identifier switch
             {
@@ -99,6 +105,57 @@ public static class Policy
         reply.ReasonCodes.AddRange(reasons);
         return reply;
     }
+
+    // The Nintendo Switch word list (WordFilterNX), the newest games' online name rules,
+    // checks the nickname when the player gave one and the original trainer's name.
+    // ParseSettings keeps it out of legality: Gen IV names are not evidence of an
+    // illegal Pokémon, so a match is its own reason rather than ILLEGAL_DATA.
+    public static bool HasInappropriateName(PK4 pk) =>
+        (pk.IsNicknamed && IsInappropriate(pk.Nickname)) || IsInappropriate(pk.OriginalTrainerName);
+
+    private static bool IsInappropriate(string name)
+    {
+        if (!WordFilterNX.IsFiltered(name, out _, EntityContext.Gen4))
+            return false;
+        var key = Key(name);
+        return !AllowedNames.Value.Contains(key) && !GameTerms.Value.Contains(key);
+    }
+
+    // The word list's own normalization: no spaces, lowercase, folded kana and widths.
+    private static string Key(string name)
+    {
+        Span<char> buffer = stackalloc char[name.Length];
+        return new string(buffer[..TextNormalizer.Normalize(name, buffer)]);
+    }
+
+    // Reviewed names the list's substring patterns catch by accident (name-allowlist.txt).
+    private static readonly Lazy<HashSet<string>> AllowedNames = new(LoadAllowedNames);
+
+    private static HashSet<string> LoadAllowedNames()
+    {
+        using var stream = typeof(Policy).Assembly.GetManifestResourceStream("DSWT.Validator.name-allowlist.txt")
+            ?? throw new InvalidOperationException("name allow-list missing");
+        using var reader = new StreamReader(stream);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        while (reader.ReadLine() is { } line)
+            if (line.Length != 0 && line[0] != '#')
+                names.Add(Key(line));
+        return names;
+    }
+
+    // Official Pokémon names in every Gen IV language: species, moves, items,
+    // abilities, natures and forms, such as Leafage, Coaching or Snatch.
+    private static readonly Lazy<HashSet<string>> GameTerms = new(() =>
+    {
+        var terms = new HashSet<string>(StringComparer.Ordinal);
+        // Only the six lists, not all of GameStrings: the worker has a small heap and a short life.
+        foreach (var language in new[] { "ja", "en", "fr", "it", "de", "es", "ko" })
+            foreach (var list in new[] { "species", "moves", "items", "abilities", "natures", "forms" })
+                foreach (var term in Util.GetStringList(list, language))
+                    if (!string.IsNullOrWhiteSpace(term))
+                        terms.Add(Key(term));
+        return terms;
+    });
 
     // Blank saves expose the pinned core's per-game limits (Personal, HeldItems,
     // MaxItemID, MaxBallID), the same members SaveExtensions.EvaluateCompatibility reads.
