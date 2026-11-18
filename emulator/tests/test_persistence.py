@@ -60,36 +60,94 @@ class PersistenceTests(unittest.TestCase):
         shutil.rmtree(store)
         shutil.copytree(self.baseline, store)
 
+    def run_probe(self, *images, env=None):
+        paths = []
+        for i, data in enumerate(images):
+            path = self.root / f'image-{i}'
+            path.write_bytes(data)
+            paths.append(str(path))
+        return subprocess.run([str(self.probe), str(self.save), *paths], env=env, capture_output=True, timeout=5)
+
     def test_every_persistence_fence_survives_process_kill_and_write_failure(self):
-        # Four atomic publications each have write/fsync/close/rename/dir-fsync.
+        # The log append and its fsync, then the checkpoint: closing the log, four
+        # atomic publications (write/fsync/close/rename/dir-fsync) and a new log.
+        # Every fault point is tried until a run passes them all and completes.
         for mode in ('before', 'after', 'error'):
-            for stage in range(1, 21):
+            for stage in range(1, 61):
+                self.reset()
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_AT=str(stage),
+                           DSWT_FAULT_MODE=mode, DSWT_FAULT_SAVE=str(self.save))
+                process = subprocess.Popen([str(self.probe), str(self.save), str(self.input)], env=env,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    stopped = False
+                    if mode != 'error':
+                        with selectors.DefaultSelector() as selector:
+                            selector.register(process.stderr, selectors.EVENT_READ)
+                            self.assertTrue(selector.select(5), 'fault checkpoint did not report')
+                            stopped = process.stderr.readline() == b'STOPPED\n'
+                        if stopped:
+                            process.kill()
+                    out, err = process.communicate(timeout=5)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
+                if out == b'COMMITTED\n' and process.returncode == 0:
+                    self.assertGreaterEqual(stage, 28, f'{mode}: only {stage - 1} fault points')
+                    self.assertEqual(self.save.read_bytes(), self.after)
+                    break
                 with self.subTest(mode=mode, stage=stage):
-                    self.reset()
-                    env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_AT=str(stage),
-                               DSWT_FAULT_MODE=mode, DSWT_FAULT_SAVE=str(self.save))
-                    process = subprocess.Popen([str(self.probe), str(self.save), str(self.input)], env=env,
-                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    try:
-                        if mode != 'error':
-                            with selectors.DefaultSelector() as selector:
-                                selector.register(process.stderr, selectors.EVENT_READ)
-                                self.assertTrue(selector.select(5), 'fault checkpoint did not report')
-                                self.assertEqual(process.stderr.readline(), b'STOPPED\n')
-                            process.kill()
-                        out, err = process.communicate(timeout=5)
-                        self.assertNotIn(b'COMMITTED', out)
-                        if mode == 'error':
-                            self.assertEqual(process.returncode, 74, err)
-                        else:
-                            self.assertEqual(process.returncode, -signal.SIGKILL)
-                    finally:
-                        if process.poll() is None:
-                            process.kill()
-                            process.communicate()
+                    self.assertNotIn(b'COMMITTED', out)
+                    self.assertEqual(process.returncode, 74 if mode == 'error' else -signal.SIGKILL, err)
                     self.tool('prepare')
                     self.tool('check')
                     self.assertIn(self.save.read_bytes(), (self.before, self.after))
+                    # Only the first two fault points precede the durable log append.
+                    if stage > 2:
+                        self.assertEqual(self.save.read_bytes(), self.after)
+            else:
+                self.fail(f'{mode}: the probe never completed')
+
+    def test_logged_commits_survive_an_exit_without_checkpoint(self):
+        images = [image(b'owner-a', generation) for generation in range(1, 6)]
+        log = Path(str(self.save) + '.dswt') / 'LOG'
+        before = log.stat().st_size
+        result = self.run_probe(*images, env=dict(os.environ, DSWT_PROBE_NO_CHECKPOINT='1'))
+        self.assertEqual(result.stdout, b'COMMITTED\n', result.stderr)
+        self.assertEqual(self.save.read_bytes(), self.before)  # Only the log has them.
+        self.assertLess(log.stat().st_size - before, 5 * 3 * 4096 + 5 * 128)
+        self.tool('check', ok=False)  # An unfolded log needs recovery first.
+        self.tool('prepare')
+        self.tool('check')
+        self.assertEqual(self.save.read_bytes(), images[-1])
+
+    def test_a_torn_final_record_is_dropped_and_earlier_records_kept(self):
+        images = [image(b'owner-a', generation) for generation in range(1, 4)]
+        result = self.run_probe(*images, env=dict(os.environ, DSWT_PROBE_NO_CHECKPOINT='1'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = Path(str(self.save) + '.dswt') / 'LOG'
+        complete = log.read_bytes()
+        last = complete.rfind(b'DSWLR001')
+        for torn in (complete[:last + 5], complete[:last + 200], complete[:-1], complete + bytes(40)):
+            with self.subTest(size=len(torn)):
+                self.reset()
+                self.run_probe(*images, env=dict(os.environ, DSWT_PROBE_NO_CHECKPOINT='1'))
+                log.write_bytes(torn)
+                self.tool('prepare')
+                self.tool('check')
+                self.assertEqual(self.save.read_bytes(), images[-1] if torn == complete + bytes(40) else images[-2])
+
+    def test_a_damaged_record_before_the_end_is_preserved(self):
+        images = [image(b'owner-a', generation) for generation in range(1, 4)]
+        self.run_probe(*images, env=dict(os.environ, DSWT_PROBE_NO_CHECKPOINT='1'))
+        log = Path(str(self.save) + '.dswt') / 'LOG'
+        damaged = bytearray(log.read_bytes())
+        damaged[damaged.find(b'DSWLR001') + 100] ^= 1
+        log.write_bytes(damaged)
+        self.tool('prepare', ok=False)
+        self.assertEqual(log.read_bytes(), damaged)
+        self.assertEqual(self.save.read_bytes(), self.before)
 
     def test_success_is_immediately_durable_and_repeated_prepare_is_idempotent(self):
         for _ in range(20):

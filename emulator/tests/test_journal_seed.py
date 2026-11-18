@@ -184,31 +184,39 @@ class JournalSeedTests(unittest.TestCase):
         store = Path(str(self.save) + ".dswt")
         baseline = self.root / "baseline"
         shutil.copytree(store, baseline)
-        # Each journal mirror uses four atomic host publications and five fences.
+        # Each journal mirror is one logged record (append and fsync); the
+        # checkpoint then closes the log, makes four atomic host publications
+        # with five fences each and starts a new log. Every fault point is tried
+        # until a run passes them all.
         for mode in ("before", "after", "error"):
-            for stage in range(1, 41):
+            for stage in range(1, 61):
+                shutil.rmtree(store); shutil.copytree(baseline, store); self.save.write_bytes(original)
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_ARMED="1",
+                           DSWT_FAULT_SAVE=str(self.save), DSWT_FAULT_AT=str(stage), DSWT_FAULT_MODE=mode)
+                process = subprocess.Popen([str(self.store), "seed", str(self.save), "us-rev1"],
+                                           env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    if mode != "error":
+                        with selectors.DefaultSelector() as selector:
+                            selector.register(process.stderr, selectors.EVENT_READ)
+                            self.assertTrue(selector.select(5), "seed fence did not report")
+                            if process.stderr.readline() == b"STOPPED\n":
+                                process.kill()
+                    out, err = process.communicate(timeout=5)
+                finally:
+                    if process.poll() is None:
+                        process.kill(); process.communicate()
+                if b"verified" in out and process.returncode == 0:
+                    self.assertGreaterEqual(stage, 30, f"{mode}: only {stage - 1} fault points")
+                    self.preserved(original)
+                    break
                 with self.subTest(mode=mode, stage=stage):
-                    shutil.rmtree(store); shutil.copytree(baseline, store); self.save.write_bytes(original)
-                    env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_ARMED="1",
-                               DSWT_FAULT_SAVE=str(self.save), DSWT_FAULT_AT=str(stage), DSWT_FAULT_MODE=mode)
-                    process = subprocess.Popen([str(self.store), "seed", str(self.save), "us-rev1"],
-                                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    try:
-                        if mode != "error":
-                            with selectors.DefaultSelector() as selector:
-                                selector.register(process.stderr, selectors.EVENT_READ)
-                                self.assertTrue(selector.select(5), "seed fence did not report")
-                                self.assertEqual(process.stderr.readline(), b"STOPPED\n")
-                            process.kill()
-                        out, err = process.communicate(timeout=5)
-                        self.assertNotIn(b"verified", out)
-                        self.assertEqual(process.returncode, 74 if mode == "error" else -signal.SIGKILL, err)
-                    finally:
-                        if process.poll() is None:
-                            process.kill(); process.communicate()
+                    self.assertEqual(process.returncode, 74 if mode == "error" else -signal.SIGKILL, err)
                     self.tool("prepare")
                     self.tool("seed")
                     self.preserved(original)
+            else:
+                self.fail(f"{mode}: the seed never completed")
 
     def test_durable_launcher_uses_native_active_refresh_and_preserves_lock(self):
         original = self.install(8)
