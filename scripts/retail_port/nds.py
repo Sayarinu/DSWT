@@ -79,10 +79,32 @@ def file_span(rom, fid):
     return struct.unpack_from("<II", rom, fat + 8 * fid)
 
 
+NITRO_CODE = 0x2106C0DE
+
+
+def module_params(arm9):
+    """Offset of the ARM9 module parameters: autoload list, BSS, compressed end, SDK version, magic."""
+    at = arm9.find(struct.pack("<I", NITRO_CODE))
+    if at < 32 or u32(arm9, at - 4) != 0xDEC00621:
+        raise RomError("ARM9 module parameters not found")
+    return at - 32
+
+
+def arm9_expanded(arm9, ram=ARM9_RAM):
+    """The ARM9 static binary as it runs: a compressed one is expanded (MI_UncompressBackward)."""
+    try:
+        end = u32(arm9, module_params(arm9) + 0x14)
+    except RomError:
+        return arm9  # No module parameters: a test image, never compressed.
+    if not end:
+        return arm9
+    return blz_decode(arm9[:end - ram]) + arm9[end - ram:]
+
+
 def modules(rom):
     """The ARM9 static binary and each overlay, expanded: {"arm9" or overlay id: (RAM address, bytes)}."""
     offset, _, ram, size = struct.unpack_from("<IIII", rom, 0x20)
-    found = {"arm9": (ram, rom[offset:offset + size])}
+    found = {"arm9": (ram, arm9_expanded(rom[offset:offset + size], ram))}
     for oid, ram, _, _, fid, compressed in overlays(rom):
         start, end = file_span(rom, fid)
         body = rom[start:end]

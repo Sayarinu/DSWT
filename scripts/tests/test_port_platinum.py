@@ -94,6 +94,22 @@ class RomTest(unittest.TestCase):
         with self.assertRaises(nds.RomError):
             nds.blz_decode(b"\0" * 8)
 
+    def test_compressed_arm9_is_expanded_from_its_module_parameters(self):
+        stream = b"\x00\x60\x00\xf0XYZ\x18"
+        packed = b"PRE" + stream + struct.pack("<II", 8 << 24 | (len(stream) + 8), 14)
+        def arm9(compressed_end, body):
+            params = struct.pack("<9I", 0, 0, 0, 0, 0, compressed_end, 0, 0xDEC00621, 0x2106C0DE)
+            return params + body
+        # The parameters sit before the compressed stream here, as in the static binary's header.
+        plain = arm9(0, b"rest")
+        self.assertEqual(nds.arm9_expanded(plain), plain)
+        head = struct.pack("<9I", 0, 0, 0, 0, 0, 0, 0, 0xDEC00621, 0x2106C0DE)
+        image = head + packed
+        compressed = bytearray(image)
+        struct.pack_into("<I", compressed, 0x14, nds.ARM9_RAM + len(image))
+        self.assertEqual(nds.arm9_expanded(bytes(compressed)), nds.blz_decode(bytes(compressed)))
+        self.assertEqual(nds.arm9_expanded(b"no parameters"), b"no parameters")
+
     def test_archive_round_trip(self):
         members = [b"one", b"", b"three!"]
         names = b"BTNF" + struct.pack("<IIHH", 16, 4, 0, 1)
