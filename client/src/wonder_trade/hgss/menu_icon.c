@@ -51,7 +51,13 @@
 #define WT_ICON_Y           142
 #define WT_ICON_LABEL       7
 #define WT_ICON_RES_ID      0x5754
+/* A retail port appends the icon to an existing NARC instead of adding a file. */
+#ifndef WT_ICON_NARC
+#define WT_ICON_NARC NARC_wonder_trade_menu_icon
+#endif
+#ifndef WT_ICON_NARC_MEMBER
 #define WT_ICON_NARC_MEMBER 0
+#endif
 
 /* Grid indices: the first column holds 0-3 top to bottom, the second 4-6 and
  * then the Wonder Trade icon. */
@@ -120,7 +126,7 @@ void WtMenuIcon_Create(void *menu) {
 
     sWtMenuIcon.charMan = Create2DGfxResObjMan(1, GF_GFX_RES_TYPE_CHAR, MENU_HEAP_ID);
     sWtMenuIcon.plttMan = Create2DGfxResObjMan(1, GF_GFX_RES_TYPE_PLTT, MENU_HEAP_ID);
-    SpriteResource *charRes = AddCharResObjFromNarc(sWtMenuIcon.charMan, NARC_wonder_trade_menu_icon, WT_ICON_NARC_MEMBER, FALSE, WT_ICON_RES_ID, NNS_G2D_VRAM_TYPE_2DSUB, MENU_HEAP_ID);
+    SpriteResource *charRes = AddCharResObjFromNarc(sWtMenuIcon.charMan, WT_ICON_NARC, WT_ICON_NARC_MEMBER, FALSE, WT_ICON_RES_ID, NNS_G2D_VRAM_TYPE_2DSUB, MENU_HEAP_ID);
     SpriteResource *plttRes = AddPlttResObjFromNarc(sWtMenuIcon.plttMan, NARC_a_0_1_4, MENU_ICON_PALETTE_FILE, FALSE, WT_ICON_RES_ID, NNS_G2D_VRAM_TYPE_2DSUB, 1, MENU_HEAP_ID);
     if (!SpriteTransfer_CreateCharTransferTask_AllocAtEnd(charRes)) {
         WtMenuIcon_Release();

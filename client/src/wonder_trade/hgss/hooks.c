@@ -20,10 +20,12 @@ extern void sub_02034DE0(void);
 
 /* Family 3 (HG/SS), the game's version ID, English (2) and revision 0. Enrollment
  * takes the revision from the running cartridge (WtGame_EnrollVariant). */
+#ifndef WT_VARIANT /* A retail port sets its own language. */
 #if defined(SOULSILVER)
 #define WT_VARIANT 0x03080200
 #else
 #define WT_VARIANT 0x03070200
+#endif
 #endif
 
 /* HeartGold and SoulSilver never use the 64 KiB flash sectors at 0x30000 and

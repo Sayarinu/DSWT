@@ -115,14 +115,19 @@ def assemble(source, output):
     return Path(output)
 
 
-def link(objects, script, output, roots=()):
-    """Link with GNU ld; writes output, output.bin (loaded sections), output.map and output.nm."""
+def link(objects, script, output, roots=(), images=None):
+    """Link with GNU ld; writes output, output.map, output.nm and one binary per image:
+    output.SUFFIX holding the named loaded sections (by default output.bin: .text, .rodata, .data)."""
     output = Path(output).resolve()
     directories = sorted({str(Path(p).resolve().parent) for p in objects} | {str(Path(script).resolve().parent), str(output.parent)})
     ld = ["arm-none-eabi-ld", "-T", str(Path(script).resolve()), "-o", str(output), "-Map", f"{output}.map",
           "--no-warn-rwx-segments", "--use-blx", "--gc-sections"]
     ld += [f"--require-defined={root}" for root in roots] + [str(Path(p).resolve()) for p in objects]
-    copy = ["arm-none-eabi-objcopy", "-O", "binary", "-j", ".text", "-j", ".rodata", "-j", ".data", str(output), f"{output}.bin"]
+    images = images or {"bin": (".text", ".rodata", ".data")}
+    copies = []
+    for suffix, sections in images.items():
+        copies.append(["arm-none-eabi-objcopy", "-O", "binary", *[a for name in sections for a in ("-j", name)],
+                       str(output), f"{output}.{suffix}"])
     docker({d: d for d in directories},
-           f"set -e\n{shlex.join(ld)}\n{shlex.join(copy)}\narm-none-eabi-nm {shlex.quote(str(output))} > {shlex.quote(str(output))}.nm\n")
+           f"set -e\n{shlex.join(ld)}\n" + "".join(shlex.join(copy) + "\n" for copy in copies) + f"arm-none-eabi-nm {shlex.quote(str(output))} > {shlex.quote(str(output))}.nm\n")
     return output

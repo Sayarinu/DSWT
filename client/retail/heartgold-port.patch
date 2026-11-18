@@ -1,0 +1,22 @@
+Port-only changes for adding Wonder Trade to a retail HeartGold or SoulSilver.
+
+main.c keeps using the game's own main loop state: retail code outside
+main.c reads and writes _02111864, and the functions main.c shares with
+the game must see one overlay manager and backlight state.
+
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -38,9 +38,9 @@
+     struct UnkStruct_02111868_sub unk_10;
+ };
+ 
+-int _02111864;
+-PMBackLightSwitch gBacklightTop;
+-struct UnkStruct_02111868 _02111868;
++extern int _02111864;
++extern PMBackLightSwitch gBacklightTop;
++extern struct UnkStruct_02111868 _02111868;
+ 
+ static void sub_02000F60(void);
+ static void DoSoftReset(u32 param);

@@ -220,6 +220,18 @@ class ElfTest(unittest.TestCase):
         with self.assertRaises(elf.ElfError):
             elf.with_inline_addends(unsupported)
 
+    def test_section_relative_code_addresses_keep_their_mode(self):
+        # ARM code at 0, Thumb code at 8, then a literal pool; addresses taken through the section symbol.
+        obj = make_object(
+            [(".text", 1, elf.SHF_EXECINSTR | 2, bytes(24))],
+            [("$a", 0, 0, 0, elf.STT_NOTYPE, 1), ("$t", 8, 0, 0, elf.STT_NOTYPE, 1), ("$d", 12, 0, 0, elf.STT_NOTYPE, 1),
+             ("", 0, 0, 0, elf.STT_SECTION, 1)],
+            [(1, 12, elf.R_ARM_ABS32, 4, 8), (1, 16, elf.R_ARM_ABS32, 4, 0), (1, 20, elf.R_ARM_NONE, 4, 0)])
+        copy = elf.Elf(elf.with_inline_addends(obj))
+        text = copy.section_bytes(1)
+        self.assertEqual(struct.unpack_from("<ii", text, 12), (9, 0))
+        self.assertEqual(copy.relocs[1], [(12, elf.R_ARM_ABS32, 4, 9), (16, elf.R_ARM_ABS32, 4, 0), (20, elf.R_ARM_NONE, 4, 0)])
+
     def test_numbered_sections_name_each_input_section(self):
         copy = elf.Elf(elf.numbered_sections(thumb_object()))
         self.assertEqual([s["name"] for s in copy.sections[1:3]], [".text.1", ".data.2"])

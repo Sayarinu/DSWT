@@ -231,3 +231,51 @@ def relayout(rom, arm9, files):
     out += b"\xff" * (capacity - len(out))
     struct.pack_into("<H", out, HEADER_CRC, crc16(out[:HEADER_CRC]))
     return bytes(out)
+
+
+BANNER_SIZES = {1: 0x840, 2: 0x940, 3: 0xA40, 0x103: 0x23C0}
+
+
+def rebuild(rom, arm9, overlay_table, files):
+    """Lay out a cartridge again: header, ARM9 (footer included), its overlay table, ARM7 and
+    its table, the file name table, a file table grown to hold every file, the banner, then
+    every file in ID order. files replaces or adds file bodies by ID; the rest are copied."""
+    out = bytearray(rom[:0x4000])
+    def place(data, offset_field, size_field=None, size=None):
+        start = align(len(out), FILE_ALIGN)
+        out.extend(b"\xff" * (start - len(out)) + data)
+        struct.pack_into("<I", out, offset_field, start if data else 0)
+        if size_field is not None:
+            struct.pack_into("<I", out, size_field, len(data) if size is None else size)
+        return start
+    place(arm9, 0x20, 0x2C, len(arm9) - 12)
+    place(overlay_table, 0x50, 0x54)
+    for offset_field, size_field in ((0x30, 0x3C), (0x58, 0x5C)):
+        start, size = u32(rom, offset_field), u32(rom, size_field)
+        place(rom[start:start + size], offset_field, size_field)
+    place(rom[u32(rom, 0x40):u32(rom, 0x40) + u32(rom, 0x44)], 0x40, 0x44)
+    count = max(u32(rom, 0x4C) // 8, max(files, default=-1) + 1)
+    fat_at = place(bytes(8 * count), 0x48, 0x4C)
+    banner = u32(rom, 0x68)
+    place(rom[banner:banner + BANNER_SIZES.get(u16(rom, banner), 0x840)], 0x68)
+    for fid in range(count):
+        if fid in files:
+            body = files[fid]
+        else:
+            start, end = file_span(rom, fid)
+            body = rom[start:end]
+        start = align(len(out), FILE_ALIGN)
+        out.extend(b"\xff" * (start - len(out)) + body)
+        struct.pack_into("<II", out, fat_at + 8 * fid, start, start + len(body))
+    struct.pack_into("<I", out, 0x80, len(out))
+    capacity = 0x20000 << out[0x14]
+    if len(out) > capacity:
+        raise RomError("the rebuilt cartridge does not fit its capacity")
+    out += b"\xff" * (capacity - len(out))
+    struct.pack_into("<H", out, HEADER_CRC, crc16(out[:HEADER_CRC]))
+    return bytes(out)
+
+
+def overlay_entry(oid, ram, size, bss, fid):
+    """One uncompressed ARM9 overlay table entry without static initialisers."""
+    return struct.pack("<8I", oid, ram, size, bss, 0, 0, fid, 0)
