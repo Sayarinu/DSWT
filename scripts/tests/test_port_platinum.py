@@ -11,7 +11,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
-from retail_port import elf, link, nds, platinum, sdk, symbols  # noqa: E402
+from retail_port import dp, elf, link, nds, platinum, sdk, symbols, toolchain  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("port_platinum", SCRIPTS / "port-platinum.py")
 port_platinum = importlib.util.module_from_spec(spec)
@@ -93,6 +93,22 @@ class RomTest(unittest.TestCase):
         self.assertEqual(nds.blz_decode(data), b"PRE" + b"XYZ" * 10)
         with self.assertRaises(nds.RomError):
             nds.blz_decode(b"\0" * 8)
+
+    def test_compressed_arm9_is_expanded_from_its_module_parameters(self):
+        stream = b"\x00\x60\x00\xf0XYZ\x18"
+        packed = b"PRE" + stream + struct.pack("<II", 8 << 24 | (len(stream) + 8), 14)
+        def arm9(compressed_end, body):
+            params = struct.pack("<9I", 0, 0, 0, 0, 0, compressed_end, 0, 0xDEC00621, 0x2106C0DE)
+            return params + body
+        # The parameters sit before the compressed stream here, as in the static binary's header.
+        plain = arm9(0, b"rest")
+        self.assertEqual(nds.arm9_expanded(plain), plain)
+        head = struct.pack("<9I", 0, 0, 0, 0, 0, 0, 0, 0xDEC00621, 0x2106C0DE)
+        image = head + packed
+        compressed = bytearray(image)
+        struct.pack_into("<I", compressed, 0x14, nds.ARM9_RAM + len(image))
+        self.assertEqual(nds.arm9_expanded(bytes(compressed)), nds.blz_decode(bytes(compressed)))
+        self.assertEqual(nds.arm9_expanded(b"no parameters"), b"no parameters")
 
     def test_archive_round_trip(self):
         members = [b"one", b"", b"three!"]
@@ -203,6 +219,27 @@ class ElfTest(unittest.TestCase):
                                   [(1, 0, elf.R_ARM_REL32, 1, 0)])
         with self.assertRaises(elf.ElfError):
             elf.with_inline_addends(unsupported)
+
+    def test_section_relative_code_addresses_keep_their_mode(self):
+        # ARM code at 0, Thumb code at 8, then a literal pool; addresses taken through the section symbol.
+        obj = make_object(
+            [(".text", 1, elf.SHF_EXECINSTR | 2, bytes(24))],
+            [("$a", 0, 0, 0, elf.STT_NOTYPE, 1), ("$t", 8, 0, 0, elf.STT_NOTYPE, 1), ("$d", 12, 0, 0, elf.STT_NOTYPE, 1),
+             ("", 0, 0, 0, elf.STT_SECTION, 1)],
+            [(1, 12, elf.R_ARM_ABS32, 4, 8), (1, 16, elf.R_ARM_ABS32, 4, 0), (1, 20, elf.R_ARM_NONE, 4, 0)])
+        copy = elf.Elf(elf.with_inline_addends(obj))
+        text = copy.section_bytes(1)
+        self.assertEqual(struct.unpack_from("<ii", text, 12), (9, 0))
+        self.assertEqual(copy.relocs[1], [(12, elf.R_ARM_ABS32, 4, 9), (16, elf.R_ARM_ABS32, 4, 0), (20, elf.R_ARM_NONE, 4, 0)])
+
+    def test_unsized_functions_run_to_the_next_function(self):
+        # Two assembly functions without sizes, the first with an internal branch label.
+        obj = make_object(
+            [(".text", 1, elf.SHF_EXECINSTR | 2, bytes(20))],
+            [("$t", 0, 0, 0, elf.STT_FUNC, 1), ("first", 0, 0, 1, elf.STT_FUNC, 1), ("$b", 4, 0, 0, elf.STT_FUNC, 1),
+             ("second", 12, 0, 1, elf.STT_FUNC, 1), ("sized", 16, 2, 1, elf.STT_FUNC, 1)])
+        sizes = {f[0]: f[3] for f in elf.Elf(elf.with_function_sizes(obj)).functions()}
+        self.assertEqual(sizes, {"first": 12, "second": 4, "sized": 2})
 
     def test_numbered_sections_name_each_input_section(self):
         copy = elf.Elf(elf.numbered_sections(thumb_object()))
@@ -365,6 +402,38 @@ enum Language {
         self.assertIn("found", placeable)
         self.assertNotIn("missing", placeable)
         self.assertEqual(calls, ["found", "missing"])
+
+
+class DiamondPearlTest(unittest.TestCase):
+    def test_make_objects_follow_their_sources(self):
+        self.assertEqual(toolchain.dp_object("arm9/src/main.c", "DIAMOND"), "build/diamond.us/src/main.o")
+        self.assertEqual(toolchain.dp_object("arm9/overlays/52/src/overlay_52.c", "PEARL"),
+                         "build/pearl.us/overlays/52/src/overlay_52.o")
+
+    def test_bank_keys_come_from_msg_mk(self):
+        msg_mk = ("files/msgdata/msg/narc_0323.bin: MSGENCFLAGS = -k 0xd3a0\n"
+                  "files/msgdata/msg/narc_0624.bin: MSGENCFLAGS = -k 0x5754\n")
+        self.assertEqual((dp.gmm_key(msg_mk, 323), dp.gmm_key(msg_mk, 624)), (0xD3A0, 0x5754))
+        with self.assertRaises(platinum.PortError):
+            dp.gmm_key(msg_mk, 1)
+
+    def test_gmm_text_moves_into_the_english_slot(self):
+        source = ('<?xml version="1.0"?>\n<body language="English"><row id="a" index="0">'
+                  '<language name="English">WONDER TRADE</language><language name="French">ECHANGE MIRACLE</language>'
+                  '</row></body>')
+        out = dp.localized_gmm(source, "French")
+        self.assertTrue(out.startswith('<?xml version="1.0"?>'))
+        self.assertIn('<language name="English">ECHANGE MIRACLE</language>', out)
+        with self.assertRaises(platinum.PortError):
+            dp.localized_gmm(source, "German")
+
+    def test_sdk_library_reads_loose_objects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "OS_init.o"
+            path.write_bytes(thumb_object())
+            library = sdk.Library([path])
+            self.assertIn("caller", library.globals)
+            self.assertNotIn("callee", library.globals)
 
 
 class CliTest(unittest.TestCase):

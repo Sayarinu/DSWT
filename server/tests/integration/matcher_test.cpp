@@ -1,5 +1,6 @@
 #include "dswt/server/match_worker.h"
 #include "dswt/server/matcher_service.h"
+#include "dswt/server/offer_screener.h"
 #include "dswt/server/trade_service.h"
 #include "dswt/server/identity_store.h"
 
@@ -161,6 +162,24 @@ protected:
     }
   }
 };
+
+TEST_F(MatcherTest, NeverPairsAnOfferWhoseNameScreeningRefusedIt) {
+  const auto refused = Queue(201);
+  const auto other = Queue(202);
+  // A later rule screens both queued offers again and refuses the first one's name.
+  OfferScreener screener("", [](const auto &data) {
+    return data[8] == 201 ? LegalityDecision{LegalityVerdict::Illegal, {kInappropriateName}, 0}
+                          : LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+  }, kNameRule + 1);
+  while (screener.Poll(64) != 0) {}
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  const auto third = Queue(203);
+  const auto reply = Match();
+  ASSERT_EQ(reply.result(), v1::RESULT_OK);
+  EXPECT_EQ((std::set<std::string>{reply.first_trade_id(), reply.second_trade_id()}),
+            (std::set<std::string>{other.offer.trade_id(), third.offer.trade_id()}));
+  EXPECT_EQ(Status(refused.auth).trade().state(), v1::TRADE_QUEUED);
+}
 
 TEST_F(MatcherTest, PairAvailabilityNeedsTwoQueuedOwnersAndWritesNothing) {
   const auto attempts = Scalar("SELECT count(*) FROM dswt.matcher_attempts");

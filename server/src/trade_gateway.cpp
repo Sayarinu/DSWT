@@ -31,6 +31,7 @@ std::uint64_t Number(std::string_view bytes, std::size_t offset, std::size_t siz
 }
 
 struct Frame {
+  unsigned char version;
   unsigned char operation;
   std::string request_id;
   v1::Credentials auth;
@@ -48,13 +49,15 @@ struct Frame {
 
 Frame Decode(std::string_view packet) {
   if (packet.size() < wire::kRequestHeaderSize || packet.size() > wire::kMaxPacket ||
-      packet.substr(0, wire::kMagic.size()) != wire::kMagic ||
+      packet.substr(0, wire::kMagic.size() - 1) != wire::kMagic.substr(0, wire::kMagic.size() - 1) ||
+      (packet[wire::kMagic.size() - 1] != wire::kMagic.back() && packet[wire::kMagic.size() - 1] != wire::kVersionServerReturns) ||
       Number(packet, wire::kRequestBodyLength, 2) != packet.size() - wire::kRequestHeaderSize) throw InvalidFrame();
-  Frame frame{static_cast<unsigned char>(packet[wire::kRequestOperation]),
+  Frame frame{static_cast<unsigned char>(packet[wire::kMagic.size() - 1]), static_cast<unsigned char>(packet[wire::kRequestOperation]),
               std::string(packet.substr(wire::kRequestId, wire::kIdSize)), {}, Number(packet, wire::kRequestCounter, 8),
               packet.substr(wire::kRequestHeaderSize)};
   frame.auth.set_save_id(std::string(packet.substr(wire::kRequestSaveId, wire::kIdSize)));
   frame.auth.set_credential(std::string(packet.substr(wire::kRequestCredential, wire::kCredentialSize)));
+  frame.auth.set_server_returns(frame.version == wire::kVersionServerReturns);
   const bool enroll = frame.operation == wire::kEnroll;
   const bool mutation = frame.operation == wire::kSubmit || frame.operation == wire::kCancel || frame.operation == wire::kAcknowledge;
   if (frame.operation < wire::kEnroll || frame.operation > wire::kReconcile || !detail::NonzeroBytes(frame.request_id, wire::kIdSize) ||
@@ -108,7 +111,8 @@ std::string Snapshot(const v1::TradeSnapshot &snapshot, std::uint64_t highwater)
   return detail::EncodeOutcome(0, snapshot).substr(wire::kOutcomeSnapshot);
 }
 
-std::string Event(const v1::TradeEvent &event) {
+// Only a client that accepts server returns gets a CANCELLED event without an operation.
+std::string Event(const v1::TradeEvent &event, bool server_returns) {
   Require(Known(event) && event.kind() >= v1::EVENT_ENROLLED && event.kind() <= v1::EVENT_REJECTED);
   const auto kind = event.kind();
   Require(event.state() >= v1::TRADE_NONE && event.state() <= v1::TRADE_ACKNOWLEDGED);
@@ -124,7 +128,8 @@ std::string Event(const v1::TradeEvent &event) {
           detail::NonzeroBytes(event.trade_id(), wire::kIdSize) && event.state() != v1::TRADE_NONE);
     } else {
       Require(detail::NonzeroBytes(event.trade_id(), wire::kIdSize) && detail::NonzeroBytes(event.asset_id(), wire::kIdSize) && event.payload_sha256().size() == wire::kDigestSize);
-      Require(kind == v1::EVENT_MATCHED ? event.operation_id().empty() : detail::NonzeroBytes(event.operation_id(), wire::kIdSize));
+      Require(kind == v1::EVENT_MATCHED || (kind == v1::EVENT_CANCELLED && server_returns && event.operation_id().empty()) ?
+          event.operation_id().empty() : detail::NonzeroBytes(event.operation_id(), wire::kIdSize));
       Require(kind == v1::EVENT_SUBMITTED ? event.receipt_id().empty() : detail::NonzeroBytes(event.receipt_id(), wire::kIdSize));
       Require(event.state() == static_cast<v1::TradeState>(kind - 1));
     }
@@ -148,7 +153,8 @@ std::string Envelope(const Frame &frame, const v1::ReplyContext &context, const 
   else Require(body.empty());
   if (context.result() == v1::RESULT_UNAUTHENTICATED || context.result() == v1::RESULT_PROCESSING)
     Require(context.next_counter() == 0 && context.event_highwater() == 0);
-  std::string bytes(wire::kMagic);
+  std::string bytes(wire::kMagic.substr(0, wire::kMagic.size() - 1));
+  bytes += static_cast<char>(frame.version);
   bytes += static_cast<char>(frame.operation);
   detail::AppendUnsigned(bytes, body.size(), 2);
   bytes += frame.request_id;
@@ -297,7 +303,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
           value.events_size() <= value.context().event_highwater() - request.after_event());
       auto sequence = request.after_event();
       std::string events;
-      for (const auto &event : value.events()) { Require(event.sequence() == ++sequence); events += Event(event); }
+      for (const auto &event : value.events()) { Require(event.sequence() == ++sequence); events += Event(event, frame.auth.server_returns()); }
       Require(value.page_end() == sequence && value.has_more() == (sequence < value.context().event_highwater()) &&
           (!value.has_more() || value.events_size() == static_cast<int>(request.limit())));
       std::string bytes;

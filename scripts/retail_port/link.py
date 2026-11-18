@@ -13,12 +13,20 @@ class LinkError(ValueError):
 
 
 def defined_and_needed(objects):
-    """(names defined, names used but not defined) across ELF objects."""
+    """(names defined, names used but not defined) across ELF objects.
+
+    An undefined symbol that no relocation refers to, such as one an assembly
+    include declares for every file, is not needed."""
     defined, used = set(), set()
     for data in objects:
-        for symbol in elf.Elf(data).symbols:
+        obj = elf.Elf(data)
+        referenced = {index for rows in obj.relocs.values() for _, _, index, _ in rows}
+        for index, symbol in enumerate(obj.symbols):
             if symbol["name"] and symbol["bind"]:
-                (used if symbol["shndx"] == 0 else defined).add(symbol["name"])
+                if symbol["shndx"] != 0:
+                    defined.add(symbol["name"])
+                elif index in referenced:
+                    used.add(symbol["name"])
     return defined, used - defined
 
 
@@ -54,6 +62,33 @@ def linker_script(base, first):
 """
 
 
+def region_script(regions):
+    """Link several regions at once: [(prefix, base, input file patterns or None for the rest, first files)].
+
+    Each region's code, constants and data load from its base, then its BSS;
+    __PREFIX_load_end and __PREFIX_end mark them. Inputs not claimed by an earlier
+    pattern list go to the region with None."""
+    claimed = [pattern for _, _, patterns, _ in regions if patterns for pattern in patterns]
+    exclude = " ".join(claimed)
+    lines = ["SECTIONS {"]
+    for prefix, base, patterns, first in regions:
+        inputs = " ".join(patterns) if patterns else f"EXCLUDE_FILE({exclude}) *" if exclude else "*"
+        keep = lambda kind: " ".join(f"KEEP(*{name}({kind}.*))" for name in first)
+        files = lambda kind: " ".join(f"{p}({kind} {kind}.*)" for p in inputs.split(" ") if not p.startswith("EXCLUDE")) \
+            if patterns else f"{inputs}({kind} {kind}.*)"
+        lines += [f"  . = {base:#x};",
+                  f"  .{prefix}_text : {{ {keep('.text')} {files('.text')} }}",
+                  f"  .{prefix}_rodata : ALIGN(4) {{ {keep('.rodata')} {files('.rodata')} }}",
+                  f"  .{prefix}_data : ALIGN(4) {{ {files('.data')} }}",
+                  "  . = ALIGN(32);",
+                  f"  __{prefix}_load_end = .;",
+                  f"  .{prefix}_bss (NOLOAD) : ALIGN(32) {{ {files('.bss')} {'*(COMMON)' if not patterns else ''} }}",
+                  "  . = ALIGN(32);",
+                  f"  __{prefix}_end = .;"]
+    lines += ["  /DISCARD/ : { *(.debug*) *(.comment) *(.rel.debug*) *(.rela.debug*) }", "}"]
+    return "\n".join(lines) + "\n"
+
+
 SECTION_LINE = re.compile(r"^ (\.[\w.]+)?\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S.*\S)\s*$")
 
 
@@ -82,8 +117,10 @@ def nm_symbols(nm_text):
 class Linked:
     """A linked blob: its loaded bytes, symbol values and where each input section went."""
 
-    def __init__(self, base, binary, nm_text, map_text, objects):
+    def __init__(self, base, binary, nm_text, map_text, objects, segments=()):
         self.base, self.binary = base, binary
+        # Further loaded images, such as an overlay linked with the blob: (base, bytes).
+        self.segments = [(base, binary), *segments]
         self.symbols = nm_symbols(nm_text)
         self.sections = placements(map_text)
         self.objects = objects  # path -> Elf of each linked input
@@ -109,7 +146,10 @@ class Linked:
         return out
 
     def word(self, address):
-        return self.binary[address - self.base:address - self.base + 4]
+        for base, binary in self.segments:
+            if base <= address < base + len(binary):
+                return binary[address - base:address - base + 4]
+        return b""
 
 
 def thumb_functions(objects):
@@ -138,6 +178,8 @@ def check_relocations(linked, resolved):
             if at is None:
                 continue  # discarded by --gc-sections
             for offset, kind, index, addend in rows:
+                if kind == elf.R_ARM_NONE:
+                    continue
                 symbol = obj.symbols[index]
                 if symbol["shndx"] == 0 or (symbol["bind"] and symbol["name"] in linked.symbols):
                     name = symbol["name"]

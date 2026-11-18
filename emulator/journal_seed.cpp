@@ -82,9 +82,14 @@ const Layout &LayoutFor(const std::string &target) {
     if (target == "us-rev0" || target == "us-rev1" || target == "europe" || target == "france" || target == "germany" ||
         target == "italy" || target == "spain" || target == "japan" || target == "platinum-korea") return kPlatinum;
     if (target == "diamond-us-rev5" || target == "pearl-us-rev5" || target == "diamond-europe-rev5" ||
-        target == "pearl-europe-rev5") return kDiamondPearl;
+        target == "pearl-europe-rev5" || target == "diamond-france" || target == "diamond-germany" ||
+        target == "diamond-italy" || target == "diamond-spain" || target == "pearl-france" ||
+        target == "pearl-germany" || target == "pearl-italy" || target == "pearl-spain") return kDiamondPearl;
     Require(target == "heartgold-us-rev0" || target == "soulsilver-us-rev0" || target == "heartgold-europe" ||
-            target == "soulsilver-europe");
+            target == "soulsilver-europe" || target == "heartgold-france" || target == "heartgold-germany" ||
+            target == "heartgold-italy" || target == "heartgold-spain" ||
+            target == "soulsilver-france" || target == "soulsilver-germany" ||
+            target == "soulsilver-italy" || target == "soulsilver-spain");
     return kHeartGoldSoulSilver;
 }
 

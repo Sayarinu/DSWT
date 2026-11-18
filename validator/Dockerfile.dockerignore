@@ -17,6 +17,7 @@
 !validator/WorkerRunner.cs
 !validator/core-resources.json
 !validator/fetch-core.sh
+!validator/name-allowlist.txt
 !validator/packages.lock.json
 !validator/runtime-sources.tsv
 !validator/tests/ImageAudit.cs

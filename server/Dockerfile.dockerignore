@@ -18,6 +18,7 @@
 !server/include/dswt/server/ledger_store.h
 !server/include/dswt/server/legality_client.h
 !server/include/dswt/server/match_worker.h
+!server/include/dswt/server/offer_screener.h
 !server/include/dswt/server/matcher_service.h
 !server/include/dswt/server/metrics_server.h
 !server/include/dswt/server/recovery_barrier.h
@@ -31,6 +32,7 @@
 !server/migrations/0003_observation_time.sql
 !server/migrations/0004_identity_variants.sql
 !server/migrations/0005_offer_destinations.sql
+!server/migrations/0006_offer_screenings.sql
 !server/proto/connectivity.proto
 !server/proto/trade.proto
 !server/src/admission.cpp
@@ -54,6 +56,7 @@
 !server/src/legality_client.cpp
 !server/src/main.cpp
 !server/src/match_worker.cpp
+!server/src/offer_screener.cpp
 !server/src/matcher_main.cpp
 !server/src/matcher_service.cpp
 !server/src/metrics_server.cpp

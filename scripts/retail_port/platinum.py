@@ -139,14 +139,14 @@ def retail_arena(rom):
     return max(ends)
 
 
-def heap_count(nef, arm9):
+def heap_count(nef, arm9, function="InitHeapSystem"):
     """(address, value) of the movs r2, #HEAP_ID_MAX that passes the heap count to Heap_InitSystem."""
-    found = [s for s in nef.symbols if s["name"] == "InitHeapSystem" and s["type"] in symbols.FUNCTION_KINDS]
-    require(len(found) == 1, "the build has no single InitHeapSystem")
+    found = [s for s in nef.symbols if s["name"] == function and s["type"] in symbols.FUNCTION_KINDS]
+    require(len(found) == 1, f"the build has no single {function}")
     start, size = found[0]["value"] & ~1, found[0]["size"]
     calls = [offset for offset, _, index, _ in nef.relocs.get(found[0]["shndx"], ())
              if start <= offset < start + size and nef.symbols[index]["name"] == "Heap_InitSystem"]
-    require(len(calls) == 1, "InitHeapSystem does not call Heap_InitSystem once")
+    require(len(calls) == 1, f"{function} does not call Heap_InitSystem once")
     base, body = arm9
     for at in range(calls[0] - 2, max(start, calls[0] - 8) - 1, -2):
         half = nds.u16(body, at - base)
@@ -157,6 +157,9 @@ def heap_count(nef, arm9):
 
 class Target:
     """One retail Platinum to port: its dump, the pristine US map and the prepared workspace."""
+
+    # Passed to every toolchain.compile_objects call; other games override it.
+    compile_options = {}
 
     def __init__(self, language, rom_path, workspace, pristine, work, log=print):
         require(language in LANGUAGES, f"unsupported language {language}")
@@ -243,7 +246,7 @@ class Target:
         tree = self.work / "pristine"
         self._stage(tree, self.files + self.headers, lambda name: git(self.workspace, "show", f"HEAD:{name}"), self.deltas)
         objects = toolchain.compile_objects(self.workspace, tree, tree / "include", self.work / "pristine-obj",
-                                            self.language_name, self.files)
+                                            self.language_name, self.files, **self.compile_options)
         self.pristine_objects = {self._file_of(path): elf.Elf(path.read_bytes()) for path in objects}
         self.located, self.located_data, problems = {}, {}, []
         for name in self.files:
@@ -367,7 +370,7 @@ class Target:
         tls = subprocess.run(["python3", str(ROOT / "scripts/prepare-tls.py")], check=True, capture_output=True, text=True).stdout.strip()
         objects = toolchain.compile_objects(self.workspace, tree, tree / "include", self.work / "port-obj", self.language_name,
                                             self.files, wonder_trade=True, variant=self.code, tls=tls,
-                                            defines={"WT_SAVE_MAGIC": f"{self.save_magic:#010x}"})
+                                            defines=self.port_defines(), **self.compile_options)
         library = self.workspace / "build/src/wonder_trade/libwonder_trade_tls.a.p"
         sources = list(objects) + sorted(library.glob("*.o"))
         require(len(sources) > len(objects), f"{library} has no objects; build the workspace first")
@@ -382,6 +385,10 @@ class Target:
         self.port_objects = {self._file_of(path): self.objects[str(out / path.name)] for path in objects
                              if self._file_of(path) in self.files}
         self.log(f"compiled {len(objects)} objects for variant {self.code:#010x}")
+
+    def port_defines(self):
+        """Defines added when compiling Wonder Trade for this target."""
+        return {"WT_SAVE_MAGIC": f"{self.save_magic:#010x}"}
 
     # --- 3. Resolve and link ------------------------------------------------------------------------
     def resolve(self, name):
@@ -724,7 +731,8 @@ class Target:
                 if owner == module:
                     allowed.update(range(at - base, at - base + VENEER_SIZE))
             if module == "arm9":
-                allowed.add(self.heap_site[0] - base)
+                if self.heap_site is not None:  # Diamond and Pearl keep their heap count
+                    allowed.add(self.heap_site[0] - base)
                 params, start, end = nds.autoload_table(body + self.rom[nds.u32(self.rom, 0x20) + len(body):][:12])
                 allowed.update(range(params, params + 8))  # the autoload list moved
                 allowed.update(range(start, end))

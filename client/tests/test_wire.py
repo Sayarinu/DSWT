@@ -87,7 +87,8 @@ def run(binary):
         reply = wire.encode_response(wire.Response(
             wire.Operation(operation), b"\x11" * 16, wire.Result.OK, counter, highwater, body))
         add(requests[operation], reply, 1)
-        for offset, value in ((4, 2), (5, 0), (8, 0x12), (24, 12), (26, 1)):
+        # A reply must repeat its request's version (requests go out as version 2).
+        for offset, value in ((4, 1), (4, 3), (5, 0), (8, 0x12), (24, 12), (26, 1)):
             changed = bytearray(reply)
             changed[offset] = value
             add(requests[operation], changed, 0)

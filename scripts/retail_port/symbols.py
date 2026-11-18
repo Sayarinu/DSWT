@@ -36,7 +36,8 @@ class UsImage:
         marks = image.mapping_modes()
         self.syms, self.thumb = [], set()
         for num, raw in enumerate(image.symbols):
-            if not raw["name"] or raw["name"] in elf.MAPPING or not 0 < raw["shndx"] < elf.SHN_LORESERVE:
+            # $b marks a branch target inside a function (Metrowerks); it is neither a symbol nor a mode.
+            if not raw["name"] or raw["name"] in (*elf.MAPPING, "$b") or not 0 < raw["shndx"] < elf.SHN_LORESERVE:
                 continue
             if raw["type"] in (elf.STT_FUNC, elf.STT_OBJECT, elf.STT_ARM_TFUNC, elf.STT_NOTYPE):
                 symbol = Symbol(num, raw["value"], raw["size"], raw["type"], raw["shndx"], raw["name"])
@@ -63,14 +64,14 @@ class UsImage:
     def _modules(image, rom):
         """Section index -> "arm9" or overlay ID, checked against the US cartridge's overlay table.
 
-        After main, the TCMs and the link tables, overlay sections follow overlay ID order."""
+        After main (arm9 in the make builds), the TCMs and the link tables, overlay sections follow overlay ID order."""
         names = [(i, section["name"]) for i, section in enumerate(image.sections)]
-        start = next(i for i, name in names if name == "main_table")
+        start = next(i for i, name in names if name in ("main_table", "arm9_table"))  # meson, make
         order = []
         for i, name in names:
             if i > start and name and not name.startswith(".") and "." not in name and name not in order:
                 order.append(name)
-        found = {i: "arm9" for i, name in names if name == "main"}
+        found = {i: "arm9" for i, name in names if name in ("main", "arm9")}
         found.update({i: order.index(name) for i, name in names if name in order})
         table = {row[0]: row for row in nds.overlays(rom)}
         if len(order) != len(table):
@@ -149,17 +150,23 @@ class SymbolMap:
         self._propagate()
         self._neighbours()
 
+    def _size(self, symbol):
+        """A symbol's size; code from assembly records none, so it runs to the next symbol."""
+        if symbol.size:
+            return symbol.size
+        return self.us.extent(symbol) if symbol.kind in FUNCTION_KINDS else 0
+
     def _masked(self, symbol):
         if symbol.kind not in MAPPED_KINDS:
             return None
-        got = masked(self.us, self.us_modules, symbol)
+        got = masked(self.us, self.us_modules, symbol, self._size(symbol))
         if got is None or got[0] not in self.modules:
             return None
         return got
 
     def _anchor(self):
         for symbol in self.us.syms:
-            if symbol.kind not in FUNCTION_KINDS or symbol.size < 16:
+            if symbol.kind not in FUNCTION_KINDS or self._size(symbol) < 16:
                 continue
             got = self._masked(symbol)
             if got is None:

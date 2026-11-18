@@ -36,8 +36,12 @@ class WireTests(unittest.TestCase):
         )
         self.assertEqual(wire.REQUEST.size, 80)
         self.assertEqual(wire.RESPONSE.size, 44)
-        self.assertEqual(wire.encode_request(self.request()), expected)
-        self.assertEqual(wire.decode_request(expected), self.request())
+        # Version 1 frames, as journals from earlier clients keep them, stay valid.
+        self.assertEqual(wire.encode_request(self.request(version=1)), expected)
+        self.assertEqual(wire.decode_request(expected), self.request(version=1))
+        current = expected[:4] + bytes([wire.VERSION_SERVER_RETURNS]) + expected[5:]
+        self.assertEqual(wire.encode_request(self.request()), current)
+        self.assertEqual(wire.decode_request(current), self.request())
 
     def test_all_operations_round_trip(self):
         for operation in wire.Operation:
@@ -52,7 +56,7 @@ class WireTests(unittest.TestCase):
         packet = wire.encode_request(self.request())
         mutations = [packet[:i] for i in range(len(packet))]
         mutations += [packet + b"extra", bytes(wire.MAX_PACKET + 1)]
-        for offset, value in ((0, 0), (4, 2), (5, 255), (6, 0)):
+        for offset, value in ((0, 0), (4, 0), (4, 3), (5, 255), (6, 0)):
             changed = bytearray(packet)
             changed[offset] = value
             mutations.append(bytes(changed))

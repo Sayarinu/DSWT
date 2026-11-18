@@ -9,6 +9,12 @@
 
 #define WT_WIRE_MAGIC "WTDS\1" /* ASCII magic followed by version 1 */
 #define WT_WIRE_MAGIC_SIZE 5
+/* Version 2 is version 1 plus server returns: a CANCELLED event without an
+ * operation hands back an offer the server refused. New requests use it; frames a
+ * journal kept from version 1 stay valid, and a reply repeats its request's version. */
+#define WT_WIRE_VERSION_SERVER_RETURNS 2
+#define WT_WIRE_KNOWN_VERSION(frame) ((memcmp((frame), WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE - 1) == 0 \
+    && ((frame)[WT_WIRE_MAGIC_SIZE - 1] == 1 || (frame)[WT_WIRE_MAGIC_SIZE - 1] == WT_WIRE_VERSION_SERVER_RETURNS)))
 #define WT_WIRE_ID_SIZE 16
 #define WT_WIRE_DIGEST_SIZE 32
 #define WT_WIRE_CREDENTIAL_SIZE 32

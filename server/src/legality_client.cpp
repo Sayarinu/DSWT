@@ -15,7 +15,7 @@ namespace {
 bool KnownReason(std::string_view reason) {
   constexpr std::string_view reasons[] = {
       "EGG_NOT_ALLOWED", "ILLEGAL_DATA", "ILLEGAL_ENCOUNTER", "ILLEGAL_MOVES",
-      "ILLEGAL_RNG", "INCOMPATIBLE_FORM", "INCOMPATIBLE_GAME", "INVALID_SPECIES", "INVALID_STRUCTURE",
+      "ILLEGAL_RNG", "INAPPROPRIATE_NAME", "INCOMPATIBLE_FORM", "INCOMPATIBLE_GAME", "INVALID_SPECIES", "INVALID_STRUCTURE",
       "MAIL_NOT_ALLOWED"};
   return std::find(std::begin(reasons), std::end(reasons), reason) != std::end(reasons);
 }

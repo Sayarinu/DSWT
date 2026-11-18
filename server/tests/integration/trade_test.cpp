@@ -1,4 +1,5 @@
 #include "dswt/server/trade_service.h"
+#include "dswt/server/offer_screener.h"
 #include "dswt/server/identity_store.h"
 #include "dswt/server/identity_service.h"
 
@@ -194,6 +195,53 @@ TEST_F(TradeTest, EnrollmentEndpointRejectsUnknownAndChangedVariants) {
   ASSERT_TRUE(endpoint.Enroll(nullptr, &request, &reply).ok());
   EXPECT_EQ(reply.context().result(), v1::RESULT_OK);
   EXPECT_EQ(reply.save_id(), id);
+}
+
+TEST_F(TradeTest, RefusedNameReturnsOnlyToClientsThatAcceptServerReturns) {
+  auto request = Submission(auth);
+  auto data = request.pokemon().pk4();
+  data[8] = data[6] = '\x77';  // Marks this offer for the screening validator below; keeps the checksum.
+  request.mutable_pokemon()->set_pk4(data);
+  request.mutable_pokemon()->set_sha256(detail::HashBytes(data));
+  ASSERT_EQ(Submit(request).context().result(), v1::RESULT_OK);
+  const auto offer = Status().trade();
+  const auto trade = "'" + detail::HexBytes(offer.trade_id()) + "'::uuid";
+  EXPECT_EQ(Scalar(("SELECT count(*) FROM dswt.offer_screenings WHERE NOT refused AND rule=1 AND trade_id=" + trade).c_str()), "1");
+  OfferScreener screener("", [](const auto &pk4) {
+    return pk4[8] == 0x77 ? LegalityDecision{LegalityVerdict::Illegal, {"ILLEGAL_RNG", kInappropriateName}, 0}
+                          : LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+  }, kNameRule + 1);
+  while (screener.Poll(64) != 0) {}
+  EXPECT_EQ(Scalar(("SELECT refused::text FROM dswt.offer_screenings WHERE rule=2 AND trade_id=" + trade).c_str()), "true");
+
+  // A version 1 client never sees a server return: the offer stays queued.
+  EXPECT_EQ(Status().trade().state(), v1::TRADE_QUEUED);
+  EXPECT_EQ(Reconcile(2).events_size(), 0);
+  auth.set_server_returns(true);
+  // Like any mutation, a return waits until the history it extends is archived.
+  covered = false;
+  EXPECT_EQ(Status().context().result(), v1::RESULT_PROCESSING);
+  covered = true;
+  EXPECT_EQ(Scalar(("SELECT state::text FROM dswt.offers WHERE trade_id=" + trade).c_str()), "1");
+  const auto returned = Status();
+  ASSERT_EQ(returned.context().result(), v1::RESULT_OK);
+  EXPECT_EQ(returned.trade().state(), v1::TRADE_RETURN_READY);
+  EXPECT_EQ(returned.trade().delivery_kind(), v1::DELIVERY_RETURN);
+  EXPECT_EQ(returned.trade().received_asset_id(), offer.offered_asset_id());
+  EXPECT_EQ(returned.context().next_counter(), 2U);  // The owner's counters are untouched.
+  EXPECT_EQ(returned.context().event_highwater(), 3U);
+  EXPECT_EQ(Status().context().event_highwater(), 3U);  // Returned once.
+  const auto page = Reconcile(2);
+  ASSERT_EQ(page.events_size(), 1);
+  EXPECT_EQ(page.events(0).kind(), v1::EVENT_CANCELLED);
+  EXPECT_TRUE(page.events(0).operation_id().empty());
+  EXPECT_EQ(page.events(0).state(), v1::TRADE_RETURN_READY);
+  EXPECT_EQ(page.events(0).payload_sha256(), offer.offered_sha256());
+  const auto collected = Collect(offer.trade_id());
+  ASSERT_EQ(collected.context().result(), v1::RESULT_OK);
+  EXPECT_EQ(collected.pokemon().pk4(), data);
+  EXPECT_EQ(Ack(Acknowledgement(returned.trade(), 2)).context().result(), v1::RESULT_OK);
+  EXPECT_EQ(Status().trade().state(), v1::TRADE_NONE);
 }
 
 TEST_F(TradeTest, SubmissionStatusRetryAndImmutableOutcome) {

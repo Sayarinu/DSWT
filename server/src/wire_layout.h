@@ -11,6 +11,9 @@
 namespace dswt::server::wire {
 
 inline constexpr std::string_view kMagic{"WTDS\1", 5}; // ASCII magic followed by version 1
+// Version 2 is version 1 plus server returns: a CANCELLED event without an
+// operation hands back an offer the server refused. Replies repeat the request's version.
+inline constexpr unsigned char kVersionServerReturns = 2;
 
 // Operations
 inline constexpr unsigned char kEnroll = 1, kSubmit = 2, kStatus = 3, kCancel = 4, kCollect = 5, kAcknowledge = 6, kReconcile = 7;

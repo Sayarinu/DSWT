@@ -69,6 +69,9 @@ enum EventKind {
 message Credentials {
   bytes save_id = 1; // 16 random server-issued bytes; not a device identifier.
   bytes credential = 2; // 32 independently generated CSPRNG bytes; never logged.
+  // The client accepts a CANCELLED event without an operation: the server handing
+  // back an offer its name screening refused. DS wire version 2 sets it.
+  bool server_returns = 3;
 }
 
 message MutationContext {

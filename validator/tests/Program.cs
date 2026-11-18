@@ -126,18 +126,49 @@ await Test("legal generated wild encounter", () =>
     return Task.CompletedTask;
 });
 
-await Test("Gen IV names are not retroactively censored and data stays strict", () =>
+byte[] NamedByTrainer(string name)
 {
-    const string name = "SHIT";
-    ParseSettings.Initialize(new LegalitySettings());
-    Require(WordFilter.IsFiltered(name, EntityContext.Gen4, out _, out _), "fixture must trigger the default modern filter");
     var namedTrainer = new SimpleTrainerInfo(GameVersion.Pt) { OT = name, TID16 = 12345, SID16 = 54321, Language = 2, Gender = 0 };
     var pk = (PK4)starterEncounter.ConvertToPKM(namedTrainer);
-    pk.Nickname = name; pk.IsNicknamed = true; pk.MetDate = new DateOnly(2020, 1, 1);
-    var data = Canonical(pk); var before = data.ToArray();
-    Require(Policy.Analyze(data).Legal && data.SequenceEqual(before), "historical names rejected or repaired");
-    var invalid = Mutate(data, value => value.IV32 ^= 0x3FFFFFFF);
-    Require(!Policy.Analyze(invalid).Legal, "name exception bypassed RNG checks");
+    pk.MetDate = new DateOnly(2020, 1, 1);
+    return Canonical(pk);
+}
+byte[] Nicknamed(string name) => Mutate(good, pk => { pk.Nickname = name; pk.IsNicknamed = true; });
+void RequireName(byte[] data, bool allowed, string label)
+{
+    var reply = Policy.Analyze(data);
+    CheckReply(reply, data);
+    if (allowed)
+        Require(reply.Legal, label + " was refused");
+    else
+        Require(!reply.Legal && reply.ReasonCodes.SequenceEqual(["INAPPROPRIATE_NAME"]), label + " was not refused for its name");
+}
+
+await Test("names follow the Switch word list as a content rule, not legality", () =>
+{
+    var data = Nicknamed("SHIT"); var before = data.ToArray();
+    RequireName(data, false, "offensive nickname");
+    Require(data.SequenceEqual(before), "a refused name was repaired");
+    RequireName(NamedByTrainer("SHIT"), false, "offensive trainer name");
+    RequireName(Nicknamed("BULLSHIT"), false, "offensive compound");
+    RequireName(Nicknamed("KILLER"), false, "blocked inflection");
+    // An offensive name never hides an illegal Pokémon: both reasons are reported.
+    var both = Mutate(Nicknamed("SHIT"), pk => pk.IV32 ^= 0x3FFFFFFF);
+    var reply = Policy.Analyze(both);
+    Require(!reply.Legal && reply.ReasonCodes.Contains("INAPPROPRIATE_NAME") && reply.ReasonCodes.Contains("ILLEGAL_RNG"), "name hid RNG check");
+    return Task.CompletedTask;
+});
+
+await Test("names the list catches by accident stay tradable", () =>
+{
+    RequireName(good, true, "unnicknamed Pokémon");
+    // Reviewed allow-list entries: given names and ordinary words.
+    foreach (var name in new[] { "LULU", "MOSES", "Killian", "GRAPE", "COMPUTER", "Basement" })
+        RequireName(Nicknamed(name), true, name);
+    RequireName(NamedByTrainer("JODY"), true, "trainer JODY");
+    // Official Pokémon terms in any Gen IV language, and species names.
+    foreach (var name in new[] { "LEAFAGE", "SNATCH", "Coaching", "Osmose", "GIRATINA" })
+        RequireName(Nicknamed(name), true, name);
     return Task.CompletedTask;
 });
 
@@ -243,6 +274,7 @@ var illegal = new (string Name, byte[] Data, string Reason)[]
     ("impossible encounter", Mutate(good, pk => pk.MetLevel = 0), "ILLEGAL_ENCOUNTER"),
     ("invalid EV sum", Mutate(good, pk => { pk.EV_HP = 255; pk.EV_ATK = 255; pk.EV_DEF = 255; }), "ILLEGAL_DATA"),
     ("invalid RNG correlation", Mutate(good, pk => pk.IV32 ^= 0x3FFFFFFF), "ILLEGAL_RNG"),
+    ("offensive nickname", Mutate(good, pk => { pk.Nickname = "SHIT"; pk.IsNicknamed = true; }), "INAPPROPRIATE_NAME"),
 };
 foreach (var fixture in illegal)
     await Test(fixture.Name, () =>
@@ -283,6 +315,14 @@ await Test("real isolated worker accepts legal and rejects illegal payload", asy
     Console.WriteLine($"Worker cold validation: {clock.ElapsedMilliseconds} ms");
     reply = await runner.Run(illegal[0].Data, CancellationToken.None);
     Require(!reply.Legal, "worker accepted egg");
+    // The slowest name path loads the allow-list and every game-term list in a cold worker.
+    var term = Nicknamed("LEAFAGE");
+    clock.Restart();
+    reply = await runner.Run(term, CancellationToken.None);
+    Require(reply.Legal, "worker refused a Pokémon term");
+    Console.WriteLine($"Worker cold name exemption: {clock.ElapsedMilliseconds} ms");
+    reply = await runner.Run(Nicknamed("SHIT"), CancellationToken.None);
+    Require(!reply.Legal && reply.ReasonCodes.SequenceEqual(["INAPPROPRIATE_NAME"]), "worker accepted an offensive name");
 });
 
 ProcessStartInfo Shell(string command)

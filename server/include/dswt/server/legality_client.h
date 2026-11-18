@@ -17,6 +17,12 @@ inline constexpr std::uint32_t kDestinationPt = 2;
 inline constexpr std::uint32_t kDestinationHGSS = 4;
 inline constexpr std::uint32_t kAllDestinations = kDestinationDP | kDestinationPt | kDestinationHGSS;
 
+// The name screening rule offers are checked against (dswt.offer_screenings.rule).
+// Rule 1 is the Nintendo Switch word list the validator applies to the nickname and
+// original trainer's name. Raise it to screen every queued offer again.
+inline constexpr int kNameRule = 1;
+inline constexpr const char *kInappropriateName = "INAPPROPRIATE_NAME";
+
 struct LegalityDecision {
   LegalityVerdict verdict = LegalityVerdict::Unavailable;
   std::vector<std::string> reasons;

@@ -78,9 +78,9 @@ target_include_directories(dswt_admission PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/in
 target_link_libraries(dswt_admission PUBLIC Boost::system PRIVATE OpenSSL::Crypto)
 target_compile_options(dswt_admission PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(dswt_trading STATIC src/trade_service.cpp src/identity_service.cpp src/recovery_gate.cpp src/matcher_service.cpp src/match_worker.cpp)
+add_library(dswt_trading STATIC src/trade_service.cpp src/identity_service.cpp src/recovery_gate.cpp src/matcher_service.cpp src/match_worker.cpp src/offer_screener.cpp)
 target_include_directories(dswt_trading PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(dswt_trading PUBLIC dswt_protocol PRIVATE dswt_ledger dswt_legality dswt_encoding dswt_admission dswt_telemetry PostgreSQL::PostgreSQL OpenSSL::Crypto)
+target_link_libraries(dswt_trading PUBLIC dswt_protocol PRIVATE dswt_server dswt_ledger dswt_legality dswt_encoding dswt_admission dswt_telemetry PostgreSQL::PostgreSQL OpenSSL::Crypto)
 target_compile_options(dswt_trading PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(dswt-backend src/backend_main.cpp)
