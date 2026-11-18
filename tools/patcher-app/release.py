@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Stage and publish a GitHub release of the patch archive and player apps.
+"""Stage and publish a GitHub release of the player apps.
 
 `draft` runs locally, where the ROMs are: it uploads dswt-VERSION.zip to a new draft
 release tagged at the manifest's source commit. The Release patcher workflow then
-runs `fetch` to verify that archive, builds the apps, and runs `publish`, which
-uploads them with SHA256SUMS and publishes the draft.
+runs `fetch` to verify that archive, builds the apps around it, and runs `publish`,
+which uploads them with SHA256SUMS, removes the archive and publishes the draft.
+Players download one file: each app carries every patch.
 """
 
 import argparse
@@ -36,12 +37,14 @@ def archive_name(version):
 
 def notes(manifest):
     rows = "\n".join(f"| {build.bundle.title(entry)} | `{entry['input']['sha256']}` |" for entry in manifest["entries"])
+    version = manifest["version"]
     return f"""Wonder Trade for your own copy of a supported Pokémon game.
 
-Download the patcher for your computer, open it, choose a clean dump of your cartridge
-and save the patched ROM. Trimmed dumps work; the original file is never changed.
-The patches in `{archive_name(manifest['version'])}` apply only through DSWT Patcher, which
-unpacks your ROM's compressed code first; generic BPS patchers are not supported.
+Download one file, DSWT Patcher for your computer: `dswt-patcher-{version}-windows.zip`,
+`dswt-patcher-{version}-macos.zip` or `dswt-patcher-{version}-linux.zip`. It carries every
+patch. Open it, choose a clean dump of your cartridge and save the patched ROM. Trimmed
+dumps work; the original file is never changed. Patches apply only through DSWT Patcher;
+generic BPS patchers are not supported.
 
 | Supported cartridge | ROM SHA-256 |
 | --- | --- |
@@ -84,20 +87,23 @@ def fetch(version, repository, output):
 
 def publish(version, repository, directory):
     directory = Path(directory)
-    expected = {archive_name(version), *(f"dswt-patcher-{version}-{name}.zip" for name in PLATFORMS)}
+    names = {f"dswt-patcher-{version}-{name}.zip" for name in PLATFORMS}
     found = {path.name for path in directory.iterdir() if path.is_file()}
-    if found != expected:
-        raise build.BuildError(f"Release files differ from the expected set: {sorted(found ^ expected)}")
+    if found != names | {archive_name(version)}:
+        raise build.BuildError(f"Release files differ from the expected set: {sorted(found ^ (names | {archive_name(version)}))}")
     build.read_archive(directory / archive_name(version), version)
     if _draft_assets(version, repository) != {archive_name(version)}:
         raise build.BuildError(f"The draft must still hold only {archive_name(version)}")
-    remote = directory / archive_name(version)
-    sums = "".join(f"{hashlib.sha256((directory / name).read_bytes()).hexdigest()}  {name}\n" for name in sorted(expected))
+    # The apps carry the archive's patches, so players download one file each.
+    sums = "".join(f"{hashlib.sha256((directory / name).read_bytes()).hexdigest()}  {name}\n" for name in sorted(names))
     (directory / "SHA256SUMS").write_text(sums)
-    apps = [str(directory / name) for name in sorted(expected - {remote.name})]
-    gh("release", "upload", f"v{version}", *apps, str(directory / "SHA256SUMS"), "--repo", repository)
+    gh("release", "upload", f"v{version}", *(str(directory / name) for name in sorted(names)),
+       str(directory / "SHA256SUMS"), "--repo", repository)
+    gh("release", "delete-asset", f"v{version}", archive_name(version), "--repo", repository, "--yes")
+    if _draft_assets(version, repository) != names | {"SHA256SUMS"}:
+        raise build.BuildError("The draft does not hold exactly the apps and SHA256SUMS")
     gh("release", "edit", f"v{version}", "--repo", repository, "--draft=false", "--latest")
-    return {"release": f"v{version}", "published": True, "files": sorted(expected | {"SHA256SUMS"})}
+    return {"release": f"v{version}", "published": True, "files": sorted(names | {"SHA256SUMS"})}
 
 
 def main(argv=None):
