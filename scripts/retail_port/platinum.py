@@ -731,7 +731,8 @@ class Target:
                 if owner == module:
                     allowed.update(range(at - base, at - base + VENEER_SIZE))
             if module == "arm9":
-                allowed.add(self.heap_site[0] - base)
+                if self.heap_site is not None:  # Diamond and Pearl keep their heap count
+                    allowed.add(self.heap_site[0] - base)
                 params, start, end = nds.autoload_table(body + self.rom[nds.u32(self.rom, 0x20) + len(body):][:12])
                 allowed.update(range(params, params + 8))  # the autoload list moved
                 allowed.update(range(start, end))

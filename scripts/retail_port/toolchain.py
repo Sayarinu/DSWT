@@ -20,7 +20,7 @@ class ToolchainError(RuntimeError):
     pass
 
 
-def docker(mounts, script, workdir=None):
+def docker(mounts, script, workdir=None, image=IMAGE):
     """Run a shell script in the builder image as the calling user; mounts maps host -> container."""
     args = ["docker", "run", "--rm", "--platform", "linux/amd64", "--network", "none",
             "--user", f"{os.getuid()}:{os.getgid()}"]
@@ -28,9 +28,9 @@ def docker(mounts, script, workdir=None):
         args += ["--mount", f"type=bind,source={host},target={container}" + (",readonly" if container.startswith("/port/") else "")]
     if workdir:
         args += ["--workdir", workdir]
-    result = subprocess.run(args + [IMAGE, "bash", "-c", script], capture_output=True, text=True)
+    result = subprocess.run(args + [image, "bash", "-c", script], capture_output=True, text=True)
     if result.returncode:
-        raise ToolchainError(f"{IMAGE} failed:\n{result.stdout[-4000:]}{result.stderr[-4000:]}")
+        raise ToolchainError(f"{image} failed:\n{result.stdout[-4000:]}{result.stderr[-4000:]}")
     return result.stdout
 
 
@@ -103,6 +103,75 @@ def compile_objects(workspace, sources, headers, out, language, files, wonder_tr
     if tls:
         mounts[str(Path(tls).resolve())] = "/tls"
     docker(mounts, compile_script(workspace, language, files, wonder_trade, variant, defines, build, pch, required))
+    return sorted(out.glob("*.o"))
+
+
+DP_IMAGE = "dswt-rom-builder-dp"
+# How build-rom.sh runs the Diamond and Pearl build: one Wine prefix and server for the jobs.
+DP_WINE = 'export WINEPREFIX="$(mktemp -d)"; wineserver -p; wineboot -i 2>/dev/null'
+DP_MAKE = ("COMPARE=0 WT_TLS_DIR=/tls WT_MSL_DIR=/opt/pokediamond/msl "
+           "WT_PROFILE_HEADER=/workspace/.git/dswt-connection.h")
+# What arm9/Makefile exports to the compiler; make -n does not print it.
+DP_LICENSE = "LM_LICENSE_FILE=../tools/mwccarm/license.dat"
+DP_INCLUDES = {"game": "/workspace/arm9/lib/MSL_C/include /workspace/arm9/lib/NitroSDK/include /workspace/arm9/lib/libnns/include",
+               "wonder_trade": "/opt/pokediamond/msl/MSL_C/MSL_Common/Include /opt/pokediamond/msl/MSL_C/MSL_ARM/Include"}
+
+
+def dp_object(source, version):
+    """The make build's object for a workspace source such as arm9/src/main.c."""
+    inner = posixpath.relpath(source, "arm9")
+    return f"build/{version.lower()}.us/{posixpath.splitext(inner)[0]}.o"
+
+
+def dp_commands(workspace, sources, version, tls):
+    """The compiler command make runs for each source, read from a dry run in arm9/."""
+    targets = " ".join(dp_object(name, version) for name in sources)
+    always = " ".join(f"-W {shlex.quote(posixpath.relpath(name, 'arm9'))}" for name in sources)
+    out = docker({str(Path(workspace).resolve()): "/workspace", str(Path(tls).resolve()): "/tls"},
+                 f"make -n {always} GAME_VERSION={version} {DP_MAKE} {targets}", workdir="/workspace/arm9", image=DP_IMAGE)
+    commands = {}
+    for line in out.splitlines():
+        words = shlex.split(line)
+        if "-c" not in words or "-o" not in words or not any(w.endswith("mwccarm.exe") for w in words):
+            continue
+        for name in sources:
+            if words[words.index("-o") + 1] == dp_object(name, version):
+                commands[name] = words
+    missing = sorted(set(sources) - set(commands))
+    if missing:
+        raise ToolchainError(f"make does not compile {', '.join(missing)}")
+    return commands
+
+
+def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_trade=False, tls=None, defines=None):
+    """Compile Diamond or Pearl objects into out with make's own commands: files from sources
+    (a tree like the workspace), the headers directory searched first."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    names = list(files)
+    if wonder_trade:
+        root = Path(workspace) / "arm9/src/wonder_trade"
+        names += sorted(posixpath.join("arm9", p.relative_to(Path(workspace) / "arm9").as_posix())
+                        for p in [*root.glob("*.c"), *root.glob("dp/*.c")])
+    commands = dp_commands(workspace, names, version, tls)
+    extra = [f"-D{name}={value}" for name, value in (defines or {}).items()]
+    lines = ["set -e", DP_WINE, "cd /workspace/arm9"]
+    for name in names:
+        words = list(commands[name])
+        words[words.index("-o") + 1] = f"/out/{name.replace('/', '_')}.o"
+        first_include = next(i for i, w in enumerate(words) if w == "-i")
+        words[first_include:first_include] = ["-i", HEADERS]
+        first_define = next(i for i, w in enumerate(words) if w.startswith("-D"))
+        words[first_define:first_define] = extra
+        if name in files:
+            words[-1] = f"{SOURCES}/{name}"
+        kind = "wonder_trade" if name.startswith("arm9/src/wonder_trade/") else "game"
+        lines.append(f"{DP_LICENSE} MWCIncludes={shlex.quote(DP_INCLUDES[kind])} {shlex.join(words)}")
+    mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
+              str(Path(sources).resolve()): SOURCES, str(Path(headers).resolve()): HEADERS}
+    if tls:
+        mounts[str(Path(tls).resolve())] = "/tls"
+    docker(mounts, "\n".join(lines) + "\n", image=DP_IMAGE)
     return sorted(out.glob("*.o"))
 
 

@@ -1,0 +1,17 @@
+Source changes only a retail Diamond or Pearl port needs.
+
+The port leaves the game's own copy of this main.c variable in place: retail code
+outside the replaced functions reads it too.
+
+diff --git a/arm9/src/main.c b/arm9/src/main.c
+--- a/arm9/src/main.c
++++ b/arm9/src/main.c
+@@ -30,7 +30,7 @@
+ 
+ #define SOFT_RESET_KEY (PAD_BUTTON_L | PAD_BUTTON_R | PAD_BUTTON_START | PAD_BUTTON_SELECT)
+ 
+-s32 UNK_02016FA4;
++extern s32 UNK_02016FA4;
+ PMBackLightSwitch gBacklightTop;
+ struct UnkStruct_02016FA8 UNK_02016FA8;
+ 

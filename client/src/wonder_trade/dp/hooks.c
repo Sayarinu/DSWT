@@ -76,10 +76,12 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
 /* Family 1 (Diamond and Pearl), the game's version ID (10 Diamond, 11 Pearl),
  * English (2) and revision 5 (wiki Protocol, "Game variants"). Enrollment
  * takes the revision from the running cartridge (WtGame_EnrollVariant). */
+#ifndef WT_VARIANT /* A retail port sets its own language. */
 #if defined(PEARL)
 #define WT_VARIANT 0x010B0205
 #else
 #define WT_VARIANT 0x010A0205
+#endif
 #endif
 
 /* Diamond and Pearl never use the 64 KiB flash sectors at 0x30000 and 0x70000

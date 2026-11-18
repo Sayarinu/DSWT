@@ -11,7 +11,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
-from retail_port import elf, link, nds, platinum, sdk, symbols  # noqa: E402
+from retail_port import dp, elf, link, nds, platinum, sdk, symbols, toolchain  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("port_platinum", SCRIPTS / "port-platinum.py")
 port_platinum = importlib.util.module_from_spec(spec)
@@ -232,6 +232,15 @@ class ElfTest(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<ii", text, 12), (9, 0))
         self.assertEqual(copy.relocs[1], [(12, elf.R_ARM_ABS32, 4, 9), (16, elf.R_ARM_ABS32, 4, 0), (20, elf.R_ARM_NONE, 4, 0)])
 
+    def test_unsized_functions_run_to_the_next_function(self):
+        # Two assembly functions without sizes, the first with an internal branch label.
+        obj = make_object(
+            [(".text", 1, elf.SHF_EXECINSTR | 2, bytes(20))],
+            [("$t", 0, 0, 0, elf.STT_FUNC, 1), ("first", 0, 0, 1, elf.STT_FUNC, 1), ("$b", 4, 0, 0, elf.STT_FUNC, 1),
+             ("second", 12, 0, 1, elf.STT_FUNC, 1), ("sized", 16, 2, 1, elf.STT_FUNC, 1)])
+        sizes = {f[0]: f[3] for f in elf.Elf(elf.with_function_sizes(obj)).functions()}
+        self.assertEqual(sizes, {"first": 12, "second": 4, "sized": 2})
+
     def test_numbered_sections_name_each_input_section(self):
         copy = elf.Elf(elf.numbered_sections(thumb_object()))
         self.assertEqual([s["name"] for s in copy.sections[1:3]], [".text.1", ".data.2"])
@@ -393,6 +402,38 @@ enum Language {
         self.assertIn("found", placeable)
         self.assertNotIn("missing", placeable)
         self.assertEqual(calls, ["found", "missing"])
+
+
+class DiamondPearlTest(unittest.TestCase):
+    def test_make_objects_follow_their_sources(self):
+        self.assertEqual(toolchain.dp_object("arm9/src/main.c", "DIAMOND"), "build/diamond.us/src/main.o")
+        self.assertEqual(toolchain.dp_object("arm9/overlays/52/src/overlay_52.c", "PEARL"),
+                         "build/pearl.us/overlays/52/src/overlay_52.o")
+
+    def test_bank_keys_come_from_msg_mk(self):
+        msg_mk = ("files/msgdata/msg/narc_0323.bin: MSGENCFLAGS = -k 0xd3a0\n"
+                  "files/msgdata/msg/narc_0624.bin: MSGENCFLAGS = -k 0x5754\n")
+        self.assertEqual((dp.gmm_key(msg_mk, 323), dp.gmm_key(msg_mk, 624)), (0xD3A0, 0x5754))
+        with self.assertRaises(platinum.PortError):
+            dp.gmm_key(msg_mk, 1)
+
+    def test_gmm_text_moves_into_the_english_slot(self):
+        source = ('<?xml version="1.0"?>\n<body language="English"><row id="a" index="0">'
+                  '<language name="English">WONDER TRADE</language><language name="French">ECHANGE MIRACLE</language>'
+                  '</row></body>')
+        out = dp.localized_gmm(source, "French")
+        self.assertTrue(out.startswith('<?xml version="1.0"?>'))
+        self.assertIn('<language name="English">ECHANGE MIRACLE</language>', out)
+        with self.assertRaises(platinum.PortError):
+            dp.localized_gmm(source, "German")
+
+    def test_sdk_library_reads_loose_objects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "OS_init.o"
+            path.write_bytes(thumb_object())
+            library = sdk.Library([path])
+            self.assertIn("caller", library.globals)
+            self.assertNotIn("callee", library.globals)
 
 
 class CliTest(unittest.TestCase):
