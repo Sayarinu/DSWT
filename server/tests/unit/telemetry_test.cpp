@@ -3,6 +3,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -79,6 +85,52 @@ TEST(TelemetryTest, GatewayDoesNotPublishBackendLedgerGauges) {
   Telemetry metrics;
   metrics.Initialize(TelemetryRole::Gateway);
   EXPECT_EQ(metrics.Render().find("dswt_database_up"), std::string::npos);
+}
+
+std::uint64_t DroppedLogs(const Telemetry &metrics) {
+  const auto text = metrics.Render();
+  const auto at = text.find("dswt_dropped_logs_total{");
+  return std::stoull(text.substr(text.find("} ", at) + 2));
+}
+
+TEST(TelemetryTest, ConcurrentRequestsKeepEveryLogLine) {
+  Telemetry metrics;
+  metrics.Initialize(TelemetryRole::Backend);
+  auto written = std::make_shared<std::atomic<unsigned>>(0);
+  metrics.SetLogSinkForTesting([written](std::string_view line) {
+    EXPECT_EQ(line.back(), '\n');
+    written->fetch_add(1);
+    return true;
+  });
+  constexpr unsigned kThreads = 16, kEach = 500;
+  std::vector<std::thread> threads;
+  for (unsigned t = 0; t < kThreads; ++t)
+    threads.emplace_back([&] {
+      for (unsigned i = 0; i < kEach; ++i) metrics.Record(Operation::Status, 1, std::chrono::microseconds(100));
+    });
+  for (auto &thread : threads) thread.join();
+  metrics.FlushLogsForTesting();
+  EXPECT_EQ(written->load(), kThreads * kEach);
+  EXPECT_EQ(DroppedLogs(metrics), 0u);
+}
+
+TEST(TelemetryTest, StuckLogOutputDropsLinesWithoutBlockingRequests) {
+  Telemetry metrics;
+  metrics.Initialize(TelemetryRole::Gateway);
+  auto release = std::make_shared<std::promise<void>>();
+  auto released = release->get_future().share();
+  metrics.SetLogSinkForTesting([released](std::string_view) { released.wait(); return true; });
+  // The first line occupies the writer; the queue then fills while output is stuck.
+  constexpr unsigned kLines = 20000;
+  const auto begin = std::chrono::steady_clock::now();
+  for (unsigned i = 0; i < kLines; ++i) metrics.Record(Operation::Submit, 1, std::chrono::microseconds(100));
+  EXPECT_LT(std::chrono::steady_clock::now() - begin, std::chrono::seconds(5));
+  const auto dropped = DroppedLogs(metrics);
+  EXPECT_GT(dropped, 0u);
+  EXPECT_LT(dropped, kLines);
+  release->set_value();
+  metrics.FlushLogsForTesting();
+  EXPECT_EQ(DroppedLogs(metrics), dropped);
 }
 
 } // namespace

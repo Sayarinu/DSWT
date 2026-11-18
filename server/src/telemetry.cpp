@@ -1,10 +1,13 @@
 #include "dswt/server/telemetry.h"
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdio>
+#include <deque>
 #include <iomanip>
 #include <locale>
 #include <sstream>
+#include <thread>
 
 namespace dswt::server {
 namespace {
@@ -31,12 +34,73 @@ std::string HexId(std::string_view bytes) {
 }
 } // namespace
 
+// Lines wait here for the writer thread. A full queue means the output is stuck, and only
+// then is a line dropped; request threads never wait on stderr.
+struct LogQueue {
+  static constexpr std::size_t kCapacity = 8192;
+  std::mutex mutex;
+  std::condition_variable wake, idle;
+  std::deque<std::string> lines;
+  bool stopping = false, writing = false;
+  std::function<bool(std::string_view)> sink = [](std::string_view line) {
+    return std::fwrite(line.data(), 1, line.size(), stderr) == line.size();
+  };
+  std::atomic<std::uint64_t> dropped{0};
+
+  bool Push(std::string line) {
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (lines.size() >= kCapacity) return false;
+      lines.push_back(std::move(line));
+    }
+    wake.notify_one();
+    return true;
+  }
+
+  // Owns the queue through a shared pointer and runs detached, so a stuck pipe cannot hang shutdown.
+  static void Drain(std::shared_ptr<LogQueue> queue) {
+    std::unique_lock<std::mutex> lock(queue->mutex);
+    for (;;) {
+      queue->wake.wait(lock, [&] { return queue->stopping || !queue->lines.empty(); });
+      if (queue->lines.empty()) return;
+      std::deque<std::string> batch;
+      batch.swap(queue->lines);
+      auto sink = queue->sink;
+      queue->writing = true;
+      lock.unlock();
+      for (const auto &line : batch)
+        if (!sink(line)) queue->dropped.fetch_add(1, std::memory_order_relaxed);
+      lock.lock();
+      queue->writing = false;
+      queue->idle.notify_all();
+    }
+  }
+};
+
 Telemetry &Telemetry::Global() { static Telemetry instance; return instance; }
 
-Telemetry::Telemetry() {
+Telemetry::Telemetry() : log_queue_(std::make_shared<LogQueue>()) {
   for (auto &operation : requests_) for (auto &counter : operation) counter.store(0);
   for (auto &operation : latency_) for (auto &counter : operation) counter.store(0);
   for (auto &counter : elapsed_us_) counter.store(0);
+}
+
+Telemetry::~Telemetry() {
+  {
+    std::lock_guard<std::mutex> lock(log_queue_->mutex);
+    log_queue_->stopping = true;
+  }
+  log_queue_->wake.notify_all();
+}
+
+void Telemetry::SetLogSinkForTesting(std::function<bool(std::string_view)> sink) {
+  std::lock_guard<std::mutex> lock(log_queue_->mutex);
+  log_queue_->sink = std::move(sink);
+}
+
+void Telemetry::FlushLogsForTesting() {
+  std::unique_lock<std::mutex> lock(log_queue_->mutex);
+  log_queue_->idle.wait(lock, [&] { return log_queue_->lines.empty() && !log_queue_->writing; });
 }
 
 static const char *RoleName(TelemetryRole role) {
@@ -45,7 +109,7 @@ static const char *RoleName(TelemetryRole role) {
 
 void Telemetry::Initialize(TelemetryRole role) {
   role_ = role;
-  logs_.store(true, std::memory_order_release);
+  if (!logs_.exchange(true, std::memory_order_acq_rel)) std::thread(LogQueue::Drain, log_queue_).detach();
 }
 
 std::string Telemetry::LogLine(Operation operation, unsigned result, std::uint64_t elapsed,
@@ -76,10 +140,8 @@ void Telemetry::Record(Operation operation, unsigned result, std::chrono::micros
   latency_[op][bucket].fetch_add(1, std::memory_order_relaxed);
   if (!logs_.load(std::memory_order_acquire)) return;
   try {
-    std::unique_lock<std::mutex> lock(log_mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) { dropped_logs_.fetch_add(1, std::memory_order_relaxed); return; }
-    const auto line = LogLine(operation, result, duration, request, mutation, trade, role_);
-    if (std::fwrite(line.data(), 1, line.size(), stderr) != line.size()) dropped_logs_.fetch_add(1, std::memory_order_relaxed);
+    if (!log_queue_->Push(LogLine(operation, result, duration, request, mutation, trade, role_)))
+      dropped_logs_.fetch_add(1, std::memory_order_relaxed);
   } catch (...) { dropped_logs_.fetch_add(1, std::memory_order_relaxed); }
 }
 
@@ -114,7 +176,7 @@ std::string Telemetry::Render() const {
     output << "dswt_request_duration_seconds_sum{" << labels << "} " << elapsed_us_[op].load() / 1000000.0 << '\n';
   }
   output << "# TYPE dswt_operation_replays_total counter\ndswt_operation_replays_total{service=\"" << role << "\"} " << replays_.load() << '\n';
-  output << "# TYPE dswt_dropped_logs_total counter\ndswt_dropped_logs_total{service=\"" << role << "\"} " << dropped_logs_.load() << '\n';
+  output << "# TYPE dswt_dropped_logs_total counter\ndswt_dropped_logs_total{service=\"" << role << "\"} " << dropped_logs_.load() + log_queue_->dropped.load() << '\n';
   output << "# TYPE dswt_admission_rejections_total counter\ndswt_admission_rejections_total{service=\"" << role << "\"} " << refused_.load() << '\n';
   if (role_ == TelemetryRole::Backend) {
     std::lock_guard<std::mutex> lock(ledger_mutex_);

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -22,11 +23,16 @@ struct LedgerMetrics {
   double oldest_queue_seconds = 0, oldest_delivery_seconds = 0;
 };
 
+struct LogQueue;
+
 // Only fixed operation/result labels and explicit bounded IDs enter telemetry.
 // Ownership evidence remains in PostgreSQL, never in this process's counters/logs.
 class Telemetry {
 public:
   Telemetry();
+  ~Telemetry();
+  Telemetry(const Telemetry &) = delete;
+  Telemetry &operator=(const Telemetry &) = delete;
   static Telemetry &Global();
   void Initialize(TelemetryRole role);
   void Record(Operation, unsigned result, std::chrono::microseconds elapsed,
@@ -34,6 +40,9 @@ public:
   void Replay() noexcept { replays_.fetch_add(1, std::memory_order_relaxed); }
   void Refused() noexcept { refused_.fetch_add(1, std::memory_order_relaxed); }
   void SetLedger(LedgerMetrics);
+  // Tests only: replace stderr as the log destination, and wait until queued lines are written.
+  void SetLogSinkForTesting(std::function<bool(std::string_view)> sink);
+  void FlushLogsForTesting();
   std::string Render() const;
   static std::string LogLine(Operation, unsigned result, std::uint64_t elapsed_us,
                              std::string_view request_id, std::string_view operation_id, std::string_view trade_id,
@@ -47,7 +56,9 @@ private:
   std::atomic<std::uint64_t> replays_{0}, dropped_logs_{0}, refused_{0};
   std::atomic<bool> logs_{false};
   TelemetryRole role_ = TelemetryRole::Backend;
-  mutable std::mutex ledger_mutex_, log_mutex_;
+  mutable std::mutex ledger_mutex_;
+  // Lines go to a bounded queue that one writer thread drains, so requests never wait on output.
+  std::shared_ptr<LogQueue> log_queue_;
   LedgerMetrics ledger_;
   double last_ledger_success_ = 0;
 };
