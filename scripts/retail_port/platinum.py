@@ -42,13 +42,20 @@ LANGUAGES = {
 REVIEWED = {
     "ja": {
         "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+        "TradeSequence_Init": 1,  # the trade text bank number
         "String_FormatInt": 1,  # a literal data address
         "Text_AddPrinterWithParamsAndColor": 17,  # leaves the template's unused last byte alone
     },
     "ko": {
         "MessageLoader_GetSpeciesName": 1,  # the species name bank number (412 -> 408)
+        "TradeSequence_Init": 1,  # the trade text bank number
     },
 }
+# Init functions the game reaches only through its own app templates,
+# {Init, Main, Exit, overlay ID}, so no call site votes on where they are:
+# init: (main, exit). The overlay is the one main is in. Every template must agree.
+TEMPLATE_INITS = {"TradeSequence_Init": ("TradeSequence_Main", "TradeSequence_Exit")}
+
 US_VARIANT = "us-rev1"
 TEXT_ARCHIVE = "msgdata/pl_msg.narc"
 MENU_LABEL = "WonderTrade_Text_MenuLabel"
@@ -433,7 +440,10 @@ class Target:
         if us is None:
             return None
         if us.num not in self.map.addr and name in self.reviewed():
-            return symbols.reviewed_address(self.map, us, self.reviewed()[name]), True
+            # An init reached only through the game's app templates has no call to vote on it.
+            template = self._template_init(*TEMPLATE_INITS[name]) if name in TEMPLATE_INITS else None
+            extra = () if template is None else (template,)
+            return symbols.reviewed_address(self.map, us, self.reviewed()[name], extra), True
         if us.num in self.map.addr:
             at = self.map.addr[us.num]
             return ((at & ~1) | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
@@ -446,6 +456,26 @@ class Target:
         if at is None:
             return None
         return (at | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
+
+    def _template_init(self, main, exit_, overlay=None):
+        """Init's address from the game's app templates holding its placed main and exit."""
+        if overlay is None:
+            symbol = self.image.unique(main)
+            overlay = self.image.module(symbol) if symbol is not None else None
+            if not isinstance(overlay, int):
+                return None
+        placed = [self.map.addr.get(self.image.unique(name).num) if self.image.unique(name) else None for name in (main, exit_)]
+        if None in placed:
+            return None
+        main_at, exit_at = ((at & ~1) | int(self.image.unique(name).num in self.image.thumb) for at, name in zip(placed, (main, exit_)))
+        found = set()
+        for _, (_, body) in self.modules.items():
+            for offset in range(0, len(body) - 15, 4):
+                init, m, e, o = struct.unpack_from("<4I", body, offset)
+                if (m, e, o) == (main_at, exit_at, overlay):
+                    found.add(init)
+        require(len(found) <= 1, f"the game's templates disagree where {main}'s init is")
+        return (next(iter(found)) & ~1) if found else None
 
     @property
     def us_modules(self):

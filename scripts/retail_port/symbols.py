@@ -306,10 +306,12 @@ class SymbolMap:
                             break
 
 
-def reviewed_address(table, symbol, expected):
-    """A function the target changes in reviewed details: the one guess where its bytes differ
-    from the image's in exactly the reviewed number of places, Thumb bit set as the image has it."""
-    found = {at for at in table.guesses(symbol) if table.differing(symbol, at) == expected}
+def reviewed_address(table, symbol, expected, extra=()):
+    """A function the target changes in reviewed details: the one guess, or extra candidate,
+    where its bytes differ from the image's in exactly the reviewed number of places, with
+    the Thumb bit set as the image has it."""
+    candidates = table.guesses(symbol) | {at & ~1 for at in extra}
+    found = {at for at in candidates if table.differing(symbol, at) == expected}
     if len(found) != 1:
         where = ", ".join(f"{at:#x}" for at in sorted(found)) or "no call or neighbour"
         raise ValueError(f"{symbol.name}: {where} differs in the {expected} reviewed bytes")
