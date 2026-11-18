@@ -19,6 +19,10 @@
 #include "wonder_trade/tls.h"
 #include "wonder_trade_config.h"
 
+/* The trade animation images are the journal's whole Pokémon images. */
+typedef char WtImageSizeCheck[sizeof(((WtJournalEntry *)0)->original) == WT_GAME_IMAGE_SIZE
+    && sizeof(((WtJournalEntry *)0)->destinationAfter) == WT_GAME_IMAGE_SIZE ? 1 : -1];
+
 #define WT_ACK "DSWT_ACK_V1\n"
 #define WT_NETWORK_HEAP_SIZE 0x20000
 #define WT_STACK_SIZE 0x8000
@@ -321,6 +325,10 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
             transport->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
             /* The ACK retires this journal entry, so read what was saved first. */
             transport->hasReceived = WtGame_Received(&engine->entry, &transport->received) == 0;
+            if (transport->hasReceived) {
+                memcpy(transport->received.sent, engine->entry.original, sizeof(transport->received.sent));
+                memcpy(transport->received.image, engine->entry.destinationAfter, sizeof(transport->received.image));
+            }
         }
         result = WonderTradeNetwork_OneExchange(transport);
         if (result < 0) break;
