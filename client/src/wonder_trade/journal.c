@@ -4,6 +4,60 @@
 
 #include <string.h>
 
+/* Byte offsets of the 4 KiB journal record (protocol/save-layout.json,
+ * record_sections). Sections: header 0, identity 32, progress 96,
+ * transaction 160, pokemon_images 416, transport_private_state 1440,
+ * pending_request 1952, reserved_zero 2216, sha256 4060, commit_tag 4092.
+ * RESERVED_* ranges are zero in every supported record. */
+enum {
+    WT_REC_FORMAT = 0,                    /* "DSWJ" and format version 1 */
+    WT_REC_PHASE = 6,
+    WT_REC_SIZE = 8,
+    WT_REC_RESERVED_SIZE_TAIL = 12,
+    WT_REC_GENERATION = 16,
+    WT_REC_RESERVED_HEADER_TAIL = 24,
+    WT_REC_SAVE_ID = 32,                  /* identity */
+    WT_REC_CREDENTIAL = 48,
+    WT_REC_ENROLLMENT_ID = 80,
+    WT_REC_NEXT_COUNTER = 96,             /* progress */
+    WT_REC_EVENT_CURSOR = 104,
+    WT_REC_LAST_RECEIPT = 112,
+    WT_REC_LAST_OPERATION = 128,
+    WT_REC_LAST_OPERATION_COUNTER = 144,
+    WT_REC_RESERVED_PROGRESS_TAIL = 152,
+    WT_REC_OPERATION = 160,               /* transaction */
+    WT_REC_OPERATION_COUNTER = 176,
+    WT_REC_TRADE = 184,
+    WT_REC_RECEIPT = 200,
+    WT_REC_SOURCE = 216,
+    WT_REC_DESTINATION = 220,
+    WT_REC_DELIVERY_KIND = 224,
+    WT_REC_GLOBAL_COUNTER = 225,
+    WT_REC_GENERAL_COUNTER = 229,
+    WT_REC_BOX_COUNTER = 233,
+    WT_REC_INVENTORY_BEFORE = 237,
+    WT_REC_INVENTORY_AFTER = 269,
+    WT_REC_ORIGINAL_DIGEST = 301,
+    WT_REC_INCOMING_DIGEST = 333,
+    WT_REC_APPLIED_DIGEST = 365,
+    WT_REC_RESERVED_TRANSACTION_TAIL = 397,
+    WT_REC_ORIGINAL = 416,                /* pokemon_images */
+    WT_REC_DESTINATION_BEFORE = 652,
+    WT_REC_DESTINATION_AFTER = 888,
+    WT_REC_OUTGOING = 1124,
+    WT_REC_INCOMING = 1260,
+    WT_REC_RESERVED_IMAGES_TAIL = 1396,
+    WT_REC_ENTROPY_FORMAT = 1440,         /* transport_private_state */
+    WT_REC_SEED = 1444,
+    WT_REC_RESERVED_ENTROPY_TAIL = 1476,
+    WT_REC_PENDING_REQUEST = 1952,        /* pending_request: length, then the frame */
+    WT_REC_RESERVED_REQUEST_HEADER = 1954,
+    WT_REC_REQUEST = 1960,
+    WT_REC_RESERVED = 2216,               /* reserved_zero */
+    WT_REC_DIGEST = 4060,                 /* sha256 of the bytes before it */
+    WT_REC_COMMIT = 4092                  /* "CMIT" */
+};
+
 static const unsigned char kHashABC[32] = {
     0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
     0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad
@@ -63,12 +117,12 @@ static int LayoutKnown(const unsigned char *record)
     /* Check future formats even when their digest/tag is torn. All these
      * reserved bytes are zero in every supported phase. */
     return memcmp(record, "DSWJ\1\0", 6) == 0
-        && Get(record + 6, 2) <= WT_JOURNAL_RECOVERY_REQUIRED
-        && (Get(record + 6, 2) != WT_JOURNAL_EMPTY || (Zero(record + 32, 1408) && Zero(record + 1952, 264)))
-        && Get(record + 8, 4) == WT_JOURNAL_RECORD_SIZE && Zero(record + 12, 4) && Zero(record + 24, 8)
-        && Zero(record + 152, 8) && Zero(record + 397, 19) && Zero(record + 1396, 44)
-        && memcmp(record + 1440, "\1\0\40\0", 4) == 0 && Zero(record + 1476, 476)
-        && Zero(record + 1954, 6) && Zero(record + 2216, 1844);
+        && Get(record + WT_REC_PHASE, 2) <= WT_JOURNAL_RECOVERY_REQUIRED
+        && (Get(record + WT_REC_PHASE, 2) != WT_JOURNAL_EMPTY || (Zero(record + WT_REC_SAVE_ID, WT_REC_ENTROPY_FORMAT - WT_REC_SAVE_ID) && Zero(record + WT_REC_PENDING_REQUEST, WT_REC_RESERVED - WT_REC_PENDING_REQUEST)))
+        && Get(record + WT_REC_SIZE, 4) == WT_JOURNAL_RECORD_SIZE && Zero(record + WT_REC_RESERVED_SIZE_TAIL, WT_REC_GENERATION - WT_REC_RESERVED_SIZE_TAIL) && Zero(record + WT_REC_RESERVED_HEADER_TAIL, WT_REC_SAVE_ID - WT_REC_RESERVED_HEADER_TAIL)
+        && Zero(record + WT_REC_RESERVED_PROGRESS_TAIL, WT_REC_OPERATION - WT_REC_RESERVED_PROGRESS_TAIL) && Zero(record + WT_REC_RESERVED_TRANSACTION_TAIL, WT_REC_ORIGINAL - WT_REC_RESERVED_TRANSACTION_TAIL) && Zero(record + WT_REC_RESERVED_IMAGES_TAIL, WT_REC_ENTROPY_FORMAT - WT_REC_RESERVED_IMAGES_TAIL)
+        && memcmp(record + WT_REC_ENTROPY_FORMAT, "\1\0\40\0", 4) == 0 && Zero(record + WT_REC_RESERVED_ENTROPY_TAIL, WT_REC_PENDING_REQUEST - WT_REC_RESERVED_ENTROPY_TAIL)
+        && Zero(record + WT_REC_RESERVED_REQUEST_HEADER, WT_REC_REQUEST - WT_REC_RESERVED_REQUEST_HEADER) && Zero(record + WT_REC_RESERVED, WT_REC_DIGEST - WT_REC_RESERVED);
 }
 
 static int RequestValid(const WtJournalEntry *entry, WtJournalHash hash)
@@ -168,31 +222,31 @@ int WtJournal_Encode(const WtJournalEntry *entry, WtJournalHash hash, unsigned c
 {
     if (!entry || !hash || !record || !EntryValid(entry, hash)) return -1;
     memset(record, 0, WT_JOURNAL_RECORD_SIZE);
-    memcpy(record, "DSWJ\1\0", 6); Put(record + 6, entry->phase, 2);
-    Put(record + 8, WT_JOURNAL_RECORD_SIZE, 4); Put(record + 16, entry->generation, 8);
-    memcpy(record + 32, entry->saveID, 16); memcpy(record + 48, entry->credential, 32);
-    memcpy(record + 80, entry->enrollmentID, 16);
-    Put(record + 96, entry->nextCounter, 8); Put(record + 104, entry->eventCursor, 8);
-    memcpy(record + 112, entry->lastReceipt, 16); memcpy(record + 128, entry->lastOperation, 16);
-    Put(record + 144, entry->lastOperationCounter, 8);
-    memcpy(record + 160, entry->operation, 16); Put(record + 176, entry->operationCounter, 8);
-    memcpy(record + 184, entry->trade, 16); memcpy(record + 200, entry->receipt, 16);
-    PutLocator(record + 216, entry->source); PutLocator(record + 220, entry->destination);
-    record[224] = entry->deliveryKind;
-    Put(record + 225, entry->globalCounter, 4); Put(record + 229, entry->generalCounter, 4);
-    Put(record + 233, entry->boxCounter, 4);
-    memcpy(record + 237, entry->inventoryBefore, 32); memcpy(record + 269, entry->inventoryAfter, 32);
-    memcpy(record + 301, entry->originalDigest, 32); memcpy(record + 333, entry->incomingDigest, 32);
-    memcpy(record + 365, entry->appliedDigest, 32);
-    memcpy(record + 416, entry->original, 236); memcpy(record + 652, entry->destinationBefore, 236);
-    memcpy(record + 888, entry->destinationAfter, 236); memcpy(record + 1124, entry->outgoing, 136);
-    memcpy(record + 1260, entry->incoming, 136);
-    memcpy(record + 1440, "\1\0\40\0", 4); memcpy(record + 1444, entry->seed, 32);
-    Put(record + 1952, entry->requestLength, 2); memcpy(record + 1960, entry->request, 256);
-    if (entry->phase == WT_JOURNAL_EMPTY && (!Zero(record + 32, 1408) || !Zero(record + 1952, 264))) return -1;
-    if (entry->phase <= WT_JOURNAL_IDLE && !Zero(record + 160, 1280)) return -1;
-    if (hash(record, 4060, record + 4060) != 0) return -1;
-    memcpy(record + 4092, "CMIT", 4);
+    memcpy(record, "DSWJ\1\0", 6); Put(record + WT_REC_PHASE, entry->phase, 2);
+    Put(record + WT_REC_SIZE, WT_JOURNAL_RECORD_SIZE, 4); Put(record + WT_REC_GENERATION, entry->generation, 8);
+    memcpy(record + WT_REC_SAVE_ID, entry->saveID, 16); memcpy(record + WT_REC_CREDENTIAL, entry->credential, 32);
+    memcpy(record + WT_REC_ENROLLMENT_ID, entry->enrollmentID, 16);
+    Put(record + WT_REC_NEXT_COUNTER, entry->nextCounter, 8); Put(record + WT_REC_EVENT_CURSOR, entry->eventCursor, 8);
+    memcpy(record + WT_REC_LAST_RECEIPT, entry->lastReceipt, 16); memcpy(record + WT_REC_LAST_OPERATION, entry->lastOperation, 16);
+    Put(record + WT_REC_LAST_OPERATION_COUNTER, entry->lastOperationCounter, 8);
+    memcpy(record + WT_REC_OPERATION, entry->operation, 16); Put(record + WT_REC_OPERATION_COUNTER, entry->operationCounter, 8);
+    memcpy(record + WT_REC_TRADE, entry->trade, 16); memcpy(record + WT_REC_RECEIPT, entry->receipt, 16);
+    PutLocator(record + WT_REC_SOURCE, entry->source); PutLocator(record + WT_REC_DESTINATION, entry->destination);
+    record[WT_REC_DELIVERY_KIND] = entry->deliveryKind;
+    Put(record + WT_REC_GLOBAL_COUNTER, entry->globalCounter, 4); Put(record + WT_REC_GENERAL_COUNTER, entry->generalCounter, 4);
+    Put(record + WT_REC_BOX_COUNTER, entry->boxCounter, 4);
+    memcpy(record + WT_REC_INVENTORY_BEFORE, entry->inventoryBefore, 32); memcpy(record + WT_REC_INVENTORY_AFTER, entry->inventoryAfter, 32);
+    memcpy(record + WT_REC_ORIGINAL_DIGEST, entry->originalDigest, 32); memcpy(record + WT_REC_INCOMING_DIGEST, entry->incomingDigest, 32);
+    memcpy(record + WT_REC_APPLIED_DIGEST, entry->appliedDigest, 32);
+    memcpy(record + WT_REC_ORIGINAL, entry->original, 236); memcpy(record + WT_REC_DESTINATION_BEFORE, entry->destinationBefore, 236);
+    memcpy(record + WT_REC_DESTINATION_AFTER, entry->destinationAfter, 236); memcpy(record + WT_REC_OUTGOING, entry->outgoing, 136);
+    memcpy(record + WT_REC_INCOMING, entry->incoming, 136);
+    memcpy(record + WT_REC_ENTROPY_FORMAT, "\1\0\40\0", 4); memcpy(record + WT_REC_SEED, entry->seed, 32);
+    Put(record + WT_REC_PENDING_REQUEST, entry->requestLength, 2); memcpy(record + WT_REC_REQUEST, entry->request, 256);
+    if (entry->phase == WT_JOURNAL_EMPTY && (!Zero(record + WT_REC_SAVE_ID, WT_REC_ENTROPY_FORMAT - WT_REC_SAVE_ID) || !Zero(record + WT_REC_PENDING_REQUEST, WT_REC_RESERVED - WT_REC_PENDING_REQUEST))) return -1;
+    if (entry->phase <= WT_JOURNAL_IDLE && !Zero(record + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)) return -1;
+    if (hash(record, WT_REC_DIGEST, record + WT_REC_DIGEST) != 0) return -1;
+    memcpy(record + WT_REC_COMMIT, "CMIT", 4);
     return 0;
 }
 
@@ -201,30 +255,30 @@ int WtJournal_Decode(const unsigned char *record, WtJournalHash hash, WtJournalE
     unsigned char digest[32];
     if (!record || !entry || !hash) return -1;
     memset(entry, 0, sizeof(*entry));
-    if (!LayoutKnown(record) || memcmp(record + 4092, "CMIT", 4) != 0
-        || hash(record, 4060, digest) != 0 || memcmp(digest, record + 4060, 32) != 0) return -1;
-    entry->phase = (uint16_t)Get(record + 6, 2); entry->generation = Get(record + 16, 8);
-    memcpy(entry->saveID, record + 32, 16); memcpy(entry->credential, record + 48, 32);
-    memcpy(entry->enrollmentID, record + 80, 16);
-    entry->nextCounter = Get(record + 96, 8); entry->eventCursor = Get(record + 104, 8);
-    memcpy(entry->lastReceipt, record + 112, 16); memcpy(entry->lastOperation, record + 128, 16);
-    entry->lastOperationCounter = Get(record + 144, 8);
-    memcpy(entry->operation, record + 160, 16); entry->operationCounter = Get(record + 176, 8);
-    memcpy(entry->trade, record + 184, 16); memcpy(entry->receipt, record + 200, 16);
-    entry->source = GetLocator(record + 216); entry->destination = GetLocator(record + 220);
-    entry->deliveryKind = record[224];
-    entry->globalCounter = (uint32_t)Get(record + 225, 4); entry->generalCounter = (uint32_t)Get(record + 229, 4);
-    entry->boxCounter = (uint32_t)Get(record + 233, 4);
-    memcpy(entry->inventoryBefore, record + 237, 32); memcpy(entry->inventoryAfter, record + 269, 32);
-    memcpy(entry->originalDigest, record + 301, 32); memcpy(entry->incomingDigest, record + 333, 32);
-    memcpy(entry->appliedDigest, record + 365, 32);
-    memcpy(entry->original, record + 416, 236); memcpy(entry->destinationBefore, record + 652, 236);
-    memcpy(entry->destinationAfter, record + 888, 236); memcpy(entry->outgoing, record + 1124, 136);
-    memcpy(entry->incoming, record + 1260, 136); memcpy(entry->seed, record + 1444, 32);
-    entry->requestLength = (uint16_t)Get(record + 1952, 2); memcpy(entry->request, record + 1960, 256);
+    if (!LayoutKnown(record) || memcmp(record + WT_REC_COMMIT, "CMIT", 4) != 0
+        || hash(record, WT_REC_DIGEST, digest) != 0 || memcmp(digest, record + WT_REC_DIGEST, 32) != 0) return -1;
+    entry->phase = (uint16_t)Get(record + WT_REC_PHASE, 2); entry->generation = Get(record + WT_REC_GENERATION, 8);
+    memcpy(entry->saveID, record + WT_REC_SAVE_ID, 16); memcpy(entry->credential, record + WT_REC_CREDENTIAL, 32);
+    memcpy(entry->enrollmentID, record + WT_REC_ENROLLMENT_ID, 16);
+    entry->nextCounter = Get(record + WT_REC_NEXT_COUNTER, 8); entry->eventCursor = Get(record + WT_REC_EVENT_CURSOR, 8);
+    memcpy(entry->lastReceipt, record + WT_REC_LAST_RECEIPT, 16); memcpy(entry->lastOperation, record + WT_REC_LAST_OPERATION, 16);
+    entry->lastOperationCounter = Get(record + WT_REC_LAST_OPERATION_COUNTER, 8);
+    memcpy(entry->operation, record + WT_REC_OPERATION, 16); entry->operationCounter = Get(record + WT_REC_OPERATION_COUNTER, 8);
+    memcpy(entry->trade, record + WT_REC_TRADE, 16); memcpy(entry->receipt, record + WT_REC_RECEIPT, 16);
+    entry->source = GetLocator(record + WT_REC_SOURCE); entry->destination = GetLocator(record + WT_REC_DESTINATION);
+    entry->deliveryKind = record[WT_REC_DELIVERY_KIND];
+    entry->globalCounter = (uint32_t)Get(record + WT_REC_GLOBAL_COUNTER, 4); entry->generalCounter = (uint32_t)Get(record + WT_REC_GENERAL_COUNTER, 4);
+    entry->boxCounter = (uint32_t)Get(record + WT_REC_BOX_COUNTER, 4);
+    memcpy(entry->inventoryBefore, record + WT_REC_INVENTORY_BEFORE, 32); memcpy(entry->inventoryAfter, record + WT_REC_INVENTORY_AFTER, 32);
+    memcpy(entry->originalDigest, record + WT_REC_ORIGINAL_DIGEST, 32); memcpy(entry->incomingDigest, record + WT_REC_INCOMING_DIGEST, 32);
+    memcpy(entry->appliedDigest, record + WT_REC_APPLIED_DIGEST, 32);
+    memcpy(entry->original, record + WT_REC_ORIGINAL, 236); memcpy(entry->destinationBefore, record + WT_REC_DESTINATION_BEFORE, 236);
+    memcpy(entry->destinationAfter, record + WT_REC_DESTINATION_AFTER, 236); memcpy(entry->outgoing, record + WT_REC_OUTGOING, 136);
+    memcpy(entry->incoming, record + WT_REC_INCOMING, 136); memcpy(entry->seed, record + WT_REC_SEED, 32);
+    entry->requestLength = (uint16_t)Get(record + WT_REC_PENDING_REQUEST, 2); memcpy(entry->request, record + WT_REC_REQUEST, 256);
     if (!EntryValid(entry, hash) || (entry->phase == WT_JOURNAL_EMPTY
-        && (!Zero(record + 32, 1408) || !Zero(record + 1952, 264)))
-        || (entry->phase <= WT_JOURNAL_IDLE && !Zero(record + 160, 1280))) {
+        && (!Zero(record + WT_REC_SAVE_ID, WT_REC_ENTROPY_FORMAT - WT_REC_SAVE_ID) || !Zero(record + WT_REC_PENDING_REQUEST, WT_REC_RESERVED - WT_REC_PENDING_REQUEST)))
+        || (entry->phase <= WT_JOURNAL_IDLE && !Zero(record + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION))) {
         memset(entry, 0, sizeof(*entry));
         return -1;
     }
@@ -248,8 +302,8 @@ void WtJournal_Close(WtJournal *store)
 static int Sealed(const unsigned char *record, WtJournalHash hash)
 {
     unsigned char digest[32];
-    return memcmp(record + 4092, "CMIT", 4) == 0 && hash(record, 4060, digest) == 0
-        && memcmp(record + 4060, digest, 32) == 0;
+    return memcmp(record + WT_REC_COMMIT, "CMIT", 4) == 0 && hash(record, WT_REC_DIGEST, digest) == 0
+        && memcmp(record + WT_REC_DIGEST, digest, 32) == 0;
 }
 
 static int PrefixAndZeros(const unsigned char *bytes, const unsigned char *complete, size_t length)
@@ -273,53 +327,53 @@ static int ZerosAndSuffix(const unsigned char *bytes, const unsigned char *compl
 static int InitialPacketKnown(const unsigned char *record, int allowClear)
 {
     unsigned char expected[264];
-    unsigned length = (unsigned)Get(record + 1952, 2), candidate;
+    unsigned length = (unsigned)Get(record + WT_REC_PENDING_REQUEST, 2), candidate;
     unsigned candidates[2];
-    if ((length != 0 && (length < 85 || length > 149)) || record[2044] > 64) return 0;
-    candidates[0] = length ? length : 85u + record[2044]; candidates[1] = length ? length : 149u;
+    if ((length != 0 && (length < 85 || length > 149)) || record[WT_REC_PENDING_REQUEST + 92] > 64) return 0;
+    candidates[0] = length ? length : 85u + record[WT_REC_PENDING_REQUEST + 92]; candidates[1] = length ? length : 149u;
     for (candidate = 0; candidate < 2; candidate++) {
         unsigned size = candidates[candidate];
         memset(expected, 0, sizeof(expected)); Put(expected, size, 2);
         memcpy(expected + 8, "WTDS\1\1", 6); Put(expected + 14, size - 80, 2);
-        memcpy(expected + 16, record + 80, 16); memcpy(expected + 48, record + 48, 32);
-        memcpy(expected + 88, record + 2040, 4); expected[92] = (unsigned char)(size - 85);
-        memcpy(expected + 93, record + 2045, size - 85);
-        if (PrefixAndZeros(record + 1952, expected, sizeof(expected))
-            || (allowClear && ZerosAndSuffix(record + 1952, expected, sizeof(expected)))) return 1;
+        memcpy(expected + 16, record + WT_REC_ENROLLMENT_ID, 16); memcpy(expected + 48, record + WT_REC_CREDENTIAL, 32);
+        memcpy(expected + 88, record + WT_REC_PENDING_REQUEST + 88, 4); expected[92] = (unsigned char)(size - 85);
+        memcpy(expected + 93, record + WT_REC_PENDING_REQUEST + 93, size - 85);
+        if (PrefixAndZeros(record + WT_REC_PENDING_REQUEST, expected, sizeof(expected))
+            || (allowClear && ZerosAndSuffix(record + WT_REC_PENDING_REQUEST, expected, sizeof(expected)))) return 1;
     }
     return 0;
 }
 
 static int InitialEnrollment(const unsigned char *record)
 {
-    return Get(record + 6, 2) == WT_JOURNAL_ENROLLING && Zero(record + 32, 16)
-        && Get(record + 96, 8) <= 1 && Zero(record + 104, 56) && Zero(record + 160, 1280)
+    return Get(record + WT_REC_PHASE, 2) == WT_JOURNAL_ENROLLING && Zero(record + WT_REC_SAVE_ID, 16)
+        && Get(record + WT_REC_NEXT_COUNTER, 8) <= 1 && Zero(record + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR) && Zero(record + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)
         && InitialPacketKnown(record, 0);
 }
 
 static int TornIdentityKnown(const unsigned char *partial, const unsigned char *complete)
 {
-    uint16_t partialPhase = (uint16_t)Get(partial + 6, 2), completePhase = (uint16_t)Get(complete + 6, 2);
+    uint16_t partialPhase = (uint16_t)Get(partial + WT_REC_PHASE, 2), completePhase = (uint16_t)Get(complete + WT_REC_PHASE, 2);
     if (Blank(partial)) return 1;
     if (partialPhase == WT_JOURNAL_EMPTY) return completePhase == WT_JOURNAL_EMPTY || InitialEnrollment(complete);
     if (completePhase == WT_JOURNAL_EMPTY) return InitialEnrollment(partial);
     /* Identity bytes never change after enrollment. A cut during the first
      * provisioning mirror can contain only a known prefix followed by zeros. */
-    if (memcmp(partial + 48, complete + 48, 48) != 0
+    if (memcmp(partial + WT_REC_CREDENTIAL, complete + WT_REC_CREDENTIAL, WT_REC_NEXT_COUNTER - WT_REC_CREDENTIAL) != 0
         && !(partialPhase == WT_JOURNAL_ENROLLING && completePhase == WT_JOURNAL_ENROLLING
-            && PrefixAndZeros(partial + 48, complete + 48, 48))) return 0;
-    if (partialPhase <= WT_JOURNAL_IDLE && Get(complete + 96, 8) == 1 && Zero(complete + 104, 56)
+            && PrefixAndZeros(partial + WT_REC_CREDENTIAL, complete + WT_REC_CREDENTIAL, WT_REC_NEXT_COUNTER - WT_REC_CREDENTIAL))) return 0;
+    if (partialPhase <= WT_JOURNAL_IDLE && Get(complete + WT_REC_NEXT_COUNTER, 8) == 1 && Zero(complete + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR)
         && (completePhase == WT_JOURNAL_ENROLLING || completePhase == WT_JOURNAL_IDLE)
-        && (Get(partial + 96, 8) > 1 || !Zero(partial + 104, 56) || !Zero(partial + 160, 1280)
+        && (Get(partial + WT_REC_NEXT_COUNTER, 8) > 1 || !Zero(partial + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR) || !Zero(partial + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)
             || !InitialPacketKnown(partial, 1))) return 0;
-    if (Zero(complete + 32, 16)) return partialPhase <= WT_JOURNAL_IDLE
-        && Get(partial + 96, 8) <= 1 && Zero(partial + 104, 56) && Zero(partial + 160, 1280)
-        && (PrefixAndZeros(partial + 1952, complete + 1952, 264)
-            || ZerosAndSuffix(partial + 1952, complete + 1952, 264));
-    if (memcmp(partial + 32, complete + 32, 16) == 0) return 1;
+    if (Zero(complete + WT_REC_SAVE_ID, 16)) return partialPhase <= WT_JOURNAL_IDLE
+        && Get(partial + WT_REC_NEXT_COUNTER, 8) <= 1 && Zero(partial + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR) && Zero(partial + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)
+        && (PrefixAndZeros(partial + WT_REC_PENDING_REQUEST, complete + WT_REC_PENDING_REQUEST, WT_REC_RESERVED - WT_REC_PENDING_REQUEST)
+            || ZerosAndSuffix(partial + WT_REC_PENDING_REQUEST, complete + WT_REC_PENDING_REQUEST, WT_REC_RESERVED - WT_REC_PENDING_REQUEST));
+    if (memcmp(partial + WT_REC_SAVE_ID, complete + WT_REC_SAVE_ID, 16) == 0) return 1;
     return partialPhase <= WT_JOURNAL_IDLE && completePhase == WT_JOURNAL_IDLE
-        && Get(complete + 96, 8) == 1 && Get(complete + 104, 8) == 0
-        && PrefixAndZeros(partial + 32, complete + 32, 16);
+        && Get(complete + WT_REC_NEXT_COUNTER, 8) == 1 && Get(complete + WT_REC_EVENT_CURSOR, 8) == 0
+        && PrefixAndZeros(partial + WT_REC_SAVE_ID, complete + WT_REC_SAVE_ID, 16);
 }
 
 static int Follows(const unsigned char *before, const unsigned char *after)
@@ -362,7 +416,7 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
         result = WT_JOURNAL_ERROR_READ;
         goto failed;
     }
-    if ((!Blank(store->record) && (!LayoutKnown(store->record) || (emptyOnly && Get(store->record + 6, 2) != 0)))
+    if ((!Blank(store->record) && (!LayoutKnown(store->record) || (emptyOnly && Get(store->record + WT_REC_PHASE, 2) != 0)))
         || (!Blank(other) && (!LayoutKnown(other) || (emptyOnly && Get(other + 6, 2) != 0)))) goto failed;
     firstValid = WtJournal_Decode(store->record, io.hash, &entry) == 0;
     if (firstValid) firstGeneration = entry.generation;
@@ -478,7 +532,7 @@ int WtJournal_Commit(WtJournal *store, const WtJournalEntry *entry)
     uint64_t generation;
     int result = -1;
     if (!store || !store->usable || !entry) return -1;
-    generation = Get(store->record + 16, 8);
+    generation = Get(store->record + WT_REC_GENERATION, 8);
     if (generation == UINT64_MAX || entry->generation != generation + 1) goto done;
     if (WtJournal_Encode(entry, store->io.hash, next) != 0 || !Follows(store->record, next)
         || store->io.hash(next, WT_JOURNAL_RECORD_SIZE, fingerprint) != 0) goto done;

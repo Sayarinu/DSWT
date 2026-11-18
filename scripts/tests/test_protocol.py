@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import struct
 import sys
+import re
 import unittest
 
 
@@ -140,6 +141,26 @@ class SaveLayoutTests(unittest.TestCase):
             with self.subTest(layout=path):
                 self.check_layout(json.loads((ROOT / path).read_text()),
                                   json.loads((ROOT / pin).read_text()))
+
+    def test_journal_codec_names_every_record_section(self):
+        source = (ROOT / "client/src/wonder_trade/journal.c").read_text()
+        layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
+        body = re.search(r"enum \{\n(    WT_REC_.*?)\n\};", source, re.S).group(1)
+        offsets = {name: int(value) for name, value in re.findall(r"(WT_REC_\w+) = (\d+)", body)}
+        values = list(offsets.values())
+        self.assertEqual(values, sorted(values))
+        self.assertEqual(len(set(values)), len(values))
+        self.assertLess(values[-1], layout["record_size"])
+        named = {"header": "WT_REC_FORMAT", "identity": "WT_REC_SAVE_ID", "progress": "WT_REC_NEXT_COUNTER",
+                 "transaction": "WT_REC_OPERATION", "pokemon_images": "WT_REC_ORIGINAL",
+                 "transport_private_state": "WT_REC_ENTROPY_FORMAT", "pending_request": "WT_REC_PENDING_REQUEST",
+                 "reserved_zero": "WT_REC_RESERVED", "sha256": "WT_REC_DIGEST", "commit_tag": "WT_REC_COMMIT"}
+        for section in layout["record_sections"]:
+            with self.subTest(section=section["name"]):
+                self.assertEqual(offsets[named[section["name"]]], section["offset"])
+        # No numeric record offset is left outside the named layout.
+        code = source[source.index("};", source.index("WT_REC_COMMIT")):]
+        self.assertFalse(re.findall(r"\b(?:record|partial|complete) \+ \d", code))
 
     def test_games_share_one_journal_record_format(self):
         platinum, *others = (json.loads((ROOT / path).read_text()) for path, _ in self.LAYOUTS)
