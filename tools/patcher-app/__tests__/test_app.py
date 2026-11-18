@@ -129,6 +129,10 @@ class FakeGitHub:
         if arguments[:2] == ("release", "download"):
             directory = Path(arguments[arguments.index("--dir") + 1])
             (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())
+        if arguments[:2] == ("release", "upload"):
+            self.assets += [Path(item).name for item in arguments[3:arguments.index("--repo")]]
+        if arguments[:2] == ("release", "delete-asset"):
+            self.assets.remove(arguments[3])
         return ""
 
 
@@ -144,6 +148,8 @@ class ReleaseTests(AppFixture):
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
         self.assertIn("| Pokémon Platinum us-rev1 |", notes)
+        self.assertIn("Download one file, DSWT Patcher for your computer", notes)
+        self.assertIn("`dswt-patcher-0.1.0-windows.zip`", notes)
         self.assertIn("apply only through DSWT Patcher", notes)
         self.assertNotIn("any\nBPS patcher", notes)
         renamed = self.root / "game/other.zip"
@@ -161,7 +167,7 @@ class ReleaseTests(AppFixture):
             with patch.object(release, "gh", github), self.assertRaises(ValueError):
                 release.fetch("0.1.0", "owner/repo", self.root / "game/again")
 
-    def test_publish_uploads_every_app_with_sums(self):
+    def test_publish_offers_only_the_apps_with_sums(self):
         directory = self.root / "game/publish"
         directory.mkdir()
         (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())
@@ -170,13 +176,14 @@ class ReleaseTests(AppFixture):
         github = FakeGitHub()
         with patch.object(release, "gh", github):
             result = release.publish("0.1.0", "owner/repo", directory)
-        self.assertEqual(len(result["files"]), 5)
-        upload = github.calls[-2]
-        self.assertEqual(sorted(Path(item).name for item in upload[3:-2]),
-                         ["SHA256SUMS", *(f"dswt-patcher-0.1.0-{name}.zip" for name in release.PLATFORMS)])
+        apps = [f"dswt-patcher-0.1.0-{name}.zip" for name in release.PLATFORMS]
+        self.assertEqual(result["files"], sorted(["SHA256SUMS", *apps]))
+        # Each app carries the patches, so the archive is removed before publishing.
+        self.assertEqual(sorted(github.assets), sorted(["SHA256SUMS", *apps]))
+        self.assertIn(("release", "delete-asset", "v0.1.0", "dswt-0.1.0.zip", "--repo", "owner/repo", "--yes"), github.calls)
         self.assertEqual(github.calls[-1][:3], ("release", "edit", "v0.1.0"))
         sums = (directory / "SHA256SUMS").read_text().splitlines()
-        self.assertEqual(len(sums), 4)
+        self.assertEqual(sorted(line.split()[1] for line in sums), sorted(apps))
         (directory / "SHA256SUMS").unlink()
         (directory / "dswt-patcher-0.1.0-linux.zip").unlink()
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "differ"):
