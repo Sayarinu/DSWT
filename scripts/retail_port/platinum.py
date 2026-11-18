@@ -405,7 +405,24 @@ class Target:
         return REVIEWED.get(self.language, {})
 
     def resolve(self, name):
-        """(address, is code) of a game symbol the module uses, or None."""
+        """(address, is code) of a game symbol the module uses, or None.
+
+        A symbol in a game overlay must resolve inside that overlay as the retail game
+        loads it, wherever that is: an overlay the module calls into need not load at
+        US Rev 1's address."""
+        found = self._resolve(name)
+        us = self.image.unique(name)
+        # SDK_OVERLAY_*_ID and SDK_AUTOLOAD_* are linker constants, not addresses.
+        module = self.image.module(us) if us is not None and name not in self.witnessed and not name.startswith("SDK_") else None
+        if found is not None and isinstance(module, int):
+            rows = {row[0]: row for row in nds.overlays(self.rom)}
+            require(module in rows, f"{name} is in overlay {module}, which the retail game does not have")
+            _, ram, size, bss, _, _ = rows[module]
+            require(ram <= (found[0] & ~1) < ram + size + bss,
+                    f"{name} resolves to {found[0]:#x}, outside overlay {module} in the retail game")
+        return found
+
+    def _resolve(self, name):
         us = self.image.unique(name)
         if name in self.witnessed:
             return self.witnessed[name], us is None or self.image.is_code(us)
@@ -440,11 +457,12 @@ class Target:
         return self.map.us_modules
 
     def _overlay_id(self, symbol):
+        # Its contents need not load where US Rev 1's do: resolve() places each symbol
+        # the module uses inside the retail game's own copy of the overlay.
         oid = symbol.address
-        us = {row[0]: row for row in nds.overlays(self.us_rom)}
-        target = {row[0]: row for row in nds.overlays(self.rom)}
-        require(oid in us and oid in target and us[oid][1] == target[oid][1],
-                f"overlay {oid} ({symbol.name}) does not load at the same address in the retail game")
+        us = {row[0] for row in nds.overlays(self.us_rom)}
+        target = {row[0] for row in nds.overlays(self.rom)}
+        require(oid in us and oid in target, f"overlay {oid} ({symbol.name}) is not in the retail game")
         return oid
 
     def _autoload_start(self, symbol):
