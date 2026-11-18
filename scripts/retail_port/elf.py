@@ -201,6 +201,28 @@ def with_inline_addends(data):
     return bytes(data)
 
 
+def with_function_sizes(data):
+    """A copy whose unsized functions run to the next function or the end of their section.
+
+    Assembly sources (Diamond and Pearl's, for one) give their functions no size."""
+    obj = Elf(data)
+    out = bytearray(data)
+    symtab = next(section for section in obj.sections if section["type"] == SHT_SYMTAB)
+    starts = {}
+    for symbol in obj.symbols:
+        if symbol["type"] in (STT_FUNC, STT_ARM_TFUNC) and symbol["name"] and not symbol["name"].startswith("$"):
+            starts.setdefault(symbol["shndx"], set()).add(symbol["value"] & ~1)
+    for k, symbol in enumerate(obj.symbols):
+        shndx = symbol["shndx"]
+        if symbol["size"] or shndx not in starts or symbol["name"].startswith("$") or symbol["type"] not in (STT_FUNC, STT_ARM_TFUNC):
+            continue
+        start = symbol["value"] & ~1
+        later = [s for s in starts[shndx] if s > start]
+        end = min(later) if later else obj.sections[shndx]["size"]
+        struct.pack_into("<I", out, symtab["off"] + 16 * k + 8, end - start)
+    return bytes(out)
+
+
 def numbered_sections(data):
     """A copy whose .text, .rodata, .data and .bss sections are named .text.N and so on.
 
