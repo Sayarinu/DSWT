@@ -1,0 +1,43 @@
+Code differences of the Korean Diamond and Pearl cartridges from US.
+
+Korean save blocks carry their own footer magic number.
+
+diff --git a/arm9/src/save.c b/arm9/src/save.c
+--- a/arm9/src/save.c
++++ b/arm9/src/save.c
+@@ -217,7 +217,7 @@
+     if (r4->size != size) {
+         return FALSE;
+     }
+-    if (r4->magic != 0x20060623) {
++    if (r4->magic != 0x20070903) {
+         return FALSE;
+     }
+     if (r4->unk_10 != idx) {
+@@ -244,7 +244,7 @@
+     r4->unk_0 = save->unk_20214;
+     r4->offset = save->unk_20218[idx];
+     r4->size = spec->size;
+-    r4->magic = 0x20060623;
++    r4->magic = 0x20070903;
+     r4->unk_10 = (u8)idx;
+     r4->crc = sub_02022898(save, data, spec->size);
+ }
+@@ -611,7 +611,7 @@
+ 
+ void CreateChunkFooter(struct SaveData *save, u8 *data, int id, u32 size) {
+     struct SaveArrayFooter *footer = (struct SaveArrayFooter *)(data + size);
+-    footer->magic = 0x20060623;
++    footer->magic = 0x20070903;
+     footer->saveno = save->unk_204A4 + 1;
+     footer->size = size;
+     footer->idx = (u16)id;
+@@ -620,7 +620,7 @@
+ 
+ BOOL ValidateChunk(struct SaveData *save, u8 *data, int id, u32 size) {
+     struct SaveArrayFooter *footer = (struct SaveArrayFooter *)(data + size);
+-    if (footer->magic != 0x20060623) {
++    if (footer->magic != 0x20070903) {
+         return FALSE;
+     }
+     if (footer->size != size) {

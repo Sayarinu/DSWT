@@ -176,6 +176,15 @@ class SymbolMap:
             if hit is not None:
                 self.addr[symbol.num] = hit | (symbol.address & 1)
                 self.how[symbol.num] = "bytes"
+        # Two different US functions can never share an address: when byte matching puts two there
+        # (short functions that differ only in what they call), neither placement is trusted.
+        seen = collections.defaultdict(list)
+        for num, at in self.addr.items():
+            seen[(self.us.module(self._bynum[num]), at & ~1)].append(num)  # overlays share addresses
+        for nums in seen.values():
+            if len({self._bynum[num].start for num in nums}) > 1:  # aliases of one function may share
+                for num in nums:
+                    del self.addr[num], self.how[num]
 
     def matches(self, symbol, address):
         got = self._masked(symbol)
