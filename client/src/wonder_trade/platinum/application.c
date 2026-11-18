@@ -289,6 +289,16 @@ static void WonderTrade_PrintNumber(Window *window, int value, int y)
     String_Free(number);
 }
 
+/* A level on the Pokémon card, right-aligned at `right` like Diamond/Pearl and HeartGold/SoulSilver. */
+static void WonderTrade_PrintLevel(Window *window, int value, int right, int y)
+{
+    String *number = String_Init(12, HEAP_ID_WONDER_TRADE);
+    String_FormatInt(number, value, 3, PADDING_MODE_NONE, CHARSET_MODE_EN);
+    int x = right - Font_CalcStringWidth(FONT_SYSTEM, number, 0);
+    Text_AddPrinterWithParamsAndColor(window, FONT_SYSTEM, number, x, y, TEXT_SPEED_NO_TRANSFER, TEXT_COLOR(15, 2, 0), NULL);
+    String_Free(number);
+}
+
 static void WonderTrade_Preview(WonderTradeApp *app, PokemonSpriteTemplate *sprite)
 {
     if (!app->previewLoaded || memcmp(sprite, &app->previewTemplate, sizeof(*sprite)) != 0) {
@@ -329,6 +339,8 @@ static void WonderTrade_DrawPokemon(WonderTradeApp *app)
         WonderTrade_Preview(app, &sprite);
         WonderTrade_PrintChars(&app->details, species, 0, 16);
         WonderTrade_PrintChars(&app->details, nickname, 0, 32);
+        WonderTrade_Print(app, &app->details, WonderTrade_Text_Level, 0, 64, TEXT_COLOR(15, 2, 0));
+        WonderTrade_PrintLevel(&app->details, Pokemon_GetValue(mon, MON_DATA_LEVEL, NULL), 48, 64);
     } else {
         const WtReceivedPokemon *received = &app->network.received;
         MessageLoader_GetSpeciesName(received->species, HEAP_ID_WONDER_TRADE, species);
