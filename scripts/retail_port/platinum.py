@@ -53,8 +53,8 @@ REVIEWED = {
 }
 # Init functions the game reaches only through its own app templates,
 # {Init, Main, Exit, overlay ID}, so no call site votes on where they are:
-# init: (main, exit, overlay ID). Every template must agree on the address.
-TEMPLATE_INITS = {"TradeSequence_Init": ("TradeSequence_Main", "TradeSequence_Exit", 95)}
+# init: (main, exit). The overlay is the one main is in. Every template must agree.
+TEMPLATE_INITS = {"TradeSequence_Init": ("TradeSequence_Main", "TradeSequence_Exit")}
 
 US_VARIANT = "us-rev1"
 TEXT_ARCHIVE = "msgdata/pl_msg.narc"
@@ -461,8 +461,13 @@ class Target:
             return None
         return (at | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
 
-    def _template_init(self, main, exit_, overlay):
+    def _template_init(self, main, exit_, overlay=None):
         """Init's address from the game's app templates holding its placed main and exit."""
+        if overlay is None:
+            symbol = self.image.unique(main)
+            overlay = self.image.module(symbol) if symbol is not None else None
+            if not isinstance(overlay, int):
+                return None
         placed = [self.map.addr.get(self.image.unique(name).num) if self.image.unique(name) else None for name in (main, exit_)]
         if None in placed:
             return None

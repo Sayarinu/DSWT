@@ -30,7 +30,8 @@ GAMES = {"heartgold": ("HEARTGOLD", "VERSION_HEARTGOLD"), "soulsilver": ("SOULSI
 # Game functions that differ from US only in reviewed, language-specific details. Each is
 # placed where the retail callers point, and only if exactly this many of its bytes differ.
 REVIEWED = {
-    "ko": {"GetSpeciesName": 1},  # the species name bank number
+    "ko": {"GetSpeciesName": 1,  # the species name bank number
+           "TradeSequence_Init": 1},  # the trade text bank number
 }
 MAIL = "heartgold-mail-template.patch"
 LANGUAGES = {
