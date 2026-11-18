@@ -219,6 +219,23 @@
       "port_base": "heartgold-us-rev0"
     },
     {
+      "id": "heartgold-italy",
+      "game": "Pokémon HeartGold",
+      "name": "Italy (Italian)",
+      "game_code": "IPKI",
+      "revision": 0,
+      "language": "Italian",
+      "size": 134217728,
+      "sha256": "013d04f5512b01ad98735a5f850dc039f0ee80bc57035b3a10e8b650be690ce1",
+      "sha1": "6b7f9bff57eb58bc8d6e48e9e5c370719458c721",
+      "crc32": "2646ae79",
+      "reference": "https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%20DS.dat (Pokemon - Versione Oro HeartGold (Italy))",
+      "build_revision": null,
+      "pristine_verified": true,
+      "planned_patch": "dswt-heartgold-italy.bps",
+      "port_base": "heartgold-us-rev0"
+    },
+    {
       "id": "heartgold-spain",
       "game": "Pokémon HeartGold",
       "name": "Spain (Spanish)",

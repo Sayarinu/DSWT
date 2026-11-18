@@ -85,7 +85,7 @@ const Layout &LayoutFor(const std::string &target) {
         target == "pearl-europe-rev5") return kDiamondPearl;
     Require(target == "heartgold-us-rev0" || target == "soulsilver-us-rev0" || target == "heartgold-europe" ||
             target == "soulsilver-europe" || target == "heartgold-france" || target == "heartgold-germany" ||
-            target == "heartgold-spain");
+            target == "heartgold-italy" || target == "heartgold-spain");
     return kHeartGoldSoulSilver;
 }
 

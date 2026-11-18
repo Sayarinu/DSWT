@@ -30,6 +30,7 @@ GAMES = {"heartgold": ("HEARTGOLD", "VERSION_HEARTGOLD"), "soulsilver": ("SOULSI
 LANGUAGES = {
     "fr": ("france", "LANGUAGE_FRENCH", "fr_FR", ()),
     "de": ("germany", "LANGUAGE_GERMAN", "de_DE", ()),
+    "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", ("heartgold-italian-build.patch",)),
     "es": ("spain", "LANGUAGE_SPANISH", "es_ES", ()),
 }
 MESSAGES = "a/0/2/7"  # NARC_msgdata_msg

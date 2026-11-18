@@ -1,0 +1,19 @@
+Code differences of the Italian HeartGold cartridge from US.
+
+The new-game mail template for ADVENTURE and EXCITED uses another sentence in
+Italian: bank 293, message 15, instead of bank 292, message 4.
+
+diff --git a/src/overlay_36.c b/src/overlay_36.c
+--- a/src/overlay_36.c
++++ b/src/overlay_36.c
+@@ -76,8 +76,8 @@
+ static const MailMessageTemplate sMailMsgTemplates[2] = {
+     {
+      // ADVENTURE! EXCITED!
+-        .msg_bank = MAILMSG_BANK_0292_GMM,
+-     .msg_no = msg_0292_00004,
++        .msg_bank = MAILMSG_BANK_0293_GMM,
++     .msg_no = msg_0293_00015,
+      .ec_groups = { EC_GROUP_LIFESTYLE, EC_GROUP_FEELINGS },
+      .ec_words = { EC_WORD_LIFESTYLE_ADVENTURE - EC_WORDS_LIFESTYLE_MIN, EC_WORD_FEELINGS_EXCITED - EC_WORDS_FEELINGS_MIN },
+      },
