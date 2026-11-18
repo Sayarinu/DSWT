@@ -34,6 +34,56 @@ LANGUAGES = {
     "es": ("spain", "LANGUAGE_SPANISH", "Spanish", "es_ES", ()),
     "ko": ("korea", "LANGUAGE_KOREAN", "Korean", "ko_KR", ("diamond-korean-build.patch",)),
 }
+# Game functions a language changes in reviewed details: name -> bytes that differ from US.
+REVIEWED = {
+    "ko": {
+        "GetSpeciesName": 1,  # the species name bank number
+        "ov81_02237E40": 1,  # a literal data address
+        "sub_020372D4": 1,  # the call to its neighbour, which grew
+        "sub_02037304": 7,  # two added calls after the trade sequence ends
+        "ov04_021DD904": 24,  # DWC_Free, a NitroDWC between Diamond's and Platinum's
+    },
+}
+# Korean ships the newer libraries Platinum has (NitroSDK 4.2.30001, NitroWiFi 2.1.30003 and
+# NitroDWC 2.2.30008), with the same structures and calls: the functions the module uses are
+# found by Platinum's build of them, so it never mixes in Diamond's older copies.
+# Diamond name -> Platinum name.
+LIBRARIES = {
+    "ko": {
+        "NNS_FndAllocFromExpHeapEx": "NNS_FndAllocFromExpHeapEx",
+        "NNS_FndCreateExpHeapEx": "NNS_FndCreateExpHeapEx",
+        "NNS_FndFreeToExpHeap": "NNS_FndFreeToExpHeap",
+        "OS_CreateThread": "OS_CreateThread",
+        "OS_GetLowEntropyData": "OS_GetLowEntropyData",
+        "OS_GetThreadPriority": "OS_GetThreadPriority",
+        "OS_GetTick": "OS_GetTick",
+        "OS_JoinThread": "OS_JoinThread",
+        "OS_Sleep": "OS_Sleep",
+        "OS_WakeupThreadDirect": "OS_WakeupThreadDirect",
+        "SOCL_CreateSocket": "SOCL_CreateSocket",
+        "SOCL_Connect": "SOCL_Connect",
+        "SOCLi_ReadFrom": "SOCL_ReadFrom",  # 2.1 reads in SOCL_ReadFrom itself, same arguments
+        "SOCL_WriteTo": "SOCL_WriteTo",
+        "SOCL_Close": "SOCL_Close",
+        "SOCL_IsClosed": "SOCL_IsClosed",
+        "SOCLi_TrashSocket": "SOCLi_TrashSocket",
+        "WCM_DisconnectAsync": "WCM_DisconnectAsync",
+        "WCM_GetPhase": "WCM_GetPhase",
+        "ov04_021DD968": "DWC_SetMemFunc",
+        "ov04_021DD944": "DWC_Alloc",
+        "ov04_021DD6F0": "DWC_ClearError",
+        "ov04_021EBC60": "DWC_AC_Create",
+        "ov04_021EBB80": "DWC_AC_Process",
+        "ov04_021EBAE8": "DWC_AC_GetStatus",
+        "ov04_021EB9D8": "DWC_AC_Destroy",
+    },
+}
+# Platinum library functions a language changes in reviewed details: name -> bytes that differ.
+LIBRARY_REVIEWED = {
+    "ko": {
+        "DWC_AC_Create": 16,  # calls into its own file, whose functions moved
+    },
+}
 MESSAGES = "msgdata/msg.narc"
 MENU_GRAPHICS = "graphic/menu_gra.narc"
 START_MENU_BANK = 323
@@ -68,7 +118,7 @@ def localized_gmm(text, language):
 class Target(platinum.Target):
     """One retail Diamond or Pearl to port."""
 
-    def __init__(self, game, language, rom_path, workspace, pristine, work, log=print):
+    def __init__(self, game, language, rom_path, workspace, pristine, work, log=print, library=None):
         require(game in GAMES, f"unsupported game {game}")
         require(language in LANGUAGES, f"unsupported language {language}")
         self.game, self.language = game, language
@@ -98,6 +148,13 @@ class Target(platinum.Target):
         for tree in (self.workspace, self.pristine):
             require(git(tree, "rev-parse", "HEAD").decode().strip() == pin, f"{tree} is not at upstream {pin}")
         self.modules = nds.modules(self.rom)
+        self.library = None
+        if language in LIBRARIES:
+            require(library is not None, f"{self.variant_id} also needs the pristine Platinum build")
+            self.library = Path(library).resolve()
+            self.library_rom = (self.library / "build/pokeplatinum.us.nds").read_bytes()
+            require(sha256(self.library_rom) == catalogue[platinum.US_VARIANT]["sha256"],
+                    f"{self.library} is not a pristine {platinum.US_VARIANT} build; build it with ROM_REVISION=1 --pristine")
         self.banks_header = None
         self.object_names = {}
 
@@ -106,6 +163,53 @@ class Target(platinum.Target):
         self.image = symbols.UsImage((self.pristine / self.arm9_build / "arm9.elf").read_bytes(), self.us_rom)
         self.map = symbols.SymbolMap(self.image, self.us_rom, self.rom)
         self.log(f"mapped {len(self.map.addr)} US symbols")
+        self.library_addr = self._map_library() if self.library is not None else {}
+
+    def _map_library(self):
+        """Diamond name -> address of each listed library function, found by Platinum's bytes in
+        the module Diamond keeps it in (Platinum keeps the socket library in an overlay)."""
+        image = symbols.UsImage((self.library / "build/main.nef").read_bytes(), self.library_rom)
+        modules = nds.modules(self.library_rom)
+        found, pending = {}, {}
+        for name, theirs in LIBRARIES[self.language].items():
+            ours, symbol = self.image.unique(name), image.unique(theirs)
+            require(ours is not None and symbol is not None, f"{name} or Platinum's {theirs} is not a single symbol")
+            got = symbols.masked(image, modules, symbol, symbol.size)
+            require(got is not None, f"Platinum's {theirs} has no bytes to match")
+            module, thumb = self.image.module(ours), symbol.num in image.thumb
+            at = symbols.unique_match(self.modules, module, got[2], got[3], 2 if thumb else 4)
+            if at is None:
+                pending[name] = (symbol, module, got[2], got[3])
+            else:
+                found[name] = (symbol, module, at | int(thumb))
+        reviewed = LIBRARY_REVIEWED.get(self.language, {})
+        for name, (symbol, module, data, keep) in pending.items():
+            if symbol.name not in reviewed:
+                continue
+            # Placed at Platinum's distance from a placed function of its Platinum section, where
+            # its bytes differ in exactly the reviewed number of places.
+            base, body = self.modules[module]
+            hits = set()
+            for other, where, at in found.values():
+                guess = (at & ~1) + symbol.start - other.start
+                offset = guess - base
+                if (where, other.section) != (module, symbol.section) or not 0 <= offset <= len(body) - len(data):
+                    continue
+                if sum(keep[i] and body[offset + i] != data[i] for i in range(len(data))) == reviewed[symbol.name]:
+                    hits.add(guess | int(symbol.num in image.thumb))
+            require(len(hits) == 1, f"{symbol.name} is not where its neighbours put it with the reviewed differences")
+            found[name] = (symbol, module, hits.pop())
+        self.log(f"{len(found)} of {len(LIBRARIES[self.language])} library functions found by Platinum's build")
+        return {name: at for name, (_, _, at) in found.items()}
+
+    def reviewed(self):
+        return REVIEWED.get(self.language, {})
+
+    def _resolve(self, name):
+        if name in LIBRARIES.get(self.language, {}):
+            at = self.library_addr.get(name)
+            return None if at is None else (at, True)
+        return super()._resolve(name)
 
     def replaced_files(self):
         _, desired = prepare_game.overlay_files(ROOT, self.workspace, prepare_game.GAMES["dp"])

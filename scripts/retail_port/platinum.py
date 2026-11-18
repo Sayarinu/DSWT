@@ -433,12 +433,7 @@ class Target:
         if us is None:
             return None
         if us.num not in self.map.addr and name in self.reviewed():
-            at = self.map.voted(us)
-            require(at is not None, f"no retail call agrees where {name} is")
-            differ = self.map.differing(us, at)
-            expected = self.reviewed()[name]
-            require(differ == expected, f"{name} at {at:#x} differs from US in {differ} bytes, not the {expected} reviewed")
-            return (at & ~1) | int(us.num in self.image.thumb), True
+            return symbols.reviewed_address(self.map, us, self.reviewed()[name]), True
         if us.num in self.map.addr:
             at = self.map.addr[us.num]
             return ((at & ~1) | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)

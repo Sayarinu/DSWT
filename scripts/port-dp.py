@@ -2,7 +2,8 @@
 """Add Wonder Trade to your own retail Diamond or Pearl in a language pret cannot build.
 
 Build the pristine US game (ROM_GAME=diamond ./scripts/build-rom.sh --pristine) and the
-Wonder Trade workspace against your connection profile first. The ROM is written only if
+Wonder Trade workspace against your connection profile first. Korean also needs the pristine
+US Rev 1 Platinum (ROM_REVISION=1 ./scripts/build-rom.sh --pristine). The ROM is written only if
 every check passes; see scripts/retail_port/dp.py.
 """
 
@@ -28,13 +29,16 @@ def main(argv=None):
     parser.add_argument("output", type=Path, help="new ROM file to write")
     parser.add_argument("--workspace", type=Path, default=ROOT / "game/pokediamond")
     parser.add_argument("--pristine", type=Path, default=ROOT / "game/pokediamond-pristine")
+    parser.add_argument("--library", type=Path, default=ROOT / "game/pokeplatinum-pristine",
+                        help="pristine US Rev 1 Platinum, whose libraries Korean shares")
     parser.add_argument("--work", type=Path, help="scratch directory (default game/retail-port/GAME-LANGUAGE)")
     args = parser.parse_args(argv)
     if args.output.exists():
         parser.exit(1, f"{args.output} already exists\n")
     try:
         work = args.work or ROOT / "game/retail-port" / f"{args.game}-{args.language}"
-        target = dp.Target(args.game, args.language, args.rom, args.workspace, args.pristine, work)
+        target = dp.Target(args.game, args.language, args.rom, args.workspace, args.pristine, work,
+                           library=args.library)
         rom = target.build()
         port_platinum.write_new(args.output, rom)
     except (OSError, ValueError, RuntimeError) as error:
