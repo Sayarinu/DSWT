@@ -7,13 +7,14 @@ https://github.com/Sayarinu/DSWT/wiki.
 ## What you need
 
 - A dump of your own cartridge. Trimmed dumps work.
-  - English, US or European: Pokémon Platinum, Diamond or Pearl (Rev 5),
-    HeartGold or SoulSilver.
-  - French, German, Italian or Spanish: Pokémon Platinum.
+  - English, US or European, and French, German, Italian or Spanish: Pokémon
+    Platinum, Diamond or Pearl (Rev 5), HeartGold or SoulSilver.
+  - Japanese or Korean: Pokémon Platinum.
 
   Other versions and languages are recognised but not supported yet.
 - melonDS 1.1. Physical DS hardware isn't supported yet.
-- DSWT Patcher for your computer. Other patching tools such as Flips don't work.
+- DSWT Patcher for your computer: the one file to download from the release page.
+  It carries every patch. Other patching tools such as Flips don't work.
 
 ## Patch your game
 
@@ -31,9 +32,10 @@ page lists every file's checksum.
 
 ## Trade
 
-Open the menu and choose **Wonder Trade**: **ECHANGE MIRACLE**, **WUNDERTAUSCH**,
-**SCAMBIO PRODIG.** or **INT. PRODIGIOSO** in French, German, Italian and
-Spanish Platinum. Its screens use your game's language. A brand-new save may ask
+Open the menu and choose **Wonder Trade**. In HeartGold and SoulSilver it's on the
+touch-screen menu. In other languages the entry uses your game's name for it, such
+as **ECHANGE MIRACLE**, **WUNDERTAUSCH** or **ミラクルこうかん**, and its screens
+use your game's language. A brand-new save may ask
 you to keep playing for a moment first, to gather randomness that secures your
 connection.
 
@@ -50,7 +52,8 @@ your result waits until you make space.
 
 You can't offer an Egg, a Pokémon holding mail, one with a ball capsule, your last
 Pokémon that can battle, or an exact copy of one you already have. The server
-refuses illegal Pokémon and gives them back. It can't promise every Pokémon you
+refuses illegal Pokémon, and Pokémon whose nickname or trainer name breaks the
+online name rules of the newest Pokémon games, and gives them back. It can't promise every Pokémon you
 receive is legitimate.
 
 ## If something goes wrong
