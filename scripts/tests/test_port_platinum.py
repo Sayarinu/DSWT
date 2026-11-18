@@ -448,6 +448,10 @@ enum Language {
             target._template_init("Main", "Exit", 95)
         target.modules = {"arm9": (0x02000000, template(0x02246001)[:12] + struct.pack("<I", 94))}
         self.assertIsNone(target._template_init("Main", "Exit", 95))
+        # Without an explicit overlay, the one main is in: overlay 71, as in HeartGold.
+        target.image.module = lambda symbol: 71
+        target.modules = {"arm9": (0x02000000, template(0x02246001)[:12] + struct.pack("<I", 71))}
+        self.assertEqual(target._template_init("Main", "Exit"), 0x02246000)
 
     def test_placeable_names_are_looked_up_once(self):
         calls = []
