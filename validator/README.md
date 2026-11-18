@@ -1,6 +1,6 @@
 The isolated validator accepts only canonical 136-byte PK4 data and its SHA-256
 through `PokemonLegality.Validate`. It returns a boolean, the exact payload hash,
-policy `pkhex-26.08.26-74b88906-dswt3`, up to eight stable reason codes and, when
+policy `pkhex-26.08.26-74b88906-dswt4`, up to eight stable reason codes and, when
 legal, the destination games that can hold the Pokémon. It never
 returns a Pokémon or repairs data. No ROM, save, UI, sprite or package icon is
 included in the build context or runtime.
@@ -22,8 +22,14 @@ The whole-container memory/PID limits also cover native memory and runtime
 threads; a managed-heap setting alone is insufficient.
 
 The policy uses the pinned core's Gen IV legality analysis, physical Gen III
-transfer rules and invalid verdicts for missing Gen III/IV RNG frames. Gen IV
-names use historical-format checks rather than later consoles' word lists.
+transfer rules and invalid verdicts for missing Gen III/IV RNG frames. Legality
+uses historical-format name checks, so a Gen IV name is never evidence of an
+illegal Pokémon. Names are checked separately, because other players see them:
+the nickname, when the player gave one, and the original trainer's name must
+pass the Nintendo Switch word list, the newest games' online rules. Exact
+species names, official Pokémon terms in every Gen IV language and the reviewed
+`name-allowlist.txt` (innocent names the list's substring patterns catch, such
+as Lulu or grape) are exempt.
 Eggs, mail, invalid structures/species and forms no Gen IV game can hold or trade
 are rejected. The game must reject attached capsules and protect its last usable
 party Pokémon before escrow: those facts are absent from canonical PK4.
@@ -41,12 +47,15 @@ without destinations, such as one from an older validator, as unavailable.
 | `EGG_NOT_ALLOWED`, `MAIL_NOT_ALLOWED`, `INCOMPATIBLE_FORM` | Unsupported trade content |
 | `INCOMPATIBLE_GAME` | Legal, but no Diamond/Pearl, Platinum or HeartGold/SoulSilver game can hold it |
 | `ILLEGAL_ENCOUNTER`, `ILLEGAL_MOVES`, `ILLEGAL_RNG`, `ILLEGAL_DATA` | Pinned core legality checks failed |
+| `INAPPROPRIATE_NAME` | The nickname or original trainer's name fails the word list |
 
 RPC failures, timeouts, worker failures, capacity exhaustion and mismatched
-policy/hash replies are unavailable, never definitive illegal verdicts. Only
-new submission acceptance calls the validator. Already accepted ownership,
-collection, cancellation, reconciliation and idempotent replay must remain
-available when validation is down; lifecycle integration follows separately.
+policy/hash replies are unavailable, never definitive illegal verdicts. New
+submissions call the validator, and so does the backend's name screening of
+offers queued before the current name rule: only `INAPPROPRIATE_NAME` refuses
+such an offer, which then never matches and goes back to its owner. Already
+accepted ownership, collection, cancellation, reconciliation and idempotent
+replay must remain available when validation is down.
 An illegal verdict alone cannot authorize local restoration: the server must
 first durably record the matching rejection under the protocol's recovery rule.
 
@@ -56,7 +65,8 @@ positives can occur, particularly around events and RNG. Keep the offered
 Pokémon in escrow pending a definitive durable outcome. Review a minimal
 private reproduction, add a synthetic regression and review the core/resource
 pin and policy version together; never auto-legalize, disable checks on failure
-or retroactively block delivery of accepted assets.
+or retroactively refuse an accepted asset for legality. Only a name screening
+hands an accepted offer back.
 
 `upstream.env` pins the source archive. `core-resources.json` inventories all
 embedded core resources; they include encounter/event databases, factual game

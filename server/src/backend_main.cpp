@@ -1,6 +1,7 @@
 #include "dswt/server/config.h"
 #include "dswt/server/identity_service.h"
 #include "dswt/server/legality_client.h"
+#include "dswt/server/offer_screener.h"
 #include "dswt/server/trade_service.h"
 #include "dswt/server/wal_archive_barrier.h"
 #include "admission.h"
@@ -9,9 +10,13 @@
 #include <boost/asio.hpp>
 #include <grpcpp/grpcpp.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <exception>
 #include <iostream>
+#include <mutex>
+#include <thread>
 
 int main() {
   try {
@@ -25,7 +30,9 @@ int main() {
     WalArchiveBarrier recovery(config.connection_info);
     auto admission = std::make_shared<detail::ServiceAdmission>(config.submission_workers);
     IdentityService identities(config.connection_info, recovery.Barrier(), admission);
-    TradeService trades(config.connection_info, [&](const auto &data) { return legality.CheckNewSubmission(data); }, recovery.Barrier(), admission);
+    const SubmissionValidator validate = [&](const auto &data) { return legality.CheckNewSubmission(data); };
+    TradeService trades(config.connection_info, validate, recovery.Barrier(), admission);
+    OfferScreener screener(config.connection_info, validate);
     grpc::ServerBuilder builder;
     int port = 0;
     builder.AddListeningPort(config.address, grpc::InsecureServerCredentials(), &port);
@@ -44,11 +51,29 @@ int main() {
     std::cout << "Trade backend listening on loopback port " << port << std::endl;
     boost::asio::io_context io;
     boost::asio::signal_set signals(io, SIGINT, SIGTERM);
-    signals.async_wait([&](boost::system::error_code, int) {
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::atomic<bool> stopping{false};
+    const auto stop = [&] {
+      { std::lock_guard<std::mutex> lock(mutex); stopping = true; }
+      changed.notify_all();
       server->Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(3));
       io.stop();
+    };
+    signals.async_wait([&](boost::system::error_code, int) { stop(); });
+    // Screen queued offers that predate the current name rule; idle when none remain.
+    std::thread screening([&] {
+      std::unique_lock<std::mutex> lock(mutex);
+      while (!stopping) {
+        lock.unlock();
+        std::size_t screened = 0;
+        try { screened = screener.Poll(16, &stopping); } catch (const std::exception &) {}
+        lock.lock();
+        changed.wait_for(lock, std::chrono::seconds(screened ? 0 : 10), [&] { return stopping.load(); });
+      }
     });
     io.run();
+    screening.join();
     return 0;
   } catch (const std::exception &) {
     std::cerr << "trade backend unavailable; check private configuration\n";

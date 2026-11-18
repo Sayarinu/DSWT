@@ -150,7 +150,8 @@ class GatewayScenario:
         finally:
             connection.close()
         magic, version, operation, size, request, result, reserved, counter, highwater = RESPONSE.unpack_from(body)
-        self.test.assertEqual((magic, version, operation, request, reserved), (b'WTDS', 1, packet[5], packet[8:24], 0))
+        # A reply repeats its request's version.
+        self.test.assertEqual((magic, version, operation, request, reserved), (b'WTDS', packet[4], packet[5], packet[8:24], 0))
         self.test.assertEqual(size, len(body) - RESPONSE.size)
         payload = body[RESPONSE.size:]
         if result != 1:
@@ -290,7 +291,7 @@ class GatewayScenario:
 
     def malformed_and_backend_failures(self):
         valid = self.frame(3, ZERO_ID, self.first)
-        packets = [valid[:79], b'BAD!' + valid[4:], valid[:4] + b'\x02' + valid[5:],
+        packets = [valid[:79], b'BAD!' + valid[4:], valid[:4] + b'\x00' + valid[5:], valid[:4] + b'\x03' + valid[5:],
                    valid[:5] + b'\x08' + valid[6:], valid[:6] + b'\xff\xff' + valid[8:],
                    valid[:8] + bytes(16) + valid[24:], valid[:40] + bytes(32) + valid[72:],
                    valid[:72] + struct.pack('<Q', 1) + valid[80:], valid[:24] + ZERO_ID + valid[40:],
@@ -298,6 +299,8 @@ class GatewayScenario:
                    self.frame(5, ZERO_ID, self.first)]
         for packet in packets:
             self.post(packet, status=400)
+        # Version 2 (server returns) is version 1's envelope; both are served.
+        self.test.assertEqual(self.post(valid[:4] + b'\x02' + valid[5:])[0], 1)
         # Well-formed enrollments with an unknown game variant are bounded protocol rejections.
         for build in (0, 2, 0x020C0600, 0x040C0200):
             self.test.assertEqual(self.post(self.frame(1, struct.pack('<IB', build, 0))), (3, 0, 0, b''))

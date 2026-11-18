@@ -135,7 +135,7 @@ static int RequestValid(const WtJournalEntry *entry, WtJournalHash hash)
     if (length == 0) return Zero(frame, WT_JOURNAL_FRAME_MAX);
     if (length < WT_WIRE_REQUEST_HEADER_SIZE || length > WT_JOURNAL_FRAME_MAX
         || !Zero(frame + length, WT_JOURNAL_FRAME_MAX - length)
-        || memcmp(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE) != 0
+        || !WT_WIRE_KNOWN_VERSION(frame)
         || Get(frame + WT_WIRE_REQUEST_BODY_LENGTH, 2) != (unsigned)length - WT_WIRE_REQUEST_HEADER_SIZE
         || memcmp(frame + WT_WIRE_REQUEST_CREDENTIAL, entry->credential, WT_WIRE_CREDENTIAL_SIZE) != 0) return 0;
     opcode = frame[WT_WIRE_REQUEST_OPERATION];
@@ -328,13 +328,16 @@ static int InitialPacketKnown(const unsigned char *record, int allowClear)
 {
     unsigned char expected[264];
     unsigned length = (unsigned)Get(record + WT_REC_PENDING_REQUEST, 2), candidate;
-    unsigned candidates[2];
+    unsigned candidates[4];
     if ((length != 0 && (length < 85 || length > 149)) || record[WT_REC_PENDING_REQUEST + 92] > 64) return 0;
     candidates[0] = length ? length : 85u + record[WT_REC_PENDING_REQUEST + 92]; candidates[1] = length ? length : 149u;
-    for (candidate = 0; candidate < 2; candidate++) {
+    candidates[2] = candidates[0]; candidates[3] = candidates[1];
+    for (candidate = 0; candidate < 4; candidate++) {
         unsigned size = candidates[candidate];
         memset(expected, 0, sizeof(expected)); Put(expected, size, 2);
+        /* Earlier clients enrolled with version 1; this one uses version 2. */
         memcpy(expected + 8, "WTDS\1\1", 6); Put(expected + 14, size - 80, 2);
+        if (candidate >= 2) expected[12] = WT_WIRE_VERSION_SERVER_RETURNS;
         memcpy(expected + 16, record + WT_REC_ENROLLMENT_ID, 16); memcpy(expected + 48, record + WT_REC_CREDENTIAL, 32);
         memcpy(expected + 88, record + WT_REC_PENDING_REQUEST + 88, 4); expected[92] = (unsigned char)(size - 85);
         memcpy(expected + 93, record + WT_REC_PENDING_REQUEST + 93, size - 85);

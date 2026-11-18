@@ -1,4 +1,5 @@
 #include "wonder_trade/wire.h"
+#include "wonder_trade/wire_layout.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -105,7 +106,7 @@ static void Reply(unsigned operation)
     unsigned kinds[8] = { 1, 2, 3, 5, 2, 4, 5, 6 };
     size_t size = 0;
     unsigned i;
-    memset(packet, 0, sizeof(packet)); memcpy(packet, "WTDS\1", 5); packet[5] = (unsigned char)operation;
+    memset(packet, 0, sizeof(packet)); memcpy(packet, frame, 5); packet[5] = (unsigned char)operation; /* Same version as the request. */
     memcpy(packet + 8, frame + 8, 16); Put(packet + 24, WT_RESULT_OK, 2);
     Put(packet + 28, 2, 8); Put(packet + 36, 3, 8);
     switch (operation) {
@@ -176,7 +177,9 @@ static void TestEnvelopes(void)
         originalSize = packetSize;
         for (i = 0; i < originalSize; i++) { packetSize = i; Reject(); }
         packetSize = originalSize + 1; Reject(); packetSize = originalSize;
-        BadByte(0, 0); BadByte(4, 2); BadByte(5, 0); BadByte(8, 0); BadByte(6, 0);
+        /* A version-1 reply to this version-2 request, or an unknown version, fails. */
+        assert(frame[4] == WT_WIRE_VERSION_SERVER_RETURNS);
+        BadByte(0, 0); BadByte(4, 1); BadByte(4, 3); BadByte(5, 0); BadByte(8, 0); BadByte(6, 0);
         BadByte(24, 0); BadByte(24, 12); BadByte(25, 1); BadByte(26, 1); BadByte(27, 1);
         Put(packet + 28, 0, 8); Reject(); Put(packet + 28, 2, 8);
         Put(packet + 36, 0, 8); Reject(); Reply(operation);

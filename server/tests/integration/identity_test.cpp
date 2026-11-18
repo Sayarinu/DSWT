@@ -75,6 +75,7 @@ protected:
         "VALUES ($1::uuid,$2::uuid,$3::uuid,1,2)",
         {AsHex(trade), AsHex(owner), AsHex(asset)});
     database.Parameters("INSERT INTO dswt.offer_destinations VALUES ($1::uuid,2)", {AsHex(trade)});
+    database.Parameters("INSERT INTO dswt.offer_screenings VALUES ($1::uuid,1,false)", {AsHex(trade)});
     database.Parameters("INSERT INTO dswt.ownership VALUES "
                         "($1::uuid,$2::uuid,$3::uuid,1,2)",
                         {AsHex(asset), AsHex(owner), AsHex(trade)});

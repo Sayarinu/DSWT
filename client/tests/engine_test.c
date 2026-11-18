@@ -130,7 +130,7 @@ static void Init(Fixture *fixture, unsigned char id, unsigned char species)
 
 static size_t Header(Fixture *fixture, unsigned char packet[902], unsigned result, uint64_t counter, uint64_t highwater, size_t body)
 {
-    memset(packet, 0, 902); memcpy(packet, "WTDS\1", 5);
+    memset(packet, 0, 902); memcpy(packet, fixture->engine.frame, 5); /* A reply repeats its request's version. */
     packet[5] = fixture->engine.frame[5]; Put(packet + 6, body, 2);
     memcpy(packet + 8, fixture->engine.frame + 8, 16); Put(packet + 24, result, 2);
     Put(packet + 28, counter, 8); Put(packet + 36, highwater, 8);
@@ -436,6 +436,41 @@ static void MatchedCancelRace(void)
     assert(fixture.received && memcmp(fixture.delivered, incoming, 136) == 0);
 }
 
+/* The server hands back an offer its name screening refused: a CANCELLED event
+ * without an operation, which used none of this save's counters. */
+static void ServerReturn(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], digest[32];
+    unsigned char *event;
+    size_t size;
+    unsigned attempt;
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(Hash(fixture.pokemon, 136, digest) == 0);
+    for (attempt = 0; attempt < 2; ++attempt) {
+        assert(WtEngine_Request(&fixture.engine, WT_OP_RECONCILE) == 0);
+        size = Header(&fixture, packet, WT_RESULT_OK, 2, 3, 116);
+        packet[44] = 1; Put(packet + 46, 3, 8);
+        event = packet + 54; Put(event, 3, 8); event[8] = WT_EVENT_CANCELLED;
+        memcpy(event + 9, fixture.engine.entry.trade, 16); memset(event + 41, 31, 16);
+        memcpy(event + 57, digest, 32); memset(event + 89, 41, 16); event[105] = WT_TRADE_RETURN_READY;
+        /* Only this save's own Pokémon can come back. */
+        if (attempt == 0) {
+            event[57] ^= 1;
+            assert(WtEngine_Reply(&fixture.engine, packet, size) != 0);
+            assert(fixture.engine.entry.phase == WT_JOURNAL_QUEUED && !fixture.engine.entry.deliveryKind);
+            WtEngine_Close(&fixture.engine); Open(&fixture);
+            continue;
+        }
+        assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.engine.synchronized);
+    }
+    assert(fixture.engine.entry.phase == WT_JOURNAL_QUEUED && fixture.engine.entry.deliveryKind == WT_DELIVERY_RETURN);
+    assert(fixture.engine.entry.nextCounter == 2 && memcmp(fixture.engine.entry.receipt, packet + 54 + 89, 16) == 0);
+    fixture.cannotHold = 1; fixture.holdChecks = 0;
+    Collect(&fixture, fixture.pokemon, WT_DELIVERY_RETURN, 2, 4);
+    assert(!fixture.holdChecks && fixture.engine.entry.phase == WT_JOURNAL_IDLE);
+}
+
 static void LoadedStateAndMismatch(void)
 {
     Fixture fixture;
@@ -735,8 +770,8 @@ static void LocalSettlement(void)
 int main(void)
 {
     PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
-    RejectedCancel(); MatchedCancelRace(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
+    RejectedCancel(); MatchedCancelRace(); ServerReturn(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding(); LocalSettlement();
-    puts("Recoverable engine: paired delivery, match-cancel race, return, refused delivery, rejection, retries, full-storage restart, stale context, failed persistence and boot settlement passed");
+    puts("Recoverable engine: paired delivery, match-cancel race, return, server return, refused delivery, rejection, retries, full-storage restart, stale context, failed persistence and boot settlement passed");
     return 0;
 }

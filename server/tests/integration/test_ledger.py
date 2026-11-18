@@ -113,12 +113,15 @@ class LedgerTests(unittest.TestCase):
         # Schemas before 0005 have no destination table; their upgrade backfills Platinum only.
         if self.sql("SELECT to_regclass('dswt.offer_destinations') IS NULL") == "t":
             destinations = None
+        # Schemas from 0006 record each offer's name screening; Submit records a pass.
+        screened = self.sql("SELECT to_regclass('dswt.offer_screenings') IS NOT NULL") == "t"
         return f"""
             INSERT INTO dswt.payloads VALUES ('{identifier(asset)}',{blob(payload)},{blob(digest)});
             INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,receipt_id,last_event) VALUES
                 ('{identifier(trade)}','{identifier(owner)}','{identifier(asset)}',1,NULL,{sequence});
             {"" if destinations is None else
              f"INSERT INTO dswt.offer_destinations VALUES ('{identifier(trade)}',{destinations});"}
+            {f"INSERT INTO dswt.offer_screenings VALUES ('{identifier(trade)}',1,false);" if screened else ""}
             INSERT INTO dswt.ownership VALUES
                 ('{identifier(asset)}','{identifier(owner)}','{identifier(trade)}',1,{sequence});
             INSERT INTO dswt.operations VALUES ('{identifier(owner)}','{identifier(operation)}',
@@ -531,6 +534,28 @@ class LedgerTests(unittest.TestCase):
         for table in ("payloads", "ownership", "receipts", "acknowledgements"):
             self.assertEqual(self.sql(f"SELECT count(*) FROM dswt.{table}"), "1")
         self.assertEqual(self.sql("SELECT count(*) FROM dswt.operations"), "3")
+        self.tool("verify")
+
+    def test_server_return_needs_a_refused_screening_and_no_operation(self):
+        self.enroll()
+        self.submit()
+        trade, asset, receipt = [identifier(1 + delta) for delta in (1000, 2000, 5000)]
+        server_return = f"""BEGIN;
+            INSERT INTO dswt.receipts VALUES ('{receipt}','{trade}','{identifier(1)}','{asset}',2,NULL);
+            UPDATE dswt.offers SET state=3,receipt_id='{receipt}',last_event=3 WHERE trade_id='{trade}';
+            UPDATE dswt.ownership SET location=2,last_event=3 WHERE asset_id='{asset}';
+            INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,asset_id,payload_sha256,receipt_id,state)
+                VALUES ('{identifier(1)}',3,4,'{trade}','{asset}',{blob(hashlib.sha256(bytes(136)).digest())},'{receipt}',3);
+            COMMIT;"""
+        # The owner did not cancel and the name passed: nothing may hand the offer back.
+        self.sql(server_return, ok=False)
+        self.assertEqual(self.sql("SELECT state FROM dswt.offers"), "1")
+        self.sql(f"INSERT INTO dswt.offer_screenings VALUES ('{trade}',2,true)")
+        self.sql(server_return)
+        self.assertEqual(self.sql("SELECT state FROM dswt.offers"), "3")
+        self.assertEqual(self.sql("SELECT next_counter FROM dswt.save_identities"), "2")
+        self.sql(f"UPDATE dswt.offer_screenings SET refused=false WHERE trade_id='{trade}'", ok=False)
+        self.acknowledge()
         self.tool("verify")
 
     def test_no_ownerless_or_extra_unassigned_asset(self):

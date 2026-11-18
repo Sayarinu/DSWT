@@ -47,6 +47,7 @@ class WireLayoutTests(unittest.TestCase):
         self.assertEqual({name: server[name] for name in operations},
                          {server_name(op.name.lower()): int(op) for op in wire.Operation})
         self.assertEqual(server["kMaxPacket"], wire.MAX_PACKET)
+        self.assertEqual(client["VERSION_SERVER_RETURNS"], wire.VERSION_SERVER_RETURNS)
         magic = '"WTDS\\1"'
         self.assertIn(f"#define WT_WIRE_MAGIC {magic}", (ROOT / "client/include/wonder_trade/wire_layout.h").read_text())
         self.assertIn(f"kMagic{{{magic}, 5}}", (ROOT / "server/src/wire_layout.h").read_text())
