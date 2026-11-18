@@ -122,3 +122,8 @@ only merge what is ready to serve players. The required check names are listed i
   `validator/README.md` (in the validator image's GPL source) and license
   notices. Change docs only when necessary or beneficial, and skip routine
   progress notes.
+- The wiki explains how to build, develop and install, not how a problem was
+  found. Write investigation findings to the issue tracker instead: root
+  causes, debugging steps that worked, and what to check next time. Put them in
+  a comment on the ticket, or in a project document when they apply beyond one
+  ticket, such as notes for every retail port.
