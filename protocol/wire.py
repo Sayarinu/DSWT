@@ -32,6 +32,11 @@ class Result(IntEnum):
     UNAVAILABLE = 11
 
 
+# Version 2 is version 1 plus server returns: a CANCELLED event without an
+# operation hands back an offer the server refused. A reply repeats its request's version.
+VERSION_SERVER_RETURNS = 2
+VERSIONS = (1, VERSION_SERVER_RETURNS)
+
 REQUEST = struct.Struct("<4sBBH16s16s32sQ")
 RESPONSE = struct.Struct("<4sBBH16sHHQQ")
 MAX_PACKET = 4096
@@ -71,6 +76,7 @@ class Request:
     credential: bytes = field(repr=False)
     counter: int
     payload: bytes = field(repr=False)
+    version: int = VERSION_SERVER_RETURNS
 
 
 @dataclass(frozen=True)
@@ -81,13 +87,14 @@ class Response:
     next_counter: int
     event_highwater: int
     payload: bytes = field(repr=False)
+    version: int = VERSION_SERVER_RETURNS
 
 
 def _header(packet, header):
     if not header.size <= len(packet) <= MAX_PACKET:
         raise ValueError("Invalid packet size")
     values = header.unpack_from(packet)
-    if values[0] != b"WTDS" or values[1] != 1:
+    if values[0] != b"WTDS" or values[1] not in VERSIONS:
         raise ValueError("Unsupported magic or version")
     if values[3] != len(packet) - header.size:
         raise ValueError("Payload length mismatch")
@@ -96,7 +103,7 @@ def _header(packet, header):
 
 def decode_request(packet):
     values, payload = _header(packet, REQUEST)
-    _, _, opcode, _, request_id, save_id, credential, counter = values
+    _, version, opcode, _, request_id, save_id, credential, counter = values
     operation = Operation(opcode)
     if not any(request_id) or not any(credential):
         raise ValueError("Missing request ID or credential")
@@ -112,7 +119,7 @@ def decode_request(packet):
         raise ValueError("Invalid operation payload size")
     if operation == Operation.RECONCILE and not 1 <= payload[8] <= 8:
         raise ValueError("Invalid reconciliation limit")
-    return Request(operation, request_id, save_id, credential, counter, payload)
+    return Request(operation, request_id, save_id, credential, counter, payload, version)
 
 
 def encode_request(request):
@@ -120,7 +127,7 @@ def encode_request(request):
         if len(value) != size:
             raise ValueError("Invalid identifier or credential length")
     packet = REQUEST.pack(
-        b"WTDS", 1, request.operation, len(request.payload), request.request_id,
+        b"WTDS", request.version, request.operation, len(request.payload), request.request_id,
         request.save_id, request.credential, request.counter,
     ) + request.payload
     decode_request(packet)
@@ -129,7 +136,7 @@ def encode_request(request):
 
 def decode_response(packet):
     values, payload = _header(packet, RESPONSE)
-    _, _, opcode, _, request_id, result, reserved, counter, highwater = values
+    _, version, opcode, _, request_id, result, reserved, counter, highwater = values
     operation, result = Operation(opcode), Result(result)
     if reserved or not any(request_id):
         raise ValueError("Invalid response header")
@@ -144,14 +151,14 @@ def decode_response(packet):
             raise ValueError("Invalid reconciliation page size")
     elif len(payload) != RESPONSE_SIZES[operation]:
         raise ValueError("Invalid response payload size")
-    return Response(operation, request_id, result, counter, highwater, payload)
+    return Response(operation, request_id, result, counter, highwater, payload, version)
 
 
 def encode_response(response):
     if len(response.request_id) != 16:
         raise ValueError("Invalid request ID length")
     packet = RESPONSE.pack(
-        b"WTDS", 1, response.operation, len(response.payload), response.request_id,
+        b"WTDS", response.version, response.operation, len(response.payload), response.request_id,
         response.result, 0, response.next_counter, response.event_highwater,
     ) + response.payload
     decode_response(packet)

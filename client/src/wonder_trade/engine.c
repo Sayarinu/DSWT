@@ -358,7 +358,10 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
             unsigned kind = event->kind == WT_EVENT_MATCHED ? WT_DELIVERY_MATCH : WT_DELIVERY_RETURN;
             if (next->deliveryKind && next->deliveryKind != kind) return -1;
             if (!Zero(next->receipt, 16) && memcmp(next->receipt, event->receipt, 16) != 0) return -1;
-            if (event->kind == WT_EVENT_CANCELLED && (memcmp(event->operation, next->lastOperation, 16) != 0
+            /* The owner's own Cancel, or the server handing back an offer it refused
+             * (no operation: it used none of this save's counters). Either returns this offer. */
+            if (event->kind == WT_EVENT_CANCELLED && ((!Zero(event->operation, 16)
+                && memcmp(event->operation, next->lastOperation, 16) != 0)
                 || memcmp(event->digest, outgoingDigest, 32) != 0)) return -1;
             if (!Zero(next->incomingDigest, 32) && memcmp(next->incomingDigest, event->digest, 32) != 0) return -1;
             memcpy(next->receipt, event->receipt, 16);

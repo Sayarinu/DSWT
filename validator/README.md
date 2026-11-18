@@ -50,10 +50,12 @@ without destinations, such as one from an older validator, as unavailable.
 | `INAPPROPRIATE_NAME` | The nickname or original trainer's name fails the word list |
 
 RPC failures, timeouts, worker failures, capacity exhaustion and mismatched
-policy/hash replies are unavailable, never definitive illegal verdicts. Only
-new submission acceptance calls the validator. Already accepted ownership,
-collection, cancellation, reconciliation and idempotent replay must remain
-available when validation is down; lifecycle integration follows separately.
+policy/hash replies are unavailable, never definitive illegal verdicts. New
+submissions call the validator, and so does the backend's name screening of
+offers queued before the current name rule: only `INAPPROPRIATE_NAME` refuses
+such an offer, which then never matches and goes back to its owner. Already
+accepted ownership, collection, cancellation, reconciliation and idempotent
+replay must remain available when validation is down.
 An illegal verdict alone cannot authorize local restoration: the server must
 first durably record the matching rejection under the protocol's recovery rule.
 
@@ -63,7 +65,8 @@ positives can occur, particularly around events and RNG. Keep the offered
 Pokémon in escrow pending a definitive durable outcome. Review a minimal
 private reproduction, add a synthetic regression and review the core/resource
 pin and policy version together; never auto-legalize, disable checks on failure
-or retroactively block delivery of accepted assets.
+or retroactively refuse an accepted asset for legality. Only a name screening
+hands an accepted offer back.
 
 `upstream.env` pins the source archive. `core-resources.json` inventories all
 embedded core resources; they include encounter/event databases, factual game

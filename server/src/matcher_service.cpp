@@ -3,6 +3,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
+#include "dswt/server/legality_client.h"
 #include "dswt/server/telemetry.h"
 
 #include <mutex>
@@ -37,10 +38,15 @@ void Result(v1::MatchReply &reply, v1::ResultCode code) {
 
 // Queued offers (o) of identities that can still record events (i), with the
 // games able to hold each Pokémon (d.destinations) and the owner's variant (v).
+// Only offers whose names passed the current screening rule can be paired; the
+// backend screens older offers, and returns refused ones to their owners.
 const std::string kQueued =
     "dswt.offers o JOIN dswt.save_identities i USING(save_id) "
     "JOIN dswt.identity_variants v USING(save_id) JOIN dswt.offer_destinations d USING(trade_id) "
-    "WHERE o.state=1 AND i.event_highwater<18446744073709551615 ";
+    "WHERE o.state=1 AND i.event_highwater<18446744073709551615 "
+    "AND EXISTS (SELECT 1 FROM dswt.offer_screenings s WHERE s.trade_id=o.trade_id AND s.rule=" +
+    std::to_string(kNameRule) + " AND NOT s.refused) "
+    "AND NOT EXISTS (SELECT 1 FROM dswt.offer_screenings s WHERE s.trade_id=o.trade_id AND s.refused) ";
 // The destination bit of v's game family: DP 1, Pt 2, HGSS 4. Legacy code 1 is
 // Platinum; structured codes carry family 1-3 in their top byte.
 const std::string kGame = "(1<<((CASE WHEN v.variant=1 THEN 2 ELSE v.variant>>24 END)::integer-1))";

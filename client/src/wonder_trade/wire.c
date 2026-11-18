@@ -60,7 +60,7 @@ int WtWire_CheckRequest(const unsigned char *frame, size_t size, WtWireHash hash
     uint64_t counter;
     int mutation;
     if (!frame || !hash || size < WT_WIRE_REQUEST_HEADER_SIZE || size > WT_WIRE_REQUEST_MAX
-        || memcmp(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE) != 0
+        || !WT_WIRE_KNOWN_VERSION(frame)
         || ReadNumber(frame + WT_WIRE_REQUEST_BODY_LENGTH, 2) != size - WT_WIRE_REQUEST_HEADER_SIZE) return -1;
     operation = frame[WT_WIRE_REQUEST_OPERATION]; body = frame + WT_WIRE_REQUEST_HEADER_SIZE;
     if (operation < WT_OP_ENROLL || operation > WT_OP_RECONCILE
@@ -99,7 +99,8 @@ int WtWire_Encode(const WtWireRequest *request, WtWireHash hash, unsigned char *
     if (!size) return -1;
     *size = 0;
     if (!request || !hash || !output) return -1;
-    memcpy(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE); frame[WT_WIRE_REQUEST_OPERATION] = request->operation;
+    memcpy(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE); frame[WT_WIRE_MAGIC_SIZE - 1] = WT_WIRE_VERSION_SERVER_RETURNS;
+    frame[WT_WIRE_REQUEST_OPERATION] = request->operation;
     memcpy(frame + WT_WIRE_REQUEST_ID, request->requestID, WT_WIRE_ID_SIZE);
     memcpy(frame + WT_WIRE_REQUEST_SAVE_ID, request->saveID, WT_WIRE_ID_SIZE);
     memcpy(frame + WT_WIRE_REQUEST_CREDENTIAL, request->credential, WT_WIRE_CREDENTIAL_SIZE);
@@ -192,8 +193,9 @@ static int EventKnown(const unsigned char *bytes)
             && (IsZero(bytes + WT_WIRE_EVENT_TRADE, WT_WIRE_ID_SIZE) ? state == WT_TRADE_NONE : state != WT_TRADE_NONE);
     }
     return !IsZero(bytes + WT_WIRE_EVENT_TRADE, WT_WIRE_ID_SIZE) && !IsZero(bytes + WT_WIRE_EVENT_ASSET, WT_WIRE_ID_SIZE)
+        /* A server return is a CANCELLED event without an operation. */
         && (kind == WT_EVENT_MATCHED ? IsZero(bytes + WT_WIRE_EVENT_OPERATION, WT_WIRE_ID_SIZE)
-            : !IsZero(bytes + WT_WIRE_EVENT_OPERATION, WT_WIRE_ID_SIZE))
+            : kind == WT_EVENT_CANCELLED || !IsZero(bytes + WT_WIRE_EVENT_OPERATION, WT_WIRE_ID_SIZE))
         && (kind == WT_EVENT_SUBMITTED ? IsZero(bytes + WT_WIRE_EVENT_RECEIPT, WT_WIRE_ID_SIZE)
             : !IsZero(bytes + WT_WIRE_EVENT_RECEIPT, WT_WIRE_ID_SIZE))
         && state == kind - 1;
@@ -280,7 +282,7 @@ int WtWire_Decode(const unsigned char *request, size_t requestSize,
     Clear(reply, sizeof(*reply));
     if (WtWire_CheckRequest(request, requestSize, hash) != 0 || !packet
         || packetSize < WT_WIRE_REPLY_HEADER_SIZE || packetSize > WT_WIRE_REPLY_MAX
-        || memcmp(packet, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE) != 0
+        || memcmp(packet, request, WT_WIRE_MAGIC_SIZE) != 0
         || packet[WT_WIRE_REPLY_OPERATION] != request[WT_WIRE_REQUEST_OPERATION]
         || ReadNumber(packet + WT_WIRE_REPLY_BODY_LENGTH, 2) != packetSize - WT_WIRE_REPLY_HEADER_SIZE
         || memcmp(packet + WT_WIRE_REPLY_REQUEST_ID, request + WT_WIRE_REQUEST_ID, WT_WIRE_ID_SIZE) != 0

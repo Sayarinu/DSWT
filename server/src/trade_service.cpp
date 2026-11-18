@@ -233,6 +233,42 @@ void Allocate(Work work) {
   throw std::runtime_error("trade allocation unavailable");
 }
 
+// Hand back the owner's queued offer when its name screening refused it. Only a
+// client that accepts server returns may see the event this records.
+void ReturnRefusedOffer(const std::string &info, detail::RecoveryGate &recovery, detail::ServiceAdmission &admission,
+                        const v1::Credentials &auth, detail::Quota::Permit &permit) {
+  if (!auth.server_returns()) return;
+  Allocate([&] {
+    Session session(info, auth, recovery, true, admission, permit);
+    if (!session.authenticated || session.highwater == kMaximumSequenceValue) return;
+    auto refused = session.database.Parameters("SELECT replace(o.trade_id::text,'-','') FROM dswt.offers o "
+        "WHERE o.save_id=$1::uuid AND o.state=1 AND EXISTS (SELECT 1 FROM dswt.offer_screenings s "
+        "WHERE s.trade_id=o.trade_id AND s.refused)",
+        {HexBytes(auth.save_id())});
+    // Like any mutation, wait until the history it extends is archived.
+    if (PQntuples(refused.get()) != 1 || !session.Covered(session.highwater)) return;
+    const auto trade = UnhexBytes(PQgetvalue(refused.get(), 0, 0));
+    auto snapshot = session.Snapshot(trade);
+    const auto receipt = detail::RandomIdentifier();
+    const auto sequence = std::to_string(session.highwater + 1);
+    session.database.Parameters("INSERT INTO dswt.receipts(receipt_id,trade_id,save_id,asset_id,delivery_kind) "
+        "VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,2)",
+        {HexBytes(receipt), HexBytes(trade), HexBytes(auth.save_id()), HexBytes(snapshot.offered_asset_id())});
+    session.database.Parameters("UPDATE dswt.offers SET state=3,receipt_id=$3::uuid,last_event=$4::numeric "
+        "WHERE trade_id=$1::uuid AND save_id=$2::uuid AND state=1",
+        {HexBytes(trade), HexBytes(auth.save_id()), HexBytes(receipt), sequence});
+    session.database.Parameters("UPDATE dswt.ownership SET location=2,last_event=$4::numeric "
+        "WHERE asset_id=$1::uuid AND save_id=$2::uuid AND trade_id=$3::uuid",
+        {HexBytes(snapshot.offered_asset_id()), HexBytes(auth.save_id()), HexBytes(trade), sequence});
+    // As the owner's Cancel would record it, without an operation: they used no counter.
+    session.database.Parameters("INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,asset_id,"
+        "payload_sha256,receipt_id,state) VALUES ($1::uuid,$2::numeric,4,$3::uuid,$4::uuid,decode($5,'hex'),$6::uuid,3)",
+        {HexBytes(auth.save_id()), sequence, HexBytes(trade), HexBytes(snapshot.offered_asset_id()),
+         HexBytes(snapshot.offered_sha256()), HexBytes(receipt)});
+    session.transaction.Commit();
+  });
+}
+
 } // namespace
 
 TradeService::TradeService(std::string connection_info, SubmissionValidator validator, RecoveryBarrier recovery,
@@ -291,6 +327,9 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
           {HexBytes(trade), HexBytes(session.auth.save_id()), HexBytes(asset), sequence});
       session.database.Parameters("INSERT INTO dswt.offer_destinations VALUES ($1::uuid,$2::smallint)",
           {HexBytes(trade), std::to_string(legality.destinations)});
+      // A legal verdict covers the names, so the offer passes the current screening.
+      session.database.Parameters("INSERT INTO dswt.offer_screenings VALUES ($1::uuid,$2::smallint,false)",
+          {HexBytes(trade), std::to_string(kNameRule)});
       session.database.Parameters("INSERT INTO dswt.ownership VALUES ($1::uuid,$2::uuid,$3::uuid,1,$4::numeric)",
           {HexBytes(asset), HexBytes(session.auth.save_id()), HexBytes(trade), sequence});
       const auto snapshot = session.Snapshot(trade);
@@ -311,6 +350,7 @@ grpc::Status TradeService::Status(grpc::ServerContext *context, const v1::Status
     if (!request->trade_id().empty() && !detail::NonzeroBytes(request->trade_id(), wire::kIdSize)) {
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
+    ReturnRefusedOffer(connection_info_, *recovery_, *admission_, request->auth(), permit);
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     *reply->mutable_trade() = session.Snapshot(request->trade_id());
@@ -363,6 +403,7 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (!detail::NonzeroBytes(request->trade_id(), wire::kIdSize)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
+    ReturnRefusedOffer(connection_info_, *recovery_, *admission_, request->auth(), permit);
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     const auto snapshot = session.Snapshot(request->trade_id());
@@ -426,6 +467,7 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
     if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
+    ReturnRefusedOffer(connection_info_, *recovery_, *admission_, request->auth(), permit);
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
     if (request->after_event() > session.highwater) { session.Publish(*reply, v1::RESULT_CURSOR_AHEAD); return; }
