@@ -117,7 +117,9 @@ class IdentifyRomTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in variants], [
             "us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5", "heartgold-us-rev0", "soulsilver-us-rev0",
             "diamond-europe-rev5", "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe",
-            "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "france", "germany", "italy", "spain", "japan", "platinum-korea"])
+            "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
+            "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain",
+            "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for key in ("id", "sha256", "sha1", "crc32"):
             self.assertEqual(len({row[key] for row in variants}), len(variants))
         patches = [row["planned_patch"] for row in variants if row["planned_patch"] is not None]
@@ -139,7 +141,8 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-europe-rev5",
                                                         "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe",
                                                         "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
-                                                        "france", "germany", "italy", "spain", "japan", "platinum-korea"])
+                                                        "soulsilver-france", "soulsilver-germany", "soulsilver-italy",
+                                                        "soulsilver-spain", "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for row in built:
             if "port_base" in row:
                 continue
