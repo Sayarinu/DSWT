@@ -57,9 +57,17 @@ extern void sub_02008904(u8 *pixels, u32 personality, u32 bothFrames);
 /* asm/unk_0206F3FC.s: the party screen, as the field's "choose a Pokémon"
  * script command (sub_020379F8) opens it. */
 extern const struct OverlayManagerTemplate UNK_020F96DC;
-/* asm/unk_020606B0.s: the trade animation (overlay 81), as the field's NPC
- * trade task (sub_020606D0) runs it. */
-extern const struct OverlayManagerTemplate UNK_020F7630;
+/* arm9/overlays/81/asm/overlay_81.s: the trade animation's init, main and exit,
+ * as the field's NPC trade template (UNK_020F7630, asm/unk_020606B0.s) lists them.
+ * Wonder Trade keeps its own template: retail ports find these functions by their
+ * code, while a copy of the game's template has nothing unique to match. */
+extern BOOL ov81_02237E40(struct OverlayManager *manager, u32 *status);
+extern BOOL ov81_02238064(struct OverlayManager *manager, u32 *status);
+extern BOOL ov81_02238004(struct OverlayManager *manager, u32 *status);
+FS_EXTERN_OVERLAY(OVERLAY_81);
+static const struct OverlayManagerTemplate sWonderTradeSequence = {
+    ov81_02237E40, ov81_02238064, ov81_02238004, FS_OVERLAY_ID(OVERLAY_81)
+};
 
 enum WonderTradeAppState {
     WT_APP_BOOT,
@@ -973,7 +981,7 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
     if (app->state == WT_APP_TRADE_FADE) {
         /* The fade out has finished; the animation sets up its own screens. */
         WonderTrade_FreeGraphics(app);
-        app->sequence = OverlayManager_New(&UNK_020F7630, (s32 *)&app->tradeAnimation, HEAP_ID_WONDER_TRADE);
+        app->sequence = OverlayManager_New(&sWonderTradeSequence, (s32 *)&app->tradeAnimation, HEAP_ID_WONDER_TRADE);
         app->state = WT_APP_TRADE;
         return FALSE;
     }
