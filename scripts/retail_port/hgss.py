@@ -32,6 +32,11 @@ GAMES = {"heartgold": ("HEARTGOLD", "VERSION_HEARTGOLD"), "soulsilver": ("SOULSI
 REVIEWED = {
     "ko": {"GetSpeciesName": 1,  # the species name bank number
            "TradeSequence_Init": 1},  # the trade text bank number
+    "ja": {"GetSpeciesName": 1,  # the species name bank number
+           "sub_0201A1B4": 1,  # the heap count: Japanese has no Voltorb Flip heap
+           "String16_FormatInteger": 1,  # a character code of the Japanese charset
+           "TradeSequence_Init": 2,  # the trade text bank number and a call into its moved overlay
+           "TradeSequence_Main": 1},  # a call into its moved overlay
 }
 MAIL = "heartgold-mail-template.patch"
 LANGUAGES = {
@@ -162,9 +167,19 @@ class Target(platinum.Target):
             (tree / "include/msgdata/msg.naix").write_text(self.naix)
 
     # --- 1. Upstream code, including the overlay 27 assembly, must match the retail bytes --------------
+    def _asm_object(self, tree, out, built):
+        """Overlay 27's object: the workspace build's, or assembled from tree when a language
+        delta changes the assembly."""
+        if not any(ASM in prepare_game.patched_paths(patch) for patch in self.deltas):
+            return built.read_bytes()
+        toolchain.compile_objects(self.workspace, tree, tree / "include", out, self.language_name, [ASM],
+                                  **self.compile_options)
+        return (out / "asm_overlay_27.s.o").read_bytes()
+
     def check_variant(self):
         super().check_variant()
-        asm = elf.Elf(self._renumbered_banks((self.pristine / self.build_dir / "main.nef.p/asm_overlay_27.s.o").read_bytes()))
+        built = self.pristine / self.build_dir / "main.nef.p/asm_overlay_27.s.o"
+        asm = elf.Elf(self._renumbered_banks(self._asm_object(self.work / "pristine", self.work / "pristine-asm", built)))
         self.pristine_objects[ASM] = asm
         problems = self._locate(ASM, asm)
         require(not problems, "overlay 27 differs from the retail game:\n  " + "\n  ".join(problems))
@@ -211,7 +226,7 @@ class Target(platinum.Target):
         for path, name in inputs:
             data = path.read_bytes()
             if name == "asm_overlay_27.s.o":
-                data = self._shared_overlay_data(self._renumbered_banks(data))
+                data = self._shared_overlay_data(self._renumbered_banks(self._asm_object(tree, self.work / "port-asm", path)))
             (out / name).write_bytes(elf.numbered_sections(elf.with_inline_addends(data)))
             self.objects[str(out / name)] = elf.Elf((out / name).read_bytes())
         self.port_objects = {self._file_of(out / name): self.objects[str(out / name)] for path, name in inputs
@@ -396,11 +411,16 @@ class Target(platinum.Target):
         workspace_rom = (self.workspace / self.build_dir / f"poke{self.game}.us.nds").read_bytes()
         _, wt_value = platinum.heap_count(elf.Elf((self.workspace / self.build_dir / "main.nef").read_bytes()),
                                           nds.modules(workspace_rom)["arm9"], HEAP_FUNCTION)
-        require(us_value < wt_value < 256, f"heap count {us_value} -> {wt_value} is not an increase")
         us_function = self.image.unique(HEAP_FUNCTION)
-        at = self.map.addr.get(us_function.num) if us_function else None
-        require(at is not None, f"{HEAP_FUNCTION} was not found in the retail game")
-        self.heap_site, self.heap_count = ((at & ~1) + us_at - us_function.start, us_value), wt_value
+        found = self._resolve(HEAP_FUNCTION) if us_function else None
+        require(found is not None, f"{HEAP_FUNCTION} was not found in the retail game")
+        site = (found[0] & ~1) + us_at - us_function.start
+        # The cartridge's own count: Japanese has no Voltorb Flip heap, so one fewer than US.
+        arm9_base, arm9 = self.modules["arm9"]
+        retail = arm9[site - arm9_base:site - arm9_base + 2]
+        require(retail[1] == 0x22, "unexpected heap count instruction")
+        require(retail[0] <= us_value < wt_value < 256, f"heap count {retail[0]} -> {wt_value} is not an increase")
+        self.heap_site, self.heap_count = (site, retail[0]), wt_value
         self.text = self._message_archive()
         icon = self.workspace / self.build_dir / "files/wonder_trade/menu_icon.narc"
         icon_members, _ = nds.narc_split(icon.read_bytes())

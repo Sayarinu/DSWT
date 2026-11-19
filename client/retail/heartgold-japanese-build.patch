@@ -8,7 +8,1850 @@ applied after heartgold-mail-template.patch.
 - The game-reset check has no case for result 5.
 - A finished flash write unlocks the card before looking at the result, and
   asserts on an unexpected one.
+- Five touch menu functions in overlay 27 differ; they are written out from
+  the cartridge, with calls and addresses by name.
 
+diff --git a/asm/overlay_27.s b/asm/overlay_27.s
+--- a/asm/overlay_27.s
++++ b/asm/overlay_27.s
+@@ -1,6 +1,7 @@
+ 	.include "macros.inc"
+ 	.include "overlay_27.inc"
+ 	.include "global.inc"
++	.public GetWindowBgId
+ 
+ 	.text
+ 
+@@ -1167,109 +1168,88 @@ _0225A8E4:
+ 	pop {r4, pc}
+ 	thumb_func_end ov27_0225A89C
+ 
+-	thumb_func_start ov27_0225A8E8
+-ov27_0225A8E8: ; 0x0225A8E8
+-	push {r3, r4, lr}
+-	sub sp, #4
+-	add r4, r0, #0
+-	cmp r1, #0
+-	beq _0225A9AE
+-	ldr r1, _0225A9B8 ; =0x0000051C
+-	ldr r1, [r4, r1]
+-	lsl r1, r1, #0x1b
+-	lsr r1, r1, #0x1c
+-	cmp r1, #5
+-	bne _0225A912
+-	ldr r1, [r4, #0x10]
+-	add r1, #0xd2
+-	ldrb r1, [r1]
+-	lsl r1, r1, #0x1a
+-	lsr r1, r1, #0x1a
+-	bne _0225A912
+-	mov r1, #0
+-	mvn r1, r1
+-	bl ov27_0225B398
+-_0225A912:
+-	mov r0, #0xef
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++thumb_func_start ov27_0225A8E8
++ov27_0225A8E8: ; 0X0225A8E8
++	.short 0XB518
++	.short 0XB081
++	.short 0X1C04
++	.short 0X2900
++	.short 0XD04D
++	.short 0X20EF
++	.short 0X0080
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	mov r0, #0xf1
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++	.short 0X20F1
++	.short 0X0080
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	mov r0, #0xeb
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++	.short 0X20EB
++	.short 0X0080
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	mov r0, #0xed
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++	.short 0X20ED
++	.short 0X0080
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	mov r0, #0x3b
+-	lsl r0, r0, #4
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++	.short 0X203B
++	.short 0X0100
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	mov r0, #0xee
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #1
++	.short 0X20EE
++	.short 0X0080
++	.short 0X5820
++	.short 0X2101
+ 	bl Sprite_SetOamMode
+-	ldr r0, [r4, #0x10]
+-	add r0, #0xd2
+-	ldrb r0, [r0]
+-	lsl r0, r0, #0x1a
+-	lsr r0, r0, #0x1a
+-	beq _0225A974
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	ldr r1, [r4, #0x14]
+-	add r0, r4, r0
++	.short 0X6920
++	.short 0X30D2
++	.short 0X7800
++	.short 0X0680
++	.short 0X0E80
++	.short 0XD006
++	.short 0X2039
++	.short 0X0100
++	.short 0X6961
++	.short 0X1820
+ 	bl ov27_0225B4AC
+-	b _0225A982
+-_0225A974:
+-	mov r0, #0x39
+-	lsl r0, r0, #4
+-	mov r1, #0
+-	add r0, r4, r0
+-	mvn r1, r1
++	.short 0XE006
++	.short 0X2039
++	.short 0X0100
++	.short 0X2100
++	.short 0X1820
++	.short 0X43C9
+ 	bl ov27_0225B4AC
+-_0225A982:
+-	ldr r0, _0225A9B8 ; =0x0000051C
+-	ldr r0, [r4, r0]
+-	lsl r0, r0, #0x1b
+-	lsr r0, r0, #0x1c
+-	cmp r0, #2
+-	bne _0225A99A
+-	mov r0, #0xea
+-	lsl r0, r0, #2
+-	ldr r0, [r4, r0]
+-	mov r1, #0
++	.short 0X480D
++	.short 0X5820
++	.short 0X06C0
++	.short 0X0F00
++	.short 0X2802
++	.short 0XD105
++	.short 0X20EA
++	.short 0X0080
++	.short 0X5820
++	.short 0X2100
+ 	bl Sprite_SetOamMode
+-_0225A99A:
+-	mov r0, #9
+-	str r0, [sp]
+-	ldr r0, _0225A9BC ; =0x04001050
+-	mov r1, #0
+-	mov r2, #0x23
+-	mov r3, #6
++	.short 0X2009
++	.short 0X9000
++	.short 0X4807
++	.short 0X2100
++	.short 0X2223
++	.short 0X2306
+ 	bl G2x_SetBlendAlpha_
+-	add sp, #4
+-	pop {r3, r4, pc}
+-_0225A9AE:
+-	ldr r0, _0225A9BC ; =0x04001050
+-	mov r1, #0
+-	strh r1, [r0]
+-	add sp, #4
+-	pop {r3, r4, pc}
+-	.balign 4, 0
+-_0225A9B8: .word 0x0000051C
+-_0225A9BC: .word 0x04001050
++	.short 0XB001
++	.short 0XBD18
++	.short 0X4803
++	.short 0X2100
++	.short 0X8001
++	.short 0XB001
++	.short 0XBD18
++	.word 0X0000051C
++	.word 0X04001050
+ 	thumb_func_end ov27_0225A8E8
+ 
+ 	thumb_func_start ov27_0225A9C0
+@@ -1636,7 +1616,7 @@ ov27_0225AC00: ; 0x0225AC00
+ 	ldr r0, [sp, #0x14]
+ 	add r1, r6, #0
+ 	mov r2, #5
+-	mov r3, #9
++	mov r3, #8
+ 	bl AddWindowParameterized
+ 	add r0, r6, #0
+ 	mov r1, #0
+@@ -2816,613 +2796,771 @@ _0225B62C: .word ov27_0225CF68
+ 	thumb_func_end ov27_0225B4D8
+ 
+ 	thumb_func_start ov27_0225B630
+-ov27_0225B630: ; 0x0225B630
+-	push {r4, r5, r6, r7, lr}
+-	sub sp, #0x1c
+-	add r7, r0, #0
+-	str r1, [sp, #0x10]
+-	ldr r6, [r7]
++ov27_0225B630: ; 0X0225B630
++	.short 0XB5F8
++	.short 0XB088
++	.short 0X1C07
++	.short 0X9104
++	.short 0X683E
++	bl GetWindowBgId
++	.short 0X9005
++	.short 0X1C38
+ 	bl GetWindowX
+-	add r5, r0, #0
+-	add r0, r7, #0
++	.short 0X1C05
++	.short 0X1C38
+ 	bl GetWindowY
+-	add r4, r0, #0
+-	add r0, r7, #0
++	.short 0X1C04
++	.short 0X1C38
+ 	bl GetWindowWidth
+-	str r0, [sp, #0x14]
+-	add r0, r7, #0
++	.short 0X9006
++	.short 0X1C38
+ 	bl GetWindowHeight
+-	str r0, [sp, #0x18]
+-	ldr r0, [sp, #0x10]
+-	cmp r0, #1
+-	beq _0225B666
+-	cmp r0, #2
+-	bne _0225B664
+-	b _0225B8C2
+-_0225B664:
+-	b _0225BB1E
+-_0225B666:
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xa9
+-	lsr r3, r3, #0x18
++	.short 0X9007
++	.short 0X9804
++	.short 0X2800
++	.short 0XD006
++	.short 0X2801
++	.short 0XD100
++	.short 0XE0AE
++	.short 0X2802
++	.short 0XD100
++	.short 0XE1DA
++	.short 0XE308
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X222C
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xaa
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X222D
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xab
+-	lsr r3, r3, #0x18
++	.short 0X9806
++	.short 0X9905
++	.short 0X182F
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X1C30
++	.short 0X222E
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	ldr r0, [sp, #0x14]
+-	lsl r3, r5, #0x18
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #4]
+-	mov r0, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0xac
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X224C
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	ldr r0, [sp, #0x14]
+-	mov r1, #5
+-	add r7, r5, r0
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r2, #0xad
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X224E
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x64
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X226C
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x65
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X226E
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x66
+-	lsr r3, r3, #0x18
++	.short 0X9807
++	.short 0X1E6B
++	.short 0X1824
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X228C
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0x68
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X228D
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x84
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X228E
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x85
+-	lsr r3, r3, #0x18
++	.short 0XB008
++	.short 0XBDF8
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A9
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0x86
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22AA
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0x88
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22AB
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	ldr r0, [sp, #0x18]
+-	sub r3, r5, #3
+-	add r4, r4, r0
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xa4
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22AC
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xa5
+-	lsr r3, r3, #0x18
++	.short 0X9806
++	.short 0X9905
++	.short 0X182F
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X1C30
++	.short 0X22AD
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #0xa6
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2264
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	ldr r0, [sp, #0x14]
+-	lsl r3, r5, #0x18
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #4]
+-	mov r0, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0xa7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2265
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0xa8
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2266
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	b _0225BB22
+-_0225B8C2:
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2268
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2284
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2285
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	ldr r0, [sp, #0x14]
+-	lsl r3, r5, #0x18
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #4]
+-	mov r0, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2286
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	ldr r0, [sp, #0x14]
+-	mov r1, #5
+-	add r7, r5, r0
+-	sub r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2288
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X9807
++	.short 0X1EEB
++	.short 0X1824
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A4
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A5
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A6
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A7
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #3
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X22A8
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0XB008
++	.short 0XBDF8
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	add r0, r4, #1
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	ldr r0, [sp, #0x18]
+-	sub r3, r5, #3
+-	add r4, r4, r0
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #2
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X9806
++	.short 0X9905
++	.short 0X182F
++	.short 0X1E60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	sub r3, r5, #1
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	lsl r3, r3, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #4
+-	mov r2, #7
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	ldr r0, [sp, #0x14]
+-	lsl r3, r5, #0x18
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #4]
+-	mov r0, #1
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	lsl r0, r4, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	str r0, [sp, #8]
+-	mov r0, #2
+-	lsl r3, r7, #0x18
+-	str r0, [sp, #0xc]
+-	add r0, r6, #0
+-	mov r1, #5
+-	mov r2, #0
+-	lsr r3, r3, #0x18
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
+ 	bl FillBgTilemapRect
+-	b _0225BB22
+-_0225BB1E:
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EEB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X1C60
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X9807
++	.short 0X1EEB
++	.short 0X1824
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1EAB
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X1E6B
++	.short 0X9002
++	.short 0X2002
++	.short 0X061B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X9806
++	.short 0X062B
++	.short 0X0600
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2001
++	.short 0X9002
++	.short 0X2002
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0X0620
++	.short 0X0E00
++	.short 0X9000
++	.short 0X2001
++	.short 0X9001
++	.short 0X9002
++	.short 0X2002
++	.short 0X063B
++	.short 0X9003
++	.short 0X9905
++	.short 0X1C30
++	.short 0X2200
++	.short 0X0E1B
++	bl FillBgTilemapRect
++	.short 0XB008
++	.short 0XBDF8
+ 	bl GF_AssertFail
+-_0225BB22:
+-	add r0, r6, #0
+-	mov r1, #4
+-	bl ScheduleBgTilemapBufferTransfer
+-	add r0, r6, #0
+-	mov r1, #5
+-	bl ScheduleBgTilemapBufferTransfer
+-	add sp, #0x1c
+-	pop {r4, r5, r6, r7, pc}
+-	.balign 4, 0
++	.short 0XB008
++	.short 0XBDF8
++	.short 0X0000
+ 	thumb_func_end ov27_0225B630
+ 
+ 	thumb_func_start ov27_0225BB38
+@@ -3796,90 +3934,82 @@ ov27_0225BDDC: ; 0x0225BDDC
+ 	thumb_func_end ov27_0225BDDC
+ 
+ 	thumb_func_start ov27_0225BDFC
+-ov27_0225BDFC: ; 0x0225BDFC
+-	push {r4, r5, lr}
+-	sub sp, #0x14
+-	add r5, r0, #0
+-	ldr r0, [r5, #4]
++ov27_0225BDFC: ; 0X0225BDFC
++	.short 0XB530
++	.short 0XB085
++	.short 0X1C05
++	.short 0X6868
+ 	bl GearPhoneRingManager_IsRinging
+-	ldr r1, [r5, #0x1c]
+-	cmp r1, #0
+-	bne _0225BE8A
+-	cmp r0, #1
+-	bne _0225BEAA
+-	cmp r1, #0
+-	bne _0225BEAA
+-	ldr r0, [r5, #4]
+-	mov r1, #8
++	.short 0X69E9
++	.short 0X2900
++	.short 0XD13A
++	.short 0X2801
++	.short 0XD148
++	.short 0X2900
++	.short 0XD146
++	.short 0X6868
++	.short 0X2108
+ 	bl GetPhoneBookEntryName
+-	add r4, r0, #0
+-	mov r0, #0
+-	add r1, r4, #0
+-	add r2, r0, #0
++	.short 0X1C04
++	.short 0X2000
++	.short 0X1C21
++	.short 0X1C02
+ 	bl FontID_String_GetWidth
+-	asr r1, r0, #2
+-	lsr r1, r1, #0x1d
+-	add r1, r0, r1
+-	asr r0, r1, #3
+-	add r1, r0, #2
+-	cmp r1, #9
+-	ble _0225BE3A
+-	mov r1, #9
+-_0225BE3A:
+-	mov r0, #0x13
+-	str r0, [sp]
+-	lsl r0, r1, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #4]
+-	mov r0, #2
+-	str r0, [sp, #8]
+-	mov r0, #4
+-	str r0, [sp, #0xc]
+-	mov r0, #0xc0
+-	str r0, [sp, #0x10]
+-	add r1, r5, #0
+-	ldr r0, [r5]
+-	add r1, #0xc
+-	mov r2, #5
+-	mov r3, #0xb
++	.short 0X1081
++	.short 0X0F49
++	.short 0X1841
++	.short 0X10C8
++	.short 0X1C81
++	.short 0X2013
++	.short 0X9000
++	.short 0X0608
++	.short 0X0E00
++	.short 0X9001
++	.short 0X2002
++	.short 0X9002
++	.short 0X2004
++	.short 0X9003
++	.short 0X20C0
++	.short 0X9004
++	.short 0X1C29
++	.short 0X6828
++	.short 0X310C
++	.short 0X2205
++	.short 0X230B
+ 	bl AddWindowParameterized
+-	add r0, r5, #0
+-	add r0, #0xc
+-	mov r1, #1
++	.short 0X1C28
++	.short 0X300C
++	.short 0X2101
+ 	bl ov27_0225B630
+-	add r0, r5, #0
+-	add r0, #0xc
+-	add r1, r4, #0
+-	mov r2, #1
++	.short 0X1C28
++	.short 0X300C
++	.short 0X1C21
++	.short 0X2201
+ 	bl ov27_0225BB38
+-	add r0, r4, #0
++	.short 0X1C20
+ 	bl String_Delete
+-	ldr r0, [r5, #8]
+-	mov r1, #5
++	.short 0X68A8
++	.short 0X2105
+ 	bl Sprite_TryChangeAnimSeq
+-	mov r0, #1
+-	add sp, #0x14
+-	str r0, [r5, #0x1c]
+-	pop {r4, r5, pc}
+-_0225BE8A:
+-	cmp r0, #0
+-	ldr r0, [r5, #8]
+-	beq _0225BE9A
+-	mov r1, #5
++	.short 0X2001
++	.short 0XB005
++	.short 0X61E8
++	.short 0XBD30
++	.short 0X2800
++	.short 0X68A8
++	.short 0XD004
++	.short 0X2105
+ 	bl Sprite_TryChangeAnimSeq
+-	add sp, #0x14
+-	pop {r4, r5, pc}
+-_0225BE9A:
+-	mov r1, #0
++	.short 0XB005
++	.short 0XBD30
++	.short 0X2100
+ 	bl Sprite_TryChangeAnimSeq
+-	add r0, r5, #0
++	.short 0X1C28
+ 	bl ov27_0225BEB0
+-	mov r0, #0
+-	str r0, [r5, #0x1c]
+-_0225BEAA:
+-	add sp, #0x14
+-	pop {r4, r5, pc}
+-	.balign 4, 0
++	.short 0X2000
++	.short 0X61E8
++	.short 0XB005
++	.short 0XBD30
+ 	thumb_func_end ov27_0225BDFC
+ 
+ 	thumb_func_start ov27_0225BEB0
+@@ -3987,80 +4117,78 @@ _0225BF80: .word 0x000E0200
+ 	thumb_func_end ov27_0225BED8
+ 
+ 	thumb_func_start ov27_0225BF84
+-ov27_0225BF84: ; 0x0225BF84
+-	push {r3, r4, r5, r6, lr}
+-	sub sp, #0x14
+-	add r4, r1, #0
+-	mov r1, #0
+-	add r5, r0, #0
+-	str r1, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	ldr r0, _0225BFC4 ; =0x000004AC
+-	add r6, r2, #0
+-	add r2, r3, #0
+-	ldr r0, [r5, r0]
+-	mov r3, #2
++ov27_0225BF84: ; 0X0225BF84
++	.short 0XB578
++	.short 0XB085
++	.short 0X1C0C
++	.short 0X2100
++	.short 0X1C05
++	.short 0X9100
++	.short 0X1C16
++	.short 0X1C1A
++	.short 0X480B
++	.short 0X9101
++	.short 0X5828
++	.short 0X2302
+ 	bl BufferIntegerAsString
+-	mov r0, #6
+-	str r0, [sp]
+-	mov r0, #2
+-	str r0, [sp, #4]
+-	ldr r0, _0225BFC8 ; =0x00000186
+-	mov r1, #0x1f
+-	str r0, [sp, #8]
+-	mov r0, #0
+-	str r0, [sp, #0xc]
+-	str r0, [sp, #0x10]
+-	add r0, r5, #0
+-	add r2, r4, #0
+-	add r3, r6, #0
++	.short 0X2006
++	.short 0X9000
++	.short 0X2002
++	.short 0X9001
++	.short 0X4807
++	.short 0X211F
++	.short 0X9002
++	.short 0X2000
++	.short 0X9003
++	.short 0X9004
++	.short 0X1C28
++	.short 0X1C22
++	.short 0X1C33
+ 	bl ov27_0225BED8
+-	add sp, #0x14
+-	pop {r3, r4, r5, r6, pc}
+-	.balign 4, 0
+-_0225BFC4: .word 0x000004AC
+-_0225BFC8: .word 0x00000186
++	.short 0XB005
++	.short 0XBD78
++	.short 0X46C0
++	.word 0X000004AC
++	.word 0X00000186
+ 	thumb_func_end ov27_0225BF84
+ 
+ 	thumb_func_start ov27_0225BFCC
+-ov27_0225BFCC: ; 0x0225BFCC
+-	push {r3, r4, lr}
+-	sub sp, #0x14
+-	add r4, r0, #0
+-	ldr r0, [r1, #0x10]
+-	mov r1, #0xa1
+-	mov r2, #0
++ov27_0225BFCC: ; 0X0225BFCC
++	.short 0XB518
++	.short 0XB085
++	.short 0X1C04
++	.short 0X6908
++	.short 0X21A1
++	.short 0X2200
+ 	bl GetMonData
+-	mov r1, #0
+-	add r2, r0, #0
+-	str r1, [sp]
+-	mov r0, #1
+-	str r0, [sp, #4]
+-	ldr r0, _0225C014 ; =0x000004AC
+-	mov r3, #3
+-	ldr r0, [r4, r0]
++	.short 0X2100
++	.short 0X1C02
++	.short 0X9100
++	.short 0X480C
++	.short 0X9101
++	.short 0X5820
++	.short 0X2303
+ 	bl BufferIntegerAsString
+-	mov r0, #6
+-	str r0, [sp]
+-	mov r0, #2
+-	str r0, [sp, #4]
+-	ldr r0, _0225C018 ; =0x00000192
+-	mov r1, #0x21
+-	str r0, [sp, #8]
+-	mov r0, #4
+-	str r0, [sp, #0xc]
+-	mov r0, #0
+-	str r0, [sp, #0x10]
+-	add r0, r4, #0
+-	mov r2, #0xc
+-	mov r3, #0x15
++	.short 0X2006
++	.short 0X9000
++	.short 0X2002
++	.short 0X9001
++	.short 0X4808
++	.short 0X2121
++	.short 0X9002
++	.short 0X2004
++	.short 0X9003
++	.short 0X2000
++	.short 0X9004
++	.short 0X1C20
++	.short 0X220C
++	.short 0X2315
+ 	bl ov27_0225BED8
+-	add sp, #0x14
+-	pop {r3, r4, pc}
+-	.balign 4, 0
+-_0225C014: .word 0x000004AC
+-_0225C018: .word 0x00000192
++	.short 0XB005
++	.short 0XBD18
++	.short 0X46C0
++	.word 0X000004AC
++	.word 0X00000192
+ 	thumb_func_end ov27_0225BFCC
+ 
+ 	thumb_func_start ov27_0225C01C
 diff --git a/include/start_menu.h b/include/start_menu.h
 --- a/include/start_menu.h
 +++ b/include/start_menu.h
