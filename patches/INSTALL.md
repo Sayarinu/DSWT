@@ -9,7 +9,8 @@ https://github.com/Sayarinu/DSWT/wiki.
 - A dump of your own cartridge. Trimmed dumps work.
   - English, US or European, and French, German, Italian or Spanish: Pokémon
     Platinum, Diamond or Pearl (Rev 5), HeartGold or SoulSilver.
-  - Japanese or Korean: Pokémon Platinum.
+  - Japanese: Pokémon Platinum, HeartGold or SoulSilver.
+  - Korean: Pokémon Platinum, Diamond, Pearl, HeartGold or SoulSilver.
 
   Other versions and languages are recognised but not supported yet.
 - melonDS 1.1. Physical DS hardware isn't supported yet.
