@@ -175,17 +175,22 @@ class BundleTests(Fixture):
     def test_identifies_every_retail_cartridge(self):
         self.assertEqual(sorted(bundle.CARTRIDGES), sorted(
             prefix + letter for prefix in ("ADA", "APA", "CPU", "IPK", "IPG") for letter in "JEPFDISK"))
-        self.assertEqual(bundle.cartridge(rom(1, "k", code="CPUK")),
+        self.assertEqual(bundle.cartridge(rom(1, "k", code="CPUK", capacity=10)),
                          {"game": "Pokémon Platinum", "game_code": "CPUK", "region": "Korea", "language": "Korean",
                           "revision": 1, "size": 128 * 1024 * 1024})
         for code, game, size in (("ADAE", "Pokémon Diamond", 64), ("APAE", "Pokémon Pearl", 64),
                                  ("CPUE", "Pokémon Platinum", 128), ("IPKE", "Pokémon HeartGold", 128),
                                  ("IPGE", "Pokémon SoulSilver", 128)):
             with self.subTest(code):
-                info = bundle.cartridge(rom(5, code, code=code))
+                info = bundle.cartridge(rom(5, code, code=code, capacity=size.bit_length() + 2))
                 self.assertEqual((info["game"], info["size"], info["region"]), (game, size * 1024 * 1024, "North America"))
                 self.assertEqual(bundle.describe(info), f"{game} (North America, English, Rev 5)")
                 self.assertEqual(bundle.title({"game_code": code, "name": "USA Rev 5"}), f"{game} USA Rev 5")
+        # The size is the cartridge's own: Japanese Diamond and Pearl are 128 MiB.
+        for code, capacity, size in (("ADAJ", 10, 128), ("APAJ", 10, 128), ("ADAK", 9, 64), ("CPUE", 0, 1 / 8)):
+            with self.subTest(code):
+                self.assertEqual(bundle.cartridge(rom(0, code, code=code, capacity=capacity))["size"], size * 1024 * 1024)
+        self.assertIsNone(bundle.cartridge(rom(0, "big", code="ADAJ", capacity=12))["size"])
         europe = bundle.cartridge(rom(10, "eu", code="CPUE"))
         self.assertEqual(bundle.describe(europe), "Pokémon Platinum (Europe, English, Rev 10)")
         self.assertIsNone(bundle.cartridge(b"\xff" * 0x200))

@@ -275,7 +275,7 @@ class Window:
             self.text(line if index == 0 or len(name) <= 2 else line[:-3] + "...", x, y + 11 + 10 * index)
         self.text("VERSION", x, y + 38, "label")
         # The game on one line and its version on the next, such as "HeartGold" and "USA Rev 0".
-        game = bundle.GAMES[self.entry["game_code"][:3]][0].removeprefix("Pokémon ") if self.entry else "-"
+        game = bundle.GAMES[self.entry["game_code"][:3]].removeprefix("Pokémon ") if self.entry else "-"
         self.text(game, x, y + 49)
         self.text(self.entry["name"] if self.entry else "", x, y + 59)
         self.text("STATUS", x, y + 74, "label")

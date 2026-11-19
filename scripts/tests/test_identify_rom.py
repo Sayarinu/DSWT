@@ -128,16 +128,17 @@ class IdentifyRomTests(unittest.TestCase):
         patches = [row["planned_patch"] for row in variants if row["planned_patch"] is not None]
         self.assertEqual(len(set(patches)), len(patches))
         for row in variants:
-            game, size = identify_rom.bundle.GAMES[row["game_code"][:3]]
+            self.assertEqual(identify_rom.bundle.GAMES[row["game_code"][:3]], row["game"])
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][0], row["game"])
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][2], row["language"])
-            self.assertEqual((row["game"], row["size"]), (game, size))
+            # Only Japanese Diamond and Pearl, the first release, are 128 MiB.
+            small = row["game_code"][:3] in ("ADA", "APA") and row["game_code"][3] != "J"
+            self.assertEqual(row["size"], (64 if small else 128) * 1024 * 1024)
             self.assertIs(type(row["revision"]), int)
             for key, length in (("sha256", 64), ("sha1", 40), ("crc32", 8)):
                 self.assertRegex(row[key], f"^[0-9a-f]{{{length}}}$")
             if row["planned_patch"] is not None:
                 self.assertRegex(row["planned_patch"], r"^dswt-[a-z0-9-]+\.bps$")
-        self.assertEqual({row["size"] for row in variants if row["game_code"][:3] in ("ADA", "APA")}, {67108864})
         pin = json.loads((SCRIPT.parent.parent / "client/upstream.json").read_text())
         built = [row for row in variants if row["pristine_verified"] and row["planned_patch"] is not None]
         self.assertEqual([row["id"] for row in built], ["us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5",

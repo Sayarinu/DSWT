@@ -81,10 +81,11 @@ PROFILE = {"hostname": "wt.dswt.games", "ipv4": "1.1.1.1", "port": 443,
            "current_spki_sha256": PINS[0].hex(), "next_spki_sha256": PINS[1].hex()}
 
 
-def rom(revision, seed, code="CPUE", payload=b""):
+def rom(revision, seed, code="CPUE", payload=b"", capacity=0):
     import hashlib
     data = bytearray(SIZE)
     data[0x0C:0x10] = code.encode()
+    data[0x14] = capacity
     data[0x1E] = revision
     data[0x80:0x84] = USED.to_bytes(4, "little")
     body = b"".join(hashlib.sha256(f"{seed}:{index}".encode()).digest() for index in range((USED - 0x200) // 32 + 1))
