@@ -147,6 +147,9 @@ def synthetic_bundle(directory):
     """A one-entry bundle for a made-up trimmed cartridge, so the frozen app can patch for real."""
     source = bytearray(os.urandom(4096))
     source[0x0C:0x10], source[0x1E] = b"CPUE", 7
+    # No ARM9, FAT or overlay table: the patcher reads them to find compressed code,
+    # and random values there would make this made-up cartridge malformed.
+    source[0x20:0x60] = bytes(0x40)
     source[0x80:0x84] = (4096 - 256).to_bytes(4, "little")
     source[-256:] = b"\xff" * 256
     source = bytes(source)
