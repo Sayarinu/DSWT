@@ -91,7 +91,7 @@ const Layout &LayoutFor(const std::string &target) {
             target == "heartgold-italy" || target == "heartgold-spain" ||
             target == "soulsilver-france" || target == "soulsilver-germany" ||
             target == "soulsilver-italy" || target == "soulsilver-spain" || target == "heartgold-korea" ||
-            target == "soulsilver-korea");
+            target == "soulsilver-korea" || target == "heartgold-japan" || target == "soulsilver-japan");
     return kHeartGoldSoulSilver;
 }
 

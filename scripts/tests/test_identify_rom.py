@@ -119,7 +119,7 @@ class IdentifyRomTests(unittest.TestCase):
             "diamond-europe-rev5", "pearl-europe-rev5", "heartgold-europe", "soulsilver-europe",
             "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
             "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain",
-            "heartgold-korea", "soulsilver-korea",
+            "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan",
             "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
             "diamond-korea", "pearl-korea",
             "france", "germany", "italy", "spain", "japan", "platinum-korea"])
@@ -146,6 +146,7 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain",
                                                         "soulsilver-france", "soulsilver-germany", "soulsilver-italy",
                                                         "soulsilver-spain", "heartgold-korea", "soulsilver-korea",
+                                                        "heartgold-japan", "soulsilver-japan",
                                                         "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain",
                                                         "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
                                                         "diamond-korea", "pearl-korea",
