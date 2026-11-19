@@ -40,6 +40,7 @@ LANGUAGES = {
     "it": ("italy", "LANGUAGE_ITALIAN", "it_IT", (MAIL,)),
     "es": ("spain", "LANGUAGE_SPANISH", "es_ES", ()),
     "ko": ("korea", "LANGUAGE_KOREAN", "ko_KR", (MAIL, "heartgold-korean-build.patch")),
+    "ja": ("japan", "LANGUAGE_JAPANESE", "ja_JP", (MAIL, "heartgold-japanese-build.patch")),
 }
 MESSAGES = "a/0/2/7"  # NARC_msgdata_msg
 ICONS = "a/0/1/4"  # NARC_a_0_1_4, where the menu icon's palette comes from

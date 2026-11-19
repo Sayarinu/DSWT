@@ -1,0 +1,208 @@
+Code differences of the Japanese HeartGold and SoulSilver cartridges from US,
+applied after heartgold-mail-template.patch.
+
+- The start menu also lists its actions as text in a window on the top screen.
+  The window, its 2D list menu and the list items live at the start of the
+  menu's data, and closing or leaving the menu removes them.
+- Opening the Bag does not call ov01_021F4440.
+- The game-reset check has no case for result 5.
+- A finished flash write unlocks the card before looking at the result, and
+  asserts on an unexpected one.
+
+diff --git a/include/start_menu.h b/include/start_menu.h
+--- a/include/start_menu.h
++++ b/include/start_menu.h
+@@ -1,7 +1,10 @@
+ #ifndef POKEHEARTGOLD_START_MENU_H
+ #define POKEHEARTGOLD_START_MENU_H
+ 
++#include "bg_window.h"
+ #include "field_use_item.h"
++#include "list_menu_2d.h"
++#include "list_menu_items.h"
+ #include "party_menu.h"
+ #include "task.h"
+ 
+@@ -41,9 +44,10 @@ typedef enum StartMenuState {
+ } StartMenuState;
+ 
+ typedef struct StartMenuTaskData {
+-    int unk_000;
+-    u8 filler_004[0x1C];
+-    BOOL cursorActive;
++    Window window; // the action list beside the icons
++    u8 filler_010[0x10];
++    struct ListMenu2D *menu;
++    ListMenuItem *menuItems;
+     u16 lastButtonSelected;
+     u16 state; // 26
+     int selectedIndex;
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -185,9 +185,6 @@ static void sub_02000F40(u32 param) {
+ static void sub_02000F60(void) {
+     int r1 = sub_020399B8();
+     switch (r1) {
+-    case 5:
+-        sub_02000FD8(0, r1);
+-        break;
+     case 1:
+         sub_02000FD8(1, r1);
+         break;
+diff --git a/src/save.c b/src/save.c
+--- a/src/save.c
++++ b/src/save.c
+@@ -1153,20 +1153,22 @@ static BOOL WaitFlashWrite(s32 lockId, BOOL checkResult, BOOL *resultSuccess) {
+         if (!checkResult) {
+             return TRUE;
+         }
+-        switch (CARD_GetResultCode()) {
++        CARDResult result = CARD_GetResultCode();
++        CARD_UnlockBackup(lockId);
++        OS_ReleaseLockID(lockId);
++        switch (result) {
+         case CARD_RESULT_SUCCESS:
+             *resultSuccess = TRUE;
+             break;
+-        case CARD_RESULT_TIMEOUT:
+         default:
++            GF_AssertFail();
++        case CARD_RESULT_TIMEOUT:
+             *resultSuccess = FALSE;
+             SaveErrorHandling(lockId, 0);
+         case CARD_RESULT_NO_RESPONSE:
+             *resultSuccess = FALSE;
+             SaveErrorHandling(lockId, 1);
+         }
+-        CARD_UnlockBackup(lockId);
+-        OS_ReleaseLockID(lockId);
+         return TRUE;
+     }
+     return FALSE;
+diff --git a/src/start_menu.c b/src/start_menu.c
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -9,6 +9,7 @@
+ #include "constants/std_script.h"
+ 
+ #include "field/fieldmap.h"
++#include "msgdata/msg.naix"
+ #include "msgdata/msg/msg_0196.h"
+ 
+ #include "bag_view.h"
+@@ -430,6 +431,8 @@ static BOOL Task_StartMenu(TaskManager *taskManager) {
+         sub_0203C69C(startMenu, fieldSystem);
+         sub_0203C38C(startMenu, fieldSystem);
+         fieldSystem->unkD2_0 = 2;
++        ClearWindowPixelBuffer(&startMenu->window, TRUE);
++        RemoveWindow(&startMenu->window);
+         ScheduleBgTilemapBufferTransfer(fieldSystem->bgConfig, GF_BG_LYR_MAIN_3);
+         Heap_Free(startMenu);
+         MapObjectManager_UnpauseAllMovement(fieldSystem->mapObjectManager);
+@@ -446,28 +449,65 @@ static BOOL Task_StartMenu(TaskManager *taskManager) {
+         sub_0203D304(taskManager);
+         break;
+     }
+-    if (startMenu->cursorActive) {
++    if (startMenu->menu != NULL) {
+         SpriteList_RenderAndAnimateSprites(startMenu->spriteList);
+     }
+     return FALSE;
+ }
+ 
++struct ListMenu2D *Create2dMenuInternalEx(const struct ListMenu2DTemplate *template, u8 x, u8 y, u8 initialSelection, u8 heapID, int cancelKey);
++
+ static void Task_StartMenu_DrawCursor(TaskManager *taskManager) {
+     FieldSystem *fieldSystem = TaskManager_GetFieldSystem(taskManager);
+     StartMenuTaskData *startMenu = (StartMenuTaskData *)TaskManager_GetEnvironment(taskManager);
++    MsgData *msgData;
++    struct ListMenu2DTemplate template;
+ 
+     u32 numActiveButtons = StartMenu_BuildActionLists(startMenu, startMenu->insertionOrder, startMenu->selectionToAction);
+     startMenu->numActiveButtons = numActiveButtons;
++    AddWindowParameterized(fieldSystem->bgConfig, &startMenu->window, GF_BG_LYR_MAIN_3, 6, 25, 20, 3, 12, 0x145);
++    LoadUserFrameGfx1(fieldSystem->bgConfig, GF_BG_LYR_MAIN_3, 0x3D9, 11, 1, HEAP_ID_FIELD2);
++    DrawFrameAndWindow1(&startMenu->window, TRUE, 0x3D9, 11);
++    msgData = NewMsgDataFromNarc(MSGDATA_LOAD_DIRECT, NARC_msgdata_msg, msg_0196, HEAP_ID_FIELD2);
++    startMenu->menuItems = ListMenuItems_New(numActiveButtons, HEAP_ID_FIELD2);
+     startMenu->lastButtonSelected = 0;
+     for (int i = 0; i < numActiveButtons; ++i) {
++        if (startMenu->insertionOrder[i] == START_MENU_ACTION_TRAINER_CARD) {
++            MessageFormat *messageFormat = MessageFormat_New(HEAP_ID_FIELD2);
++            String *string = String_New(8, HEAP_ID_FIELD2);
++            String *format = NewString_ReadMsgData(msgData, sStartMenuActions[startMenu->insertionOrder[i]].ident);
++            BufferPlayersName(messageFormat, 0, Save_PlayerData_GetProfile(fieldSystem->saveData));
++            StringExpandPlaceholders(messageFormat, string, format);
++            ListMenuItems_AddItem(startMenu->menuItems, string, startMenu->insertionOrder[i]);
++            String_Delete(format);
++            String_Delete(string);
++            MessageFormat_Delete(messageFormat);
++        } else {
++            ListMenuItems_AppendFromMsgData(startMenu->menuItems, msgData, sStartMenuActions[startMenu->insertionOrder[i]].ident, startMenu->insertionOrder[i]);
++        }
+         if (fieldSystem->unk90 == startMenu->insertionOrder[i]) {
+             startMenu->lastButtonSelected = i;
+         }
+     }
+-    startMenu->cursorActive = TRUE;
++    fieldSystem->unk90 = startMenu->insertionOrder[startMenu->lastButtonSelected];
++    DestroyMsgData(msgData);
++    template.items = startMenu->menuItems;
++    template.window = &startMenu->window;
++    template.fontId = 1;
++    template.itemsWide = 1;
++    template.itemsHigh = numActiveButtons;
++    template.yTop = 8;
++    template.cursorType = 1;
++    if (numActiveButtons >= 4) {
++        template.enableWrap = 1;
++    } else {
++        template.enableWrap = 0;
++    }
++    startMenu->menu = Create2dMenuInternalEx(&template, 28, 4, startMenu->lastButtonSelected, HEAP_ID_FIELD2, PAD_BUTTON_B | PAD_BUTTON_X);
++    ScheduleWindowCopyToVram(&startMenu->window);
+     GfGfxLoader_LoadCharData(NARC_a_0_1_4, 12, fieldSystem->bgConfig, GF_BG_LYR_MAIN_3, 0, 0, TRUE, HEAP_ID_FIELD2);
+-    GfGfxLoader_GXLoadPal(NARC_a_0_1_4, 15, GF_PAL_LOCATION_MAIN_BG, (enum GFPalSlotOffset)0x1C0, 0x20, HEAP_ID_FIELD2);
+     GfGfxLoader_LoadScrnData(NARC_a_0_1_4, 13, fieldSystem->bgConfig, GF_BG_LYR_MAIN_3, 0, 0, TRUE, HEAP_ID_FIELD2);
++    GfGfxLoader_GXLoadPal(NARC_a_0_1_4, 15, GF_PAL_LOCATION_MAIN_BG, (enum GFPalSlotOffset)0x1C0, 0x20, HEAP_ID_FIELD2);
+     StartMenu_CreateCursor(startMenu, startMenu->insertionOrder, numActiveButtons, PlayerProfile_GetTrainerGender(Save_PlayerData_GetProfile(fieldSystem->saveData)));
+ }
+ 
+@@ -525,7 +565,9 @@ static u32 StartMenu_BuildActionLists(StartMenuTaskData *startMenu, u8 *insertio
+ static void sub_0203C38C(StartMenuTaskData *startMenu, FieldSystem *fieldSystem) {
+     StartMenu_DestroyCursor(startMenu);
+     FillBgTilemapRect(fieldSystem->bgConfig, GF_BG_LYR_MAIN_3, 0, 0, 0, 0x20, 0x18, 0);
+-    startMenu->cursorActive = FALSE;
++    Delete2dMenu(startMenu->menu, NULL);
++    ListMenuItems_Delete(startMenu->menuItems);
++    startMenu->menu = NULL;
+ }
+ 
+ static BOOL FieldSystem_StartMenuActionIsAvailable(FieldSystem *fieldSystem, StartMenuAction action) {
+@@ -711,6 +753,7 @@ static void Task_StartMenu_WaitFade(TaskManager *taskManager) {
+ 
+         sub_0203C38C(startMenu, fieldSystem);
+         fieldSystem->unkD2_0 = 0;
++        RemoveWindow(&startMenu->window);
+         startMenu->exitTaskFunc(taskManager);
+         startMenu->state = START_MENU_STATE_WAIT_APP;
+     }
+@@ -1004,7 +1047,6 @@ static BOOL Task_StartMenu_Bag(TaskManager *taskManager) {
+     startMenu->exitTaskEnvironment = sub_0203E3FC(fieldSystem, &startMenu->itemCheckUseData);
+     BagView_SetPartySlot(startMenu->exitTaskEnvironment, 0);
+     startMenu->exitTaskFunc = Task_StartMenu_HandleReturn;
+-    ov01_021F4440(fieldSystem);
+     return FALSE;
+ }
+ 
+@@ -1255,6 +1297,9 @@ static BOOL Task_StartMenu_HandleSelection_Retire(TaskManager *taskManager) {
+ 
+     sub_0203C38C(startMenu, fieldSystem);
+     fieldSystem->unkD2_0 = 0;
++    ClearWindowPixelBuffer(&startMenu->window, TRUE);
++    ScheduleBgTilemapBufferTransfer(startMenu->window.bgConfig, startMenu->window.bgId);
++    RemoveWindow(&startMenu->window);
+     if (Save_VarsFlags_CheckSafariSysFlag(Save_VarsFlags_Get(fieldSystem->saveData)) == TRUE) {
+         StartScriptFromMenu(taskManager, std_safari_exit, NULL);
+     } else if (Save_VarsFlags_CheckBugContestFlag(Save_VarsFlags_Get(fieldSystem->saveData)) == TRUE) {

@@ -283,29 +283,49 @@ class Target:
         module = modules.pop()
         near = sorted(c.start for c in anchors)[len(anchors) // 2]
         base, image = self.modules[module]
-        for name, shndx, offset, size, _, _ in functions:
+        previous = None  # (size, address) of the function before this one, if it matched
+        for name, shndx, offset, size, _, _ in sorted(functions, key=lambda f: (f[1], f[2])):
+            last, previous = previous, None
             candidates = sorted(self._us_candidates(name, symbols.FUNCTION_KINDS, module), key=lambda c: abs(c.start - near))
             if not candidates:
                 problems.append(f"{filename}: {name} is not in the US build")
                 continue
             us = candidates[0]
-            at = self.map.addr.get(us.num)
-            if at is None:
-                at = self._by_neighbour(us)
             body = obj.section_bytes(shndx)[offset:offset + size]
             mask = relocated(obj, shndx)
-            if at is None and size >= 16:
-                # A function the language changes: look for this build's own bytes, once.
-                keep = [offset + i not in mask for i in range(size)]
-                at = symbols.unique_match(self.modules, module, body, keep, 2)
-            if at is None:
+            keep = [offset + i not in mask for i in range(size)]
+
+            def fits(at):
+                got = image[at - base:at - base + size]
+                return len(got) == size and all(not keep[i] or body[i] == got[i] for i in range(size))
+
+            def guesses():
+                at = self.map.addr.get(us.num)
+                yield at if at is not None else self._by_neighbour(us)
+                # The compiler lays a file's functions out in order, each in its own section:
+                # where the language grew or shrank an earlier one, the next one still follows it.
+                if last is not None:
+                    yield (last[1] + last[0] + 3) & ~3
+                if size >= 16:
+                    # A function the language changes: look for this build's own bytes, once.
+                    yield symbols.unique_match(self.modules, module, body, keep, 2)
+
+            tried = []
+            for at in guesses():
+                if at is not None:
+                    tried.append(at & ~1)
+                    if fits(tried[-1]):
+                        break
+            if not tried:
                 problems.append(f"{filename}: {name} was not found in the retail game")
                 continue
-            at &= ~1
+            at = tried[-1] if fits(tried[-1]) else tried[0]
             got = image[at - base:at - base + size]
-            differ = [i for i in range(size) if offset + i not in mask and (i >= len(got) or body[i] != got[i])]
+            differ = [i for i in range(size) if keep[i] and (i >= len(got) or body[i] != got[i])]
             if differ:
                 problems.append(f"{filename}: {name} at {at:#x} differs from +{differ[0]:#x} ({len(differ)} bytes)")
+            else:
+                previous = (size, at)
             self.located[(filename, name)] = (at, size, module, us)
         for symbol in obj.symbols:
             shndx = symbol["shndx"]

@@ -29,7 +29,7 @@ def seed_record(seed, generation):
 
 LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json")
 TARGETS = ("us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain", "japan", "platinum-korea", "heartgold-us-rev0", "soulsilver-us-rev0",
-           "diamond-us-rev5", "pearl-us-rev5", "heartgold-europe", "soulsilver-europe", "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain", "heartgold-korea", "soulsilver-korea", "diamond-europe-rev5",
+           "diamond-us-rev5", "pearl-us-rev5", "heartgold-europe", "soulsilver-europe", "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain", "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan", "diamond-europe-rev5",
            "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea")
 
 
