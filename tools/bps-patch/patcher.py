@@ -458,42 +458,127 @@ def code_views(rom, label):
     return [rom] + [expanded for _, _, expanded in compressed_code(rom, label)]
 
 
-def _retail_run(data, retail):
-    """True if data holds a run of VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes found in any retail view."""
-    windows = (data[k:k + VERBATIM_WINDOW] for k in range(0, len(data) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE))
-    return any(window in view for window in windows for view in retail)
+MARKERS = ("/home/", "/Users/", "C:\\Users\\", "-----BEGIN", "PRIVATE KEY")
 
 
-def release_check(variant, base, target, patch, report, secrets, root, base_views, target_views):
-    """Fail if a patch or its target carries anything beyond the project's own build output.
+def markers(root):
+    return sorted({str(root), str(Path.home()), *MARKERS})
 
-    The key and path checks search the expanded code views of the target and bases too."""
-    problems = []
-    for label, value in secrets:
-        if value in patch or any(value in view for view in target_views):
-            problems.append(f"material from private key {label}")
-    for marker in sorted({str(root), str(Path.home()), "/home/", "/Users/", "C:\\Users\\", "-----BEGIN", "PRIVATE KEY"}):
-        encoded = marker.encode()
-        if (sum(view.count(encoded) for view in target_views)
-                > max(sum(view.count(encoded) for view in views) for views in base_views)):
-            problems.append(f"build-host or key text {marker!r}")
-    # Retail code counts expanded too: a literal must not copy it from any base or
-    # from any base's expanded code.
-    retail = [view for views in base_views for view in views]
-    for item in report["literals"]["items"]:
-        if item["length"] < VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
-            continue
-        if _retail_run(patch[item["patch_offset"]:item["patch_offset"] + item["length"]], retail):
-            problems.append(f"retail ROM content copied into a literal at target offset {item['target_offset']:#x}")
-            break
-    # Recompressed code encodes retail code without copying its bytes, so expand
-    # every compressed module the target does not copy unchanged from its base.
-    unchanged = {code for _, code, _ in compressed_code(base, "Base ROM")}
-    recompressed = [name for name, code, expanded in compressed_code(target, "Target ROM")
-                    if code not in unchanged and _retail_run(expanded, retail)]
-    if recompressed:
-        more = f" and {len(recompressed) - 3} more" if len(recompressed) > 3 else ""
-        problems.append(f"retail code recompressed in {', '.join(recompressed[:3])}{more}; build that code uncompressed")
+
+def marker_counts(views, root):
+    """How often each build-host or key marker appears in a set of code views."""
+    return {marker: sum(view.count(marker.encode()) for view in views) for marker in markers(root)}
+
+
+def shares_run(data, retail, at):
+    """True if data holds retail[at:at + VERBATIM_WINDOW] inside a common run of at least
+    VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes, extended both ways in both."""
+    block, limit = retail[at:at + VERBATIM_WINDOW], VERBATIM_WINDOW + VERBATIM_STRIDE - 1
+    found = data.find(block)
+    while found >= 0:
+        before = 0
+        while before < found and before < at and data[found - before - 1] == retail[at - before - 1]:
+            before += 1
+        after, end, retail_end = 0, found + VERBATIM_WINDOW, at + VERBATIM_WINDOW
+        while end + after < len(data) and retail_end + after < len(retail) and data[end + after] == retail[retail_end + after]:
+            after += 1
+        if VERBATIM_WINDOW + before + after >= limit:
+            return True
+        found = data.find(block, found + 1)
+    return False
+
+
+class Checked:
+    """One patch's data the retail check searches: long literals and recompressed modules.
+
+    The bundle keeps only this, not the ROMs, so every cartridge's release check
+    shares one pass over the supplied cartridges (RetailIndex)."""
+
+    def __init__(self, variant, patch, report, base, target):
+        self.variant, self.literals, self.modules = variant, [], []
+        for item in report["literals"]["items"]:
+            if item["length"] >= VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
+                self.literals.append((item["target_offset"],
+                                      bytes(patch[item["patch_offset"]:item["patch_offset"] + item["length"]])))
+        # Recompressed code encodes retail code without copying its bytes, so expand
+        # every compressed module the target does not copy unchanged from its base.
+        unchanged = {code for _, code, _ in compressed_code(base, "Base ROM")}
+        self.modules = [(name, expanded) for name, code, expanded in compressed_code(target, "Target ROM")
+                        if code not in unchanged]
+        self.copied, self.recompressed = set(), []
+
+    def pieces(self):
+        yield from (data for _, data in self.literals)
+        yield from (data for _, data in self.modules)
+
+    def note(self, retail, at):
+        """Record a literal or recompressed module sharing a run of VERBATIM_WINDOW +
+        VERBATIM_STRIDE - 1 bytes with retail around retail[at:at + VERBATIM_WINDOW]."""
+        for offset, data in self.literals:
+            if offset not in self.copied and shares_run(data, retail, at):
+                self.copied.add(offset)
+        for name, data in self.modules:
+            if name not in self.recompressed and shares_run(data, retail, at):
+                self.recompressed.append(name)
+
+    def problem(self):
+        """The release check message for what note() found, or None."""
+        problems = []
+        if self.copied:
+            problems.append(f"retail ROM content copied into a literal at target offset {min(self.copied):#x}")
+        names = [name for name, _ in self.modules if name in self.recompressed]
+        if names:
+            more = f" and {len(names) - 3} more" if len(names) > 3 else ""
+            problems.append(f"retail code recompressed in {', '.join(names[:3])}{more}; build that code uncompressed")
+        return "; ".join(problems) or None
+
+
+class RetailIndex:
+    """Finds any run of VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes that a checked piece
+    shares with a retail view, reading each view once.
+
+    Every VERBATIM_WINDOW-byte substring of the checked pieces is indexed by hash. A
+    retail view is then read in VERBATIM_WINDOW-byte blocks at every VERBATIM_STRIDE
+    bytes: a shared run of 47 or more bytes holds one such block whole, wherever it
+    starts. A hash match counts only once the bytes around it make a run that long."""
+
+    def __init__(self, checked):
+        self.checked, self.hashes = checked, set()
+        for item in checked:
+            for piece in item.pieces():
+                view = memoryview(piece)
+                self.hashes.update(hash(bytes(view[k:k + VERBATIM_WINDOW]))
+                                   for k in range(len(piece) - VERBATIM_WINDOW + 1))
+
+    def search(self, retail):
+        """Note every checked patch holding a block of this retail view."""
+        if not self.hashes:
+            return
+        view, hashes = memoryview(retail), self.hashes
+        for k in range(0, len(retail) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE):
+            if hash(bytes(view[k:k + VERBATIM_WINDOW])) in hashes:
+                for item in self.checked:
+                    item.note(retail, k)
+
+    def check(self):
+        """Raise for the first patch, in input order, that copies retail content."""
+        for item in self.checked:
+            problem = item.problem()
+            if problem:
+                raise PatchError(f"Release check failed for {item.variant['id']}: {problem}")
+
+
+def key_problems(patch, secrets, target_views):
+    """Private keys a patch or its target carries; the target's expanded code is searched too."""
+    return [f"material from private key {label}" for label, value in secrets
+            if value in patch or any(value in view for view in target_views)]
+
+
+def release_check(variant, problems, target_markers, base_markers):
+    """Fail on a patch's key problems, or build-host or key text its target holds more often
+    than any supplied base. Retail content is checked across the bundle (RetailIndex)."""
+    problems = list(problems) + [f"build-host or key text {marker!r}" for marker, count in target_markers.items()
+                                 if count > base_markers.get(marker, 0)]
     if problems:
         raise PatchError(f"Release check failed for {variant['id']}: " + "; ".join(problems))
 
@@ -577,20 +662,25 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
         secret_paths = sorted(Path(profile_path).resolve().parent.glob("*.key"))
     secrets_found = forbidden_secrets(secret_paths)
     parent, name = _new_output(output, root)
-    inputs = []
-    for base_path, target_path in pairs:
-        base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
-        variant = _match(catalog, base)
-        if any(item[0]["id"] == variant["id"] for item in inputs):
-            raise PatchError(f"{variant['id']} was supplied more than once")
-        target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
-        inputs.append((variant, base, target, *_check_target(variant, base, target, authority, pins)))
-    base_views = [views for _, _, _, views, _ in inputs]
-    entries, files = [], {}
+    entries, files, seen, checked, deferred = [], {}, set(), [], []
+    base_markers = {marker: 0 for marker in markers(root)}
     with Stage(parent, f"{name}.partial") as stage:
-        for variant, base, target, _, target_views in inputs:
+        # One cartridge at a time: only its base and target are in memory. What the
+        # cross-cartridge checks need is kept small (markers, Checked) and checked below.
+        for base_path, target_path in pairs:
+            base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
+            variant = _match(catalog, base)
+            if variant["id"] in seen:
+                raise PatchError(f"{variant['id']} was supplied more than once")
+            seen.add(variant["id"])
+            target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
+            base_views, target_views = _check_target(variant, base, target, authority, pins)
+            for marker, count in marker_counts(base_views, root).items():
+                base_markers[marker] = max(base_markers[marker], count)
             patch, report = _generate(stage, flips, variant, source_view(base), target)
-            release_check(variant, base, target, patch, report, secrets_found, root, base_views, target_views)
+            # Only small results wait for the other cartridges; the ROMs go after this pass.
+            deferred.append((variant, key_problems(patch, secrets_found, target_views), marker_counts(target_views, root)))
+            checked.append(Checked(variant, patch, report, base, target))
             literals = literal_bytes(patch, report)
             prefix, filename = variant["id"], variant["planned_patch"]
             cartridge = bundle.cartridge(base)
@@ -612,6 +702,18 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
                     raise PatchError(f"Bundle entry for {prefix} did not reproduce the target")
             except bundle.BundleError as error:
                 raise PatchError(f"Bundle entry for {prefix} failed: {error}") from None
+            del base, target, base_views, target_views
+        for variant, problems, target_markers in deferred:
+            release_check(variant, problems, target_markers, base_markers)
+        deferred.clear()
+        # Retail code counts expanded too: no patch may copy it from any supplied base.
+        index = RetailIndex(checked)
+        for base_path, _ in pairs:
+            base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
+            for view in code_views(base, "Base ROM"):
+                index.search(view)
+            del base
+        index.check()
         entries.sort(key=lambda entry: entry["variant"])
         manifest = {
             "schema_version": bundle.SCHEMA_VERSION, "kind": bundle.KIND, "version": version,

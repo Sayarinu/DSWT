@@ -404,5 +404,44 @@ class PinnedFlipsTests(Fixture):
         self.assertEqual(out.read_bytes(), TARGETS["us-rev0"])
         self.assertEqual(manifest["tool"]["binary"], flips.record["binary"])
 
+class RetailIndexTests(unittest.TestCase):
+    """The bundle-wide retail check: one pass over each cartridge, the same 47-byte limit."""
+
+    class Item(patcher.Checked):
+        def __init__(self, data):  # pylint: disable=super-init-not-called
+            self.variant, self.literals, self.modules = {"id": "probe"}, [(0x100, data)], []
+            self.copied, self.recompressed = set(), []
+
+    @staticmethod
+    def noise(seed, size):
+        out = b""
+        while len(out) < size:
+            out += hashlib.sha512(seed + len(out).to_bytes(4, "little")).digest()
+        return out[:size]
+
+    def check(self, literal, retail):
+        item = self.Item(literal)
+        index = patcher.RetailIndex([item])
+        index.search(retail)
+        return item.problem()
+
+    def test_runs_of_47_bytes_are_found_at_any_alignment(self):
+        retail = self.noise(b"retail", 4096)
+        for start in range(0, 48):
+            for where in (0, 5, 17):
+                literal = self.noise(b"before", where) + retail[1000 + start:1000 + start + 47] + self.noise(b"after", 9)
+                with self.subTest(start=start, where=where):
+                    self.assertIn("retail ROM content", self.check(literal, retail))
+
+    def test_shorter_runs_and_padding_pass(self):
+        retail = self.noise(b"retail", 4096) + bytes(200)
+        for start in range(0, 32):
+            literal = self.noise(b"x", 3) + retail[2000 + start:2000 + start + 46] + self.noise(b"y", 3)
+            with self.subTest(start=start):
+                self.assertIsNone(self.check(literal, retail))
+        # 40 zero bytes are shorter than the limit, though the retail padding is longer.
+        self.assertIsNone(self.check(self.noise(b"a", 7) + bytes(40) + self.noise(b"b", 7), retail))
+
+
 if __name__ == "__main__":
     unittest.main()
