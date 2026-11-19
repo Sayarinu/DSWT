@@ -3,6 +3,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -134,6 +135,22 @@ class FakeGitHub:
         if arguments[:2] == ("release", "delete-asset"):
             self.assets.remove(arguments[3])
         return ""
+
+
+class SyntheticBundleTests(unittest.TestCase):
+    """The frozen apps' self-test cartridge must patch through the player's applier.
+    CI skips building a frozen app, so this runs the same bundle unfrozen."""
+
+    def test_self_test_bundle_patches(self):
+        for attempt in range(20):  # the cartridge is random: try several
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp) / "bundle"
+                source, target = build_app.synthetic_bundle(directory)
+                rom = Path(temp) / "trimmed.nds"
+                rom.write_bytes(source)
+                self.assertEqual(build_app.bundle.compressed_code(source, "ROM"), [])
+                _, output = build_app.bundle.patch_file(directory, rom)
+                self.assertEqual(output.read_bytes(), target)
 
 
 class ReleaseTests(AppFixture):
