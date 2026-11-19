@@ -28,14 +28,17 @@ HEADER_SIZE = 0x200
 GAME_CODE = slice(0x0C, 0x10)
 ROM_VERSION = 0x1E
 USED_SIZE = 0x80
-# Gen IV Pokémon games by the first three letters of the header game code, with
-# their full cartridge size in bytes.
+# The header's device capacity: the cartridge holds 128 KiB << this value. It is
+# per cartridge, not per game: Japanese Diamond and Pearl are 128 MiB, every
+# later Diamond and Pearl 64 MiB.
+CAPACITY = 0x14
+# Gen IV Pokémon games by the first three letters of the header game code.
 GAMES = {
-    "ADA": ("Pokémon Diamond", 64 * 1024 * 1024),
-    "APA": ("Pokémon Pearl", 64 * 1024 * 1024),
-    "CPU": ("Pokémon Platinum", 128 * 1024 * 1024),
-    "IPK": ("Pokémon HeartGold", 128 * 1024 * 1024),
-    "IPG": ("Pokémon SoulSilver", 128 * 1024 * 1024),
+    "ADA": "Pokémon Diamond",
+    "APA": "Pokémon Pearl",
+    "CPU": "Pokémon Platinum",
+    "IPK": "Pokémon HeartGold",
+    "IPG": "Pokémon SoulSilver",
 }
 # The last letter of the game code: region and language.
 REGIONS = {
@@ -49,7 +52,7 @@ REGIONS = {
     "K": ("Korea", "Korean"),
 }
 # Retail cartridges by game code: (game, region, language).
-CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, (game, _) in GAMES.items() for letter in REGIONS}
+CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, game in GAMES.items() for letter in REGIONS}
 GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
 # European English cartridges that reuse the US game code, told apart by their
 # header revision: Platinum reads CPUE revision 10, Diamond and Pearl revision 13,
@@ -76,7 +79,9 @@ def crc32_hex(data):
 
 
 def cartridge(data):
-    """Describe a Gen IV Pokémon dump from its header, or return None for anything else."""
+    """Describe a Gen IV Pokémon dump from its header, or return None for anything else.
+
+    The size is None when the header declares a capacity no supported file can have."""
     if len(data) < HEADER_SIZE:
         return None
     try:
@@ -85,12 +90,13 @@ def cartridge(data):
         return None
     if code not in CARTRIDGES:
         return None
+    size = 0x20000 << data[CAPACITY] if 0x20000 << min(data[CAPACITY], 12) <= bps.MAX_FILE else None
     game, region, language = CARTRIDGES[code]
     revision = data[ROM_VERSION]
     if (code, revision) in EUROPE_AS_US:
         region = "Europe"
     return {"game": game, "game_code": code, "region": region, "language": language,
-            "revision": revision, "size": GAMES[code[:3]][1]}
+            "revision": revision, "size": size}
 
 
 def describe(info):
@@ -99,7 +105,7 @@ def describe(info):
 
 def title(entry):
     """Name a manifest entry with its game, such as "Pokémon HeartGold USA Rev 0"."""
-    return f"{GAMES[entry['game_code'][:3]][0]} {entry['name']}"
+    return f"{GAMES[entry['game_code'][:3]]} {entry['name']}"
 
 
 def restore(data, size):
