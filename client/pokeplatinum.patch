@@ -63,6 +63,20 @@ diff --git a/platinum.us/main.lsf.in b/platinum.us/main.lsf.in
 +	Object src/wonder_trade/platinum/hooks.c
 @@ -372,0 +388 @@
 +	Library libwonder_trade_tls.a
+diff --git a/res/graphics/start_menu/meson.build b/res/graphics/start_menu/meson.build
+--- a/res/graphics/start_menu/meson.build
++++ b/res/graphics/start_menu/meson.build
+@@ -4,0 +5 @@
++    'wonder_trade_icon.png',
+diff --git a/res/graphics/start_menu/start_menu.order b/res/graphics/start_menu/start_menu.order
+--- a/res/graphics/start_menu/start_menu.order
++++ b/res/graphics/start_menu/start_menu.order
+@@ -11 +11,2 @@
+-underground_icons.NCGR
+\ No newline at end of file
++underground_icons.NCGR
++wonder_trade_icon.NCGR
+\ No newline at end of file
 diff --git a/res/text/start_menu.json b/res/text/start_menu.json
 --- a/res/text/start_menu.json
 +++ b/res/text/start_menu.json
@@ -167,12 +181,12 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 @@ -380 +387 @@
 -        hideFlags |= HIDE_OPTION_POKEMON;
 +        hideFlags |= HIDE_OPTION_POKEMON | HIDE_OPTION_WONDER_TRADE;
-@@ -381,0 +389,5 @@
-+    }
-+
+@@ -383,0 +391,5 @@
 +    if (Party_GetCurrentCount(SaveData_GetParty(fieldSystem->saveData)) == 0
 +        || CommServerClient_IsInitialized() || !FieldSystem_IsInValidLocation(fieldSystem)) {
 +        hideFlags |= HIDE_OPTION_WONDER_TRADE;
++    }
++
 @@ -392 +404 @@
 -    return HIDE_OPTION_SAVE | HIDE_OPTION_CHAT;
 +    return HIDE_OPTION_WONDER_TRADE | HIDE_OPTION_SAVE | HIDE_OPTION_CHAT;
@@ -208,22 +222,25 @@ diff --git a/src/start_menu.c b/src/start_menu.c
 +    Sprite_SetAffineScaleEx(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, &cursorScale, AFFINE_OVERWRITE_MODE_DOUBLE);
 +
 +    StartMenu_SetCursorPos(menu->sprites[CURSOR_SPRITE_INDEX]->sprite, menu->cursorPos, menu->rowSpacing);
-@@ -765,3 +784,5 @@
+@@ -759,0 +779,2 @@
++    // Wonder Trade's icon has its own tiles, laid out like the Pokedex icon's first cell.
++    SpriteResourceManager_LoadTiles(&menu->spriteManager, narc, wonder_trade_icon_NCGR, FALSE, NNS_G2D_VRAM_TYPE_2DMAIN, 13530);
+@@ -765 +786 @@
 -        template.y += 24 * i;
--
--        if (options[i] == START_MENU_OPTION_BAG && gender == GENDER_FEMALE) {
 +        template.y += menu->rowSpacing * i;
-+
+@@ -767 +788,4 @@
+-        if (options[i] == START_MENU_OPTION_BAG && gender == GENDER_FEMALE) {
 +        if (options[i] == START_MENU_OPTION_WONDER_TRADE) {
-+            template.animIdx = START_MENU_OPTION_POKEMON * ICON_ANIM_COUNT;
++            template.resources[0] = 13530;
++            template.animIdx = START_MENU_OPTION_POKEDEX * ICON_ANIM_COUNT;
 +        } else if (options[i] == START_MENU_OPTION_BAG && gender == GENDER_FEMALE) {
-@@ -802 +823 @@
+@@ -802 +826 @@
 -static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos)
 +static void StartMenu_SetCursorPos(Sprite *sprite, u32 pos, u8 spacing)
-@@ -805 +826 @@
+@@ -805 +829 @@
 -    position.y = (20 + 24 * pos) * FX32_ONE;
 +    position.y = (20 + spacing * pos) * FX32_ONE;
-@@ -1777,0 +1799,26 @@
+@@ -1777,0 +1802,26 @@
 +
 +static BOOL StartMenu_SelectWonderTrade(FieldTask *fieldTask)
 +{

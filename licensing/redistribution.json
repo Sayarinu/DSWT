@@ -69,6 +69,8 @@
     "client/pokediamond.patch",
     "client/pokeheartgold.patch",
     "client/pokeplatinum.patch",
+    "client/res/graphics/start_menu/wonder_trade_icon.png",
+    "client/res/graphics/start_menu/wonder_trade_icon_cell.json",
     "client/res/text/wonder_trade.json",
     "client/retail/platinum-european-build.patch",
     "client/retail/platinum-port.patch",
