@@ -25,14 +25,16 @@ from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_gam
 # game: (make GAME_VERSION and define, decompilation version name)
 GAMES = {"diamond": ("DIAMOND", "VERSION_DIAMOND"), "pearl": ("PEARL", "VERSION_PEARL")}
 # id: (catalogue country, language enumerator, .gmm and Wonder Trade text column, build deltas)
-# Korean was built later than US, with a newer compiler for the game's own code.
-COMPILERS = {"ko": "2.0/sp1p6"}
+# Korean was built later than US, with a newer compiler for the game's own code, and
+# Japanese, the first release, earlier, with Metrowerks 1.2.
+COMPILERS = {"ko": "2.0/sp1p6", "ja": "1.2/sp4"}
 LANGUAGES = {
     "fr": ("france", "LANGUAGE_FRENCH", "French", "fr_FR", ()),
     "de": ("germany", "LANGUAGE_GERMAN", "German", "de_DE", ()),
     "it": ("italy", "LANGUAGE_ITALIAN", "Italian", "it_IT", ()),
     "es": ("spain", "LANGUAGE_SPANISH", "Spanish", "es_ES", ()),
     "ko": ("korea", "LANGUAGE_KOREAN", "Korean", "ko_KR", ("diamond-korean-build.patch",)),
+    "ja": ("japan", "LANGUAGE_JAPANESE", "Japanese", "ja_JP", ("diamond-japanese-build.patch",)),
 }
 # Game functions a language changes in reviewed details: name -> bytes that differ from US.
 REVIEWED = {

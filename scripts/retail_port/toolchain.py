@@ -143,6 +143,18 @@ def dp_commands(workspace, sources, version, tls):
     return commands
 
 
+def _older_compiler(words):
+    """Make's command for Metrowerks 1.x: it has no -ipa, and it warns about struct padding the
+    2.0 build is quiet about, so its warnings do not stop the build. Neither changes the code."""
+    out = []
+    for word in words:
+        if out and (out[-1], word) in (("-ipa", "file"), ("-W", "error")):
+            out.pop()
+            continue
+        out.append(word)
+    return out
+
+
 def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_trade=False, tls=None, defines=None,
                        compiler=None):
     """Compile Diamond or Pearl objects into out with make's own commands: files from sources
@@ -169,9 +181,11 @@ def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_
             words[-1] = f"{SOURCES}/{name}"
         kind = "wonder_trade" if name.startswith("arm9/src/wonder_trade/") else "game"
         if compiler and kind == "game":
-            # A cartridge built later than US used a newer compiler for the game's own code.
+            # A cartridge built at another time than US used another compiler for the game's own code.
             at = next(i for i, w in enumerate(words) if w.endswith("mwccarm.exe"))
             words[at] = f"../tools/mwccarm/{compiler}/mwccarm.exe"
+            if compiler.startswith("1."):
+                words = _older_compiler(words)
         lines.append(f"{DP_LICENSE} MWCIncludes={shlex.quote(DP_INCLUDES[kind])} {shlex.join(words)}")
     mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
               str(Path(sources).resolve()): SOURCES, str(Path(headers).resolve()): HEADERS}

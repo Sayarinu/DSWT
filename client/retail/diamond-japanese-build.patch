@@ -1,0 +1,26 @@
+Code differences of the Japanese Diamond and Pearl cartridges from US.
+
+Japanese, the first release, was compiled with Metrowerks 1.2, which has no
+__declspec(noreturn).
+
+diff --git a/arm9/src/main.c b/arm9/src/main.c
+--- a/arm9/src/main.c
++++ b/arm9/src/main.c
+@@ -50,7 +50,7 @@
+ const int gGameLanguage = GAME_LANGUAGE;
+ const int gGameVersion = GAME_VERSION;
+ 
+-__declspec(noreturn) void NitroMain(void) {
++void NitroMain(void) {
+     InitSystemForTheGame();
+     InitGraphicMemory();
+     InitKeypadAndTouchpad();
+@@ -200,7 +200,7 @@
+ 
+ extern void sub_0200E3A0(PMLCDTarget, int);
+ 
+-__declspec(noreturn) void DoSoftReset(u32 parameter) {
++void DoSoftReset(u32 parameter) {
+     sub_0200E3A0(PM_LCD_TOP, 0x7FFF);
+     sub_0200E3A0(PM_LCD_BOTTOM, 0x7FFF);
+     if (sub_02032DAC()) {
