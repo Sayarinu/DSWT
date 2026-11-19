@@ -58,6 +58,8 @@ TEMPLATE_INITS = {"TradeSequence_Init": ("TradeSequence_Main", "TradeSequence_Ex
 
 US_VARIANT = "us-rev1"
 TEXT_ARCHIVE = "msgdata/pl_msg.narc"
+MENU_GRAPHICS = "graphic/menu_gra.narc"
+MENU_ICON = 11  # wonder_trade_icon.NCGR, the member the patch appends
 MENU_LABEL = "WonderTrade_Text_MenuLabel"
 MENU_ENTRY = "StartMenu_Text_WonderTrade"
 VENEER_SIZE = 6
@@ -711,7 +713,7 @@ class Target:
         new_arm9 = nds.add_autoload(bytes(rom), segment, self.base, literal, end)
         self.arena = end
         self.trampolines = len(patches)
-        files = {self.text_fid: self.text}
+        files = {self.text_fid: self.text, self.icon_fid: self.icons}
         return nds.relayout(bytes(rom), new_arm9, files)
 
     def derive_layout(self):
@@ -732,6 +734,13 @@ class Target:
         members, names = self.text_members, self.text_names
         require(len(members) == ids["TEXT_BANK_WONDER_TRADE"], "the retail text archive does not end where Wonder Trade's bank goes")
         self.text = self._text(members, names, ids["TEXT_BANK_START_MENU"], entry)
+        # The start menu's Wonder Trade icon, appended to the cartridge's menu graphics.
+        self.icon_fid = nds.file_ids(self.rom)[MENU_GRAPHICS]
+        icons, icon_names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.icon_fid))])
+        require(len(icons) == MENU_ICON, f"the retail menu graphics archive does not end at member {MENU_ICON}")
+        built, _ = nds.narc_split(workspace_rom[slice(*nds.file_span(workspace_rom, nds.file_ids(workspace_rom)[MENU_GRAPHICS]))])
+        require(len(built) == MENU_ICON + 1, f"the workspace's menu graphics archive has no member {MENU_ICON}")
+        self.icons = nds.narc_join([*icons, built[MENU_ICON]], icon_names)
 
     def _text(self, members, names, menu_bank, entry):
         work = self.work / "text"
