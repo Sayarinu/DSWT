@@ -120,13 +120,19 @@ class ArchiveTests(AppFixture):
 
 
 class FakeGitHub:
-    def __init__(self, draft=True, assets=("dswt-0.1.0.zip",), archive=None):
+    def __init__(self, draft=True, assets=("dswt-0.1.0.zip",), archive=None, releases=(), merges="", body=""):
         self.draft, self.assets, self.archive, self.calls = draft, list(assets), archive, []
+        self.releases, self.merges, self.body = list(releases), merges, body
 
     def __call__(self, *arguments, capture=True):
         self.calls.append(arguments)
         if arguments[:2] == ("release", "view"):
-            return json.dumps({"isDraft": self.draft, "assets": [{"name": name} for name in self.assets]})
+            return json.dumps({"isDraft": self.draft, "assets": [{"name": name} for name in self.assets],
+                               "body": self.body})
+        if arguments[:2] == ("release", "list"):
+            return json.dumps([{"tagName": tag} for tag in self.releases])
+        if arguments[0] == "api" and "/compare/" in arguments[1]:
+            return self.merges
         if arguments[:2] == ("release", "download"):
             directory = Path(arguments[arguments.index("--dir") + 1])
             (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())
@@ -164,7 +170,9 @@ class ReleaseTests(AppFixture):
         self.assertIn("--draft", create)
         self.assertEqual(create[create.index("--target") + 1], "a" * 40)
         notes = create[create.index("--notes") + 1]
-        self.assertIn("| Pokémon Platinum us-rev1 |", notes)
+        self.assertNotIn("SHA-256", notes)
+        self.assertIn("## Changes\n\nFirst release.", notes)
+        self.assertIn("/wiki/Language-support", notes)
         self.assertIn("Download one file, DSWT Patcher for your computer", notes)
         self.assertIn("`dswt-patcher-0.1.0-windows.zip`", notes)
         self.assertIn("apply only through DSWT Patcher", notes)
@@ -173,6 +181,40 @@ class ReleaseTests(AppFixture):
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):
             release.draft("0.1.0", renamed, "owner/repo")
+
+    def test_notes_list_pull_requests_since_the_previous_release(self):
+        merges = "\n".join(["LUNE-1 - Merge current main", "LUNE-2 - Fix trade recovery (#7)",
+                            "Bump actions/checkout (#8)"])
+        github = FakeGitHub(releases=["v0.2.0", "v0.1.1", "v0.1.0", "v0.1.1-rc.1", "latest"], merges=merges)
+        with patch.object(release, "gh", github):
+            previous, titles = release.changes("0.2.0", "b" * 40, "owner/repo")
+        self.assertEqual(previous, "v0.1.1")
+        self.assertIn(("api", "repos/owner/repo/compare/v0.1.1..." + "b" * 40), [call[:2] for call in github.calls])
+        self.assertEqual(titles, ["Fix trade recovery (#7)", "Bump actions/checkout (#8)"])
+        manifest = {"version": "0.2.0", "source": {"commit": "b" * 40}, "upstream": {"revision": "c" * 40}}
+        notes = release.notes(manifest, previous, titles)
+        self.assertIn("## Changes since v0.1.1\n\n- Fix trade recovery (#7)\n- Bump actions/checkout (#8)\n", notes)
+        self.assertIn("No changes to the game patches.", release.notes(manifest, previous, []))
+        with patch.object(release, "gh", FakeGitHub(releases=["v0.1.0"])):
+            self.assertEqual(release.changes("0.1.0", "b" * 40, "owner/repo"), (None, []))
+        with patch.object(release, "gh", FakeGitHub(releases=["v0.1.0"])):
+            self.assertEqual(release.previous_release("0.1.0-rc.1", "owner/repo"), None)
+            self.assertEqual(release.previous_release("0.1.1-rc.1", "owner/repo"), "v0.1.0")
+
+    def test_notes_rewrites_a_published_release(self):
+        source = f"Source: {'b' * 40}, upstream {'c' * 40}."
+        github = FakeGitHub(draft=False, releases=["v0.1.0"], merges="LUNE-3 - Add a thing (#9)",
+                            body=f"| table |\n\n{source}\n")
+        with patch.object(release, "gh", github):
+            result = release.rewrite("0.1.1", "owner/repo")
+        edit = github.calls[-1]
+        self.assertEqual(edit[:5], ("release", "edit", "v0.1.1", "--repo", "owner/repo"))
+        self.assertEqual(edit[-1], result["notes"])
+        self.assertIn("- Add a thing (#9)", result["notes"])
+        self.assertIn(source, result["notes"])
+        self.assertNotIn("| table |", result["notes"])
+        with patch.object(release, "gh", FakeGitHub(body="no source")), self.assertRaisesRegex(ValueError, "no source line"):
+            release.rewrite("0.1.1", "owner/repo")
 
     def test_fetch_requires_a_draft_holding_only_the_archive(self):
         output = self.root / "game/fetched"
