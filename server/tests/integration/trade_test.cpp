@@ -71,10 +71,13 @@ protected:
   std::atomic<LegalityVerdict> verdict{LegalityVerdict::Legal};
   std::atomic<std::uint32_t> destinations{kAllDestinations};
   std::atomic<bool> covered{true};
+  std::vector<std::string> reasons{"ILLEGAL_DATA"};  // Of an illegal verdict; set before submitting.
   TradeService service{"", [&](const auto &) {
     ++validations;
     const auto current = verdict.load();
-    return LegalityDecision{current, {}, current == LegalityVerdict::Legal ? destinations.load() : 0};
+    const bool legal = current == LegalityVerdict::Legal;
+    return LegalityDecision{current, current == LegalityVerdict::Illegal ? reasons : std::vector<std::string>{},
+                            legal ? destinations.load() : 0};
   }, [&](auto) { return covered.load(); }};
   detail::Database database{""};
   v1::Credentials auth = Enroll();
@@ -240,6 +243,7 @@ TEST_F(TradeTest, RefusedNameReturnsOnlyToClientsThatAcceptServerReturns) {
   const auto collected = Collect(offer.trade_id());
   ASSERT_EQ(collected.context().result(), v1::RESULT_OK);
   EXPECT_EQ(collected.pokemon().pk4(), data);
+  EXPECT_EQ(collected.context().refusal(), v1::REFUSAL_NAME);  // The server's return says why.
   EXPECT_EQ(Ack(Acknowledgement(returned.trade(), 2)).context().result(), v1::RESULT_OK);
   EXPECT_EQ(Status().trade().state(), v1::TRADE_NONE);
 }
@@ -329,11 +333,34 @@ TEST_F(TradeTest, AuthorizationAndForeignTradesNeverDiscloseOwnership) {
   EXPECT_EQ(Status().trade().state(), v1::TRADE_QUEUED);
 }
 
+TEST_F(TradeTest, RetriedRefusalReplaysItsReason) {
+  verdict = LegalityVerdict::Illegal;
+  reasons = {"ILLEGAL_RNG", std::string(kInappropriateName)};
+  const auto request = Submission(auth);
+  EXPECT_EQ(Submit(request).context().refusal(), v1::REFUSAL_ILLEGAL);
+  // A retry, such as after a reply that waited for the archive, replays the recorded reason.
+  verdict = LegalityVerdict::Unavailable;
+  const auto replayed = Submit(request);
+  EXPECT_EQ(replayed.context().result(), v1::RESULT_ILLEGAL_POKEMON);
+  EXPECT_EQ(replayed.context().refusal(), v1::REFUSAL_ILLEGAL);
+  EXPECT_EQ(validations.load(), 1);
+  EXPECT_EQ(Scalar("SELECT reason::text FROM dswt.refusals"), "4");
+
+  // A refusal no reason explains is stored without one and replays without one.
+  verdict = LegalityVerdict::Illegal;
+  reasons = {};
+  const auto unexplained = Submission(auth, 2);
+  EXPECT_EQ(Submit(unexplained).context().refusal(), v1::REFUSAL_UNSPECIFIED);
+  EXPECT_EQ(Submit(unexplained).context().refusal(), v1::REFUSAL_UNSPECIFIED);
+  EXPECT_EQ(Scalar("SELECT count(*) FROM dswt.refusals"), "1");
+}
+
 TEST_F(TradeTest, DefinitiveRejectionRetainsMatchingDigestAndRetry) {
   verdict = LegalityVerdict::Illegal;
   const auto request = Submission(auth);
   const auto rejected = Submit(request);
   ASSERT_EQ(rejected.context().result(), v1::RESULT_ILLEGAL_POKEMON);
+  EXPECT_EQ(rejected.context().refusal(), v1::REFUSAL_ILLEGAL);
   EXPECT_EQ(rejected.context().next_counter(), 2U);
   EXPECT_FALSE(rejected.has_outcome());
   verdict = LegalityVerdict::Unavailable;
@@ -449,6 +476,8 @@ TEST_F(TradeTest, ReceiptProofAndTerminalCancellationFailuresAreRetained) {
   const auto submitted = Submit(Submission(auth));
   const auto returned = Cancel(Cancellation(submitted.outcome()));
   ASSERT_EQ(returned.context().result(), v1::RESULT_OK);
+  // The owner's own Cancel needs no explanation.
+  EXPECT_EQ(Collect(returned.outcome().trade_id()).context().refusal(), v1::REFUSAL_UNSPECIFIED);
   auto invalid = Acknowledgement(returned.outcome());
   invalid.set_delivered_sha256(std::string(32, 'x'));
   EXPECT_EQ(Ack(invalid).context().result(), v1::RESULT_CONFLICT);

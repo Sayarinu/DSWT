@@ -239,6 +239,8 @@
     "server/migrations/0003_observation_time.sql",
     "server/migrations/0004_identity_variants.sql",
     "server/migrations/0005_offer_destinations.sql",
+    "server/migrations/0006_offer_screenings.sql",
+    "server/migrations/0007_refusals.sql",
     "server/proto/connectivity.proto",
     "server/proto/trade.proto",
     "server/src/admission.cpp",

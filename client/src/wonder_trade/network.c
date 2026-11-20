@@ -44,6 +44,7 @@ typedef struct WonderTradeTransport {
     int slot;
     unsigned action;
     BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived, refused;
+    unsigned char refusal; /* Why the server refused or returned the offer, if it said. */
     WtReceivedPokemon received;
     unsigned tradePhase;
     BOOL canLeave;
@@ -346,6 +347,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
             continue;
         }
         if (wireResult == WT_RESULT_ILLEGAL_POKEMON) transport->rejected = TRUE;
+        if (transport->reply.refusal) transport->refusal = transport->reply.refusal;
         if (operation == WT_OP_SUBMIT && wireResult == WT_RESULT_COUNTER_MISMATCH && !engine->blocked) {
             transport->superseded = TRUE; continue;
         }
@@ -440,7 +442,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
         network->tradePhase = transport->tradePhase; network->canLeave = transport->canLeave;
         network->completed = transport->completed; network->returned = transport->returned; network->rejected = transport->rejected;
         network->waiting = transport->waiting; network->superseded = transport->superseded;
-        network->refused = transport->refused;
+        network->refused = transport->refused; network->refusal = transport->refusal;
         network->needsEntropy = transport->needsEntropy;
         network->hasReceived = transport->hasReceived; network->received = transport->received;
         if (network->canLeave) WtRecovery_Allow(network->tradePhase);

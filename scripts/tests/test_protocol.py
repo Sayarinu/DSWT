@@ -39,7 +39,9 @@ class WireTests(unittest.TestCase):
         # Version 1 frames, as journals from earlier clients keep them, stay valid.
         self.assertEqual(wire.encode_request(self.request(version=1)), expected)
         self.assertEqual(wire.decode_request(expected), self.request(version=1))
-        current = expected[:4] + bytes([wire.VERSION_SERVER_RETURNS]) + expected[5:]
+        returns = expected[:4] + bytes([wire.VERSION_SERVER_RETURNS]) + expected[5:]
+        self.assertEqual(wire.decode_request(returns), self.request(version=wire.VERSION_SERVER_RETURNS))
+        current = expected[:4] + bytes([wire.VERSION_REFUSAL_REASON]) + expected[5:]
         self.assertEqual(wire.encode_request(self.request()), current)
         self.assertEqual(wire.decode_request(current), self.request())
 
@@ -56,7 +58,7 @@ class WireTests(unittest.TestCase):
         packet = wire.encode_request(self.request())
         mutations = [packet[:i] for i in range(len(packet))]
         mutations += [packet + b"extra", bytes(wire.MAX_PACKET + 1)]
-        for offset, value in ((0, 0), (4, 0), (4, 3), (5, 255), (6, 0)):
+        for offset, value in ((0, 0), (4, 0), (4, 4), (5, 255), (6, 0)):
             changed = bytearray(packet)
             changed[offset] = value
             mutations.append(bytes(changed))
@@ -127,6 +129,27 @@ class WireTests(unittest.TestCase):
             changed[offset] = value
             with self.assertRaises(ValueError):
                 wire.decode_response(bytes(changed))
+
+    def test_refusal_reason_rides_only_on_version_3_refusals_and_returns(self):
+        def response(version=wire.VERSION_REFUSAL_REASON, operation=wire.Operation.SUBMIT,
+                     result=wire.Result.ILLEGAL_POKEMON, refusal=wire.Refusal.NAME):
+            return wire.Response(operation, b"x" * 16, result, 0, 0, b"", version, refusal)
+        for refusal in wire.Refusal:
+            packet = wire.encode_response(response(refusal=refusal))
+            self.assertEqual(struct.unpack_from("<H", packet, 26)[0], refusal)
+            self.assertEqual(wire.decode_response(packet).refusal, refusal)
+        collected = wire.Response(wire.Operation.COLLECT, b"x" * 16, wire.Result.OK, 1, 1,
+                                  bytes(wire.RESPONSE_SIZES[wire.Operation.COLLECT]), refusal=wire.Refusal.NAME)
+        self.assertEqual(wire.decode_response(wire.encode_response(collected)), collected)
+        for changes in ({"version": 1}, {"version": wire.VERSION_SERVER_RETURNS},
+                        {"operation": wire.Operation.CANCEL}, {"result": wire.Result.CONFLICT},
+                        {"operation": wire.Operation.COLLECT}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                wire.encode_response(response(**changes))
+        packet = bytearray(wire.encode_response(response()))
+        packet[26] = 6
+        with self.assertRaises(ValueError):
+            wire.decode_response(bytes(packet))
 
     def test_debug_repr_does_not_expose_credentials_or_payloads(self):
         request = self.request(credential=b"private credential material!!!!!", payload=b"sensitive bytes!")

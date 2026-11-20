@@ -41,6 +41,8 @@ typedef struct WonderTradeNetwork {
     unsigned tradePhase;
     BOOL canLeave;
     BOOL completed, returned, rejected, waiting, superseded, needsEntropy, hasReceived, refused;
+    /* Why the offer was refused or handed back (enum WtWireRefusal), if the server said. */
+    unsigned char refusal;
     WtReceivedPokemon received;
 } WonderTradeNetwork;
 

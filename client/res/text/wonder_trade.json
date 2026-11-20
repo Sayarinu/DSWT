@@ -432,6 +432,56 @@
       "ko_KR": "Lv."
     },
     {
+      "id": "WonderTrade_Text_RefusedEgg",
+      "en_US": "Eggs can’t be traded online.\nYour Pokémon is back.",
+      "fr_FR": "Les Œufs ne s’échangent pas.\nVotre Pokémon est revenu.",
+      "de_DE": "Eier sind nicht tauschbar.\nDein Pokémon ist zurück.",
+      "it_IT": "Niente scambi di Uova.\nIl Pokémon è tornato.",
+      "es_ES": "Los Huevos no se intercambian.\nTu Pokémon ha vuelto.",
+      "ja_JP": "タマゴは　こうかん　できません\nポケモンは　もどりました",
+      "ko_KR": "알은 교환할 수 없습니다\n포켓몬이 돌아왔습니다"
+    },
+    {
+      "id": "WonderTrade_Text_RefusedMail",
+      "en_US": "Remove its Mail to trade it.\nYour Pokémon is back.",
+      "fr_FR": "Retirez d’abord sa Lettre.\nVotre Pokémon est revenu.",
+      "de_DE": "Nimm zuerst den Brief ab.\nDein Pokémon ist zurück.",
+      "it_IT": "Togli prima la Lettera.\nIl Pokémon è tornato.",
+      "es_ES": "Quítale antes la Carta.\nTu Pokémon ha vuelto.",
+      "ja_JP": "さきに　メ－ルを　はずしてください\nポケモンは　もどりました",
+      "ko_KR": "먼저 메일을 떼어 주십시오\n포켓몬이 돌아왔습니다"
+    },
+    {
+      "id": "WonderTrade_Text_RefusedGame",
+      "en_US": "No other game can hold it yet.\nYour Pokémon is back.",
+      "fr_FR": "Aucun autre jeu ne l’accepte.\nVotre Pokémon est revenu.",
+      "de_DE": "Kein anderes Spiel nimmt es.\nDein Pokémon ist zurück.",
+      "it_IT": "Nessun altro gioco lo accoglie.\nIl Pokémon è tornato.",
+      "es_ES": "Ningún otro juego lo admite.\nTu Pokémon ha vuelto.",
+      "ja_JP": "ほかの　ソフトでは　うけとれません\nポケモンは　もどりました",
+      "ko_KR": "다른 소프트는 받을 수 없습니다\n포켓몬이 돌아왔습니다"
+    },
+    {
+      "id": "WonderTrade_Text_RefusedIllegal",
+      "en_US": "It failed the legality check.\nYour Pokémon is back.",
+      "fr_FR": "Il a échoué à la vérification.\nVotre Pokémon est revenu.",
+      "de_DE": "Die Prüfung ist fehlgeschlagen.\nDein Pokémon ist zurück.",
+      "it_IT": "Non ha superato il controllo.\nIl Pokémon è tornato.",
+      "es_ES": "No ha superado la verificación.\nTu Pokémon ha vuelto.",
+      "ja_JP": "チェックに　とおりませんでした\nポケモンは　もどりました",
+      "ko_KR": "검사를 통과하지 못했습니다\n포켓몬이 돌아왔습니다"
+    },
+    {
+      "id": "WonderTrade_Text_RefusedName",
+      "en_US": "Its name can’t be traded.\nYour Pokémon is back.",
+      "fr_FR": "Son nom n’est pas autorisé.\nVotre Pokémon est revenu.",
+      "de_DE": "Sein Name ist nicht erlaubt.\nDein Pokémon ist zurück.",
+      "it_IT": "Il suo nome non è permesso.\nIl Pokémon è tornato.",
+      "es_ES": "Su nombre no está permitido.\nTu Pokémon ha vuelto.",
+      "ja_JP": "この　なまえは　つかえません\nポケモンは　もどりました",
+      "ko_KR": "이 이름으로는 교환할 수 없습니다\n포켓몬이 돌아왔습니다"
+    },
+    {
       "id": "WonderTrade_Text_MenuLabel",
       "en_US": "WONDER TRADE",
       "fr_FR": "ECHANGE MIRACLE",

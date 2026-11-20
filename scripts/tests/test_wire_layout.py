@@ -48,6 +48,7 @@ class WireLayoutTests(unittest.TestCase):
                          {server_name(op.name.lower()): int(op) for op in wire.Operation})
         self.assertEqual(server["kMaxPacket"], wire.MAX_PACKET)
         self.assertEqual(client["VERSION_SERVER_RETURNS"], wire.VERSION_SERVER_RETURNS)
+        self.assertEqual(client["VERSION_REFUSAL_REASON"], wire.VERSION_REFUSAL_REASON)
         magic = '"WTDS\\1"'
         self.assertIn(f"#define WT_WIRE_MAGIC {magic}", (ROOT / "client/include/wonder_trade/wire_layout.h").read_text())
         self.assertIn(f"kMagic{{{magic}, 5}}", (ROOT / "server/src/wire_layout.h").read_text())
@@ -58,7 +59,7 @@ class WireLayoutTests(unittest.TestCase):
         request = offsets(wire.REQUEST.format, [None, None, "OPERATION", "BODY_LENGTH", "ID", "SAVE_ID", "CREDENTIAL", "COUNTER"])
         self.assertEqual({k: c["REQUEST_HEADER_SIZE" if k == "SIZE" else "REQUEST_" + k] for k in request}, request)
         reply = offsets(wire.RESPONSE.format,
-                        [None, None, "OPERATION", "BODY_LENGTH", "REQUEST_ID", "RESULT", "RESERVED", "NEXT_COUNTER", "HIGHWATER"])
+                        [None, None, "OPERATION", "BODY_LENGTH", "REQUEST_ID", "RESULT", "REFUSAL", "NEXT_COUNTER", "HIGHWATER"])
         self.assertEqual({k: c["REPLY_HEADER_SIZE" if k == "SIZE" else "REPLY_" + k] for k in reply}, reply)
 
         snapshot = offsets("<16sBB16s32s16s32s16sQ", ["TRADE", "STATE", "DELIVERY_KIND", "OFFERED_ASSET", "OFFERED_DIGEST",

@@ -177,17 +177,25 @@ static void TestEnvelopes(void)
         originalSize = packetSize;
         for (i = 0; i < originalSize; i++) { packetSize = i; Reject(); }
         packetSize = originalSize + 1; Reject(); packetSize = originalSize;
-        /* A version-1 reply to this version-2 request, or an unknown version, fails. */
-        assert(frame[4] == WT_WIRE_VERSION_SERVER_RETURNS);
-        BadByte(0, 0); BadByte(4, 1); BadByte(4, 3); BadByte(5, 0); BadByte(8, 0); BadByte(6, 0);
-        BadByte(24, 0); BadByte(24, 12); BadByte(25, 1); BadByte(26, 1); BadByte(27, 1);
+        /* An earlier version's reply to this version-3 request, or an unknown version, fails. */
+        assert(frame[4] == WT_WIRE_VERSION_REFUSAL_REASON);
+        BadByte(0, 0); BadByte(4, 1); BadByte(4, 2); BadByte(4, 4); BadByte(5, 0); BadByte(8, 0); BadByte(6, 0);
+        BadByte(24, 0); BadByte(24, 12); BadByte(25, 1); BadByte(27, 1); BadByte(26, 6);
+        /* Only a Collect's success, or a refused Submit below, may say why an offer came back. */
+        if (operation == WT_OP_COLLECT) {
+            packet[26] = WT_REFUSAL_NAME; assert(Accept().refusal == WT_REFUSAL_NAME); packet[26] = 0;
+        } else BadByte(26, 1);
         Put(packet + 28, 0, 8); Reject(); Put(packet + 28, 2, 8);
         Put(packet + 36, 0, 8); Reject(); Reply(operation);
         for (result = WT_RESULT_PROCESSING; result <= WT_RESULT_UNAVAILABLE; result++) {
             memset(packet + 44, 0, sizeof(packet) - 44);
             Put(packet + 24, result, 2); Put(packet + 6, 0, 2); packetSize = 44;
             Put(packet + 28, 0, 8); Put(packet + 36, 0, 8);
-            reply = Accept(); assert(reply.result == result && Zero(&reply.body, sizeof(reply.body)));
+            reply = Accept(); assert(reply.result == result && reply.refusal == 0 && Zero(&reply.body, sizeof(reply.body)));
+            packet[26] = WT_REFUSAL_EGG;
+            if (operation == WT_OP_SUBMIT && result == WT_RESULT_ILLEGAL_POKEMON) assert(Accept().refusal == WT_REFUSAL_EGG);
+            else Reject();
+            packet[26] = 0;
             Put(packet + 28, 7, 8); Reject(); Put(packet + 36, 9, 8);
             if (result == WT_RESULT_PROCESSING || result == WT_RESULT_UNAUTHENTICATED) Reject();
             else assert(Accept().result == result);

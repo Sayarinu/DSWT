@@ -30,6 +30,11 @@ struct LegalityDecision {
   std::uint32_t destinations = 0;
 };
 
+// What the player is told about an illegal verdict (v1::RefusalReason): the first of
+// Egg, Mail, no other game, illegal, name that any reason names; zero if none is known.
+// Illegal comes before the name because renaming would not make the Pokémon legal.
+int RefusalFor(const std::vector<std::string> &reasons);
+
 // Use only before accepting a NEW submission. Collection, cancellation,
 // reconciliation and replay of an accepted operation need no validator.
 class LegalityClient {

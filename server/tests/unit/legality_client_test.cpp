@@ -169,5 +169,22 @@ TEST_F(LegalityClientTest, RejectsInvalidPolicyAndDeadlineConfiguration) {
   EXPECT_THROW(LegalityClient(address, kPolicy, std::chrono::milliseconds(0)), std::invalid_argument);
   EXPECT_THROW(LegalityClient(address, kPolicy, std::chrono::milliseconds(1501)), std::invalid_argument);
 }
+
+TEST(RefusalFor, TellsThePlayerTheReasonTheyCanActOn) {
+  EXPECT_EQ(RefusalFor({}), v1::REFUSAL_UNSPECIFIED);
+  EXPECT_EQ(RefusalFor({"EGG_NOT_ALLOWED"}), v1::REFUSAL_EGG);
+  EXPECT_EQ(RefusalFor({"MAIL_NOT_ALLOWED"}), v1::REFUSAL_MAIL);
+  EXPECT_EQ(RefusalFor({"INCOMPATIBLE_FORM"}), v1::REFUSAL_INCOMPATIBLE);
+  EXPECT_EQ(RefusalFor({"INCOMPATIBLE_GAME"}), v1::REFUSAL_INCOMPATIBLE);
+  for (const char *reason : {"ILLEGAL_ENCOUNTER", "ILLEGAL_RNG", "ILLEGAL_MOVES", "ILLEGAL_DATA",
+                             "INVALID_SPECIES", "INVALID_STRUCTURE"})
+    EXPECT_EQ(RefusalFor({reason}), v1::REFUSAL_ILLEGAL) << reason;
+  EXPECT_EQ(RefusalFor({"INAPPROPRIATE_NAME"}), v1::REFUSAL_NAME);
+  // Renaming would not make an illegal Pokémon legal.
+  EXPECT_EQ(RefusalFor({"ILLEGAL_RNG", "INAPPROPRIATE_NAME"}), v1::REFUSAL_ILLEGAL);
+  EXPECT_EQ(RefusalFor({"ILLEGAL_DATA", "INCOMPATIBLE_FORM"}), v1::REFUSAL_INCOMPATIBLE);
+  EXPECT_EQ(RefusalFor({"MAIL_NOT_ALLOWED", "EGG_NOT_ALLOWED"}), v1::REFUSAL_EGG);
+  EXPECT_EQ(RefusalFor({"SOMETHING_NEW"}), v1::REFUSAL_UNSPECIFIED);
+}
 } // namespace
 } // namespace dswt::server

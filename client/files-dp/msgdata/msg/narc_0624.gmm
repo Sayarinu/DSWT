@@ -440,4 +440,54 @@
 		<language name="Japanese">つかう　まえに\nレポ－トを　かいてください</language>
 		<language name="Korean">쓰기 전에\n리포트를 작성해 주십시오</language>
 	</row>
+	<row id="WonderTrade_Text_RefusedEgg" index="44">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Eggs can’t be traded online.\nYour Pokémon is back.</language>
+		<language name="French">Les Œufs ne s’échangent pas.\nVotre Pokémon est revenu.</language>
+		<language name="German">Eier sind nicht tauschbar.\nDein Pokémon ist zurück.</language>
+		<language name="Italian">Niente scambi di Uova.\nIl Pokémon è tornato.</language>
+		<language name="Spanish">Los Huevos no se intercambian.\nTu Pokémon ha vuelto.</language>
+		<language name="Japanese">タマゴは　こうかん　できません\nポケモンは　もどりました</language>
+		<language name="Korean">알은 교환할 수 없습니다\n포켓몬이 돌아왔습니다</language>
+	</row>
+	<row id="WonderTrade_Text_RefusedMail" index="45">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Remove its Mail to trade it.\nYour Pokémon is back.</language>
+		<language name="French">Retirez d’abord sa Lettre.\nVotre Pokémon est revenu.</language>
+		<language name="German">Nimm zuerst den Brief ab.\nDein Pokémon ist zurück.</language>
+		<language name="Italian">Togli prima la Lettera.\nIl Pokémon è tornato.</language>
+		<language name="Spanish">Quítale antes la Carta.\nTu Pokémon ha vuelto.</language>
+		<language name="Japanese">さきに　メ－ルを　はずしてください\nポケモンは　もどりました</language>
+		<language name="Korean">먼저 메일을 떼어 주십시오\n포켓몬이 돌아왔습니다</language>
+	</row>
+	<row id="WonderTrade_Text_RefusedGame" index="46">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">No other game can hold it yet.\nYour Pokémon is back.</language>
+		<language name="French">Aucun autre jeu ne l’accepte.\nVotre Pokémon est revenu.</language>
+		<language name="German">Kein anderes Spiel nimmt es.\nDein Pokémon ist zurück.</language>
+		<language name="Italian">Nessun altro gioco lo accoglie.\nIl Pokémon è tornato.</language>
+		<language name="Spanish">Ningún otro juego lo admite.\nTu Pokémon ha vuelto.</language>
+		<language name="Japanese">ほかの　ソフトでは　うけとれません\nポケモンは　もどりました</language>
+		<language name="Korean">다른 소프트는 받을 수 없습니다\n포켓몬이 돌아왔습니다</language>
+	</row>
+	<row id="WonderTrade_Text_RefusedIllegal" index="47">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">It failed the legality check.\nYour Pokémon is back.</language>
+		<language name="French">Il a échoué à la vérification.\nVotre Pokémon est revenu.</language>
+		<language name="German">Die Prüfung ist fehlgeschlagen.\nDein Pokémon ist zurück.</language>
+		<language name="Italian">Non ha superato il controllo.\nIl Pokémon è tornato.</language>
+		<language name="Spanish">No ha superado la verificación.\nTu Pokémon ha vuelto.</language>
+		<language name="Japanese">チェックに　とおりませんでした\nポケモンは　もどりました</language>
+		<language name="Korean">검사를 통과하지 못했습니다\n포켓몬이 돌아왔습니다</language>
+	</row>
+	<row id="WonderTrade_Text_RefusedName" index="48">
+		<attribute name="window_context_name">used</attribute>
+		<language name="English">Its name can’t be traded.\nYour Pokémon is back.</language>
+		<language name="French">Son nom n’est pas autorisé.\nVotre Pokémon est revenu.</language>
+		<language name="German">Sein Name ist nicht erlaubt.\nDein Pokémon ist zurück.</language>
+		<language name="Italian">Il suo nome non è permesso.\nIl Pokémon è tornato.</language>
+		<language name="Spanish">Su nombre no está permitido.\nTu Pokémon ha vuelto.</language>
+		<language name="Japanese">この　なまえは　つかえません\nポケモンは　もどりました</language>
+		<language name="Korean">이 이름으로는 교환할 수 없습니다\n포켓몬이 돌아왔습니다</language>
+	</row>
 </body>

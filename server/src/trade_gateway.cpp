@@ -50,14 +50,14 @@ struct Frame {
 Frame Decode(std::string_view packet) {
   if (packet.size() < wire::kRequestHeaderSize || packet.size() > wire::kMaxPacket ||
       packet.substr(0, wire::kMagic.size() - 1) != wire::kMagic.substr(0, wire::kMagic.size() - 1) ||
-      (packet[wire::kMagic.size() - 1] != wire::kMagic.back() && packet[wire::kMagic.size() - 1] != wire::kVersionServerReturns) ||
+      packet[wire::kMagic.size() - 1] < wire::kMagic.back() || packet[wire::kMagic.size() - 1] > wire::kVersionRefusalReason ||
       Number(packet, wire::kRequestBodyLength, 2) != packet.size() - wire::kRequestHeaderSize) throw InvalidFrame();
   Frame frame{static_cast<unsigned char>(packet[wire::kMagic.size() - 1]), static_cast<unsigned char>(packet[wire::kRequestOperation]),
               std::string(packet.substr(wire::kRequestId, wire::kIdSize)), {}, Number(packet, wire::kRequestCounter, 8),
               packet.substr(wire::kRequestHeaderSize)};
   frame.auth.set_save_id(std::string(packet.substr(wire::kRequestSaveId, wire::kIdSize)));
   frame.auth.set_credential(std::string(packet.substr(wire::kRequestCredential, wire::kCredentialSize)));
-  frame.auth.set_server_returns(frame.version == wire::kVersionServerReturns);
+  frame.auth.set_server_returns(frame.version >= wire::kVersionServerReturns);
   const bool enroll = frame.operation == wire::kEnroll;
   const bool mutation = frame.operation == wire::kSubmit || frame.operation == wire::kCancel || frame.operation == wire::kAcknowledge;
   if (frame.operation < wire::kEnroll || frame.operation > wire::kReconcile || !detail::NonzeroBytes(frame.request_id, wire::kIdSize) ||
@@ -159,7 +159,14 @@ std::string Envelope(const Frame &frame, const v1::ReplyContext &context, const 
   detail::AppendUnsigned(bytes, body.size(), 2);
   bytes += frame.request_id;
   detail::AppendUnsigned(bytes, context.result(), 2);
-  detail::AppendUnsigned(bytes, 0, 2);
+  // Only a refused Submit or a server return's Collect says why. Earlier clients
+  // require zero here and show their generic message.
+  Require(context.refusal() >= v1::REFUSAL_UNSPECIFIED && context.refusal() <= v1::REFUSAL_NAME);
+  const bool refusal = frame.version >= wire::kVersionRefusalReason &&
+      ((frame.operation == wire::kSubmit && context.result() == v1::RESULT_ILLEGAL_POKEMON) ||
+       (frame.operation == wire::kCollect && context.result() == v1::RESULT_OK));
+  Require(refusal || context.refusal() == v1::REFUSAL_UNSPECIFIED || frame.version < wire::kVersionRefusalReason);
+  detail::AppendUnsigned(bytes, refusal ? context.refusal() : 0, 2);
   detail::AppendUnsigned(bytes, context.next_counter(), 8);
   detail::AppendUnsigned(bytes, context.event_highwater(), 8);
   Require(bytes.size() == wire::kReplyHeaderSize);

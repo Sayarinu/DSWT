@@ -129,8 +129,8 @@ class GatewayScenario:
         line = self.mark(process, b'HTTPS listening on ' if tls else b'HTTP listening on ')
         return process, int(line.rsplit(b':', 1)[1])
 
-    def frame(self, operation, body, client=None, *, counter=0, request_id=None):
-        return REQUEST.pack(b'WTDS', 1, operation, len(body), request_id or os.urandom(16),
+    def frame(self, operation, body, client=None, *, counter=0, request_id=None, version=1):
+        return REQUEST.pack(b'WTDS', version, operation, len(body), request_id or os.urandom(16),
                             client.save if client else ZERO_ID, client.credential if client else b'Q' * 32, counter) + body
 
     def post(self, packet, *, port=None, status=200):
@@ -149,9 +149,12 @@ class GatewayScenario:
             self.test.assertEqual(response.getheader('Content-Type'), 'application/octet-stream')
         finally:
             connection.close()
-        magic, version, operation, size, request, result, reserved, counter, highwater = RESPONSE.unpack_from(body)
-        # A reply repeats its request's version.
-        self.test.assertEqual((magic, version, operation, request, reserved), (b'WTDS', packet[4], packet[5], packet[8:24], 0))
+        magic, version, operation, size, request, result, refusal, counter, highwater = RESPONSE.unpack_from(body)
+        # A reply repeats its request's version. Only version 3 says why a Submit was refused.
+        self.test.assertEqual((magic, version, operation, request), (b'WTDS', packet[4], packet[5], packet[8:24]))
+        if not (version >= 3 and ((operation == 2 and result == 8) or (operation == 5 and result == 1))):
+            self.test.assertEqual(refusal, 0)
+        self.refusal = refusal
         self.test.assertEqual(size, len(body) - RESPONSE.size)
         payload = body[RESPONSE.size:]
         if result != 1:
@@ -257,6 +260,7 @@ class GatewayScenario:
         self.test.assertEqual(self.post(self.frame(5, self.first_offer[0], self.first))[3][138:], self.pokemon(2))
         _, rejected = self.submit(self.first, 3, counter=3)
         self.test.assertEqual(rejected[:3], (8, 4, 5))
+        self.test.assertEqual(self.refusal, 0)  # Version 1 never carries the reason.
         page = self.post(self.frame(7, struct.pack('<QB', 0, 8), self.first))
         self.test.assertEqual(page[:3], (1, 4, 5))
         self.test.assertEqual(struct.unpack_from('<BBQ', page[3]), (5, 0, 5))
@@ -264,6 +268,12 @@ class GatewayScenario:
         for index in range(5):
             self.test.assertEqual(struct.unpack_from('<Q', page[3], 10 + index * 106)[0], index + 1)
         self.test.assertEqual(self.post(self.frame(4, self.second_offer[0], self.second, counter=2))[0], 5)
+        data = self.pokemon(3)
+        egg = self.frame(2, struct.pack('<Q', 1) + data + hashlib.sha256(data).digest(), self.first, counter=4, version=3)
+        self.test.assertEqual(self.post(egg)[0], 8)
+        self.test.assertEqual(self.refusal, 1)
+        self.test.assertEqual(self.post(egg)[0], 8)  # A retry replays the reason.
+        self.test.assertEqual(self.refusal, 1)
         returned_client = self.enroll(b'T' * 32)
         _, queued = self.submit(returned_client)
         returned_trade = SNAPSHOT.unpack(queued[3][8:])[0]
@@ -291,7 +301,7 @@ class GatewayScenario:
 
     def malformed_and_backend_failures(self):
         valid = self.frame(3, ZERO_ID, self.first)
-        packets = [valid[:79], b'BAD!' + valid[4:], valid[:4] + b'\x00' + valid[5:], valid[:4] + b'\x03' + valid[5:],
+        packets = [valid[:79], b'BAD!' + valid[4:], valid[:4] + b'\x00' + valid[5:], valid[:4] + b'\x04' + valid[5:],
                    valid[:5] + b'\x08' + valid[6:], valid[:6] + b'\xff\xff' + valid[8:],
                    valid[:8] + bytes(16) + valid[24:], valid[:40] + bytes(32) + valid[72:],
                    valid[:72] + struct.pack('<Q', 1) + valid[80:], valid[:24] + ZERO_ID + valid[40:],
@@ -299,8 +309,9 @@ class GatewayScenario:
                    self.frame(5, ZERO_ID, self.first)]
         for packet in packets:
             self.post(packet, status=400)
-        # Version 2 (server returns) is version 1's envelope; both are served.
+        # Versions 2 (server returns) and 3 (refusal reasons) are version 1's envelope; all are served.
         self.test.assertEqual(self.post(valid[:4] + b'\x02' + valid[5:])[0], 1)
+        self.test.assertEqual(self.post(valid[:4] + b'\x03' + valid[5:])[0], 1)
         # Well-formed enrollments with an unknown game variant are bounded protocol rejections.
         for build in (0, 2, 0x020C0600, 0x040C0200):
             self.test.assertEqual(self.post(self.frame(1, struct.pack('<IB', build, 0))), (3, 0, 0, b''))
@@ -314,7 +325,7 @@ class GatewayScenario:
         self.reject_http(self.http(bytes(4097)))
         self.reject_http(self.http(valid) + b'GET /v1/ping HTTP/1.1\r\nHost: localhost\r\n\r\n')
         data = self.pokemon()
-        truncated = self.frame(2, struct.pack('<Q', 1) + data + hashlib.sha256(data).digest(), self.first, counter=4)
+        truncated = self.frame(2, struct.pack('<Q', 1) + data + hashlib.sha256(data).digest(), self.first, counter=5)
         with self.raw() as connection:
             connection.sendall(self.http(truncated)[:-1])
         time.sleep(0.05)
