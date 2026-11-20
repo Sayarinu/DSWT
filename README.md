@@ -30,13 +30,9 @@ Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold or So
 
 DSWT is a patch: you need a dump of your own cartridge. **DSWT never distributes ROMs.**
 
-| Game | Version |
-|---|---|
-| Pokémon Platinum | English: US Rev 0 and Rev 1, Europe; French, German, Italian, Spanish |
-| Pokémon Diamond and Pearl | English: US Rev 5, Europe Rev 5 |
-| Pokémon HeartGold and SoulSilver | English: US, Europe |
+DSWT is tested on melonDS with the US versions of Pokémon Platinum, Diamond, Pearl, HeartGold and SoulSilver. Most other languages are supported as ports: see **[Language support](https://github.com/Sayarinu/DSWT/wiki/Language-support)**.
 
-Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)** once the first release is out, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
+Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)**, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
 
 Step-by-step install and trading instructions are in the **[guide](https://github.com/Sayarinu/DSWT/wiki/Install)**.
 
