@@ -213,6 +213,13 @@ int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsig
         }
         return Hash(target, INVENTORY_BODY, entry->inventoryAfter);
     }
+    if (step == WT_INVENTORY_PREPARE_RESTORE) {
+        /* Restore in place only while the inventory is still the escrow's; otherwise return it like a delivery. */
+        for (bank = 0; bank < 2; ++bank)
+            if (valid[bank] && memcmp(banks[bank] + INVENTORY_BODY, entry->inventoryBefore, 32) != 0
+                && memcmp(banks[bank] + INVENTORY_BODY, entry->inventoryAfter, 32) != 0) return 1;
+        return valid[0] || valid[1] ? 0 : -1;
+    }
     digest = step == WT_INVENTORY_RESTORE ? entry->inventoryBefore : entry->inventoryAfter;
     for (bank = 0; bank < 2; ++bank) if (valid[bank]) {
         if (memcmp(banks[bank] + INVENTORY_BODY, entry->inventoryBefore, 32) != 0
@@ -250,6 +257,7 @@ int Report(Probe *probe, int result)
     printf("\",\"request_sha256\":\"");
     if (entry.requestLength) {
         memcpy(request, entry.request, 40); memcpy(request + 40, entry.request + 72, entry.requestLength - 72);
+        request[4] = 1;  /* The server hashes every version's request as version 1. */
         Hash(request, entry.requestLength - 32, digest); Hex(digest, 32);
     }
     printf("\",\"trade_id\":\""); Hex(entry.trade, 16);
