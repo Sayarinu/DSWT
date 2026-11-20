@@ -328,16 +328,16 @@ static int InitialPacketKnown(const unsigned char *record, int allowClear)
 {
     unsigned char expected[264];
     unsigned length = (unsigned)Get(record + WT_REC_PENDING_REQUEST, 2), candidate;
-    unsigned candidates[4];
+    unsigned candidates[6];
     if ((length != 0 && (length < 85 || length > 149)) || record[WT_REC_PENDING_REQUEST + 92] > 64) return 0;
     candidates[0] = length ? length : 85u + record[WT_REC_PENDING_REQUEST + 92]; candidates[1] = length ? length : 149u;
-    candidates[2] = candidates[0]; candidates[3] = candidates[1];
-    for (candidate = 0; candidate < 4; candidate++) {
+    candidates[2] = candidates[4] = candidates[0]; candidates[3] = candidates[5] = candidates[1];
+    for (candidate = 0; candidate < 6; candidate++) {
         unsigned size = candidates[candidate];
         memset(expected, 0, sizeof(expected)); Put(expected, size, 2);
-        /* Earlier clients enrolled with version 1; this one uses version 2. */
+        /* Earlier clients enrolled with versions 1 and 2; this one uses version 3. */
         memcpy(expected + 8, "WTDS\1\1", 6); Put(expected + 14, size - 80, 2);
-        if (candidate >= 2) expected[12] = WT_WIRE_VERSION_SERVER_RETURNS;
+        expected[12] = (unsigned char)(1 + candidate / 2);
         memcpy(expected + 16, record + WT_REC_ENROLLMENT_ID, 16); memcpy(expected + 48, record + WT_REC_CREDENTIAL, 32);
         memcpy(expected + 88, record + WT_REC_PENDING_REQUEST + 88, 4); expected[92] = (unsigned char)(size - 85);
         memcpy(expected + 93, record + WT_REC_PENDING_REQUEST + 93, size - 85);

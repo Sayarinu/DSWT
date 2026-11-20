@@ -50,6 +50,16 @@ enum TradeState {
   TRADE_ACKNOWLEDGED = 4;
 }
 
+// What the player is told about a refused offer (protocol/wire.py Refusal).
+enum RefusalReason {
+  REFUSAL_UNSPECIFIED = 0;
+  REFUSAL_EGG = 1;
+  REFUSAL_MAIL = 2;
+  REFUSAL_INCOMPATIBLE = 3; // No other game can hold its form or species.
+  REFUSAL_ILLEGAL = 4; // Encounter, RNG, moves, data, species or structure.
+  REFUSAL_NAME = 5;
+}
+
 enum DeliveryKind {
   DELIVERY_NONE = 0;
   DELIVERY_MATCH = 1;
@@ -70,7 +80,7 @@ message Credentials {
   bytes save_id = 1; // 16 random server-issued bytes; not a device identifier.
   bytes credential = 2; // 32 independently generated CSPRNG bytes; never logged.
   // The client accepts a CANCELLED event without an operation: the server handing
-  // back an offer its name screening refused. DS wire version 2 sets it.
+  // back an offer its name screening refused. DS wire version 2 and later set it.
   bool server_returns = 3;
 }
 
@@ -84,6 +94,10 @@ message ReplyContext {
   ResultCode result = 1;
   uint64 next_counter = 2;
   uint64 event_highwater = 3; // Per identity, externally durable contiguous prefix.
+  // Why an offer was refused: on a Submit's RESULT_ILLEGAL_POKEMON, or on the Collect
+  // of an offer the server handed back. DS wire version 3 and later carry it; earlier
+  // clients show their generic message.
+  RefusalReason refusal = 4;
 }
 
 message CanonicalPokemon {

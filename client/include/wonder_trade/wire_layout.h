@@ -10,11 +10,15 @@
 #define WT_WIRE_MAGIC "WTDS\1" /* ASCII magic followed by version 1 */
 #define WT_WIRE_MAGIC_SIZE 5
 /* Version 2 is version 1 plus server returns: a CANCELLED event without an
- * operation hands back an offer the server refused. New requests use it; frames a
- * journal kept from version 1 stay valid, and a reply repeats its request's version. */
+ * operation hands back an offer the server refused. Version 3 adds the refusal
+ * reason in the reply header's refusal field: an ILLEGAL_POKEMON reply to Submit, or
+ * the Collect of an offer the server handed back, says why; it is zero otherwise.
+ * New requests use version 3; frames a journal kept from earlier versions stay
+ * valid, and a reply repeats its request's version. */
 #define WT_WIRE_VERSION_SERVER_RETURNS 2
+#define WT_WIRE_VERSION_REFUSAL_REASON 3
 #define WT_WIRE_KNOWN_VERSION(frame) ((memcmp((frame), WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE - 1) == 0 \
-    && ((frame)[WT_WIRE_MAGIC_SIZE - 1] == 1 || (frame)[WT_WIRE_MAGIC_SIZE - 1] == WT_WIRE_VERSION_SERVER_RETURNS)))
+    && (frame)[WT_WIRE_MAGIC_SIZE - 1] >= 1 && (frame)[WT_WIRE_MAGIC_SIZE - 1] <= WT_WIRE_VERSION_REFUSAL_REASON))
 #define WT_WIRE_ID_SIZE 16
 #define WT_WIRE_DIGEST_SIZE 32
 #define WT_WIRE_CREDENTIAL_SIZE 32
@@ -34,7 +38,7 @@
 #define WT_WIRE_REPLY_BODY_LENGTH 6
 #define WT_WIRE_REPLY_REQUEST_ID 8
 #define WT_WIRE_REPLY_RESULT 24
-#define WT_WIRE_REPLY_RESERVED 26
+#define WT_WIRE_REPLY_REFUSAL 26
 #define WT_WIRE_REPLY_NEXT_COUNTER 28
 #define WT_WIRE_REPLY_HIGHWATER 36
 #define WT_WIRE_REPLY_HEADER_SIZE 44

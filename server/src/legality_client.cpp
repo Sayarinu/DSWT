@@ -21,6 +21,20 @@ bool KnownReason(std::string_view reason) {
 }
 } // namespace
 
+int RefusalFor(const std::vector<std::string> &reasons) {
+  const auto has = [&](auto match) { return std::any_of(reasons.begin(), reasons.end(), match); };
+  const auto starts = [](std::string_view prefix) {
+    return [prefix](const std::string &reason) { return std::string_view(reason).substr(0, prefix.size()) == prefix; };
+  };
+  const auto is = [](std::string_view name) { return [name](const std::string &reason) { return reason == name; }; };
+  if (has(is("EGG_NOT_ALLOWED"))) return v1::REFUSAL_EGG;
+  if (has(is("MAIL_NOT_ALLOWED"))) return v1::REFUSAL_MAIL;
+  if (has(starts("INCOMPATIBLE_"))) return v1::REFUSAL_INCOMPATIBLE;
+  if (has(starts("ILLEGAL_")) || has(starts("INVALID_"))) return v1::REFUSAL_ILLEGAL;
+  if (has(is(kInappropriateName))) return v1::REFUSAL_NAME;
+  return v1::REFUSAL_UNSPECIFIED;
+}
+
 struct LegalityClient::Impl {
   std::unique_ptr<v1::PokemonLegality::Stub> stub;
   std::string policy;

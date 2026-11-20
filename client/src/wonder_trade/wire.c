@@ -99,7 +99,7 @@ int WtWire_Encode(const WtWireRequest *request, WtWireHash hash, unsigned char *
     if (!size) return -1;
     *size = 0;
     if (!request || !hash || !output) return -1;
-    memcpy(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE); frame[WT_WIRE_MAGIC_SIZE - 1] = WT_WIRE_VERSION_SERVER_RETURNS;
+    memcpy(frame, WT_WIRE_MAGIC, WT_WIRE_MAGIC_SIZE); frame[WT_WIRE_MAGIC_SIZE - 1] = WT_WIRE_VERSION_REFUSAL_REASON;
     frame[WT_WIRE_REQUEST_OPERATION] = request->operation;
     memcpy(frame + WT_WIRE_REQUEST_ID, request->requestID, WT_WIRE_ID_SIZE);
     memcpy(frame + WT_WIRE_REQUEST_SAVE_ID, request->saveID, WT_WIRE_ID_SIZE);
@@ -285,10 +285,18 @@ int WtWire_Decode(const unsigned char *request, size_t requestSize,
         || memcmp(packet, request, WT_WIRE_MAGIC_SIZE) != 0
         || packet[WT_WIRE_REPLY_OPERATION] != request[WT_WIRE_REQUEST_OPERATION]
         || ReadNumber(packet + WT_WIRE_REPLY_BODY_LENGTH, 2) != packetSize - WT_WIRE_REPLY_HEADER_SIZE
-        || memcmp(packet + WT_WIRE_REPLY_REQUEST_ID, request + WT_WIRE_REQUEST_ID, WT_WIRE_ID_SIZE) != 0
-        || !IsZero(packet + WT_WIRE_REPLY_RESERVED, 2)) return -1;
+        || memcmp(packet + WT_WIRE_REPLY_REQUEST_ID, request + WT_WIRE_REQUEST_ID, WT_WIRE_ID_SIZE) != 0) return -1;
     reply->operation = packet[WT_WIRE_REPLY_OPERATION];
     reply->result = (uint16_t)ReadNumber(packet + WT_WIRE_REPLY_RESULT, 2);
+    {
+        /* Only version 3 says why, and only for a refused Submit or a Collect. */
+        uint64_t refusal = ReadNumber(packet + WT_WIRE_REPLY_REFUSAL, 2);
+        int explains = packet[WT_WIRE_MAGIC_SIZE - 1] >= WT_WIRE_VERSION_REFUSAL_REASON
+            && ((reply->operation == WT_OP_SUBMIT && reply->result == WT_RESULT_ILLEGAL_POKEMON)
+                || (reply->operation == WT_OP_COLLECT && reply->result == WT_RESULT_OK));
+        if (refusal > WT_REFUSAL_NAME || (refusal && !explains)) goto invalid;
+        reply->refusal = (unsigned char)refusal;
+    }
     reply->nextCounter = ReadNumber(packet + WT_WIRE_REPLY_NEXT_COUNTER, 8);
     reply->highwater = ReadNumber(packet + WT_WIRE_REPLY_HIGHWATER, 8);
     if (reply->result < WT_RESULT_OK || reply->result > WT_RESULT_UNAVAILABLE

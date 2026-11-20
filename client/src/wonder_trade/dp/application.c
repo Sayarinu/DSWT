@@ -648,6 +648,19 @@ static BOOL WonderTrade_Leave(WonderTradeApp *app)
     return FALSE;
 }
 
+/* Says why the server refused or handed back the offer, when it said. */
+static int WonderTrade_RefusalText(unsigned refusal, int fallback)
+{
+    switch (refusal) {
+    case WT_REFUSAL_EGG: return WonderTrade_Text_RefusedEgg;
+    case WT_REFUSAL_MAIL: return WonderTrade_Text_RefusedMail;
+    case WT_REFUSAL_INCOMPATIBLE: return WonderTrade_Text_RefusedGame;
+    case WT_REFUSAL_ILLEGAL: return WonderTrade_Text_RefusedIllegal;
+    case WT_REFUSAL_NAME: return WonderTrade_Text_RefusedName;
+    default: return fallback;
+    }
+}
+
 static void WonderTrade_Show(WonderTradeApp *app, int state, int message)
 {
     app->state = state;
@@ -1015,11 +1028,13 @@ static BOOL WonderTrade_Main(struct OverlayManager *man, u32 *state)
             app->selectedSlot = -1;
             if (app->network.needsEntropy) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_KeepPlaying);
             else if (!app->fieldSystem && app->network.canLeave) WonderTrade_Close(app);
-            else if (app->network.completed && app->network.returned) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Returned);
+            else if (app->network.completed && app->network.returned)
+                WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_RefusalText(app->network.refusal, WonderTrade_Text_Returned));
             else if (app->network.completed) {
                 if (!WonderTrade_StartSequence(app)) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Completed);
             }
-            else if (app->network.rejected) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Rejected);
+            else if (app->network.rejected)
+                WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_RefusalText(app->network.refusal, WonderTrade_Text_Rejected));
             else if (app->network.refused) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_CannotHold);
             else if (app->network.superseded && app->network.tradePhase == WT_JOURNAL_IDLE) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Superseded);
             else if (app->network.waiting) WonderTrade_Show(app, WT_APP_MESSAGE, WonderTrade_Text_Waiting);

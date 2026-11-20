@@ -27,7 +27,7 @@ RECOVERY_LABEL = "studio.nouvellelune.dswt.recovery-run"
 PSQL_CONNECTION = ["-h", "/var/run/postgresql", "-U", "dswt_local"]
 # Tables whose exact rows a restore must reproduce, including the replay journal.
 TABLES = ("save_identities", "payloads", "offers", "ownership", "matches", "receipts", "operations",
-          "trade_events", "acknowledgements", "matcher_attempts", "identity_variants", "offer_destinations",
+          "trade_events", "acknowledgements", "matcher_attempts", "identity_variants", "offer_destinations", "refusals",
           "audit_journal")
 # Root only prepares owned volumes, then drops to the image's postgres user.
 CAPABILITIES = ["--cap-drop", "ALL"] + [item for cap in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")

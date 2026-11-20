@@ -133,6 +133,12 @@ public:
       else if (code == v1::RESULT_OK)
         detail::DecodeOutcome(UnhexBytes(PQgetvalue(prior.get(), 0, 2)), reply);
       Publish(reply, code);
+      if (code == v1::RESULT_ILLEGAL_POKEMON && reply.context().result() == code) {
+        auto refusal = database.Parameters("SELECT reason FROM dswt.refusals WHERE save_id=$1::uuid "
+            "AND operation_id=$2::uuid", {HexBytes(auth.save_id()), HexBytes(context.operation_id())});
+        if (PQntuples(refusal.get()) == 1)
+          reply.mutable_context()->set_refusal(static_cast<v1::RefusalReason>(std::stoi(PQgetvalue(refusal.get(), 0, 0))));
+      }
       return false;
     }
     if (context.counter() == 0 || context.counter() == kMaximumSequenceValue || context.counter() != next) {
@@ -178,7 +184,8 @@ public:
 
   void Record(const v1::MutationContext &context, unsigned char opcode,
               const std::string &hash, v1::ResultCode code, v1::EventKind kind,
-              const v1::TradeSnapshot &snapshot = {}, std::string_view rejected_digest = {}) {
+              const v1::TradeSnapshot &snapshot = {}, std::string_view rejected_digest = {},
+              v1::RefusalReason refusal = v1::REFUSAL_UNSPECIFIED) {
     const auto sequence = std::to_string(highwater + 1);
     const bool success = code == v1::RESULT_OK;
     const auto asset = kind == v1::EVENT_SUBMITTED ? snapshot.offered_asset_id() : snapshot.received_asset_id();
@@ -188,6 +195,9 @@ public:
         {HexBytes(auth.save_id()), HexBytes(context.operation_id()), std::to_string(context.counter()),
          std::to_string(opcode), HexBytes(hash), std::to_string(code), sequence,
          success ? HexBytes(detail::EncodeOutcome(highwater + 1, snapshot)) : ""});
+    if (refusal != v1::REFUSAL_UNSPECIFIED)
+      database.Parameters("INSERT INTO dswt.refusals VALUES ($1::uuid,$2::uuid,$3::smallint)",
+          {HexBytes(auth.save_id()), HexBytes(context.operation_id()), std::to_string(refusal)});
     database.Parameters("INSERT INTO dswt.trade_events(save_id,sequence,kind,trade_id,operation_id,"
         "asset_id,payload_sha256,receipt_id,state) VALUES ($1::uuid,$2::numeric,$3::smallint,"
         "nullif($4,'')::uuid,$5::uuid,nullif($6,'')::uuid,CASE WHEN $7='' THEN NULL ELSE decode($7,'hex') END,"
@@ -214,9 +224,11 @@ bool CheckAuthShape(const v1::Credentials &auth, Reply &reply) {
 
 void Rejected(Session &session, const v1::MutationContext &context, unsigned char opcode,
               const std::string &hash, v1::ResultCode code, v1::MutationReply &reply,
-              const v1::TradeSnapshot &snapshot = {}, std::string_view digest = {}) {
-  session.Record(context, opcode, hash, code, v1::EVENT_REJECTED, snapshot, digest);
+              const v1::TradeSnapshot &snapshot = {}, std::string_view digest = {},
+              v1::RefusalReason refusal = v1::REFUSAL_UNSPECIFIED) {
+  session.Record(context, opcode, hash, code, v1::EVENT_REJECTED, snapshot, digest, refusal);
   session.Publish(reply, code);
+  if (reply.context().result() == code) reply.mutable_context()->set_refusal(refusal);
 }
 
 bool RetryAllocation(const detail::DatabaseError &error) {
@@ -315,7 +327,8 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
         session.Publish(*reply, v1::RESULT_UNAVAILABLE); return;
       }
       if (legality.verdict == LegalityVerdict::Illegal) {
-        Rejected(session, request->context(), wire::kSubmit, hash, v1::RESULT_ILLEGAL_POKEMON, *reply, {}, request->pokemon().sha256());
+        Rejected(session, request->context(), wire::kSubmit, hash, v1::RESULT_ILLEGAL_POKEMON, *reply, {}, request->pokemon().sha256(),
+                 static_cast<v1::RefusalReason>(RefusalFor(legality.reasons)));
         return;
       }
       const auto asset = detail::RandomIdentifier(), trade = detail::RandomIdentifier();
@@ -416,7 +429,14 @@ grpc::Status TradeService::Collect(grpc::ServerContext *context, const v1::Colle
     *reply->mutable_trade() = snapshot;
     reply->mutable_pokemon()->set_pk4(UnhexBytes(PQgetvalue(row.get(), 0, 0)));
     reply->mutable_pokemon()->set_sha256(UnhexBytes(PQgetvalue(row.get(), 0, 1)));
+    // A return without an operation is the server's: its name screening refused the offer.
+    auto server_return = session.database.Parameters("SELECT 1 FROM dswt.trade_events WHERE save_id=$1::uuid "
+        "AND trade_id=$2::uuid AND kind=4 AND operation_id IS NULL",
+        {HexBytes(request->auth().save_id()), HexBytes(request->trade_id())});
     session.Publish(*reply, v1::RESULT_OK);
+    if (reply->context().result() == v1::RESULT_OK && snapshot.delivery_kind() == v1::DELIVERY_RETURN &&
+        PQntuples(server_return.get()) == 1)
+      reply->mutable_context()->set_refusal(v1::REFUSAL_NAME);
     session.transaction.Commit();
   });
 }

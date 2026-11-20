@@ -14,6 +14,10 @@ inline constexpr std::string_view kMagic{"WTDS\1", 5}; // ASCII magic followed b
 // Version 2 is version 1 plus server returns: a CANCELLED event without an
 // operation hands back an offer the server refused. Replies repeat the request's version.
 inline constexpr unsigned char kVersionServerReturns = 2;
+// Version 3 adds the refusal reason in the reply header's refusal field: an
+// ILLEGAL_POKEMON reply to Submit, or the Collect of an offer the server handed
+// back, says why. It is zero in every other reply.
+inline constexpr unsigned char kVersionRefusalReason = 3;
 
 // Operations
 inline constexpr unsigned char kEnroll = 1, kSubmit = 2, kStatus = 3, kCancel = 4, kCollect = 5, kAcknowledge = 6, kReconcile = 7;
@@ -41,7 +45,7 @@ inline constexpr std::size_t kReplyOperation = 5;
 inline constexpr std::size_t kReplyBodyLength = 6;
 inline constexpr std::size_t kReplyRequestId = 8;
 inline constexpr std::size_t kReplyResult = 24;
-inline constexpr std::size_t kReplyReserved = 26;
+inline constexpr std::size_t kReplyRefusal = 26;
 inline constexpr std::size_t kReplyNextCounter = 28;
 inline constexpr std::size_t kReplyHighwater = 36;
 inline constexpr std::size_t kReplyHeaderSize = 44;

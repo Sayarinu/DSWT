@@ -29,6 +29,11 @@ enum WtWireTradeState {
 };
 
 enum WtWireDeliveryKind { WT_DELIVERY_NONE, WT_DELIVERY_MATCH, WT_DELIVERY_RETURN };
+/* Why an offer was refused (protocol/wire.py Refusal); NONE when not given. */
+enum WtWireRefusal {
+    WT_REFUSAL_NONE, WT_REFUSAL_EGG, WT_REFUSAL_MAIL, WT_REFUSAL_INCOMPATIBLE,
+    WT_REFUSAL_ILLEGAL, WT_REFUSAL_NAME
+};
 enum WtWireEventKind {
     WT_EVENT_ENROLLED = 1, WT_EVENT_SUBMITTED, WT_EVENT_MATCHED,
     WT_EVENT_CANCELLED, WT_EVENT_ACKNOWLEDGED, WT_EVENT_REJECTED
@@ -62,7 +67,7 @@ typedef struct WtWireEvent {
 } WtWireEvent;
 
 typedef struct WtWireReply {
-    unsigned char operation;
+    unsigned char operation, refusal;
     uint16_t result;
     uint64_t nextCounter, highwater;
     union {

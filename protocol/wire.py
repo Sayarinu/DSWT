@@ -33,9 +33,23 @@ class Result(IntEnum):
 
 
 # Version 2 is version 1 plus server returns: a CANCELLED event without an
-# operation hands back an offer the server refused. A reply repeats its request's version.
+# operation hands back an offer the server refused. Version 3 adds the refusal
+# reason in the reply header's refusal field: an ILLEGAL_POKEMON reply to Submit,
+# or the Collect of an offer the server handed back, says why. Every other reply
+# has zero there. A reply repeats its request's version.
 VERSION_SERVER_RETURNS = 2
-VERSIONS = (1, VERSION_SERVER_RETURNS)
+VERSION_REFUSAL_REASON = 3
+VERSIONS = (1, VERSION_SERVER_RETURNS, VERSION_REFUSAL_REASON)
+
+
+class Refusal(IntEnum):
+    """Why an offer was refused, as the player is told. Zero means not given."""
+    NONE = 0
+    EGG = 1
+    MAIL = 2
+    INCOMPATIBLE = 3
+    ILLEGAL = 4
+    NAME = 5
 
 REQUEST = struct.Struct("<4sBBH16s16s32sQ")
 RESPONSE = struct.Struct("<4sBBH16sHHQQ")
@@ -76,7 +90,7 @@ class Request:
     credential: bytes = field(repr=False)
     counter: int
     payload: bytes = field(repr=False)
-    version: int = VERSION_SERVER_RETURNS
+    version: int = VERSION_REFUSAL_REASON
 
 
 @dataclass(frozen=True)
@@ -87,7 +101,8 @@ class Response:
     next_counter: int
     event_highwater: int
     payload: bytes = field(repr=False)
-    version: int = VERSION_SERVER_RETURNS
+    version: int = VERSION_REFUSAL_REASON
+    refusal: Refusal = Refusal.NONE
 
 
 def _header(packet, header):
@@ -136,10 +151,15 @@ def encode_request(request):
 
 def decode_response(packet):
     values, payload = _header(packet, RESPONSE)
-    _, version, opcode, _, request_id, result, reserved, counter, highwater = values
+    _, version, opcode, _, request_id, result, refusal, counter, highwater = values
     operation, result = Operation(opcode), Result(result)
-    if reserved or not any(request_id):
+    if not any(request_id):
         raise ValueError("Invalid response header")
+    explains = ((operation == Operation.SUBMIT and result == Result.ILLEGAL_POKEMON)
+                or (operation == Operation.COLLECT and result == Result.OK))
+    if refusal and (version < VERSION_REFUSAL_REASON or not explains):
+        raise ValueError("Invalid response header")
+    refusal = Refusal(refusal)
     if result != Result.OK:
         if payload:
             raise ValueError("Only successful responses have a payload")
@@ -151,7 +171,7 @@ def decode_response(packet):
             raise ValueError("Invalid reconciliation page size")
     elif len(payload) != RESPONSE_SIZES[operation]:
         raise ValueError("Invalid response payload size")
-    return Response(operation, request_id, result, counter, highwater, payload, version)
+    return Response(operation, request_id, result, counter, highwater, payload, version, refusal)
 
 
 def encode_response(response):
@@ -159,7 +179,7 @@ def encode_response(response):
         raise ValueError("Invalid request ID length")
     packet = RESPONSE.pack(
         b"WTDS", response.version, response.operation, len(response.payload), response.request_id,
-        response.result, 0, response.next_counter, response.event_highwater,
+        response.result, response.refusal, response.next_counter, response.event_highwater,
     ) + response.payload
     decode_response(packet)
     return packet

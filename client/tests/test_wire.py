@@ -87,17 +87,26 @@ def run(binary):
         reply = wire.encode_response(wire.Response(
             wire.Operation(operation), b"\x11" * 16, wire.Result.OK, counter, highwater, body))
         add(requests[operation], reply, 1)
-        # A reply must repeat its request's version (requests go out as version 2).
-        for offset, value in ((4, 1), (4, 3), (5, 0), (8, 0x12), (24, 12), (26, 1)):
+        # A reply must repeat its request's version (requests go out as version 3).
+        # Only a Collect's success, or a refused Submit, may carry a refusal reason.
+        refusal = ((26, 6),) if operation == 5 else ((26, 1),)
+        for offset, value in ((4, 1), (4, 2), (4, 4), (5, 0), (8, 0x12), (24, 12), *refusal):
             changed = bytearray(reply)
             changed[offset] = value
             add(requests[operation], changed, 0)
         add(requests[operation], reply[:-1], 0)
         if len(reply) < 902:
             add(requests[operation], reply + b"\0", 0)
+        if operation == 5:
+            add(requests[operation], wire.encode_response(wire.Response(
+                wire.Operation(operation), b"\x11" * 16, wire.Result.OK, counter, highwater, body,
+                refusal=wire.Refusal.NAME)), 1)
         for result in list(wire.Result)[1:]:
             response = wire.Response(wire.Operation(operation), b"\x11" * 16, result, 0, 0, b"")
             add(requests[operation], wire.encode_response(response), result)
+            explained = bytearray(wire.encode_response(response))
+            explained[26] = wire.Refusal.EGG
+            add(requests[operation], explained, result if (operation, result) == (2, wire.Result.ILLEGAL_POKEMON) else 0)
         if operation in (2, 4, 6):
             # A retained immutable outcome can carry newer live counter/highwater.
             changed = bytearray(reply)
