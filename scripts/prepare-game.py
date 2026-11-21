@@ -50,6 +50,19 @@ GAMES = {
         "rom_sha1": "poke{}.us.sha1",
         "destinations": {"src": "arm9/src", "files-dp": "files"},
     },
+    # fuddlesworth/pokebw2 builds Black 2 and White 2 from one tree, with
+    # configure.py and Ninja, from the player's own dumps in orig/. It has no
+    # integration patch yet, so only its pristine workspace is prepared.
+    "bw2": {
+        "pin": "client/upstream-pokebw2.json",
+        "patch": None,
+        "build_patches": (),
+        "staged_revisions": (),
+        "workspace": "pokebw2",
+        "adapter": "bw2",
+        "resources": (),
+        "rom_sha1": "{}.sha1",
+    },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
 RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
@@ -173,6 +186,8 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
 def prepare(root, pristine=False, name="platinum"):
     root = root.resolve()
     game = GAMES[name]
+    if not pristine and game["patch"] is None:
+        raise RuntimeError(f"{game['workspace']} has no Wonder Trade integration yet; prepare it with --pristine")
     pin = json.loads((root / game["pin"]).read_text())
     if (root / "game").is_symlink():
         raise RuntimeError("Game workspace directory must not be a symlink")
@@ -197,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
                         help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
-                             "or dp for Diamond and Pearl")
+                             "dp for Diamond and Pearl, or bw2 for Black 2 and White 2 (--pristine only)")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))

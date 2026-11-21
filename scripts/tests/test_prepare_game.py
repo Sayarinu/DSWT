@@ -241,6 +241,52 @@ class PrepareGameTests(unittest.TestCase):
         self.assertEqual((pristine / "arm9/src/main.c").read_text(), "original\n")
         self.assertFalse((pristine / "arm9/src/wonder_trade").exists())
 
+    def test_black2_and_white2_prepare_only_a_pristine_workspace(self):
+        (self.root / "client/src/wonder_trade/bw2").mkdir(parents=True)
+        (self.root / "client/src/wonder_trade/bw2/game_save.c").write_text("bw2 adapter\n")
+        upstream = Path(self.temp.name) / "bw2-upstream"
+        upstream.mkdir()
+        for name, text in {
+            "src/main.c": "original\n",
+            "b2_us.sha1": "7" * 40 + "  build/pokeblack2_us.nds\n",
+            "w2_us.sha1": "8" * 40 + "  build/pokewhite2_us.nds\n",
+            ".gitignore": "orig/*.nds\n/build/\n",
+        }.items():
+            (upstream / name).parent.mkdir(parents=True, exist_ok=True)
+            (upstream / name).write_text(text)
+        git = ["git", "-C", str(upstream)]
+        subprocess.check_call([*git, "init", "--quiet"])
+        subprocess.check_call([*git, "add", "."])
+        subprocess.check_call([*git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                               "commit", "--quiet", "-m", "Synthetic BW2 upstream"])
+        pin = {
+            "repository": str(upstream),
+            "revision": subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip(),
+            "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
+            "rom_sha1": {"b2_us": "7" * 40, "w2_us": "8" * 40},
+        }
+        (self.root / "client/upstream-pokebw2.json").write_text(json.dumps(pin))
+        with self.assertRaisesRegex(RuntimeError, "--pristine"):
+            prepare_game.prepare(self.root, name="bw2")
+        self.assertFalse((self.root / "game/pokebw2").exists())
+        bw2 = prepare_game.prepare(self.root, pristine=True, name="bw2")
+        self.assertEqual(bw2, self.root / "game/pokebw2-pristine")
+        self.assertEqual((bw2 / "src/main.c").read_text(), "original\n")
+        self.assertFalse((bw2 / "src/wonder_trade").exists())
+        # The player's dump and build output are ignored upstream, so a build leaves the workspace reusable.
+        (bw2 / "orig").mkdir()
+        (bw2 / "orig/baserom_b2_us.nds").write_bytes(b"dump")
+        (bw2 / "build").mkdir()
+        (bw2 / "build/pokeblack2_us.nds").write_bytes(b"rebuilt")
+        self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw2"), bw2)
+        # Another game never receives the Black 2 / White 2 adapter.
+        platinum = prepare_game.prepare(self.root)
+        self.assertFalse((platinum / "src/wonder_trade/bw2").exists())
+        pin["rom_sha1"]["w2_us"] = "9" * 40
+        (self.root / "client/upstream-pokebw2.json").write_text(json.dumps(pin))
+        with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
+            prepare_game.prepare(self.root, pristine=True, name="bw2")
+
     def test_workspace_symlink_does_not_write_outside_project(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

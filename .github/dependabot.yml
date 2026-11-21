@@ -13,6 +13,7 @@ updates:
       - /tools/bps-patch
       - /tools/rom-builder
       - /tools/rom-builder-dp
+      - /tools/rom-builder-bw2
     schedule:
       interval: weekly
   - package-ecosystem: docker-compose

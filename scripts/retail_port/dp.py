@@ -19,20 +19,50 @@ import struct
 import subprocess
 import xml.etree.ElementTree as ET
 
-from . import elf, link, nds, platinum, sdk, symbols, toolchain
+from . import elf, link, nds, platinum, sdk, symbols, toolchain, writeout
 from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_game
 
 # game: (make GAME_VERSION and define, decompilation version name)
 GAMES = {"diamond": ("DIAMOND", "VERSION_DIAMOND"), "pearl": ("PEARL", "VERSION_PEARL")}
 # id: (catalogue country, language enumerator, .gmm and Wonder Trade text column, build deltas)
-# Korean was built later than US, with a newer compiler for the game's own code.
-COMPILERS = {"ko": "2.0/sp1p6"}
+# Korean was built later than US, with a newer compiler for the game's own code, and
+# Japanese, the first release, earlier, with Metrowerks 1.2.
+COMPILERS = {"ko": "2.0/sp1p6", "ja": "1.2/sp4"}
+# A language whose game code differs from US in the compiler alone is mapped with an image of
+# the pristine US build that compiles the game's C code the same way: this patch to the
+# pristine tree. The port builds it once in game/retail-port.
+MATCHING = {"ja": "diamond-japanese-matching.patch"}
+# A language whose start menu the US assembly cannot express (another compiler's output): the
+# port writes the player's own copy out as assembly (writeout.py) and makes Wonder Trade's
+# changes to it with this patch.
+START_MENUS = {"ja": "diamond-japanese-start-menu.patch"}
+# The header the written-out start menu starts with; the patch's context includes it.
+START_MENU_HEADER = """\t; The start menu of Japanese Diamond and Pearl (asm/unk_02035068.s), written out from the
+\t; cartridge: the Japanese build lays the functions out in reverse order and compiled
+\t; them with Metrowerks 1.2. Calls and addresses are by name; labels carry the Japanese
+\t; addresses. Both versions run these bytes.
+"""
+# Objects of the workspace build whose routines the port may copy into the module when the
+# language's own copy is not found: sub_02002F40, which centres a string by its width.
+COPIED = {"ja": ("src/font.o",)}
+# Names resolved as another: Japanese links an older MSL without the exit that mbedTLS calls on a
+# corrupted heap. On a DS exit only stops the program, as OS_Terminate does.
+ALIASES = {"ja": {"exit": "OS_Terminate"}}
+# Wrappers Japanese compiled from C where US has them in assembly: name -> the Japanese Thumb
+# code and its literal pool (numbers, or names resolved in the retail game).
+WRAPPERS = {
+    "ja": {
+        "sub_02088858": ((0x4801, 0x2102, 0x4B01, 0x4718), (4, "HandleLoadOverlay")),  # load overlay 4, mode 2
+        "sub_02088868": ((0x4801, 0x4B02, 0x4718, 0x46C0), (4, "UnloadOverlayByID")),  # unload overlay 4
+    },
+}
 LANGUAGES = {
     "fr": ("france", "LANGUAGE_FRENCH", "French", "fr_FR", ()),
     "de": ("germany", "LANGUAGE_GERMAN", "German", "de_DE", ()),
     "it": ("italy", "LANGUAGE_ITALIAN", "Italian", "it_IT", ()),
     "es": ("spain", "LANGUAGE_SPANISH", "Spanish", "es_ES", ()),
     "ko": ("korea", "LANGUAGE_KOREAN", "Korean", "ko_KR", ("diamond-korean-build.patch",)),
+    "ja": ("japan", "LANGUAGE_JAPANESE", "Japanese", "ja_JP", ("diamond-japanese-build.patch",)),
 }
 # Game functions a language changes in reviewed details: name -> bytes that differ from US.
 REVIEWED = {
@@ -160,10 +190,40 @@ class Target(platinum.Target):
 
     # --- Mapping --------------------------------------------------------------------------------------
     def map_symbols(self):
-        self.image = symbols.UsImage((self.pristine / self.arm9_build / "arm9.elf").read_bytes(), self.us_rom)
-        self.map = symbols.SymbolMap(self.image, self.us_rom, self.rom)
+        tree, rom = (self.pristine, self.us_rom) if self.language not in MATCHING else self._matching_image()
+        self.image = symbols.UsImage((tree / self.arm9_build / "arm9.elf").read_bytes(), rom)
+        self.map = symbols.SymbolMap(self.image, rom, self.rom)
+        if self.language in MATCHING:
+            # Functions in assembly (US compiler output) cannot match a build with another compiler:
+            # place them by where matched code calls them.
+            symbols.trust_calls(self.map)
+            symbols.align_calls(self.map)
         self.log(f"mapped {len(self.map.addr)} US symbols")
         self.library_addr = self._map_library() if self.library is not None else {}
+
+    def _matching_image(self):
+        """(tree, ROM) of the pristine US build with the matching patch, built here when missing."""
+        patch = RETAIL / MATCHING[self.language]
+        tree = self.work.parent / f"matching-{self.language}"
+        stamp = tree / ".dswt-matching"
+        want = sha256(patch.read_bytes() + git(self.pristine, "rev-parse", "HEAD"))
+        rom_path = tree / f"build/{self.game}.us/poke{self.game}.us.nds"
+        if not stamp.is_file() or stamp.read_text() != want:
+            shutil.rmtree(tree, ignore_errors=True)
+            tree.parent.mkdir(parents=True, exist_ok=True)
+            # The pristine tree's tools and generated files come along; only the code is rebuilt.
+            subprocess.run(["cp", "-a", str(self.pristine), str(tree)], check=True)
+            result = subprocess.run(["git", "-C", str(tree), "apply", str(patch)], capture_output=True, text=True)
+            require(result.returncode == 0, f"{patch.name} does not apply: {result.stderr}")
+            for game in GAMES:
+                shutil.rmtree(tree / f"arm9/build/{game}.us", ignore_errors=True)
+                (tree / f"build/{game}.us/poke{game}.us.nds").unlink(missing_ok=True)
+            stamp.write_text(want)
+        if not rom_path.is_file():
+            self.log(f"building the matching image for {self.game} ({patch.name}); this takes a while")
+            toolchain.docker({str(tree): "/workspace"}, f"{toolchain.DP_WINE}\nmake -j\"$(nproc)\" "
+                             f"GAME_VERSION={self.version} COMPARE=0", workdir="/workspace", image=toolchain.DP_IMAGE)
+        return tree, rom_path.read_bytes()
 
     def _map_library(self):
         """Diamond name -> address of each listed library function, found by Platinum's bytes in
@@ -209,7 +269,50 @@ class Target(platinum.Target):
         if name in LIBRARIES.get(self.language, {}):
             at = self.library_addr.get(name)
             return None if at is None else (at, True)
-        return super()._resolve(name)
+        alias = ALIASES.get(self.language, {}).get(name)
+        if alias is not None:
+            return self._resolve(alias)
+        if name in WRAPPERS.get(self.language, {}):
+            return self._wrapper(*WRAPPERS[self.language][name])
+        found = super()._resolve(name)
+        us = self.image.unique(name)
+        if found is None and us is not None and self.language in MATCHING and isinstance(self.image.module(us), int):
+            at = self._template_member(us)
+            found = None if at is None else (at, True)
+        return found
+
+    def _wrapper(self, code, pool):
+        """The one place in the static module holding a wrapper's code and literal pool."""
+        words = []
+        for item in pool:
+            found = item if isinstance(item, int) else self._resolve(item)
+            if found is None:
+                return None
+            words.append(found if isinstance(item, int) else found[0])
+        data = struct.pack(f"<{len(code)}H{len(words)}I", *code, *words)
+        at = symbols.unique_match(self.modules, "arm9", data, [True] * len(data), 4)
+        return None if at is None else (at | 1, True)
+
+    def _app_templates(self, modules, oid):
+        """Every app template (init, main and exit, then the overlay ID) of an overlay's functions."""
+        start, code = modules[oid]
+        found = []
+        for base, body in modules.values():
+            for k in range(0, len(body) - 15, 4):
+                words = struct.unpack_from("<4I", body, k)
+                if words[3] == oid and all(w & 1 and start <= w - 1 < start + len(code) for w in words[:3]):
+                    found.append(words[:3])
+        return found
+
+    def _template_member(self, us):
+        """An overlay's init, main or exit, by its place in the game's app templates of that overlay,
+        which must all agree."""
+        oid = self.image.module(us)
+        theirs = {words for words in self._app_templates(self.map.us_modules, oid) if us.start | 1 in words}
+        ours = set(self._app_templates(self.modules, oid))
+        if len(theirs) != 1 or len(ours) != 1:
+            return None
+        return ours.pop()[theirs.pop().index(us.start | 1)]
 
     def replaced_files(self):
         _, desired = prepare_game.overlay_files(ROOT, self.workspace, prepare_game.GAMES["dp"])
@@ -292,14 +395,44 @@ class Target(platinum.Target):
         self._stage(tree, self.files + self.headers, lambda name: git(self.workspace, "show", f"HEAD:{name}"), self.deltas)
         objects = self._compile(tree, self.work / "pristine-obj")
         self.pristine_objects = {self._file_of(path): elf.Elf(path.read_bytes()) for path in objects}
-        self.pristine_objects[ASM] = elf.Elf(self._renumbered_banks(elf.with_function_sizes(
-            (self.pristine / self.arm9_build / "asm/unk_02035068.o").read_bytes())))
+        self.pristine_asm = self._start_menu(self.work / "pristine-asm")
+        self.pristine_objects[ASM] = elf.Elf(self._renumbered_banks(elf.with_function_sizes(self.pristine_asm)))
         self.located, self.located_data, problems = {}, {}, []
         for name in [*self.files, ASM]:
             problems += self._locate(name, self.pristine_objects[name])
         require(not problems, "upstream code differs from the retail game:\n  " + "\n  ".join(problems))
         self.files = [*self.files, ASM]
         self.log(f"{len(self.located)} functions and {len(self.located_data)} data objects match the retail game")
+
+    def witnesses(self):
+        super().witnesses()
+        # The start menu's tables name other game functions (sub-menu actions): read them from the
+        # game's copy of the tables too.
+        pristine = elf.Elf(self.pristine_asm)
+        ro = next(i for i, s in enumerate(pristine.sections) if s["name"] == ".rodata")
+        body = pristine.section_bytes(ro)
+        keep = [True] * len(body)
+        for offset, *_ in pristine.relocs.get(ro, ()):
+            keep[offset:offset + 4] = [False] * 4
+        block = symbols.unique_match(self.modules, "arm9", body, keep, 4)
+        require(block is not None, f"the tables of {ASM} were not found once in the retail game")
+        base, image = self.modules["arm9"]
+        problems, added = [], 0
+        for offset, kind, index, addend in pristine.relocs.get(ro, ()):
+            symbol = pristine.symbols[index]
+            if kind != elf.R_ARM_ABS32 or symbol["shndx"] != 0 or not symbol["name"]:
+                continue
+            target = struct.unpack_from("<I", image, block - base + offset)[0] - addend
+            name = symbol["name"]
+            if self.witnessed.setdefault(name, target) & ~1 != target & ~1:
+                problems.append(f"{name} is referenced at {self.witnessed[name]:#x} and {target:#x}")
+            us = self.image.unique(name)
+            mapped = self.map.addr.get(us.num) if us else None
+            if mapped is not None and mapped & ~1 != target & ~1:
+                problems.append(f"{name}: the start menu's tables point at {target:#x}, the symbol map says {mapped:#x}")
+            added += 1
+        require(not problems, "retail references disagree:\n  " + "\n  ".join(problems))
+        self.log(f"{added} references of the start menu's tables read from the retail game")
 
     # --- 2. Compile Wonder Trade for this language ------------------------------------------------------
     def port_defines(self):
@@ -329,8 +462,11 @@ class Target(platinum.Target):
         self.objects = {}
         inputs = [(path, path.name) for path in objects]
         inputs += [(path, "tls_" + path.relative_to(build / "wt_tls").as_posix().replace("/", "_")) for path in tls]
-        inputs.append((build / "asm/unk_02035068.o", ASM.replace("/", "_") + ".o"))
         asm = ASM.replace("/", "_") + ".o"
+        port_asm = self.work / "port-asm" / asm
+        port_asm.parent.mkdir(parents=True, exist_ok=True)
+        port_asm.write_bytes(self._start_menu(self.work / "port-asm", wonder_trade=True))
+        inputs.append((port_asm, asm))
         _, wanted = link.defined_and_needed([path.read_bytes() for path, name in inputs if name != asm])
         for path, name in inputs:
             data = path.read_bytes()
@@ -342,12 +478,55 @@ class Target(platinum.Target):
                              if self._file_of(name) in self.files}
         self.log(f"compiled {len(objects)} objects for variant {self.code:#010x}")
 
+    def _start_menu(self, out, wonder_trade=False):
+        """The start menu's object: the build's, or, for a language whose start menu is written
+        out from the cartridge, that assembly (with Wonder Trade's changes) assembled here."""
+        if self.language not in START_MENUS:
+            build = self.workspace if wonder_trade else self.pristine
+            return (build / self.arm9_build / "asm/unk_02035068.o").read_bytes()
+        changes = START_MENUS[self.language]
+        tree = out / "src"
+        shutil.rmtree(tree, ignore_errors=True)
+        (tree / ASM).parent.mkdir(parents=True)
+        (tree / ASM).write_text(self._written_start_menu())
+        if wonder_trade:
+            result = subprocess.run(["patch", "-s", "-p1", "--fuzz=0", "--no-backup-if-mismatch", "-d", str(tree),
+                                     "-i", str(RETAIL / changes)], capture_output=True, text=True)
+            require(result.returncode == 0, f"{changes} does not apply: {result.stdout}{result.stderr}")
+        return toolchain.assemble_dp(self.workspace, tree, out, ASM, self.version, self._tls())
+
+    def _written_start_menu(self):
+        """The player's own start menu as assembly, made from the dump (never stored in the repository)."""
+        if getattr(self, "start_menu_source", None) is None:
+            us = elf.Elf(elf.with_function_sizes((self.pristine / self.arm9_build / "asm/unk_02035068.o").read_bytes()))
+            ro = next(i for i, s in enumerate(us.sections) if s["name"] == ".rodata")
+            body = us.section_bytes(ro)
+            keep = [True] * len(body)
+            for offset, *_ in us.relocs.get(ro, ()):
+                keep[offset:offset + 4] = [False] * 4
+            rodata_at = symbols.unique_match(self.modules, "arm9", body, keep, 4)
+            require(rodata_at is not None, f"the tables of {ASM} were not found once in the retail game")
+            placed = {}
+            for num, at in self.map.addr.items():
+                symbol = self.map._bynum[num]
+                if self.image.module(symbol) == "arm9" and symbol.kind in symbols.FUNCTION_KINDS:
+                    placed.setdefault(at & ~1, set()).add(symbol.name)
+            try:
+                self.start_menu_source = writeout.write_out(
+                    us, git(self.workspace, "show", f"HEAD:{ASM}").decode(), writeout.Module(*self.modules["arm9"]),
+                    rodata_at, placed, START_MENU_HEADER)
+            except writeout.WriteOutError as error:
+                raise PortError(f"{ASM} could not be written out from the retail game: {error}") from None
+            (self.work / "start-menu.s").write_text(self.start_menu_source)
+        return self.start_menu_source
+
     def _renumbered_banks(self, data):
         """The start menu assembly with the cartridge's message bank numbers.
 
         It loads banks as NewMsgDataFromNarc(..., NARC_msgdata_msg, bank, ...) with the bank
-        in a literal (ldr r2, =bank); the C code gets them from msg.naix."""
-        if self.bank_remap is None:
+        in a literal (ldr r2, =bank); the C code gets them from msg.naix. A start menu written
+        out from the cartridge already has them."""
+        if self.bank_remap is None or self.language in START_MENUS:
             return data
         obj = elf.Elf(data)
         text = next(i for i, s in enumerate(obj.sections) if s["name"] == ".text")
@@ -382,7 +561,7 @@ class Target(platinum.Target):
         table stays in the module with the assembly that reads it: its labels do not mark
         where a table ends (the start menu's entries span two labels), so splitting them
         could pair the module's entries with the game's."""
-        pristine = elf.Elf((self.pristine / self.arm9_build / "asm/unk_02035068.o").read_bytes())
+        pristine = elf.Elf(self.pristine_asm)
         port = elf.Elf(data)
 
         def tables(obj):
@@ -436,6 +615,7 @@ class Target(platinum.Target):
     def link(self):
         build = self.workspace / self.arm9_build
         library = sdk.Library([*sorted((build / "lib/NitroSDK").rglob("*.o")), *sorted((build / "lib/MSL_C").rglob("*.o")),
+                               *[build / name for name in COPIED.get(self.language, ())],
                                *sorted((build / "lib/libnns").rglob("*.o")), build / "lib/libsyscall.a"])
         out = self.work / "link"
         self.base = platinum.retail_arena(self.rom)
