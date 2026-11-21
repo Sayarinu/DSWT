@@ -11,9 +11,12 @@ https://github.com/Sayarinu/DSWT/wiki.
     Platinum, Diamond or Pearl (Rev 5), HeartGold or SoulSilver.
   - Japanese: Pokémon Platinum, HeartGold or SoulSilver.
   - Korean: Pokémon Platinum, Diamond, Pearl, HeartGold or SoulSilver.
+  - Pokémon Black 2 or White 2, the English cartridge sold in the US and Europe.
 
   Other versions and languages are recognised but not supported yet.
-- melonDS 1.1. Physical DS hardware isn't supported yet.
+- melonDS 1.1. Physical DS hardware isn't supported yet. Run a patched Black 2
+  or White 2 in DS mode: in melonDS's **Config** > **Emu settings**, set
+  **Console type** to **DS**. DSi mode doesn't work with the patched game.
 - DSWT Patcher for your computer: the one file to download from the release page.
   It carries every patch. Other patching tools such as Flips don't work.
 
@@ -34,7 +37,8 @@ page lists every file's checksum.
 ## Trade
 
 Open the menu and choose **Wonder Trade**. In HeartGold and SoulSilver it's on the
-touch-screen menu. In other languages the entry uses your game's name for it, such
+touch-screen menu. In Black 2 and White 2, open the menu with X, then press
+Select. In other languages the entry uses your game's name for it, such
 as **ECHANGE MIRACLE**, **WUNDERTAUSCH** or **ミラクルこうかん**, and its screens
 use your game's language. A brand-new save may ask
 you to keep playing for a moment first, to gather randomness that secures your
