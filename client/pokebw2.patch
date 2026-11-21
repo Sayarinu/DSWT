@@ -112,6 +112,42 @@ index 90a0ae59c..cff13b03f 100644
             "Generating linker script for $config")
      # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
      n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
+diff --git a/src/field/event/event_field_menu.c b/src/field/event/event_field_menu.c
+index 2f91cd757..4b921acba 100644
+--- a/src/field/event/event_field_menu.c
++++ b/src/field/event/event_field_menu.c
+@@ -10,6 +10,7 @@
+ #include "field/player_action.h"
+ #include "field/subscreen.h"
+ #include "field/zone.h"
++#include "gfl/key.h"
+ #include "gfl/std.h"
+ #include "gfl/ui.h"
+ #include "system/game_data.h"
+@@ -32,6 +33,8 @@ enum {
+ };
+ 
+ static u32 FieldMenu_GetAppId(u32 index);
++// DSWT Wonder Trade's field event (src/wonder_trade/bw2/application.c)
++GameEvent *WtEvent_Create(GameSystem *gsys, Field *field);
+ static BOOL FieldMenu_CanRetry(FieldAppCallInput *input, void *arg);
+ static BOOL FieldMenu_CanLeaveField(FieldAppCallInput *input, void *arg);
+ static BOOL FieldMenu_OnAppEnd(FieldAppCallInput *input, void *arg);
+@@ -108,6 +111,14 @@ GameEventReturnCode EventFieldMenu_Callback(GameEvent *event, u32 *state, void *
+         }
+         break;
+     case FIELD_MENU_EVENT_STATE_WAIT_SELECTION:
++        if (GCTX_HIDGetPressedKeys() & PAD_BUTTON_SELECT) {
++            // DSWT: Select opens Wonder Trade; the field comes back without the menu
++            GameData_SetLastSubscreen(GSYS_GetGameData(work->gameSystem), work->screenId);
++            work->appCall.eventType = FIELD_APP_RESULT_EXIT;
++            GameEvent_ChainNext(event, WtEvent_Create(work->gameSystem, work->field));
++            work->state = FIELD_MENU_EVENT_STATE_CLOSE;
++            break;
++        }
+         returnSubscreen = FieldSubscreen_GetReturnSubscreen(Field_GetSubscreen(work->field));
+         if (returnSubscreen == FIELD_MENU_RESULT_SELECTED) {
+             work->state = FIELD_MENU_EVENT_STATE_SELECTED;
 diff --git a/src/gfl/backup_card.c b/src/gfl/backup_card.c
 index 8537e153c..0fe8b19e0 100644
 --- a/src/gfl/backup_card.c

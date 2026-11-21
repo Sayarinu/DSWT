@@ -5,6 +5,7 @@
 #include "gfl/heapsys.h"
 #include "gfl/proc.h"
 #include "wonder_trade/boot.h"
+#include "wonder_trade/bw2/application.h"
 #include "wonder_trade/bw2/game_save.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/recovery.h"
@@ -25,6 +26,7 @@ typedef struct WtBootWorker {
 } WtBootWorker;
 
 static WtBootWorker *sWorker;
+static WtApp *sApp;
 
 static void WtBoot_Worker(void *arg)
 {
@@ -75,10 +77,16 @@ static BOOL WtBoot_Tick(GameProc *proc, u32 *state, void *param, void *work)
         GFL_HeapFreeCore(worker);
         sWorker = NULL;
     }
-    /* A blocked save keeps the game here until Wonder Trade's recovery
-     * screen can resolve it. */
     (void)state;
-    return WtRecovery_CanWrite() ? TRUE : FALSE;
+    if (WtRecovery_CanWrite()) return TRUE;
+    /* A blocked save keeps the game here, on Wonder Trade's recovery screen,
+     * until a connection resolves it. */
+    if (!sApp) sApp = WtApp_Create(TRUE);
+    if (sApp && WtApp_Update(sApp)) {
+        WtApp_Free(sApp);
+        sApp = NULL;
+    }
+    return FALSE;
 }
 
 static BOOL WtBoot_End(GameProc *proc, u32 *state, void *param, void *work)
