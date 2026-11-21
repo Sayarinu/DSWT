@@ -64,6 +64,20 @@ GAMES = {
         "rom_sha1": "{}.sha1",
         "destinations": {"res-bw2": "res"},
     },
+    # Project-Holon/aletheia builds Black and White from one tree with its own
+    # Python tools and CodeWarrior under Wine. Its targets table
+    # (tools/targets.py) lists each cartridge's SHA-1. It has no Wonder Trade
+    # integration yet, so only its pristine workspace is prepared.
+    "bw": {
+        "pin": "client/upstream-aletheia.json",
+        "patch": None,
+        "build_patches": (),
+        "staged_revisions": (),
+        "workspace": "aletheia",
+        "adapter": "bw",
+        "resources": (),
+        "rom_sha1": "tools/targets.py",
+    },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
 RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
@@ -149,6 +163,11 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
     for revision, digest in pin["rom_sha1"].items():
         if revision in game["staged_revisions"]:
             continue
+        if "{}" not in game["rom_sha1"]:
+            # A table of every target's SHA-1 in one file
+            if f'"{digest}"'.encode() not in git(workspace, "show", "HEAD:" + game["rom_sha1"]):
+                raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
+            continue
         upstream = git(workspace, "show", "HEAD:" + game["rom_sha1"].format(revision))
         if upstream.decode().split()[0] != digest:
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
@@ -213,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
                         help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
-                             "dp for Diamond and Pearl, or bw2 for Black 2 and White 2")
+                             "dp for Diamond and Pearl, bw2 for Black 2 and White 2, or bw for Black and White (--pristine only)")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))

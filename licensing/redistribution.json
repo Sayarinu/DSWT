@@ -508,6 +508,27 @@
       "requirements": "Keep the checkout local in game/pokebw2-pristine/; no pokebw2 source is vendored. Its GPL-3.0 covers the decompiled source, build scripts and the swan symbol names it imports (also GPL-3.0). Anything distributed that is based on it, such as a future integration patch, a modified source file or a BPS patch or ROM built from it, must be offered under GPL-3.0 with the license text, its notices and the complete corresponding source: the exact pokebw2 revision, the integration patch, the project additions it links and the build scripts. Project code combined into such a build must be GPL-3.0-compatible (MIT and Apache-2.0 are). The GPL does not cover the game's own code, graphics, text and data, which the build extracts from the player's dump: never commit or publish the dump, orig/, extract/ or build/ output."
     },
     {
+      "name": "Black and White decompilation (Project-Holon/aletheia)",
+      "license": "src/: NOASSERTION (no licence grant); tools/, layout/ and docs/: MIT",
+      "evidence": [
+        "client/upstream-aletheia.json",
+        "client/UPSTREAM.md",
+        "https://github.com/Project-Holon/aletheia/blob/50731dd699fb0fb3f881cd028a67d8f6aa649a88/LEGAL.md",
+        "https://github.com/Project-Holon/aletheia/blob/50731dd699fb0fb3f881cd028a67d8f6aa649a88/LICENSE"
+      ],
+      "decision": "pinned_local_source_build; owner_accepted",
+      "requirements": "Keep the checkout local in game/aletheia-pristine/; no aletheia source is vendored. Its LEGAL.md licenses tools/, layout/, docs/ and the build scripts under MIT and distributes the reverse-engineered game source in src/ without any licence grant: it stays the property of Nintendo, Creatures and GAME FREAK, and the owner accepted building on it (LUNE-837). Keep aletheia's MIT notice with anything distributed that contains its tools. Never commit or publish a dump, extract/, asm/ or build/ output, or any patch that carries game code beyond the project's own additions."
+    },
+    {
+      "name": "CodeWarrior compilers used by aletheia (decomp.aetias.com mwccarm.zip: dsi/1.1p1, 2.0/sp2, 2.0/sp1p2, 2.0/sp2p2, 1.2/sp2, 1.2)",
+      "license": "NOASSERTION",
+      "evidence": [
+        "https://decomp.aetias.com/files/mwccarm.zip"
+      ],
+      "decision": "exclude",
+      "requirements": "Proprietary Metrowerks compilers fetched by checksum into a local build image and the workspace's ignored tools/mwccarm/. Download availability is not a redistribution grant; never publish its binaries, the image or its layers."
+    },
+    {
       "name": "pokebw2 build tools: wibo pokebw2-sjis-1, sjiswrap v1.2.2-pokebw2.1 and dsd v0.12.1-dsi.10",
       "license": "wibo: MIT; sjiswrap: Apache-2.0; dsd (ds-decomp): MIT",
       "evidence": [

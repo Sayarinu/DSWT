@@ -55,8 +55,27 @@ case "$game" in
         fi
         prepare_args=(--game bw2)
         ;;
+    black|white)
+        # Project-Holon/aletheia builds the USA/Europe cartridge of each
+        # version from the player's own dump. It has no Wonder Trade
+        # integration yet.
+        revision="${ROM_REVISION:-0}"
+        if [[ "$revision" != 0 ]]; then
+            echo "ROM_REVISION must be 0 for Black and White" >&2
+            exit 2
+        fi
+        if [[ "$build_mode" != pristine ]]; then
+            echo "Black and White build only with --pristine for now" >&2
+            exit 2
+        fi
+        if [[ ! -f "${DSWT_BW_ROM:-}" ]]; then
+            echo "Set DSWT_BW_ROM to your own USA/Europe dump of $game" >&2
+            exit 2
+        fi
+        prepare_args=(--game bw)
+        ;;
     *)
-        echo "ROM_GAME must be platinum, heartgold, soulsilver, diamond, pearl, black2 or white2" >&2
+        echo "ROM_GAME must be platinum, heartgold, soulsilver, diamond, pearl, black2, white2, black or white" >&2
         exit 2
         ;;
 esac
@@ -71,6 +90,10 @@ if [[ "$game" == diamond || "$game" == pearl ]]; then
     # pokediamond's Make build runs Metrowerks and Nitro SDK 3.2 tools under Wine.
     image="dswt-rom-builder-dp"
     builder="$repo_root/tools/rom-builder-dp"
+elif [[ "$game" == black || "$game" == white ]]; then
+    # aletheia runs CodeWarrior under Wine.
+    image="dswt-rom-builder-bw"
+    builder="$repo_root/tools/rom-builder-bw"
 elif [[ "$game" == black2 || "$game" == white2 ]]; then
     # pokebw2 runs Metrowerks tools through wibo, with its own pinned dsd.
     image="dswt-rom-builder-bw2"
@@ -90,6 +113,9 @@ fi
 workspace="$("$python" "$repo_root/scripts/prepare-game.py" ${prepare_args[@]+"${prepare_args[@]}"} "$@")"
 if [[ "$game" == platinum && "$revision" == 10 ]]; then
     "$python" "$repo_root/scripts/prepare-europe.py" "$DSWT_EUROPE_ROM" "$workspace" >/dev/null
+elif [[ "$game" == black || "$game" == white ]]; then
+    # aletheia reads the dump from <target>.nds in its root, which it ignores.
+    cmp -s "$DSWT_BW_ROM" "$workspace/$game.nds" 2>/dev/null || cp "$DSWT_BW_ROM" "$workspace/$game.nds"
 elif [[ "$game" == black2 || "$game" == white2 ]]; then
     # pokebw2 reads the dump from its ignored orig/ and checks its SHA-1 first.
     baserom="$workspace/orig/baserom_${game:0:1}2_us.nds"
@@ -108,6 +134,24 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
     meson=subprojects/meson-1.12.0/meson.py
     wonder_trade=(-Dwonder_trade_tls_dir=/tls -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h)
+    if [[ "$ROM_GAME" == black || "$ROM_GAME" == white ]]; then
+        # Install the image'"'"'s CodeWarrior releases into the ignored tools/.
+        if [[ ! -d tools/mwccarm/mwccarm/dsi/1.1p1 ]]; then
+            mkdir -p tools/mwccarm/mwccarm
+            cp -R /opt/aletheia/tools/mwccarm/. tools/mwccarm/mwccarm/
+        fi
+        WINEPREFIX="$(mktemp -d)"
+        export WINEPREFIX
+        wineserver -p
+        wineboot -i 2>/dev/null
+        # White keeps aletheia'"'"'s older paths (docs/ROMS.md). romlink.py checks
+        # the rebuilt ROM'"'"'s SHA-1.
+        extract=extract; [[ "$ROM_GAME" == white ]] && extract=extract_white
+        python3 tools/ndsrom.py extract "$ROM_GAME.nds" -o "$extract"
+        python3 tools/delink.py -e "$extract" -l "build/$ROM_GAME/layout"
+        python3 tools/romlink.py --target "$ROM_GAME" --relink
+        exit
+    fi
     if [[ "$ROM_GAME" == black2 || "$ROM_GAME" == white2 ]]; then
         # Install the image'"'"'s pinned tools into the ignored tools/, unlike
         # the ones configure.py downloads for a native build. Ninja builds the

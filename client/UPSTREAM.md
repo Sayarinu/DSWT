@@ -9,6 +9,7 @@ workspaces:
 | HeartGold, SoulSilver | [`pret/pokeheartgold`](https://github.com/pret/pokeheartgold) | [`upstream-pokeheartgold.json`](upstream-pokeheartgold.json) | `game/pokeheartgold/` |
 | Diamond, Pearl | [`pret/pokediamond`](https://github.com/pret/pokediamond) | [`upstream-pokediamond.json`](upstream-pokediamond.json) | `game/pokediamond/` |
 | Black 2, White 2 | [`fuddlesworth/pokebw2`](https://github.com/fuddlesworth/pokebw2) | [`upstream-pokebw2.json`](upstream-pokebw2.json) | `game/pokebw2-pristine/` |
+| Black, White | [`Project-Holon/aletheia`](https://github.com/Project-Holon/aletheia) | [`upstream-aletheia.json`](upstream-aletheia.json) | `game/aletheia-pristine/` |
 
 - Each pin records the upstream revision, tree and pristine US ROM checksums.
 - Platinum revision `10` is European English, which upstream does not build:
@@ -28,6 +29,7 @@ python3 scripts/prepare-game.py               # Platinum
 python3 scripts/prepare-game.py --game hgss   # HeartGold and SoulSilver
 python3 scripts/prepare-game.py --game dp     # Diamond and Pearl
 python3 scripts/prepare-game.py --game bw2 --pristine  # Black 2 and White 2
+python3 scripts/prepare-game.py --game bw --pristine   # Black and White
 ```
 
 Preparation is repeatable and rejects incompatible source or local edits. Keep
@@ -91,6 +93,19 @@ download, by checksum, and the build runs it with `--no-download`. wibo needs
 32-bit code segments, which Docker's Rosetta and QEMU emulation lack, so on an
 Apple silicon Mac build natively instead: `python3 configure.py` and `ninja`
 in the workspace, as pokebw2's `docs/building.md` describes.
+
+The Black/White pin is aletheia's newest revision; its own CI only reports
+progress, so the pin was checked by rebuilding both ROMs. aletheia's tools are
+MIT, while its reverse-engineered `src/` carries no licence grant (its
+`LEGAL.md`); the owner accepted building on it. It needs the CodeWarrior
+compilers its README lists (`tools/mwccarm/mwccarm/`, with `1.2` the 1.2 base
+release) and Wine, and builds each cartridge from the player's dump:
+
+```sh
+python3 tools/ndsrom.py extract black.nds -o extract
+python3 tools/delink.py -e extract -l build/black/layout
+python3 tools/romlink.py --target black --relink
+```
 
 Upstream notices stay in the local workspace. Its source, SDKs, toolchain and
 ROM output are excluded from this repository and require their own rights review.

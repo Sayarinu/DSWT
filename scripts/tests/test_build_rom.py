@@ -362,6 +362,31 @@ def record(tool, args):
                 self.assertEqual(self.calls_for('ninja'), [['-j1', 'build/' + rom]])
                 self.assert_docker('modified', '0', '1', 'dswt-rom-builder-bw2', 'tools/rom-builder-bw2')
 
+    def test_black_and_white_build_from_the_players_dump(self):
+        (self.workspace / 'tools/mwccarm/mwccarm/dsi/1.1p1').mkdir(parents=True)
+        for tool in ('ndsrom', 'delink', 'romlink'):
+            self.tool(self.workspace / f'tools/{tool}.py', f"record({tool!r}, sys.argv[1:])\n")
+        for game, extract in (('black', 'extract'), ('white', 'extract_white')):
+            dump = self.root / f'{game} dump.nds'
+            dump.write_bytes(game.encode())
+            env = dict(self.env, ROM_GAME=game, DSWT_BW_ROM=str(dump))
+            del env['ROM_REVISION'], env['WONDER_TRADE_PROFILE']
+            with self.subTest(game=game):
+                result = self.run_build('--pristine', env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'bw', '--pristine']])
+                self.assertEqual((self.workspace / f'{game}.nds').read_bytes(), game.encode())
+                self.assertEqual(self.calls_for('ndsrom'), [['extract', f'{game}.nds', '-o', extract]])
+                self.assertEqual(self.calls_for('delink'), [['-e', extract, '-l', f'build/{game}/layout']])
+                self.assertEqual(self.calls_for('romlink'), [['--target', game, '--relink']])
+                self.assertEqual(self.calls_for('wineserver'), [['-p']])
+                self.assert_docker('pristine', '0', '1', 'dswt-rom-builder-bw', 'tools/rom-builder-bw')
+            with self.subTest(game=game, mode='modified'):
+                result = self.run_build(env=dict(env, WONDER_TRADE_PROFILE=str(self.profile)))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('--pristine', result.stderr)
+                self.assertEqual(self.calls, [])
+
     def test_black2_and_white2_need_a_dump_and_a_profile(self):
         dump = self.root / 'dump.nds'
         dump.write_bytes(b'ROM')
