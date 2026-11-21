@@ -315,12 +315,12 @@ await Test("real isolated worker accepts legal and rejects illegal payload", asy
     Console.WriteLine($"Worker cold validation: {clock.ElapsedMilliseconds} ms");
     reply = await runner.Run(illegal[0].Data, CancellationToken.None);
     Require(!reply.Legal, "worker accepted egg");
-    // The slowest name path loads the allow-list and every game-term list in a cold worker.
+    // The slowest name path loads the allow-list and every game-term list the first time a worker uses it.
     var term = Nicknamed("LEAFAGE");
     clock.Restart();
     reply = await runner.Run(term, CancellationToken.None);
     Require(reply.Legal, "worker refused a Pokémon term");
-    Console.WriteLine($"Worker cold name exemption: {clock.ElapsedMilliseconds} ms");
+    Console.WriteLine($"Worker first name exemption: {clock.ElapsedMilliseconds} ms");
     reply = await runner.Run(Nicknamed("SHIT"), CancellationToken.None);
     Require(!reply.Legal && reply.ReasonCodes.SequenceEqual(["INAPPROPRIATE_NAME"]), "worker accepted an offensive name");
 });
@@ -332,6 +332,51 @@ ProcessStartInfo Shell(string command)
     start.ArgumentList.Add(command);
     return start;
 }
+// A worker command that appends a line to a file each time a process starts.
+ProcessStartInfo Counted(string path, string command)
+{
+    var start = Shell("echo started >> \"$1\"; " + command);
+    start.ArgumentList.Add("fixture");
+    start.ArgumentList.Add(path);
+    start.ArgumentList.Add(typeof(Policy).Assembly.Location);
+    return start;
+}
+int Starts(string path) => File.Exists(path) ? File.ReadAllLines(path).Length : 0;
+
+await Test("a worker that answered serves later payloads until recycled", async () =>
+{
+    string path = Path.Combine(Path.GetTempPath(), "validator-test-" + Guid.NewGuid().ToString("N"));
+    using var runner = new WorkerRunner(() => Counted(path, "exec dotnet \"$2\" --worker"), TimeSpan.FromSeconds(5), 1);
+    try
+    {
+        var egg = illegal[0].Data;
+        for (int i = 0; i < WorkerRunner.MaxUses; i++)
+        {
+            var data = i % 2 == 0 ? good : egg;
+            var reply = await runner.Run(data, CancellationToken.None);
+            CheckReply(reply, data);
+            Require(reply.Legal == (i % 2 == 0), "reused worker changed a verdict");
+        }
+        Require(Starts(path) == 1, $"reused worker restarted: {Starts(path)} starts");
+        var last = await runner.Run(good, CancellationToken.None);
+        Require(last.Legal && Starts(path) == 2, "worker was not recycled after its last use");
+    }
+    finally { File.Delete(path); }
+});
+
+await Test("a worker that failed is never reused", async () =>
+{
+    string path = Path.Combine(Path.GetTempPath(), "validator-test-" + Guid.NewGuid().ToString("N"));
+    using var runner = new WorkerRunner(() => Counted(path, "head -c 4096 /dev/zero; exec sleep 20"), TimeSpan.FromMilliseconds(500), 1);
+    try
+    {
+        await ExpectStatus(async () => await runner.Run(good, CancellationToken.None), StatusCode.Unavailable);
+        await ExpectStatus(async () => await runner.Run(good, CancellationToken.None), StatusCode.Unavailable);
+        Require(Starts(path) == 2, $"failed worker reused: {Starts(path)} starts");
+    }
+    finally { File.Delete(path); }
+});
+
 await Test("worker deadline kills hung process and releases admission", async () =>
 {
     string path = Path.Combine(Path.GetTempPath(), "validator-test-" + Guid.NewGuid().ToString("N"));
@@ -400,6 +445,8 @@ await Test("actual internal gRPC payload verdict deadline and size contract", as
     using var channel = GrpcChannel.ForAddress(addresses.Addresses.Single());
     var client = new PokemonLegality.PokemonLegalityClient(channel);
     ValidateRequest Request(byte[] bytes) => new() { Pokemon = new() { Pk4 = ByteString.CopyFrom(bytes), Sha256 = ByteString.CopyFrom(SHA256.HashData(bytes)) } };
+    // Before any call, so the first worker's start-up outlasts the deadline; a warm worker can answer within 1 ms.
+    await ExpectStatus(async () => await client.ValidateAsync(Request(good), deadline: DateTime.UtcNow.AddMilliseconds(1)), StatusCode.DeadlineExceeded);
     var reply = await client.ValidateAsync(Request(good), deadline: DateTime.UtcNow.AddSeconds(2));
     CheckReply(reply, good);
     Require(reply.Legal && reply.Destinations == (uint)Policy.AllDestinations, "gRPC rejected legal payload");
@@ -410,7 +457,6 @@ await Test("actual internal gRPC payload verdict deadline and size contract", as
     await ExpectStatus(async () => await client.ValidateAsync(Request(new byte[135])), StatusCode.InvalidArgument);
     await ExpectStatus(async () => await client.ValidateAsync(Request(new byte[260])), StatusCode.ResourceExhausted);
     await ExpectStatus(async () => await client.ValidateAsync(Request(new byte[4096])), StatusCode.Unknown);
-    await ExpectStatus(async () => await client.ValidateAsync(Request(good), deadline: DateTime.UtcNow.AddMilliseconds(1)), StatusCode.DeadlineExceeded);
     await app.StopAsync();
 });
 Console.WriteLine($"{passed} validator scenarios passed.");
