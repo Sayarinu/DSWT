@@ -64,7 +64,7 @@ LegalityClient::LegalityClient(const std::string &address,
 LegalityClient::~LegalityClient() = default;
 
 LegalityDecision LegalityClient::CheckNewSubmission(
-    const std::array<unsigned char, 136> &pk4) {
+    const std::array<unsigned char, 136> &pk4, PokemonFormat format) {
   unsigned verdict = 11;
   RpcTelemetry trace(Operation::Legality, nullptr, [&] { return verdict; });
   std::array<unsigned char, 32> digest{};
@@ -76,13 +76,15 @@ LegalityDecision LegalityClient::CheckNewSubmission(
   v1::ValidateRequest request;
   request.mutable_pokemon()->set_pk4(pk4.data(), pk4.size());
   request.mutable_pokemon()->set_sha256(hash);
+  request.set_format(format == PokemonFormat::PK5 ? v1::FORMAT_PK5 : v1::FORMAT_PK4);
   v1::ValidateReply reply;
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() + impl_->timeout);
   context.set_wait_for_ready(false);
   auto status = impl_->stub->Validate(&context, request, &reply);
   if (!status.ok() || reply.policy_version() != impl_->policy || reply.sha256() != hash ||
-      reply.reason_codes_size() > 8 || (reply.destinations() & ~kAllDestinations) != 0)
+      reply.format() != request.format() ||
+      reply.reason_codes_size() > 8 || (reply.destinations() & ~FormatDestinations(format)) != 0)
     return {};
   if (reply.legal()) {
     // An empty destination set (as from a validator predating the field) is
