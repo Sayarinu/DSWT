@@ -1,11 +1,13 @@
 using System.Buffers.Binary;
 using Google.Protobuf;
 using DSWT.Validator;
+using Dswt.V1;
 
 if (args.SequenceEqual(new[] { "--worker" }))
 {
     // One isolated worker serves canonical payloads until its input closes:
-    // each 136-byte request gets a reply framed by its little-endian u16 length.
+    // each request is a format byte (0 PK4, 1 PK5) and 136 bytes, and gets a
+    // reply framed by its little-endian u16 length. Any other format byte ends it.
     try
     {
         using var input = Console.OpenStandardInput();
@@ -14,12 +16,13 @@ if (args.SequenceEqual(new[] { "--worker" }))
         byte[] header = new byte[2];
         while (true)
         {
-            int first = input.ReadByte();
-            if (first == -1)
+            int format = input.ReadByte();
+            if (format == -1)
                 return 0;
-            data[0] = (byte)first;
-            await input.ReadExactlyAsync(data.AsMemory(1));
-            byte[] reply = Policy.Analyze(data.ToArray()).ToByteArray();
+            if (!Policy.IsKnown((PokemonFormat)format))
+                return 2;
+            await input.ReadExactlyAsync(data);
+            byte[] reply = Policy.Analyze((PokemonFormat)format, data.ToArray()).ToByteArray();
             BinaryPrimitives.WriteUInt16LittleEndian(header, checked((ushort)reply.Length));
             await output.WriteAsync(header);
             await output.WriteAsync(reply);
