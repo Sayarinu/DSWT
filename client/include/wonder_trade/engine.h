@@ -2,6 +2,7 @@
 #define WONDER_TRADE_ENGINE_H
 
 #include "wonder_trade/journal.h"
+#include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/wire.h"
 
 /* How long a client resends a request while the server waits for its backup to
@@ -25,13 +26,13 @@ enum WtInventoryStep {
  * never authorizes a network mutation or gameplay. A full destination returns
  * 1 from PREPARE_RECEIVE and retains the received payload without an ACK.
  * canHold returns nonzero when the game can hold a matched delivery's
- * canonical PK4; zero refuses it before the journal records it.
+ * canonical PK4 or PK5; zero refuses it before the journal records it.
  * Serialize the entire engine operation with transport and ordinary saves. */
 typedef struct WtEngineIO {
     void *arg;
     int (*random)(void *, unsigned char *, size_t);
     int (*inventory)(void *, enum WtInventoryStep, WtJournalEntry *, unsigned slot);
-    int (*canHold)(void *, const unsigned char[136]);
+    int (*canHold)(void *, const unsigned char[WT_POKEMON_SIZE]);
 } WtEngineIO;
 
 typedef struct WtEngine {

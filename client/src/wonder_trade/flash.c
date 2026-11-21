@@ -36,7 +36,7 @@ int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
         goto done;
     }
     if (!CARD_ReadFlash(address, record, 4096)) { access->error = READ_FAILED; goto done; }
-    for (offset = 4096; offset < 0x10000; offset += sizeof(page)) {
+    for (offset = 4096; offset < WT_GAME_BANK_RESERVED_SIZE; offset += sizeof(page)) {
         u32 i;
         if (!CARD_ReadFlash(address + offset, page, sizeof(page))) { access->error = READ_FAILED; goto done; }
         for (i = 0; i < sizeof(page); i++) {

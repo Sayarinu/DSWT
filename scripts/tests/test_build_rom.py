@@ -115,7 +115,7 @@ else:
 ''')
         self.tool(binary / 'ninja', '''
 record('ninja', sys.argv[1:])
-assert sys.argv[1:] == ['-j' + os.environ['ROM_BUILD_JOBS']]
+assert sys.argv[1] == '-j' + os.environ['ROM_BUILD_JOBS']
 if Path('build/regenerate').exists():
     # Meson interprets NINJA as one executable name during regeneration.
     assert shutil.which(os.environ.get('NINJA', 'ninja')), 'Could not detect Ninja'
@@ -341,12 +341,33 @@ def record(tool, args):
                     self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
             self.assertEqual(dump.read_bytes(), game.encode() + b' ROM')
 
-    def test_black2_and_white2_need_a_dump_and_a_pristine_build(self):
+    def test_black2_and_white2_modified_builds_link_wonder_trade(self):
+        marker = self.workspace / 'tools/mwccarm/dswt-rom-builder-bw2'
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        for game, version, rom in (('black2', 'b2_us', 'pokeblack2_us.nds'), ('white2', 'w2_us', 'pokewhite2_us.nds')):
+            dump = self.root / f'{game} dump.nds'
+            dump.write_bytes(game.encode())
+            env = dict(self.env, ROM_GAME=game, DSWT_BW2_ROM=str(dump))
+            del env['ROM_REVISION']
+            with self.subTest(game=game):
+                result = self.run_build(env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'bw2']])
+                self.assertEqual(self.calls_for('tls'), [[]])
+                self.assertEqual(self.calls_for('configure'), [[
+                    '--no-download', version, '--wonder-trade-tls', '/tls',
+                    '--wonder-trade-profile', '/workspace/.git/dswt-connection.h',
+                    '--wonder-trade-msl', '/opt/pokebw2/msl']])
+                self.assertEqual(self.calls_for('ninja'), [['-j1', 'build/' + rom]])
+                self.assert_docker('modified', '0', '1', 'dswt-rom-builder-bw2', 'tools/rom-builder-bw2')
+
+    def test_black2_and_white2_need_a_dump_and_a_profile(self):
         dump = self.root / 'dump.nds'
         dump.write_bytes(b'ROM')
         base = dict(self.env, DSWT_BW2_ROM=str(dump))
         del base['ROM_REVISION']
-        cases = [((), base, '--pristine'),
+        cases = [((), dict(base, WONDER_TRADE_PROFILE=''), 'WONDER_TRADE_PROFILE'),
                  (('--pristine',), dict(base, ROM_REVISION='1'), 'ROM_REVISION'),
                  (('--pristine',), dict(base, DSWT_BW2_ROM=''), 'DSWT_BW2_ROM'),
                  (('--pristine',), dict(base, DSWT_BW2_ROM=str(self.root / 'missing.nds')), 'DSWT_BW2_ROM')]

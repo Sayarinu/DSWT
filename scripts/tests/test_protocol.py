@@ -342,6 +342,29 @@ class GenVSaveLayoutTests(unittest.TestCase):
         self.assertTrue(reserved["offset"] <= footer - bank
                         and footer - bank + layout["save_footer"]["size"] <= reserved["offset"] + reserved["size"])
 
+    def test_client_family_constants_match_the_layouts(self):
+        """wonder_trade/game_family.h and persistence.h take their save values from the layout files."""
+        persistence = (ROOT / "client/include/wonder_trade/persistence.h").read_text()
+        family = (ROOT / "client/include/wonder_trade/game_family.h").read_text()
+        for path, name in (("protocol/save-layout-bw.json", "BW"), ("protocol/save-layout-b2w2.json", "B2W2")):
+            with self.subTest(layout=path):
+                layout = self.load(path)
+                address = re.search(rf"#define WT_PERSISTENCE_ADDRESS_{name} (0x[0-9A-F]+)", persistence).group(1)
+                self.assertEqual(int(address, 16), layout["persistence_address"])
+        gen5 = family[family.index("WT_FAMILY_BW || WT_GAME_FAMILY == WT_FAMILY_B2W2"):family.index("#else")]
+        for layout in (self.load(path) for path in self.LAYOUTS):
+            self.assertEqual(int(re.search(r"WT_GAME_SAVE_MAGIC (0x[0-9a-fA-F]+)", gen5).group(1), 16),
+                             layout["footer_magic"]["international"])
+            self.assertEqual(int(re.search(r"WT_GAME_BANK_RESERVED_SIZE (0x[0-9a-fA-F]+)", gen5).group(1), 16),
+                             layout["bank_reserved_size"])
+        gen4 = family[family.index("WT_GAME_FAMILY == WT_FAMILY_GEN4"):family.index("#elif")]
+        for path in ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json"):
+            layout = self.load(path)
+            self.assertEqual(int(re.search(r"WT_GAME_SAVE_MAGIC (0x[0-9a-fA-F]+)", gen4).group(1), 16),
+                             layout["footer_magic"]["international"])
+            self.assertEqual(int(re.search(r"WT_GAME_BANK_RESERVED_SIZE (0x[0-9a-fA-F]+)", gen4).group(1), 16),
+                             layout["bank_reserved_size"])
+
     def test_upstream_pin_matches_when_present(self):
         layout = self.load("protocol/save-layout-b2w2.json")
         pin = ROOT / layout["upstream_pin"]

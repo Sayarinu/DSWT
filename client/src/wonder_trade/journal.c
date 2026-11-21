@@ -1,4 +1,5 @@
 #include "wonder_trade/journal.h"
+#include "wonder_trade/game_family.h"
 #include "wonder_trade/wire.h"
 #include "wonder_trade/wire_layout.h"
 
@@ -95,8 +96,9 @@ static void Put(unsigned char *bytes, uint64_t value, int length)
 static int LocatorValid(WtJournalLocator location)
 {
     if (location.kind == 0) return location.box == 0 && location.slot == 0 && location.length == 0;
-    if (location.kind == 1) return location.box == 0 && location.slot < 6 && location.length == 236;
-    return location.kind == 2 && location.box < 18 && location.slot < 30 && location.length == 136;
+    if (location.kind == 1) return location.box == 0 && location.slot < 6 && location.length == WT_GAME_PARTY_SIZE;
+    return location.kind == 2 && location.box < WT_GAME_BOX_COUNT && location.slot < WT_GAME_BOX_SLOTS
+        && location.length == WT_POKEMON_SIZE;
 }
 
 static void PutLocator(unsigned char *bytes, WtJournalLocator location)
@@ -207,9 +209,14 @@ static int EntryValid(const WtJournalEntry *entry, WtJournalHash hash)
             && (entry->destination.kind == 0 || Zero(entry->appliedDigest, 32))) return 0;
         if (entry->phase == WT_JOURNAL_APPLIED && memcmp(entry->lastReceipt, entry->receipt, 16) != 0) return 0;
     }
-    if ((entry->source.kind == 2 && !Zero(entry->original + 136, 100))
-        || (entry->destination.kind == 2 && (!Zero(entry->destinationBefore + 136, 100)
-            || !Zero(entry->destinationAfter + 136, 100)))) return 0;
+    /* A located image shorter than its 236-byte field leaves the rest zero. */
+    if ((entry->source.kind != 0
+            && !Zero(entry->original + entry->source.length, sizeof(entry->original) - entry->source.length))
+        || (entry->destination.kind != 0
+            && (!Zero(entry->destinationBefore + entry->destination.length,
+                    sizeof(entry->destinationBefore) - entry->destination.length)
+                || !Zero(entry->destinationAfter + entry->destination.length,
+                    sizeof(entry->destinationAfter) - entry->destination.length)))) return 0;
     if ((!Zero(entry->originalDigest, 32) && (entry->source.kind == 0
             || !DigestMatches(entry->original, entry->source.length, entry->originalDigest, hash)))
         || (!Zero(entry->incomingDigest, 32)
