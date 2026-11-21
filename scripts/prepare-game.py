@@ -60,8 +60,9 @@ GAMES = {
         "staged_revisions": (),
         "workspace": "pokebw2",
         "adapter": "bw2",
-        "resources": (),
+        "resources": ("res-bw2",),
         "rom_sha1": "{}.sha1",
+        "destinations": {"res-bw2": "res"},
     },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
