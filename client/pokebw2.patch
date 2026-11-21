@@ -1,0 +1,278 @@
+diff --git a/configure.py b/configure.py
+index 90a0ae59c..cff13b03f 100644
+--- a/configure.py
++++ b/configure.py
+@@ -640,6 +640,56 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
+     return dsd
+ 
+ 
++# DSWT Wonder Trade: the Mbed TLS source tree, the connection header and CodeWarrior's MSL C headers, from
++# --wonder-trade-tls, --wonder-trade-profile and --wonder-trade-msl. The shared core (src/wonder_trade/), the
++# Black 2/White 2 adapter (src/wonder_trade/bw2/) and Mbed TLS link at the end of ARM9 main
++# (src/wonder_trade/bw2/link.py), which moves every overlay and the arena after them.
++WONDER_TRADE = None
++# Enroll's game variant code of each version: family 5 (Black 2/White 2) << 24, the game version (Black 2 23, White 2
++# 22) << 16, the language (English 2) << 8 and the revision
++WT_VARIANTS = {"b2_us": 0x05170200, "w2_us": 0x05160200}
++WT_TLS_SRC_DIRS = ["library", "tf-psa-crypto/core", "tf-psa-crypto/extras", "tf-psa-crypto/platform",
++                   "tf-psa-crypto/utilities", "tf-psa-crypto/drivers/builtin/src"]
++WT_TLS_INCLUDE_DIRS = ["include", "library", "tf-psa-crypto/include", "tf-psa-crypto/core", "tf-psa-crypto/dispatch",
++                       "tf-psa-crypto/extras", "tf-psa-crypto/platform", "tf-psa-crypto/utilities",
++                       "tf-psa-crypto/drivers/builtin/include", "tf-psa-crypto/drivers/builtin/src",
++                       "tf-psa-crypto/drivers/p256-m", "tf-psa-crypto/drivers/pqcp/include",
++                       "tf-psa-crypto/drivers/everest/include"]
++
++
++def add_wonder_trade(n: Writer, build_dir: Path, version: str) -> list[str]:
++    """Compiles Wonder Trade and Mbed TLS; returns the objects and the archive to link."""
++    tls_dir = Path(WONDER_TRADE[0])
++    include = build_dir / "wt" / "include"
++    include.mkdir(parents=True, exist_ok=True)
++    shutil.copyfile(WONDER_TRADE[1], include / "wonder_trade_config.h")
++    msl = Path(WONDER_TRADE[2]) / "MSL_C"
++    flags = " ".join([*CC_FLAGS, f"-ir {msl / 'MSL_Common/Include'}", f"-ir {msl / 'MSL_ARM/Include'}",
++                      *(f"-i {d}" for d in INCLUDE_DIRS),
++                      f"-i {include}", *(f"-i {tls_dir / d}" for d in WT_TLS_INCLUDE_DIRS),
++                      "'-DMBEDTLS_CONFIG_FILE=\"wonder_trade/tls_config.h\"'",
++                      "'-DTF_PSA_CRYPTO_CONFIG_FILE=\"wonder_trade/crypto_config.h\"'"])
++    # The core and the adapter see the SDK through include/wonder_trade/bw2/sdk, after the prefix header
++    wt_flags = " ".join([flags, "-i include/wonder_trade/bw2/sdk", "-prefix wonder_trade/bw2/sdk_prefix.h",
++                         f"-DWT_GAME_VARIANT={WT_VARIANTS[version]:#010x}u",
++                         *(f"-d {define}" for define in VERSIONS[version]["defines"])])
++    objects = []
++    for source in sorted([*Path("src/wonder_trade").glob("*.c"), *Path("src/wonder_trade/bw2").glob("*.c")]):
++        prefix = "wt_bw2_" if source.parent.name == "bw2" else "wt_"
++        obj = build_dir / "wt" / f"{prefix}{source.stem}.o"
++        n.build([obj], "wt_cc", [str(source)], variables={"flags": wt_flags}, order_only=["constants_headers"])
++        objects.append(str(obj))
++    tls_objects = []
++    for directory in WT_TLS_SRC_DIRS:
++        for source in sorted((tls_dir / directory).glob("*.c")):
++            obj = build_dir / "wt" / "tls" / directory / source.with_suffix(".o").name
++            n.build([obj], "wt_cc", [str(source)], variables={"flags": flags})
++            tls_objects.append(obj)
++    archive = build_dir / "wt" / "libwt_tls.a"
++    n.build([archive], "wt_ar", tls_objects)
++    return [*objects, str(archive)]
++
++
+ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) -> tuple[list[Path], list[str]]:
+     """Adds the build steps of one version. Returns its check targets and dsd config files. A build with the bugs fixed
+     or with its code shifted does not match, so its only targets are the ROM and its archives."""
+@@ -680,8 +730,13 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+     n.build(delink_outputs, "delink", dsd_configs, implicit=[extract_dir / "config.yaml"],
+             variables={"config": str(arm9_config)})
+     # The linker script also defines NitroSDK's linker symbols, as the SDK's template does, from linker_symbols.toml
++    wt_objects = add_wonder_trade(n, build_dir, version) if WONDER_TRADE else []
++    wt_link = (f"&& $python src/wonder_trade/bw2/link.py {lcf_file} {objects_file} {' '.join(wt_objects)}"
++               if wt_objects else "")
+     n.build([lcf_file, objects_file], "lcf", dsd_configs,
+-            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml"], variables={"config": str(arm9_config)})
++            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml",
++                      *(["src/wonder_trade/bw2/link.py"] if wt_objects else [])],
++            variables={"config": str(arm9_config), "wt_link": wt_link})
+     link_lcf = lcf_file
+     if shift:
+         # Padding in the linker script moves the code and data after it, see tools/build/shift_lcf.py
+@@ -779,7 +834,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+         link_objects = [str(veneer_object) if obj == dsprot_object else obj for obj in link_objects]
+ 
+     arm9_o = build_dir / "arm9.o"
+-    n.build([arm9_o], "mwld", link_objects, implicit=[link_lcf, link_response],
++    n.build([arm9_o], "mwld", [*link_objects, *wt_objects], implicit=[link_lcf, link_response],
+             variables={"objects": link_response, "lcf": link_lcf})
+ 
+     # The ROM's file system is the extracted one, with the archives built from source in place of the extracted ones.
+@@ -907,7 +962,14 @@ def main():
+                              "code sizes; the ROMs no longer match. A multiple of 32, such as 0x100")
+     parser.add_argument("--bugfix", action="store_true",
+                         help="fix the game's bugs that are marked with BUGFIX in the source; the ROMs no longer match")
++    parser.add_argument("--wonder-trade-tls", type=Path, help="Mbed TLS source tree for the DSWT Wonder Trade spike")
++    parser.add_argument("--wonder-trade-profile", type=Path, help="DSWT connection header for the spike")
++    parser.add_argument("--wonder-trade-msl", type=Path, help="CodeWarrior MSL headers (msl/) for the spike")
+     args = parser.parse_args()
++    global WONDER_TRADE
++    if args.wonder_trade_tls:
++        WONDER_TRADE = (args.wonder_trade_tls.resolve(), args.wonder_trade_profile.resolve(),
++                        args.wonder_trade_msl.resolve())
+ 
+     versions = args.versions or [v for v in VERSIONS if (ROOT / "orig" / f"baserom_{v}.nds").exists()]
+     if not versions:
+@@ -945,7 +1007,12 @@ def main():
+     n.rule("check_baserom", "echo '$sha1  $in' | sha1sum --quiet -c - && touch $out", "Checking base ROM $in")
+     n.rule("extract", "$dsd rom extract --rom $in --output-path $extract_dir", "Extracting $in")
+     n.rule("delink", "$dsd delink --config-path $config", "Delinking $config")
+-    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml",
++    if WONDER_TRADE:
++        n.rule("wt_cc", f"mkdir -p $$(dirname $out) && $wine {shlex.quote(str(mwcc))} $flags -o $out $in",
++               "Compiling $in")
++        n.rule("wt_ar", f"{shlex.quote(shutil.which('llvm-ar') or 'llvm-ar')} --format=gnu rcs $out $in",
++               "Archiving $out")
++    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml $wt_link",
+            "Generating linker script for $config")
+     # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
+     n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
+diff --git a/src/gfl/backup_card.c b/src/gfl/backup_card.c
+index 8537e153c..0fe8b19e0 100644
+--- a/src/gfl/backup_card.c
++++ b/src/gfl/backup_card.c
+@@ -9,6 +9,10 @@ static void unlockBackupAndReportError(u16 lockId, BOOL noResponse, BackupWriteE
+ 
+ // Whether the last write has ended
+ static BOOL sWriteDone = TRUE;
++// DSWT Wonder Trade: the last write was refused
++static BOOL sWonderTradeRefused;
++
++int WtRecovery_CanWrite(void);
+ 
+ static BOOL sLocked;
+ 
+@@ -66,6 +70,11 @@ u16 startWriteFlash(u32 dest, const void *src, u32 size, BackupWriteErrorCallbac
+     if (!CARD_ReadBackup(0, &header, sizeof(header))) {
+         unlockBackupAndReportError(lock_id, TRUE, callback);
+     }
++    if (!WtRecovery_CanWrite()) {
++        sWonderTradeRefused = TRUE;
++        sWriteDone = TRUE;
++        return lock_id;
++    }
+     sWriteDone = FALSE;
+     CARD_WriteAndVerifyBackupAsync(dest, src, size, setCardWrittenVerified, NULL);
+     return lock_id;
+@@ -76,6 +85,11 @@ BOOL finishBackupGetResult(u16 lockId, BOOL *result, BackupWriteErrorCallback ca
+         CARD_UnlockBackup(lockId);
+         OS_ReleaseLockID(lockId);
+         sLocked = FALSE;
++        if (sWonderTradeRefused) {
++            sWonderTradeRefused = FALSE;
++            *result = FALSE;
++            return TRUE;
++        }
+         switch (CARD_GetResultCode()) {
+         case CARD_RESULT_SUCCESS:
+             *result = TRUE;
+diff --git a/src/gfl/backup_system.c b/src/gfl/backup_system.c
+index cebec822b..90b1601d9 100644
+--- a/src/gfl/backup_system.c
++++ b/src/gfl/backup_system.c
+@@ -1085,3 +1085,21 @@ BOOL SaveData_ReadBlockFromCard(SaveData *sv, u32 gmdataid, u32 copy, void *dest
+                                     getStartOffsetOfSaveBlockDataInSave(sv->table, gmdataid),
+                                 dest, size, svsys->readErrorCallback);
+ }
++
++// DSWT Wonder Trade (src/wonder_trade/bw2/game_save.c): the save's block table and count, and a request that the
++// next save writes every block to both copies
++SaveDataTable *SaveData_GetTablePtr(SaveData *sv);
++u32 SaveData_GetSaveCount(SaveData *sv);
++void SaveData_RequestFullWrite(SaveData *sv);
++
++SaveDataTable *SaveData_GetTablePtr(SaveData *sv) {
++    return sv->table;
++}
++
++u32 SaveData_GetSaveCount(SaveData *sv) {
++    return sv->count;
++}
++
++void SaveData_RequestFullWrite(SaveData *sv) {
++    SaveData_SetAllBlockStatuses(sv, BLOCK_STATUS_WRITE_MAIN);
++}
+diff --git a/src/system/boot_proc.c b/src/system/boot_proc.c
+index 0e68d3764..0b4dac30d 100644
+--- a/src/system/boot_proc.c
++++ b/src/system/boot_proc.c
+@@ -23,6 +23,10 @@ const GameProcFunctions EVENT_TITLE_FUNCS = {
+     StartMenuEventEnd,
+ };
+ 
++// DSWT Wonder Trade's boot check (src/wonder_trade/bw2/boot.c)
++extern const GameProcFunctions gWtBootProcFunctions;
++int WtRecovery_Started(void);
++
+ static BootScreensParam sBootScreensParam;
+ static CDemoParam sCDemoParam;
+ 
+@@ -35,6 +39,10 @@ static BOOL StartMenuEventInit(GameProc *proc, u32 *state, void *param, void *wo
+ static BOOL StartMenuEventTick(GameProc *proc, u32 *state, void *param, void *work) {
+     switch (*state) {
+     case 0:
++        if (!WtRecovery_Started()) {
++            GCTX_ProcMgrQueueProc(OVERLAY_NONE, &gWtBootProcFunctions, NULL);
++            break;
++        }
+         GCTX_ProcMgrQueueProc(OVERLAY_ID(162), &BOOT_SCREENS_PROC_FUNCTIONS, &sBootScreensParam);
+         *state = 1;
+         break;
+diff --git a/src/system/main.c b/src/system/main.c
+index c5cdfa6e7..5b3d42a08 100644
+--- a/src/system/main.c
++++ b/src/system/main.c
+@@ -39,6 +39,9 @@ static void GameUpdateVBlank(void);
+ static void GameInit(void);
+ static void GameUpdate(void);
+ static void setMonoSnd(const Config *config);
++// DSWT Wonder Trade (src/wonder_trade/entropy_game.c)
++void WonderTradeEntropy_Init(void);
++void WonderTradeEntropy_Frame(void);
+ 
+ // Not static: it is the first object of .bss, and the boot code's parameter block (0x02004fb8), which is not
+ // decompiled, points at the start of .bss through this symbol
+@@ -47,6 +50,7 @@ BOOL g_MainMemoryPriorityBlocked;
+ void main(void) {
+     SystemInit();
+     GFLAppInit();
++    WonderTradeEntropy_Init();
+     OS_SetIrqFunction(OS_IE_H_BLANK, GFLAppIRQHBlank);
+     OS_SetIrqFunction(OS_IE_V_BLANK, GFLAppIRQVBlank);
+     OS_EnableIrqMask(OS_IE_V_BLANK | OS_IE_H_BLANK);
+@@ -62,6 +66,7 @@ void main(void) {
+         Machine_ProcessExitRequest();
+         GFLAppUpdate();
+         GameUpdate();
++        WonderTradeEntropy_Frame();
+         GflUse_NoOpFrameHook();
+         GFL_G3DSysCheckSwapBuffers();
+ 
+diff --git a/src/system/save_control.c b/src/system/save_control.c
+index 99a7df5e2..ad0cf02ed 100644
+--- a/src/system/save_control.c
++++ b/src/system/save_control.c
+@@ -268,13 +268,24 @@ void SaveControl_SetGiftsBroken(SaveControl *save, u32 value) {
+     save->giftsBroken = value;
+ }
+ 
++int WtRecovery_CanClear(void);
++void OS_ResetSystem(u32 parameter);
++
+ void SaveControl_InitNewGame(SaveControl *save) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return;
++    }
+     save->newGame = TRUE;
+     save->loadNotClean = TRUE;
+     initSaveBlkCallbacks(save->sv);
+ }
+ 
+ void SaveControl_Erase(SaveControl *save) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return;
++    }
+     SaveData_Erase(save->sv, HEAPID_USER);
+ }
+ 
+diff --git a/src/wifi/gsync/gsync_state.c b/src/wifi/gsync/gsync_state.c
+index 77ed25ea4..9c6ee7836 100644
+--- a/src/wifi/gsync/gsync_state.c
++++ b/src/wifi/gsync/gsync_state.c
+@@ -1024,7 +1024,8 @@ static void GSync_ReadResult(GSyncWork *wk, DreamWorldSave *dreamWorld, GSyncRes
+     }
+     if (!result->skipUpdate && result->id != DreamWorldSave_GetLastResultID(dreamWorld)) {
+         wk->resultId = result->id;
+-        wk->getMusical = result->musical;
++        // DSWT Wonder Trade keeps its journal where the downloaded musical was saved
++        wk->getMusical = FALSE;
+         wk->getCGear = result->cgear;
+         wk->getPokedex = result->dex;
+         wk->levels = result->levels;
