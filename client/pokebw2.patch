@@ -1,0 +1,149 @@
+diff --git a/configure.py b/configure.py
+index 90a0ae59c..6dddc0d3b 100644
+--- a/configure.py
++++ b/configure.py
+@@ -640,6 +640,47 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
+     return dsd
+ 
+ 
++# Wonder Trade (DSWT LUNE-830 spike): the Mbed TLS source tree and the connection header, from --wonder-trade-tls and
++# --wonder-trade-profile. Its objects link at the end of ARM9 main (src/wonder_trade/bw2/link.py)
++WONDER_TRADE = None
++WT_SOURCES = ["src/wonder_trade/bw2/spike.c", "src/wonder_trade/tls.c", "src/wonder_trade/http.c"]
++WT_TLS_SRC_DIRS = ["library", "tf-psa-crypto/core", "tf-psa-crypto/extras", "tf-psa-crypto/platform",
++                   "tf-psa-crypto/utilities", "tf-psa-crypto/drivers/builtin/src"]
++WT_TLS_INCLUDE_DIRS = ["include", "library", "tf-psa-crypto/include", "tf-psa-crypto/core", "tf-psa-crypto/dispatch",
++                       "tf-psa-crypto/extras", "tf-psa-crypto/platform", "tf-psa-crypto/utilities",
++                       "tf-psa-crypto/drivers/builtin/include", "tf-psa-crypto/drivers/builtin/src",
++                       "tf-psa-crypto/drivers/p256-m", "tf-psa-crypto/drivers/pqcp/include",
++                       "tf-psa-crypto/drivers/everest/include"]
++
++
++def add_wonder_trade(n: Writer, build_dir: Path) -> list[str]:
++    """Compiles the spike, the client's TLS and HTTP code and Mbed TLS; returns the objects and the archive to link."""
++    tls_dir = Path(WONDER_TRADE[0])
++    include = build_dir / "wt" / "include"
++    include.mkdir(parents=True, exist_ok=True)
++    shutil.copyfile(WONDER_TRADE[1], include / "wonder_trade_config.h")
++    msl = Path(WONDER_TRADE[2]) / "MSL_C"
++    flags = " ".join([*CC_FLAGS, f"-ir {msl / 'MSL_Common/Include'}", f"-ir {msl / 'MSL_ARM/Include'}",
++                      *(f"-i {d}" for d in INCLUDE_DIRS),
++                      f"-i {include}", *(f"-i {tls_dir / d}" for d in WT_TLS_INCLUDE_DIRS),
++                      "'-DMBEDTLS_CONFIG_FILE=\"wonder_trade/tls_config.h\"'",
++                      "'-DTF_PSA_CRYPTO_CONFIG_FILE=\"wonder_trade/crypto_config.h\"'"])
++    objects = []
++    for source in WT_SOURCES:
++        obj = build_dir / "wt" / f"wt_{Path(source).stem}.o"
++        n.build([obj], "wt_cc", [source], variables={"flags": flags}, order_only=["constants_headers"])
++        objects.append(str(obj))
++    tls_objects = []
++    for directory in WT_TLS_SRC_DIRS:
++        for source in sorted((tls_dir / directory).glob("*.c")):
++            obj = build_dir / "wt" / "tls" / directory / source.with_suffix(".o").name
++            n.build([obj], "wt_cc", [str(source)], variables={"flags": flags})
++            tls_objects.append(obj)
++    archive = build_dir / "wt" / "libwt_tls.a"
++    n.build([archive], "wt_ar", tls_objects)
++    return [*objects, str(archive)]
++
++
+ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) -> tuple[list[Path], list[str]]:
+     """Adds the build steps of one version. Returns its check targets and dsd config files. A build with the bugs fixed
+     or with its code shifted does not match, so its only targets are the ROM and its archives."""
+@@ -680,8 +721,13 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+     n.build(delink_outputs, "delink", dsd_configs, implicit=[extract_dir / "config.yaml"],
+             variables={"config": str(arm9_config)})
+     # The linker script also defines NitroSDK's linker symbols, as the SDK's template does, from linker_symbols.toml
++    wt_objects = add_wonder_trade(n, build_dir) if WONDER_TRADE else []
++    wt_link = (f"&& $python src/wonder_trade/bw2/link.py {lcf_file} {objects_file} {' '.join(wt_objects)}"
++               if wt_objects else "")
+     n.build([lcf_file, objects_file], "lcf", dsd_configs,
+-            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml"], variables={"config": str(arm9_config)})
++            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml",
++                      *(["src/wonder_trade/bw2/link.py"] if wt_objects else [])],
++            variables={"config": str(arm9_config), "wt_link": wt_link})
+     link_lcf = lcf_file
+     if shift:
+         # Padding in the linker script moves the code and data after it, see tools/build/shift_lcf.py
+@@ -779,7 +825,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+         link_objects = [str(veneer_object) if obj == dsprot_object else obj for obj in link_objects]
+ 
+     arm9_o = build_dir / "arm9.o"
+-    n.build([arm9_o], "mwld", link_objects, implicit=[link_lcf, link_response],
++    n.build([arm9_o], "mwld", [*link_objects, *wt_objects], implicit=[link_lcf, link_response],
+             variables={"objects": link_response, "lcf": link_lcf})
+ 
+     # The ROM's file system is the extracted one, with the archives built from source in place of the extracted ones.
+@@ -907,7 +953,14 @@ def main():
+                              "code sizes; the ROMs no longer match. A multiple of 32, such as 0x100")
+     parser.add_argument("--bugfix", action="store_true",
+                         help="fix the game's bugs that are marked with BUGFIX in the source; the ROMs no longer match")
++    parser.add_argument("--wonder-trade-tls", type=Path, help="Mbed TLS source tree for the DSWT Wonder Trade spike")
++    parser.add_argument("--wonder-trade-profile", type=Path, help="DSWT connection header for the spike")
++    parser.add_argument("--wonder-trade-msl", type=Path, help="CodeWarrior MSL headers (msl/) for the spike")
+     args = parser.parse_args()
++    global WONDER_TRADE
++    if args.wonder_trade_tls:
++        WONDER_TRADE = (args.wonder_trade_tls.resolve(), args.wonder_trade_profile.resolve(),
++                        args.wonder_trade_msl.resolve())
+ 
+     versions = args.versions or [v for v in VERSIONS if (ROOT / "orig" / f"baserom_{v}.nds").exists()]
+     if not versions:
+@@ -945,7 +998,12 @@ def main():
+     n.rule("check_baserom", "echo '$sha1  $in' | sha1sum --quiet -c - && touch $out", "Checking base ROM $in")
+     n.rule("extract", "$dsd rom extract --rom $in --output-path $extract_dir", "Extracting $in")
+     n.rule("delink", "$dsd delink --config-path $config", "Delinking $config")
+-    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml",
++    if WONDER_TRADE:
++        n.rule("wt_cc", f"mkdir -p $$(dirname $out) && $wine {shlex.quote(str(mwcc))} $flags -o $out $in",
++               "Compiling $in")
++        n.rule("wt_ar", f"{shlex.quote(shutil.which('llvm-ar') or 'llvm-ar')} --format=gnu rcs $out $in",
++               "Archiving $out")
++    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml $wt_link",
+            "Generating linker script for $config")
+     # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
+     n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
+diff --git a/src/gfl/g3d_system.c b/src/gfl/g3d_system.c
+index 733500691..bf87be778 100644
+--- a/src/gfl/g3d_system.c
++++ b/src/gfl/g3d_system.c
+@@ -850,7 +850,11 @@ void GFL_G3DSysReqSwapBuffers(void) {
+     g_G3DSystem.sys->swapRequested = TRUE;
+ }
+ 
++// DSWT LUNE-830 spike: once per main loop frame
++void WtSpike_Frame(void);
++
+ void GFL_G3DSysCheckSwapBuffers(void) {
++    WtSpike_Frame();
+     if (g_G3DSystem.sys != NULL && g_G3DSystem.sys->swapRequested == TRUE) {
+         G3_SwapBuffers(g_G3DSystem.sys->sortMode, g_G3DSystem.sys->bufferMode);
+         g_G3DSystem.sys->swapRequested = FALSE;
+diff --git a/src/gfl/gf_overlay.c b/src/gfl/gf_overlay.c
+index ea89e1c36..5bcd44cae 100644
+--- a/src/gfl/gf_overlay.c
++++ b/src/gfl/gf_overlay.c
+@@ -78,7 +78,12 @@ void GFL_OvlUnload(u32 overlayId) {
+     }
+ }
+ 
++// DSWT LUNE-830 spike (src/wonder_trade/bw2/spike.c), debug builds only: runs once, before main's GameInit loads the
++// first overlay and after the heaps and interrupts are up
++void WtSpike_Boot(void);
++
+ BOOL GFL_OvlLoad(u32 overlayId) {
++    static BOOL sWtSpikeBooted;
+     u32 dma = FS_DMA_NOT_USE;
+     int region;
+     OvlEntry *list;
+@@ -90,6 +95,10 @@ BOOL GFL_OvlLoad(u32 overlayId) {
+     if (overlayId == OVERLAY_NONE) {
+         return TRUE;
+     }
++    if (!sWtSpikeBooted && overlayId == OVERLAY_ID(12)) {
++        sWtSpikeBooted = TRUE;
++        WtSpike_Boot();
++    }
+     if (!GFL_OvlCheckMemoryCollision(overlayId)) {
+         return FALSE;
+     }
