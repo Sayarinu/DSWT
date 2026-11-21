@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -8,9 +10,13 @@ namespace DSWT.Validator;
 
 // The core is synchronous and cannot be interrupted safely within a thread.
 // Keep its lifetime, pipe buffers and admission bound inside this module.
+// Starting a worker costs far more than an analysis, so a worker that answered
+// correctly serves later payloads, up to MaxUses. Any timeout, crash, malformed
+// or mismatched reply kills it, and it is never reused.
 public sealed class WorkerRunner : IDisposable
 {
     internal const int MaxReplyBytes = 1024;
+    public const int MaxUses = 256;
     private const int DefaultWorkers = 2;
     private const int MaxReasonCodes = 8;
     private const int MaxReasonCodeLength = 32;
@@ -18,6 +24,7 @@ public sealed class WorkerRunner : IDisposable
     private static readonly TimeSpan CleanupBudget = TimeSpan.FromSeconds(1);
 
     private readonly SemaphoreSlim slots;
+    private readonly ConcurrentBag<Worker> idle = [];
     private readonly Func<ProcessStartInfo> command;
     private readonly TimeSpan budget;
 
@@ -45,13 +52,15 @@ public sealed class WorkerRunner : IDisposable
         return start;
     }
 
-    public async Task<ValidateReply> Run(byte[] payload, CancellationToken cancellation)
+    private sealed class Worker(Process process)
     {
-        if (!await slots.WaitAsync(0, cancellation))
-            throw new RpcException(new Status(StatusCode.ResourceExhausted, "validator busy"));
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(budget);
-        using var process = new Process();
+        public Process Process { get; } = process;
+        public int Uses { get; set; }
+    }
+
+    private Worker Start()
+    {
+        var process = new Process();
         try
         {
             process.StartInfo = command();
@@ -64,20 +73,47 @@ public sealed class WorkerRunner : IDisposable
             process.StartInfo.Environment["DOTNET_GCHeapHardLimit"] = "8000000"; // 128 MiB/worker.
             if (!process.Start())
                 throw new InvalidOperationException();
-            var output = ReadBounded(process.StandardOutput.BaseStream, deadline.Token);
-            var errors = process.StandardError.BaseStream.CopyToAsync(Stream.Null, deadline.Token);
-            await process.StandardInput.BaseStream.WriteAsync(payload, deadline.Token);
-            process.StandardInput.Close();
-            await Task.WhenAll(process.WaitForExitAsync(deadline.Token), output, errors);
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException();
-            var reply = ValidateReply.Parser.ParseFrom(await output);
+            // Drain diagnostics for the worker's whole life so a full pipe never blocks it.
+            _ = process.StandardError.BaseStream.CopyToAsync(Stream.Null);
+            return new Worker(process);
+        }
+        catch
+        {
+            process.Dispose();
+            throw;
+        }
+    }
+
+    public async Task<ValidateReply> Run(byte[] payload, CancellationToken cancellation)
+    {
+        if (!await slots.WaitAsync(0, cancellation))
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "validator busy"));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(budget);
+        Worker? worker = null;
+        bool reusable = false;
+        try
+        {
+            while (worker is null && idle.TryTake(out var warm))
+            {
+                if (warm.Process.HasExited)
+                    await Stop(warm);
+                else
+                    worker = warm;
+            }
+            worker ??= Start();
+            worker.Uses++;
+            var input = worker.Process.StandardInput.BaseStream;
+            await input.WriteAsync(payload, deadline.Token);
+            await input.FlushAsync(deadline.Token);
+            var reply = ValidateReply.Parser.ParseFrom(await ReadFrame(worker.Process.StandardOutput.BaseStream, deadline.Token));
             if (reply.PolicyVersion != Policy.Version ||
                 !reply.Sha256.Span.SequenceEqual(SHA256.HashData(payload)) ||
                 reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > MaxReasonCodes ||
                 reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~(uint)Policy.AllDestinations) != 0 ||
                 reply.ReasonCodes.Any(r => r.Length is 0 or > MaxReasonCodeLength || r.Any(c => c is not (>= 'A' and <= 'Z' or '_'))))
                 throw new InvalidOperationException();
+            reusable = worker.Uses < MaxUses;
             return reply;
         }
         catch (Exception)
@@ -88,35 +124,49 @@ public sealed class WorkerRunner : IDisposable
         }
         finally
         {
-            try
+            if (worker is not null)
             {
-                if (process.Id != 0 && !process.HasExited)
-                    process.Kill(entireProcessTree: true);
-                if (process.Id != 0)
-                {
-                    using var cleanup = new CancellationTokenSource(CleanupBudget);
-                    await process.WaitForExitAsync(cleanup.Token);
-                }
+                if (reusable)
+                    idle.Add(worker);
+                else
+                    await Stop(worker);
             }
-            catch (InvalidOperationException) { }
-            catch (OperationCanceledException) { }
             slots.Release();
         }
     }
 
-    private static async Task<byte[]> ReadBounded(Stream stream, CancellationToken cancellation)
+    // One reply frame: a little-endian u16 length, then that many bytes, within the bound.
+    private static async Task<byte[]> ReadFrame(Stream stream, CancellationToken cancellation)
     {
-        byte[] buffer = new byte[MaxReplyBytes + 1];
-        int used = 0;
-        while (used < buffer.Length)
-        {
-            int count = await stream.ReadAsync(buffer.AsMemory(used), cancellation);
-            if (count == 0)
-                return buffer[..used];
-            used += count;
-        }
-        throw new InvalidOperationException("worker output limit");
+        byte[] header = new byte[2];
+        await stream.ReadExactlyAsync(header, cancellation);
+        int length = BinaryPrimitives.ReadUInt16LittleEndian(header);
+        if (length > MaxReplyBytes)
+            throw new InvalidOperationException("worker output limit");
+        byte[] reply = new byte[length];
+        await stream.ReadExactlyAsync(reply, cancellation);
+        return reply;
     }
 
-    public void Dispose() => slots.Dispose();
+    private static async Task Stop(Worker worker)
+    {
+        var process = worker.Process;
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            using var cleanup = new CancellationTokenSource(CleanupBudget);
+            await process.WaitForExitAsync(cleanup.Token);
+        }
+        catch (InvalidOperationException) { }
+        catch (OperationCanceledException) { }
+        finally { process.Dispose(); }
+    }
+
+    public void Dispose()
+    {
+        while (idle.TryTake(out var worker))
+            Stop(worker).GetAwaiter().GetResult();
+        slots.Dispose();
+    }
 }
