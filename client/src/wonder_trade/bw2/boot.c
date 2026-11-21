@@ -32,6 +32,13 @@ static void WtBoot_Worker(void *arg)
 {
     WtBootWorker *worker = arg;
     WtJournalIO io = { &worker->flash, WtFlash_ReadBank, WtFlash_WriteBank, WtFlash_Hash };
+    /* Banks holding only a musical's data hold no journal: nothing to recover.
+     * Opening Wonder Trade erases them before creating one. */
+    if (WtGameSave_MusicalLeftover()) {
+        WtRecovery_Allow(WT_JOURNAL_EMPTY);
+        worker->result = 0;
+        return;
+    }
     worker->result = WtBoot_Check(&worker->game, io);
 }
 
