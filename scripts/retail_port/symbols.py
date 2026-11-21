@@ -306,6 +306,106 @@ class SymbolMap:
                             break
 
 
+def _thumb_calls(body, start, end):
+    """(site, target) of each Thumb BL or BLX in body[start:end]; targets keep no Thumb bit."""
+    calls, k = [], start
+    while k + 4 <= end:
+        decoded = elf.thumb_bl_target(body[k:k + 4], k)
+        if decoded is None:
+            k += 2
+            continue
+        calls.append((k, decoded[1] & ~1))
+        k += 4
+    return calls
+
+
+def trust_calls(table):
+    """Place each unplaced function that calls and references from matched functions all put at
+    one address, for a target whose own bytes differ from the US image (another compiler)."""
+    for num, counter in table.votes.items():
+        symbol = table._bynum[num]
+        if num in table.addr or len(counter) != 1 or symbol.kind not in FUNCTION_KINDS:
+            continue
+        (target, count), = counter.items()
+        table.addr[num] = target
+        table.how[num] = f"calls x{count}"
+
+
+def align_calls(table):
+    """Place more Thumb functions by the order of their calls, for a target compiled with another
+    compiler than the US image whose bytes therefore differ.
+
+    A placed function's calls are lined up with its US calls, in order, when both have the same
+    number and every callee already placed agrees with the line-up; each unplaced callee is then
+    placed where all such calls to it land. A function ends at the next address the target calls
+    or points to, or the next placed function. Repeats until nothing more is placed."""
+    us = table.us
+    starts = {}
+    for module, (base, body) in table.modules.items():
+        found = set()
+        for k in range(0, len(body) - 3, 2):
+            decoded = elf.thumb_bl_target(body[k:k + 4], base + k)
+            if decoded is not None and base <= decoded[1] & ~1 < base + len(body):
+                found.add(decoded[1] & ~1)
+        for k in range(0, len(body) - 3, 4):
+            word = struct.unpack_from("<I", body, k)[0]
+            if word & 1 and base <= word - 1 < base + len(body):
+                found.add(word - 1)
+        starts[module] = found
+    for num, at in table.addr.items():
+        symbol = table._bynum[num]
+        if symbol.kind in FUNCTION_KINDS and us.module(symbol) in starts:
+            starts[us.module(symbol)].add(at & ~1)
+    us_calls = {}
+    for symbol in us.syms:
+        if symbol.kind not in FUNCTION_KINDS or symbol.num not in us.thumb or us.module(symbol) not in starts:
+            continue
+        section, calls = us.secname[symbol.section], []
+        for k in range(0, table._size(symbol), 2):
+            for kind, name, value, _ in us.relocs.get((section, symbol.start + k), ()):
+                if kind == elf.R_ARM_THM_CALL:
+                    named = [c for c in us.byname.get(name, ()) if c.address == value]
+                    calls.append(named[0].num if len(named) == 1 else None)
+        if calls:
+            us_calls[symbol.num] = calls
+    while True:
+        ordered = {module: sorted(found) for module, found in starts.items()}
+        votes = collections.defaultdict(collections.Counter)
+        for num, calls in us_calls.items():
+            if num not in table.addr:
+                continue
+            symbol = table._bynum[num]
+            module, at = us.module(symbol), table.addr[num] & ~1
+            base, body = table.modules[module]
+            rows = ordered[module]
+            following = bisect.bisect_right(rows, at)
+            end = rows[following] if following < len(rows) else base + len(body)
+            sites = _thumb_calls(body, at - base, end - base)
+            if len(sites) != len(calls):
+                continue
+            if any(callee is not None and callee in table.addr and table.addr[callee] & ~1 != base + target
+                   for callee, (_, target) in zip(calls, sites)):
+                continue
+            for callee, (_, target) in zip(calls, sites):
+                if callee is not None and callee not in table.addr:
+                    votes[callee][base + target] += 1
+        placed = 0
+        for callee, counter in votes.items():
+            if len(counter) != 1:
+                continue  # calls disagree: leave it
+            (target, count), = counter.items()
+            symbol = table._bynum[callee]
+            module = us.module(symbol)
+            if module not in starts:
+                continue
+            table.addr[callee] = target | (symbol.address & 1)
+            table.how[callee] = f"aligned x{count}"
+            starts[module].add(target)
+            placed += 1
+        if not placed:
+            return
+
+
 def reviewed_address(table, symbol, expected, extra=()):
     """A function the target changes in reviewed details: the one guess, or extra candidate,
     where its bytes differ from the image's in exactly the reviewed number of places, with
