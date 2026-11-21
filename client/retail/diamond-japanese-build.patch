@@ -1,0 +1,141 @@
+Code differences of the Japanese Diamond and Pearl cartridges from US.
+
+Japanese, the first release, was compiled with Metrowerks 1.2, which has no
+__declspec(noreturn). Its start menu (asm/unk_02035068.s) is written out from
+the cartridge in diamond-japanese-start-menu.s.
+
+- NitroMain does not read the backlight or clear UNK_02016FA4.
+- Closing the lid sleeps once; a Game Pak pulled out while asleep powers the
+  system off, and opening the lid turns the backlight on rather than restoring it.
+- SaveGame does not clobber the chunk footers of a new game.
+- Three save functions differ only in how their source was written: the
+  compiler allocates registers differently.
+
+diff --git a/arm9/src/main.c b/arm9/src/main.c
+index eb4ce53..a5dcf77 100644
+--- a/arm9/src/main.c
++++ b/arm9/src/main.c
+@@ -52,3 +52,3 @@ const int gGameVersion = GAME_VERSION;
+ 
+-__declspec(noreturn) void NitroMain(void) {
++void NitroMain(void) {
+     InitSystemForTheGame();
+@@ -57,5 +57,2 @@ __declspec(noreturn) void NitroMain(void) {
+     sub_02016438(0);
+-
+-    PM_GetBackLight(&gBacklightTop, NULL);
+-
+     sub_02022294();
+@@ -98,3 +95,2 @@ __declspec(noreturn) void NitroMain(void) {
+     PlayTimerInit();
+-    UNK_02016FA4 = 0;
+     for (;;) {
+@@ -202,3 +198,3 @@ extern void sub_0200E3A0(PMLCDTarget, int);
+ 
+-__declspec(noreturn) void DoSoftReset(u32 parameter) {
++void DoSoftReset(u32 parameter) {
+     sub_0200E3A0(PM_LCD_TOP, 0x7FFF);
+@@ -253,2 +249,4 @@ extern void sub_0201CDD0(void);
+ 
++#define OS_IE_CARTRIDGE (1UL << 13) // the Game Pak interrupt
++
+ void HandleDSLidAction(void) {
+@@ -258,26 +256,26 @@ void HandleDSLidAction(void) {
+             sub_0201CE04();
+-            if (CTRDG_IsPulledOut() == TRUE) {
+-                UNK_02016FA4 = 1;
+-            }
+             {
+-                int r1 = UNK_02016FA4;
+-                while (1) {
+-                    PMWakeUpTrigger trigger = PM_TRIGGER_COVER_OPEN | PM_TRIGGER_CARD;
+-                    if (gSystem.gbaCartId && !r1) {
+-                        trigger |= PM_TRIGGER_CARTRIDGE;
+-                    }
+-                    PM_GoSleepMode(trigger, PM_PAD_LOGIC_OR, 0);
+-                    if (CARD_IsPulledOut()) {
+-                        PM_ForceToPowerOff();
+-                        break;
+-                    } else if (PAD_DetectFold()) {
+-                        r1 = UNK_02016FA4 = 1;
+-                    } else {
+-                        break;
+-                    }
++                PMWakeUpTrigger trigger = PM_TRIGGER_COVER_OPEN | PM_TRIGGER_CARD;
++                if (gSystem.gbaCartId) {
++                    trigger |= PM_TRIGGER_CARTRIDGE;
+                 }
+-                sub_0201CDD0();
+-                return;
++                PM_GoSleepMode(trigger, PM_PAD_LOGIC_OR, 0);
+             }
++            if (CARD_IsPulledOut()) {
++                PM_ForceToPowerOff();
++            } else if ((OS_GetIrqMask() & OS_IE_CARTRIDGE) && CTRDG_IsPulledOut()) {
++                if (PAD_DetectFold()) {
++                    PM_GoSleepMode(PM_TRIGGER_COVER_OPEN | PM_TRIGGER_CARD, PM_PAD_LOGIC_OR, 0);
++                    PM_ForceToPowerOff();
++                } else {
++                    PM_ForceToPowerOff();
++                }
++            }
++            sub_0201CDD0();
++            return;
+         } else {
++            if ((OS_GetIrqMask() & OS_IE_CARTRIDGE) && CTRDG_IsPulledOut()) {
++                PM_GoSleepMode(PM_TRIGGER_COVER_OPEN | PM_TRIGGER_CARD, PM_PAD_LOGIC_OR, 0);
++                PM_ForceToPowerOff();
++            }
+             PM_GetBackLight(&top, &bottom);
+@@ -290,3 +288,3 @@ void HandleDSLidAction(void) {
+         if (top == PM_BACKLIGHT_OFF) {
+-            PM_SetBackLight(PM_LCD_ALL, gBacklightTop);
++            PM_SetBackLight(PM_LCD_ALL, PM_BACKLIGHT_ON);
+         }
+diff --git a/arm9/src/save.c b/arm9/src/save.c
+index c6498bd..cae8444 100644
+--- a/arm9/src/save.c
++++ b/arm9/src/save.c
+@@ -101,10 +101,2 @@ int SaveGame(struct SaveData *save) {
+     }
+-    if (save->isNewGame) {
+-        sub_02016444(1);
+-        FlashClobberChunkFooter(save, 0, (u32)(save->unk_20220[0] == 0 ? 1 : 0));
+-        FlashClobberChunkFooter(save, 1, (u32)(save->unk_20220[1] == 0 ? 1 : 0));
+-        FlashClobberChunkFooter(save, 0, (u32)(save->unk_20220[0]));
+-        FlashClobberChunkFooter(save, 1, (u32)(save->unk_20220[1]));
+-        sub_02016454(1);
+-    }
+     int ret = sub_02023044(save);
+@@ -214,4 +206,4 @@ BOOL sub_020228E0(struct SaveData *save, void *data, int idx) {
+     r4 = sub_020228B8(save, data, idx);
++    u8 *start = (u8 *)data + spec->offset;
+     u32 size = spec->size;
+-    u32 offset = spec->offset;
+     if (r4->size != size) {
+@@ -225,3 +217,3 @@ BOOL sub_020228E0(struct SaveData *save, void *data, int idx) {
+     }
+-    return r4->crc == sub_02022898(save, (u8 *)data + offset, size);
++    return r4->crc == sub_02022898(save, start, size);
+ }
+@@ -388,7 +380,10 @@ BOOL FlashLoadChunkIntoDynamicRegionFromHeader(u32 slot, struct SaveSlotSpec *he
+ BOOL Save_LoadDynamicRegion(struct SaveData *save) {
+-    for (int i = 0; i < 2; i++) {
+-        if (!FlashLoadChunkIntoDynamicRegionFromHeader(save->unk_20220[i], &save->saveSlotSpecs[i], save->dynamic_region)) {
++    int i = 0;
++    struct SaveSlotSpec *spec = save->saveSlotSpecs;
++    u8 *data = save->dynamic_region;
++    for (; i < 2; spec++, i++) {
++        if (!FlashLoadChunkIntoDynamicRegionFromHeader(save->unk_20220[i], spec, save->dynamic_region)) {
+             return FALSE;
+         }
+-        if (!sub_020228E0(save, save->dynamic_region, i)) {
++        if (!sub_020228E0(save, data, i)) {
+             return FALSE;
+@@ -579,5 +574,5 @@ void SaveData_InitSubstructs(struct SaveArrayHeader *headers) {
+ void sub_02023160(struct SaveSlotSpec *spec, struct SaveArrayHeader *headers) {
+-    int i = 0;
+     int sp4 = 0;
+     u32 r12 = 0;
++    int i = 0;
+     int j = 0;

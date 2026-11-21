@@ -11,7 +11,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
-from retail_port import dp, elf, link, nds, platinum, sdk, symbols, toolchain  # noqa: E402
+from retail_port import dp, elf, link, nds, platinum, sdk, symbols, toolchain, writeout  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("port_platinum", SCRIPTS / "port-platinum.py")
 port_platinum = importlib.util.module_from_spec(spec)
@@ -524,6 +524,63 @@ class DiamondPearlTest(unittest.TestCase):
             library = sdk.Library([path])
             self.assertIn("caller", library.globals)
             self.assertNotIn("callee", library.globals)
+
+
+    def test_copied_thumb_routines_keep_their_mode(self):
+        # Metrowerks marks Thumb code only with $t: the copy must still be Thumb.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "font.o"
+            path.write_bytes(thumb_object())
+            source = sdk.Library([path]).extract(["caller"], external={"callee"})
+            self.assertIn(".thumb_func\n.type caller, %function", source)
+
+    def test_japanese_tables_name_known_languages_and_files(self):
+        for table in (dp.MATCHING, dp.START_MENUS, dp.COPIED, dp.ALIASES, dp.WRAPPERS):
+            self.assertTrue(set(table) <= set(dp.LANGUAGES))
+        for language in dp.MATCHING:
+            self.assertTrue((platinum.RETAIL / dp.MATCHING[language]).is_file())
+            self.assertIn(language, dp.COMPILERS)
+        for patch in dp.START_MENUS.values():
+            self.assertTrue((platinum.RETAIL / patch).is_file())
+        for wrappers in dp.WRAPPERS.values():
+            for code, pool in wrappers.values():
+                self.assertTrue(all(0 <= half < 0x10000 for half in code) and pool)
+
+
+class CallPlacementTest(unittest.TestCase):
+    def test_functions_are_placed_only_where_every_matched_call_agrees(self):
+        Symbol = symbols.Symbol
+        table = type("Table", (), {})()
+        table._bynum = {1: Symbol(1, 0x2000101, 8, elf.STT_FUNC, 1, "agreed"),
+                        2: Symbol(2, 0x2000201, 8, elf.STT_FUNC, 1, "disputed"),
+                        3: Symbol(3, 0x2000300, 8, elf.STT_OBJECT, 1, "data")}
+        table.addr, table.how = {}, {}
+        table.votes = {1: {0x2100101: 3}, 2: {0x2100201: 1, 0x2100301: 1}, 3: {0x2100400: 2}}
+        symbols.trust_calls(table)
+        self.assertEqual(table.addr, {1: 0x2100101})
+        self.assertEqual(table.how[1], "calls x3")
+
+
+class WriteOutTest(unittest.TestCase):
+    def test_instructions_use_the_decompilations_syntax(self):
+        label = lambda at: f"_{at:08X}"
+        self.assertEqual(writeout.instruction(0xB570, 0, label), "push {r4-r6, lr}")
+        self.assertEqual(writeout.instruction(0xBD08, 0, label), "pop {r3, pc}")
+        self.assertEqual(writeout.instruction(0x1C05, 0, label), "add r5, r0, #0x0")
+        self.assertEqual(writeout.instruction(0x2112, 0, label), "mov r1, #0x12")
+        self.assertEqual(writeout.instruction(0x5C40, 0, label), "ldrb r0, [r0, r1]")
+        self.assertEqual(writeout.instruction(0x46C0, 0, label), "mov r8, r8")
+        self.assertEqual(writeout.instruction(0xD101, 0x2000000, label), "bne _02000006")
+        self.assertEqual(writeout.instruction(0xE7FE, 0x2000000, label), "b _02000000")
+        self.assertIsNone(writeout.instruction(0xDF00, 0, label))  # swi: written as .short
+
+    def test_function_starts_are_calls_pointers_and_pushes(self):
+        body = bytearray(0x40)
+        struct.pack_into("<H", body, 0x10, 0xB510)  # push {r4, lr}
+        body[0:4] = bl(0x2000000, 0x2000021)  # a call to 0x2000020
+        struct.pack_into("<I", body, 0x38, 0x2000031)  # a pointer to Thumb code at 0x2000030
+        module = writeout.Module(0x2000000, bytes(body))
+        self.assertEqual(module.function_starts(0x2000004, 0x2000040), [0x2000010, 0x2000020, 0x2000030])
 
 
 class CliTest(unittest.TestCase):

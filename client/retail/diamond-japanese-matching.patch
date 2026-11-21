@@ -1,0 +1,65 @@
+How the matching image for Japanese Diamond and Pearl is built: the pristine US
+build, with the game's own C code compiled by Metrowerks 1.2/sp4 as Japanese
+was. The libraries, assembly and link keep their US tools. The symbol map then
+finds the C functions by their bytes, as it does for every other language.
+
+Metrowerks 1.2 has no -ipa or __declspec, is stricter about pointer types and
+returning a void call, and warns where 2.0 does not; none of these changes code.
+
+diff --git a/arm9/Makefile b/arm9/Makefile
+index d706c1a7..67d8aec0 100644
+--- a/arm9/Makefile
++++ b/arm9/Makefile
+@@ -96,7 +96,8 @@ OVERLAYS := $(shell grep -oE "Overlay \w+" $(LD_SPEC) | cut -d' ' -f2)
+ 
+ ##################### Compiler Options #######################
+ 
+-MWCCVERSION = 2.0/sp1
++MWCCVERSION = 1.2/sp4
++LINKVERSION = 2.0/sp1
+ TOOLS_DIR = ../tools
+ 
+ CROSS   := arm-none-eabi-
+@@ -107,8 +108,8 @@ MWCCARM  = $(TOOLS_DIR)/mwccarm/$(MWCCVERSION)/mwccarm.exe
+ # have to use mwldarm for now.
+ # TODO: Is there a hack workaround to let us go back to GNU LD? Ideally, the
+ # only dependency should be MWCCARM.
+-MWLDARM  = $(TOOLS_DIR)/mwccarm/$(MWCCVERSION)/mwldarm.exe
+-MWASMARM = $(TOOLS_DIR)/mwccarm/$(MWCCVERSION)/mwasmarm.exe
++MWLDARM  = $(TOOLS_DIR)/mwccarm/$(LINKVERSION)/mwldarm.exe
++MWASMARM = $(TOOLS_DIR)/mwccarm/$(LINKVERSION)/mwasmarm.exe
+ MAKELCF := $(WINE) $(TOOLS_DIR)/bin/makelcf.exe
+ 
+ AS      = $(WINE) $(MWASMARM)
+@@ -125,7 +126,8 @@ ASM_PROCESSOR := $(ASM_PROCESSOR_DIR)/compile.sh
+ 
+ # ./tools/mwccarm/2.0/base/mwasmarm.exe -proc arm5te asm/arm9_thumb.s -o arm9.o
+ MWASFLAGS = -proc arm5te -g -i ../include -i .. -D$(GAME_VERSION) -D$(GAME_LANGUAGE)
+-MWCFLAGS = -O4,p -sym on -gccext,on -proc arm946e -msgstyle gcc -gccinc -ipa file -fp soft -lang c99 -Cpp_exceptions off -inline on,noauto $(foreach dir,$(INCLUDE_DIRS),-i $(dir)) $(foreach dir,$(INCLUDE_RECURSIVE_DIRS),-ir $(dir)) -interworking -DFS_IMPLEMENT -enum int -D$(GAME_VERSION) -D$(GAME_LANGUAGE) -W all -W pedantic -W noimpl_signedunsigned -W noimplicitconv -W nounusedarg -W nomissingreturn -W error
++MWCFLAGS_BASE = -O4,p -sym on -gccext,on -proc arm946e -msgstyle gcc -gccinc -ipa file -fp soft -lang c99 -Cpp_exceptions off -inline on,noauto $(foreach dir,$(INCLUDE_DIRS),-i $(dir)) $(foreach dir,$(INCLUDE_RECURSIVE_DIRS),-ir $(dir)) -interworking -DFS_IMPLEMENT -enum int -D$(GAME_VERSION) -D$(GAME_LANGUAGE) -W all -W pedantic -W noimpl_signedunsigned -W noimplicitconv -W nounusedarg -W nomissingreturn -W error
++MWCFLAGS = -O4,p -sym on -gccext,on -proc arm946e -msgstyle gcc -gccinc -fp soft -lang c99 -Cpp_exceptions off -inline on,noauto $(foreach dir,$(INCLUDE_DIRS),-i $(dir)) $(foreach dir,$(INCLUDE_RECURSIVE_DIRS),-ir $(dir)) -interworking -DFS_IMPLEMENT -enum int -D$(GAME_VERSION) -D$(GAME_LANGUAGE) -W all -W pedantic -W noimpl_signedunsigned -W noimplicitconv -W nounusedarg -W nomissingreturn -relax_pointers '-D__declspec(x)='
+ MWCXXFLAGS = -O4,p -sym on -proc arm946e -msgstyle gcc -gccinc -fp soft -lang c99 -Cpp_exceptions off -inline on,noauto $(foreach dir,$(INCLUDE_DIRS),-i $(dir)) $(foreach dir,$(INCLUDE_RECURSIVE_DIRS),-ir $(dir)) -interworking -DFS_IMPLEMENT -enum int -D$(GAME_VERSION) -D$(GAME_LANGUAGE) -W all -W pedantic -W noimpl_signedunsigned -W noimplicitconv -W nounusedarg -W nomissingreturn -W error
+ MWLDFLAGS = -w off -sym on -proc v5te -interworking -map closure,unused -symtab sort -m _start -msgstyle gcc
+ LIBS := -Llib -lsyscall
+@@ -216,7 +218,7 @@ $(BUILD_DIR)/lib/%.o: MWCFLAGS = -O4,p -sym on -gccext,on -proc arm946e -msgstyl
+ 
+ $(BUILD_DIR)/lib/libnns/%.o: MWCCVERSION = 1.2/sp3
+ $(BUILD_DIR)/lib/MSL_C/%.o: MWCCVERSION = 2.0/sp1
+-$(BUILD_DIR)/lib/MSL_C/%.o: MWCFLAGS += -ipa file
++$(BUILD_DIR)/lib/MSL_C/%.o: MWCFLAGS = $(MWCFLAGS_BASE)
+ 
+ ####################### Everything Else ######################
+ 
+diff --git a/arm9/src/unk_02085338.c b/arm9/src/unk_02085338.c
+index 1906f770..ef4b7efc 100644
+--- a/arm9/src/unk_02085338.c
++++ b/arm9/src/unk_02085338.c
+@@ -72,7 +72,7 @@ void sub_020853F0(struct UnkStruct_02085338 *ptr, u16 *a1) {
+ }
+ 
+ void sub_020853FC(struct UnkStruct_02085338 *ptr, struct MailMessage *a1) {
+-    return MailMsg_Copy(a1, &ptr->unk_14);
++    MailMsg_Copy(a1, &ptr->unk_14);
+ }
+ 
+ u8 sub_0208540C(struct UnkStruct_02085338 *ptr) {

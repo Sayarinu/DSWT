@@ -12,7 +12,9 @@ namespace dswt::server {
 namespace detail { class RecoveryGate; class ChosenPairs; }
 
 // Register only on the separately authorized worker endpoint, never the public
-// game backend. Each call retains one pair or a definitive no-pair outcome.
+// game backend. Each call retains up to a batch of pairs, committed together
+// behind one archive wait, or a definitive no-pair outcome. The reply names
+// the first pair.
 class MatcherService final : public v1::TradeMatcher::Service {
 public:
   explicit MatcherService(std::string connection_info, RecoveryBarrier recovery = {});
