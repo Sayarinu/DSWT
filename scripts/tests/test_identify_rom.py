@@ -121,7 +121,7 @@ class IdentifyRomTests(unittest.TestCase):
             "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain",
             "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan",
             "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
-            "diamond-korea", "pearl-korea",
+            "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan",
             "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for key in ("id", "sha256", "sha1", "crc32"):
             self.assertEqual(len({row[key] for row in variants}), len(variants))
@@ -131,8 +131,8 @@ class IdentifyRomTests(unittest.TestCase):
             self.assertEqual(identify_rom.bundle.GAMES[row["game_code"][:3]], row["game"])
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][0], row["game"])
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][2], row["language"])
-            # Only Japanese Diamond and Pearl, the first release, are 128 MiB.
-            small = row["game_code"][:3] in ("ADA", "APA") and row["game_code"][3] != "J"
+            # Only the first Japanese Diamond and Pearl revisions are 128 MiB; Japanese Pearl Rev 6 is 64.
+            small = row["game_code"][:3] in ("ADA", "APA") and not (row["game_code"][3] == "J" and row["revision"] < 5)
             self.assertEqual(row["size"], (64 if small else 128) * 1024 * 1024)
             self.assertIs(type(row["revision"]), int)
             for key, length in (("sha256", 64), ("sha1", 40), ("crc32", 8)):
@@ -150,7 +150,7 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "heartgold-japan", "soulsilver-japan",
                                                         "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain",
                                                         "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
-                                                        "diamond-korea", "pearl-korea",
+                                                        "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan",
                                                         "france", "germany", "italy", "spain", "japan", "platinum-korea"])
         for row in built:
             if "port_base" in row:

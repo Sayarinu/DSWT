@@ -111,7 +111,9 @@ class Library:
                         continue
                     code = symbol["type"] == elf.STT_FUNC or "x" in flags
                     lines.append(f".global {symbol['name']}")
-                    if symbol["type"] == elf.STT_FUNC and symbol["value"] & 1:
+                    # Metrowerks marks Thumb code only with $t mapping symbols, not the address.
+                    thumb = symbol["value"] & 1 or elf.mode_at(obj.mapping_modes().get(shndx, ()), position) == "$t"
+                    if symbol["type"] == elf.STT_FUNC and thumb:
                         lines += [".thumb", ".thumb_func"]
                     elif code:
                         lines.append(".arm")

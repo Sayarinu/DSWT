@@ -29,8 +29,8 @@ GAME_CODE = slice(0x0C, 0x10)
 ROM_VERSION = 0x1E
 USED_SIZE = 0x80
 # The header's device capacity: the cartridge holds 128 KiB << this value. It is
-# per cartridge, not per game: Japanese Diamond and Pearl are 128 MiB, every
-# later Diamond and Pearl 64 MiB.
+# per cartridge, not per game: the first Japanese Diamond and Pearl revisions are
+# 128 MiB, later ones (Japanese Pearl Rev 6) and every other Diamond and Pearl 64 MiB.
 CAPACITY = 0x14
 # Gen IV Pokémon games by the first three letters of the header game code.
 GAMES = {

@@ -123,8 +123,9 @@ def dp_object(source, version):
     return f"build/{version.lower()}.us/{posixpath.splitext(inner)[0]}.o"
 
 
-def dp_commands(workspace, sources, version, tls):
-    """The compiler command make runs for each source, read from a dry run in arm9/."""
+def dp_commands(workspace, sources, version, tls, tool="mwccarm.exe"):
+    """The command make runs for each source with tool (the compiler, or mwasmarm.exe for
+    assembly), read from a dry run in arm9/."""
     targets = " ".join(dp_object(name, version) for name in sources)
     always = " ".join(f"-W {shlex.quote(posixpath.relpath(name, 'arm9'))}" for name in sources)
     out = docker({str(Path(workspace).resolve()): "/workspace", str(Path(tls).resolve()): "/tls"},
@@ -132,7 +133,7 @@ def dp_commands(workspace, sources, version, tls):
     commands = {}
     for line in out.splitlines():
         words = shlex.split(line)
-        if "-c" not in words or "-o" not in words or not any(w.endswith("mwccarm.exe") for w in words):
+        if "-o" not in words or not any(w.endswith(tool) for w in words) or tool == "mwccarm.exe" and "-c" not in words:
             continue
         for name in sources:
             if words[words.index("-o") + 1] == dp_object(name, version):
@@ -193,6 +194,20 @@ def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_
         mounts[str(Path(tls).resolve())] = "/tls"
     docker(mounts, "\n".join(lines) + "\n", image=DP_IMAGE)
     return sorted(out.glob("*.o"))
+
+
+def assemble_dp(workspace, sources, out, name, version, tls):
+    """Assemble one Diamond or Pearl assembly file (name, such as arm9/asm/unk_02035068.s) from
+    sources, a tree like the workspace, with make's own command; returns the object's bytes."""
+    words = dp_commands(workspace, [name], version, tls, tool="mwasmarm.exe")[name]
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    words[words.index("-o") + 1] = f"/out/{name.replace('/', '_')}.o"
+    words[-1] = f"{SOURCES}/{name}"
+    mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
+              str(Path(sources).resolve()): SOURCES, str(Path(tls).resolve()): "/tls"}
+    docker(mounts, "\n".join(["set -e", DP_WINE, "cd /workspace/arm9", shlex.join(words)]) + "\n", image=DP_IMAGE)
+    return (out / f"{name.replace('/', '_')}.o").read_bytes()
 
 
 def assemble(source, output):
