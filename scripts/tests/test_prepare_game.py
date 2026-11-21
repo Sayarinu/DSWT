@@ -241,7 +241,7 @@ class PrepareGameTests(unittest.TestCase):
         self.assertEqual((pristine / "arm9/src/main.c").read_text(), "original\n")
         self.assertFalse((pristine / "arm9/src/wonder_trade").exists())
 
-    def test_black2_and_white2_prepare_only_a_pristine_workspace(self):
+    def test_black2_and_white2_spike_and_pristine_workspaces(self):
         (self.root / "client/src/wonder_trade/bw2").mkdir(parents=True)
         (self.root / "client/src/wonder_trade/bw2/game_save.c").write_text("bw2 adapter\n")
         upstream = Path(self.temp.name) / "bw2-upstream"
@@ -266,9 +266,14 @@ class PrepareGameTests(unittest.TestCase):
             "rom_sha1": {"b2_us": "7" * 40, "w2_us": "8" * 40},
         }
         (self.root / "client/upstream-pokebw2.json").write_text(json.dumps(pin))
-        with self.assertRaisesRegex(RuntimeError, "--pristine"):
-            prepare_game.prepare(self.root, name="bw2")
-        self.assertFalse((self.root / "game/pokebw2").exists())
+        (self.root / "client/pokebw2.patch").write_text(
+            "diff --git a/src/main.c b/src/main.c\n"
+            "--- a/src/main.c\n+++ b/src/main.c\n"
+            "@@ -1 +1 @@\n-original\n+patched\n"
+        )
+        spike = prepare_game.prepare(self.root, name="bw2")
+        self.assertEqual((spike / "src/main.c").read_text(), "patched\n")
+        self.assertEqual((spike / "src/wonder_trade/bw2/game_save.c").read_text(), "bw2 adapter\n")
         bw2 = prepare_game.prepare(self.root, pristine=True, name="bw2")
         self.assertEqual(bw2, self.root / "game/pokebw2-pristine")
         self.assertEqual((bw2 / "src/main.c").read_text(), "original\n")

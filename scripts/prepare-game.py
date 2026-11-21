@@ -51,11 +51,11 @@ GAMES = {
         "destinations": {"src": "arm9/src", "files-dp": "files"},
     },
     # fuddlesworth/pokebw2 builds Black 2 and White 2 from one tree, with
-    # configure.py and Ninja, from the player's own dumps in orig/. It has no
-    # integration patch yet, so only its pristine workspace is prepared.
+    # configure.py and Ninja, from the player's own dumps in orig/. Its patch
+    # is the LUNE-830 debug spike, not an integration.
     "bw2": {
         "pin": "client/upstream-pokebw2.json",
-        "patch": None,
+        "patch": "client/pokebw2.patch",
         "build_patches": (),
         "staged_revisions": (),
         "workspace": "pokebw2",
