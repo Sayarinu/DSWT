@@ -16,6 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 BANKS = (0x30000, 0x70000)
+B2W2_BANKS = (0x6B000, 0x6C000)
 
 
 def seal(record):
@@ -47,7 +48,28 @@ def retail_save(record, target="us-rev1"):
     return bytes(data)
 
 
+def b2w2_save(record, marker=0):
+    """Black 2/White 2 (protocol/save-layout-b2w2.json): both main copies with a valid
+    CRC table and footer, trainer data block 27 holding musical marker 6, and the
+    record in both banks of the musical distribution area."""
+    data = bytearray(b"\xff" * 524288)
+    for copy in (0, 0x26000):
+        data[copy:copy + 0x25F00] = bytes(0x25F00)
+        struct.pack_into("<H", data, copy + 0x19400 + 0x3C, marker)
+        crc = binascii.crc_hqx(data[copy + 0x19400:copy + 0x194B0], 0xffff)
+        struct.pack_into("<HH", data, copy + 0x194B0, 1, crc)
+        struct.pack_into("<H", data, copy + 0x25F00 + 54, crc)
+        table = data[copy + 0x25F00:copy + 0x25F94]
+        struct.pack_into("<IIIHH", data, copy + 0x25F94, 1, 0x25FA4, 0x31053527, 0, binascii.crc_hqx(table, 0xffff))
+    data[0x55800:0x6D514] = b"stale musical distribution"[:16] * (0x17D14 // 16) + bytes(0x17D14 % 16)
+    for bank in B2W2_BANKS:
+        data[bank:bank + 4096] = record
+    return bytes(data)
+
+
 class JournalSeedTests(unittest.TestCase):
+    banks = BANKS
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="dswt-journal-host-")
         self.addCleanup(self.temporary.cleanup)
@@ -60,8 +82,8 @@ class JournalSeedTests(unittest.TestCase):
         self.faults = alias
         self.save = self.root / "copy.sav"
 
-    def record(self, phase):
-        record = subprocess.check_output([str(self.fixture), str(phase)], timeout=5)
+    def record(self, phase, fixture=None):
+        record = subprocess.check_output([str(fixture or self.fixture), str(phase)], timeout=5)
         self.assertEqual(len(record), 4096)
         return record
 
@@ -81,14 +103,15 @@ class JournalSeedTests(unittest.TestCase):
 
     def preserved(self, original):
         actual = self.save.read_bytes()
-        first, second = (actual[bank:bank + 4096] for bank in BANKS)
+        first, second = (actual[bank:bank + 4096] for bank in self.banks)
         self.assertEqual(first, second)
         self.assertEqual(first[4092:], b"CMIT")
         self.assertEqual(first[4060:4092], hashlib.sha256(first[:4060]).digest())
-        self.assertGreater(struct.unpack_from("<Q", first, 16)[0], struct.unpack_from("<Q", original, BANKS[0] + 16)[0])
-        self.assertNotEqual(first[1444:1476], original[BANKS[0] + 1444:BANKS[0] + 1476])
+        self.assertGreater(struct.unpack_from("<Q", first, 16)[0],
+                           struct.unpack_from("<Q", original, self.banks[0] + 16)[0])
+        self.assertNotEqual(first[1444:1476], original[self.banks[0] + 1444:self.banks[0] + 1476])
         restored = bytearray(actual)
-        for bank in BANKS:
+        for bank in self.banks:
             for offset, size in ((16, 8), (1444, 32), (4060, 32)):
                 restored[bank + offset:bank + offset + size] = original[bank + offset:bank + offset + size]
         self.assertEqual(bytes(restored), original)
@@ -179,7 +202,16 @@ class JournalSeedTests(unittest.TestCase):
         self.assertEqual({name: (store / name).read_bytes() for name in before}, before)
 
     def test_every_seed_publication_survives_kill_or_write_failure(self):
-        original = self.install(5)
+        self.seed_survives_every_fault(self.install(5), "us-rev1")
+
+    def test_every_black2_seed_publication_survives_kill_or_write_failure(self):
+        self.banks = B2W2_BANKS
+        original = b2w2_save(self.record(5, self.fixture_b2w2))
+        self.save.write_bytes(original); self.save.chmod(0o600)
+        self.tool("inspect", target="black2-us")
+        self.seed_survives_every_fault(original, "black2-us")
+
+    def seed_survives_every_fault(self, original, target):
         self.tool("prepare")
         store = Path(str(self.save) + ".dswt")
         baseline = self.root / "baseline"
@@ -193,7 +225,7 @@ class JournalSeedTests(unittest.TestCase):
                 shutil.rmtree(store); shutil.copytree(baseline, store); self.save.write_bytes(original)
                 env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_ARMED="1",
                            DSWT_FAULT_SAVE=str(self.save), DSWT_FAULT_AT=str(stage), DSWT_FAULT_MODE=mode)
-                process = subprocess.Popen([str(self.store), "seed", str(self.save), "us-rev1"],
+                process = subprocess.Popen([str(self.store), "seed", str(self.save), target],
                                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
                     if mode != "error":
@@ -213,7 +245,7 @@ class JournalSeedTests(unittest.TestCase):
                 with self.subTest(mode=mode, stage=stage):
                     self.assertEqual(process.returncode, 74 if mode == "error" else -signal.SIGKILL, err)
                     self.tool("prepare")
-                    self.tool("seed")
+                    self.tool("seed", target=target)
                     self.preserved(original)
             else:
                 self.fail(f"{mode}: the seed never completed")
@@ -246,6 +278,60 @@ class JournalSeedTests(unittest.TestCase):
         self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.assertEqual(self.save.read_bytes(), original)
 
+    def test_black2_and_white2_journals_refresh_in_every_phase(self):
+        self.banks = B2W2_BANKS
+        for target in ("black2-us", "white2-us"):
+            for phase in range(11):
+                with self.subTest(target=target, phase=phase):
+                    self.save = self.root / f"{target}-{phase}.sav"
+                    original = b2w2_save(self.record(phase, self.fixture_b2w2))
+                    self.save.write_bytes(original); self.save.chmod(0o600)
+                    for other in ("us-rev1", "heartgold-us-rev0"):
+                        self.tool("inspect", target=other, ok=False)
+                    self.tool("inspect", target=target)
+                    self.assertEqual(self.save.read_bytes(), original)
+                    self.tool("prepare")
+                    self.tool("seed", target=target)
+                    self.preserved(original)
+
+    def test_black2_inspection_refuses_other_families_and_a_musical_in_use(self):
+        gen4 = retail_save(self.record(5))
+        variants = {
+            "a Generation IV save": gen4,
+            # Phase 5 holds a party Pokémon: a Generation IV-sized one is not a Black 2 journal.
+            "a Generation IV journal": b2w2_save(self.record(5)),
+            "a musical still in use": b2w2_save(self.record(5, self.fixture_b2w2), marker=0xC21E),
+            "no journal": b2w2_save(b"\xff" * 4096),
+        }
+        damaged = bytearray(b2w2_save(self.record(5, self.fixture_b2w2)))
+        damaged[0x25F94 + 8] ^= 1; damaged[0x26000 + 0x25F94 + 8] ^= 1
+        variants["no valid footer"] = bytes(damaged)
+        for name, data in variants.items():
+            with self.subTest(name):
+                self.save = self.root / f"refused-{len(name)}.sav"
+                self.save.write_bytes(data); self.save.chmod(0o600)
+                self.tool("inspect", target="black2-us", ok=False)
+                self.assertEqual(self.save.read_bytes(), data)
+                self.assertFalse(Path(str(self.save) + ".dswt").exists())
+        self.save = self.root / "black2.sav"
+        self.save.write_bytes(b2w2_save(self.record(5, self.fixture_b2w2))); self.save.chmod(0o600)
+        self.tool("inspect", target="us-rev1", ok=False)
+
+    def test_durable_launcher_refreshes_a_black2_journal(self):
+        self.banks = B2W2_BANKS
+        original = b2w2_save(self.record(8, self.fixture_b2w2))
+        self.save.write_bytes(original); self.save.chmod(0o600)
+        marker = self.root / "child-observed"
+        code = ("import os,sys; from pathlib import Path; "
+                "assert os.environ['DSWT_DURABLE_SAVE']==sys.argv[1]; Path(sys.argv[2]).write_text('started')")
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/run-emulator.py"),
+                                 "--save", str(self.save), "--target", "black2-us", "--store-tool", str(self.store),
+                                 "--", sys.executable, "-c", code, str(self.save), str(marker)],
+                                capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(marker.read_text(), "started")
+        self.preserved(original)
+
     def test_inspection_rejects_symlink_and_hardlink_aliases(self):
         original = self.install(1)
         source = self.save
@@ -274,8 +360,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("store", type=Path)
     parser.add_argument("fixture", type=Path)
+    parser.add_argument("fixture_b2w2", type=Path)
     parser.add_argument("faults", type=Path)
     args = parser.parse_args()
-    JournalSeedTests.store, JournalSeedTests.fixture, JournalSeedTests.faults = (
-        args.store.resolve(), args.fixture.resolve(), args.faults.resolve())
+    JournalSeedTests.store, JournalSeedTests.fixture, JournalSeedTests.fixture_b2w2, JournalSeedTests.faults = (
+        args.store.resolve(), args.fixture.resolve(), args.fixture_b2w2.resolve(), args.faults.resolve())
     unittest.main(argv=[__file__], verbosity=2)

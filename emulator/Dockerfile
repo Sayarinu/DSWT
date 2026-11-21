@@ -19,6 +19,8 @@ COPY client/include/wonder_trade/wire.h client/include/wonder_trade/wire.h
 COPY client/include/wonder_trade/wire_layout.h client/include/wonder_trade/wire_layout.h
 COPY client/src/wonder_trade/wire.c client/src/wonder_trade/wire.c
 COPY client/tests/journal_fixture.h client/tests/journal_fixture.h
+COPY protocol/save-layout-b2w2.json protocol/save-layout-b2w2.json
+COPY patches/compatibility.json patches/compatibility.json
 COPY emulator/ emulator/
 RUN cmake -S emulator -B /checks -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /checks --parallel 2 \

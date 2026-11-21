@@ -18,7 +18,10 @@ int WtGameSave_Eligible(WtGame *, unsigned slot);
  * remain, or another Pokémon cannot be read. */
 BOOL WtGameSave_Unique(WtGame *, unsigned slot);
 /* Frees the musical distribution save for the journal before its first
- * write: zero once the game will never read it again. */
+ * write: zero once the game will never read it again and no data a musical
+ * left remains in the journal banks. */
 int WtGameSave_ReleaseMusicalArea(WtGame *);
+/* TRUE when the journal banks hold data a musical left and no journal. */
+BOOL WtGameSave_MusicalLeftover(void);
 
 #endif

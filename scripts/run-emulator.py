@@ -30,7 +30,8 @@ def refreshed_record(data, target):
         tail = data[bank + 4096:bank + layout["bank_reserved_size"]]
         if tail not in (bytes(len(tail)), b"\xff" * len(tail)):
             raise ValueError("Unknown reserved-sector contents; preserve recovery evidence")
-        blanked[bank:bank + 4096] = tail[:1] * 4096
+        # A bank with no reserved tail (Generation V) is blanked as erased flash.
+        blanked[bank:bank + 4096] = (tail[:1] or b"\xff") * 4096
         if record in (bytes(4096), b"\xff" * 4096):
             continue
         canonical = provision.seed_record(b"\x01" * 32, 0)

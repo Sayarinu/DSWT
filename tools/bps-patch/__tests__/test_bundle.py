@@ -70,8 +70,8 @@ class BundleTests(Fixture):
         cases = {
             "already patched": (TARGETS["us-rev1"], "already has DSWT 0.1.0"),
             "trimmed patched": (TARGETS["us-rev1"][:USED], "already has DSWT"),
-            "other game": (rom(1, "x", code="IRBO"), "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM"),
-            "short file": (b"NDS", "not a Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver ROM"),
+            "other game": (rom(1, "x", code="IRBO"), "not a Pokémon Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black 2 or White 2 ROM"),
+            "short file": (b"NDS", "not a Pokémon Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black 2 or White 2 ROM"),
             "diamond": (rom(5, "d", code="ADAE"), r"Pokémon Diamond \(North America, English, Rev 5\) is not supported yet"),
             "pearl": (rom(5, "p", code="APAP"), r"Pokémon Pearl \(Europe, English, Rev 5\) is not supported yet"),
             "heartgold": (rom(0, "h", code="IPKE")[:USED], r"Pokémon HeartGold \(North America, English, Rev 0\) is not"),
@@ -174,7 +174,7 @@ class BundleTests(Fixture):
 
     def test_identifies_every_retail_cartridge(self):
         self.assertEqual(sorted(bundle.CARTRIDGES), sorted(
-            prefix + letter for prefix in ("ADA", "APA", "CPU", "IPK", "IPG") for letter in "JEPFDISK"))
+            prefix + letter for prefix in ("ADA", "APA", "CPU", "IPK", "IPG", "IRE", "IRD") for letter in "JEPFDISKO"))
         self.assertEqual(bundle.cartridge(rom(1, "k", code="CPUK", capacity=10)),
                          {"game": "Pokémon Platinum", "game_code": "CPUK", "region": "Korea", "language": "Korean",
                           "revision": 1, "size": 128 * 1024 * 1024})
@@ -190,7 +190,8 @@ class BundleTests(Fixture):
         for code, capacity, size in (("ADAJ", 10, 128), ("APAJ", 10, 128), ("ADAK", 9, 64), ("CPUE", 0, 1 / 8)):
             with self.subTest(code):
                 self.assertEqual(bundle.cartridge(rom(0, code, code=code, capacity=capacity))["size"], size * 1024 * 1024)
-        self.assertIsNone(bundle.cartridge(rom(0, "big", code="ADAJ", capacity=12))["size"])
+        self.assertEqual(bundle.cartridge(rom(0, "big", code="IREO", capacity=12))["size"], 512 * 1024 * 1024)
+        self.assertIsNone(bundle.cartridge(rom(0, "bigger", code="IRDO", capacity=13))["size"])
         europe = bundle.cartridge(rom(10, "eu", code="CPUE"))
         self.assertEqual(bundle.describe(europe), "Pokémon Platinum (Europe, English, Rev 10)")
         self.assertIsNone(bundle.cartridge(b"\xff" * 0x200))

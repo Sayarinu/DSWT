@@ -70,6 +70,7 @@ class WalkTests(unittest.TestCase):
             "truncated number": recrc(b"BPS1" + bytes([0x00] * 3) + bytes(12)),
             "long number": recrc(b"BPS1" + bytes(11) + bytes(12)),
             "huge target": assemble(b"", b"", [], target_size=bps.MAX_FILE + 1),
+            "huge source": recrc(b"BPS1" + number(bps.MAX_SOURCE + 1) + number(1) + number(0) + bytes(12)),
             "empty target": assemble(b"", b"", []),
             "huge metadata": recrc(b"BPS1" + number(0) + number(1) + number(bps.MAX_METADATA + 1) + bytes(20)),
         }

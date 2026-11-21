@@ -30,15 +30,18 @@ ROM_VERSION = 0x1E
 USED_SIZE = 0x80
 # The header's device capacity: the cartridge holds 128 KiB << this value. It is
 # per cartridge, not per game: the first Japanese Diamond and Pearl revisions are
-# 128 MiB, later ones (Japanese Pearl Rev 6) and every other Diamond and Pearl 64 MiB.
+# 128 MiB, later ones (Japanese Pearl Rev 6) and every other Diamond and Pearl 64 MiB;
+# Black 2 and White 2 are 512 MiB.
 CAPACITY = 0x14
-# Gen IV Pokémon games by the first three letters of the header game code.
+# Supported Pokémon games by the first three letters of the header game code.
 GAMES = {
     "ADA": "Pokémon Diamond",
     "APA": "Pokémon Pearl",
     "CPU": "Pokémon Platinum",
     "IPK": "Pokémon HeartGold",
     "IPG": "Pokémon SoulSilver",
+    "IRE": "Pokémon Black 2",
+    "IRD": "Pokémon White 2",
 }
 # The last letter of the game code: region and language.
 REGIONS = {
@@ -50,10 +53,11 @@ REGIONS = {
     "I": ("Italy", "Italian"),
     "S": ("Spain", "Spanish"),
     "K": ("Korea", "Korean"),
+    "O": ("USA and Europe", "English"),
 }
 # Retail cartridges by game code: (game, region, language).
 CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, game in GAMES.items() for letter in REGIONS}
-GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold or SoulSilver"
+GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black 2 or White 2"
 # European English cartridges that reuse the US game code, told apart by their
 # header revision: Platinum reads CPUE revision 10, Diamond and Pearl revision 13,
 # HeartGold and SoulSilver revision 10.
@@ -79,7 +83,7 @@ def crc32_hex(data):
 
 
 def cartridge(data):
-    """Describe a Gen IV Pokémon dump from its header, or return None for anything else.
+    """Describe a supported Pokémon game's dump from its header, or return None for anything else.
 
     The size is None when the header declares a capacity no supported file can have."""
     if len(data) < HEADER_SIZE:
@@ -90,7 +94,8 @@ def cartridge(data):
         return None
     if code not in CARTRIDGES:
         return None
-    size = 0x20000 << data[CAPACITY] if 0x20000 << min(data[CAPACITY], 12) <= bps.MAX_FILE else None
+    size = 0x20000 << data[CAPACITY]
+    size = size if size <= bps.MAX_FILE else None
     game, region, language = CARTRIDGES[code]
     revision = data[ROM_VERSION]
     if (code, revision) in EUROPE_AS_US:
@@ -108,14 +113,37 @@ def title(entry):
     return f"{GAMES[entry['game_code'][:3]]} {entry['name']}"
 
 
-def restore(data, size):
-    """Pad a trimmed dump back to the cartridge size with the erased-flash value it held."""
-    if len(data) >= size or len(data) < HEADER_SIZE:
-        return data
+# Erased flash, added a block at a time so padding a dump makes no ROM-sized temporary.
+ERASED = b"\xff" * (1024 * 1024)
+
+
+def _padding(data, size):
+    """Return how many erased-flash bytes bring a dump to size, or None if padding cannot."""
+    if len(data) == size:
+        return 0
+    if len(data) > size or len(data) < HEADER_SIZE:
+        return None
     used = int.from_bytes(data[USED_SIZE:USED_SIZE + 4], "little")
-    if not used or len(data) < used:
-        return data
-    return data + b"\xff" * (size - len(data))
+    return size - len(data) if used and len(data) >= used else None
+
+
+def _matches(data, record):
+    """Whether the dump, padded to the record's size, has the record's SHA-256, without padding it."""
+    padding = _padding(data, record["size"])
+    if padding is None:
+        return False
+    digest = hashlib.sha256(data)
+    for start in range(0, padding, len(ERASED)):
+        digest.update(ERASED[:padding - start])
+    return digest.hexdigest() == record["sha256"]
+
+
+def restore(data, size):
+    """Pad a trimmed dump, a bytearray, back to the cartridge size in place with the erased-flash value it held."""
+    if _padding(data, size):
+        for start in range(len(data), size, len(ERASED)):
+            data += ERASED[:size - start]
+    return data
 
 
 def _require(condition, message):
@@ -191,8 +219,14 @@ def compressed_code(rom, label):
 
 
 def source_view(rom, label="ROM"):
-    """Return the bytes a patch applies to: the ROM followed by its expanded code."""
-    return rom + b"".join(expanded for _, _, expanded in compressed_code(rom, label))
+    """Return the bytes a patch applies to: the ROM followed by its expanded code.
+
+    A bytearray ROM is extended in place, so a large ROM is not held twice."""
+    code = b"".join(expanded for _, _, expanded in compressed_code(rom, label))
+    if isinstance(rom, bytearray):
+        rom += code
+        return rom
+    return rom + code
 
 
 def load_manifest(data):
@@ -229,15 +263,15 @@ def load_manifest(data):
 
 
 def select(manifest, data):
-    """Return (entry, full-size source) for an unmodified supported dump, or explain why not."""
+    """Return (entry, full-size source) for an unmodified supported dump, or explain why not.
+
+    data is a bytearray; a trimmed dump is restored in place."""
     entries = manifest["entries"]
     for entry in entries:
-        candidate = restore(data, entry["input"]["size"])
-        if len(candidate) == entry["input"]["size"] and sha256(candidate) == entry["input"]["sha256"]:
-            return entry, candidate
+        if _matches(data, entry["input"]):
+            return entry, restore(data, entry["input"]["size"])
     for entry in entries:
-        candidate = restore(data, entry["output"]["size"])
-        if len(candidate) == entry["output"]["size"] and sha256(candidate) == entry["output"]["sha256"]:
+        if _matches(data, entry["output"]):
             raise BundleError(f"This ROM already has DSWT {manifest['version']} applied.")
     info = cartridge(data)
     if info is None:
@@ -254,7 +288,10 @@ def select(manifest, data):
 
 
 def patch_rom(entry, source, patch):
-    """Apply one entry's patch and verify every recorded digest of the patch and output."""
+    """Apply one entry's patch and verify every recorded digest of the patch and output.
+
+    A bytearray source is extended in place with its expanded code, so only it and the
+    target are ever ROM-sized."""
     if len(patch) != entry["patch"]["size"] or sha256(patch) != entry["patch"]["sha256"]:
         raise BundleError("The patch file does not match the manifest; download the release again.")
     if crc32_hex(source) != entry["input"]["crc32"]:
@@ -270,13 +307,17 @@ def patch_rom(entry, source, patch):
 
 
 def read_file(path, limit, label):
+    """Read a regular file into one bytearray of its exact size."""
     path = Path(path)
     if path.is_symlink() or not path.is_file():
         raise BundleError(f"{label} must be a regular file")
     with path.open("rb") as handle:
-        data = handle.read(limit + 1)
-    if len(data) > limit:
-        raise BundleError(f"{label} is too large")
+        size = os.fstat(handle.fileno()).st_size
+        if size > limit:
+            raise BundleError(f"{label} is too large")
+        data = bytearray(size)
+        if handle.readinto(data) != size or handle.read(1):
+            raise BundleError(f"{label} changed while it was read")
     return data
 
 
@@ -325,8 +366,7 @@ def patch_file(bundle_dir, input_path, output_path=None):
     """Patch one dump with a release bundle directory; return (entry, output path)."""
     bundle_dir = Path(bundle_dir)
     manifest = load_manifest(read_file(bundle_dir / "manifest.json", MAX_MANIFEST, "Manifest"))
-    data = read_file(input_path, bps.MAX_FILE, "ROM")
-    entry, source = select(manifest, data)
+    entry, source = select(manifest, read_file(input_path, bps.MAX_FILE, "ROM"))
     patch = read_file(bundle_dir / entry["patch"]["file"], bps.MAX_PATCH, "Patch")
     target = patch_rom(entry, source, patch)
     output_path = Path(output_path) if output_path else default_output(input_path)

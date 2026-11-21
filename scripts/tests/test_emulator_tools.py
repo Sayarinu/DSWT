@@ -21,7 +21,8 @@ class EmulatorSourceTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for name in ('emulator', 'client/include/wonder_trade'):
             (self.root / name).mkdir(parents=True)
-        for name in ('emulator/durable_save.cpp', 'emulator/durable_save.h', 'client/include/wonder_trade/persistence.h', 'LICENSE'):
+        for name in ('emulator/durable_save.cpp', 'emulator/durable_save.h', 'emulator/persistence_page.h',
+                     'client/include/wonder_trade/persistence.h', 'LICENSE'):
             (self.root / name).write_text('synthetic project input\n')
         (self.root / 'emulator/melonds.patch').write_text('--- a/file\n+++ b/file\n@@ -1 +1 @@\n-before\n+after\n')
         self.archive = self.root / 'source.tar.gz'

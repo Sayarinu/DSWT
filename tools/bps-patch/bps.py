@@ -4,7 +4,10 @@ import hashlib
 import struct
 import zlib
 
-MAX_FILE = 256 * 1024 * 1024
+# A ROM: the largest DS cartridge, Black 2 and White 2, holds 512 MiB.
+MAX_FILE = 512 * 1024 * 1024
+# A patch source: the ROM followed by its expanded code, a few MiB at most.
+MAX_SOURCE = MAX_FILE + 64 * 1024 * 1024
 MAX_PATCH = 64 * 1024 * 1024
 MAX_METADATA = 64 * 1024
 FOOTER = 12
@@ -54,7 +57,7 @@ def _parse(patch):
     source_size, position = _number(data, 4, end)
     target_size, position = _number(data, position, end)
     metadata_size, position = _number(data, position, end)
-    if source_size > MAX_FILE or target_size > MAX_FILE or target_size == 0:
+    if source_size > MAX_SOURCE or target_size > MAX_FILE or target_size == 0:
         raise BPSError("Declared file size is outside the supported range")
     if metadata_size > MAX_METADATA or position + metadata_size > end:
         raise BPSError("Metadata is outside the supported range")
@@ -127,26 +130,30 @@ def walk(patch):
 
 
 def apply(source, patch):
-    """Return the patched bytes after checking the source, every action and the target CRC32."""
+    """Return the patched bytearray after checking the source, every action and the target CRC32.
+
+    Copies go through memoryviews, so a ROM-sized action makes no temporary copy."""
     header, actions = _parse(patch)
     if len(source) != header["source_size"] or crc32(source) != header["source_crc"]:
         raise BPSError("Patch was not made for this input")
     target = bytearray(header["target_size"])
-    for action, output, length, offset in actions:
-        if action == 0:
-            target[output:output + length] = source[output:output + length]
-        elif action == 1:
-            target[output:output + length] = patch[offset:offset + length]
-        elif action == 2:
-            target[output:output + length] = source[offset:offset + length]
-        else:
-            # An overlapping target_copy repeats the bytes between its offset and the output.
-            period = output - offset
-            if period >= length:
-                target[output:output + length] = target[offset:offset + length]
+    with memoryview(source) as source_bytes, memoryview(patch) as patch_bytes, memoryview(target) as out:
+        for action, output, length, offset in actions:
+            if action == 0:
+                out[output:output + length] = source_bytes[output:output + length]
+            elif action == 1:
+                out[output:output + length] = patch_bytes[offset:offset + length]
+            elif action == 2:
+                out[output:output + length] = source_bytes[offset:offset + length]
             else:
-                pattern = bytes(target[offset:output])
-                target[output:output + length] = (pattern * (length // period + 1))[:length]
+                # An overlapping target_copy repeats the bytes between its offset and the output:
+                # copy them once, then double the copied run until it is long enough.
+                done = min(output - offset, length)
+                out[output:output + done] = out[offset:offset + done]
+                while done < length:
+                    step = min(done, length - done)
+                    out[output + done:output + done + step] = out[output:output + step]
+                    done += step
     if crc32(target) != header["target_crc"]:
         raise BPSError("Patched output CRC32 mismatch")
-    return bytes(target)
+    return target
