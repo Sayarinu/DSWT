@@ -1,8 +1,8 @@
 diff --git a/configure.py b/configure.py
-index 90a0ae59c..cff13b03f 100644
+index 90a0ae59c..40ce79c01 100644
 --- a/configure.py
 +++ b/configure.py
-@@ -640,6 +640,56 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
+@@ -640,6 +640,58 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
      return dsd
  
  
@@ -43,7 +43,9 @@ index 90a0ae59c..cff13b03f 100644
 +    for source in sorted([*Path("src/wonder_trade").glob("*.c"), *Path("src/wonder_trade/bw2").glob("*.c")]):
 +        prefix = "wt_bw2_" if source.parent.name == "bw2" else "wt_"
 +        obj = build_dir / "wt" / f"{prefix}{source.stem}.o"
-+        n.build([obj], "wt_cc", [str(source)], variables={"flags": wt_flags}, order_only=["constants_headers"])
++        # The rule has no dependency file: a new connection profile rebuilds every Wonder Trade object
++        n.build([obj], "wt_cc", [str(source)], variables={"flags": wt_flags}, order_only=["constants_headers"],
++                implicit=[str(include / "wonder_trade_config.h")])
 +        objects.append(str(obj))
 +    tls_objects = []
 +    for directory in WT_TLS_SRC_DIRS:
@@ -59,7 +61,7 @@ index 90a0ae59c..cff13b03f 100644
  def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) -> tuple[list[Path], list[str]]:
      """Adds the build steps of one version. Returns its check targets and dsd config files. A build with the bugs fixed
      or with its code shifted does not match, so its only targets are the ROM and its archives."""
-@@ -680,8 +730,13 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+@@ -680,8 +732,13 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
      n.build(delink_outputs, "delink", dsd_configs, implicit=[extract_dir / "config.yaml"],
              variables={"config": str(arm9_config)})
      # The linker script also defines NitroSDK's linker symbols, as the SDK's template does, from linker_symbols.toml
@@ -74,7 +76,7 @@ index 90a0ae59c..cff13b03f 100644
      link_lcf = lcf_file
      if shift:
          # Padding in the linker script moves the code and data after it, see tools/build/shift_lcf.py
-@@ -779,7 +834,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+@@ -779,7 +836,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
          link_objects = [str(veneer_object) if obj == dsprot_object else obj for obj in link_objects]
  
      arm9_o = build_dir / "arm9.o"
@@ -83,7 +85,7 @@ index 90a0ae59c..cff13b03f 100644
              variables={"objects": link_response, "lcf": link_lcf})
  
      # The ROM's file system is the extracted one, with the archives built from source in place of the extracted ones.
-@@ -907,7 +962,14 @@ def main():
+@@ -907,7 +964,14 @@ def main():
                               "code sizes; the ROMs no longer match. A multiple of 32, such as 0x100")
      parser.add_argument("--bugfix", action="store_true",
                          help="fix the game's bugs that are marked with BUGFIX in the source; the ROMs no longer match")
@@ -98,7 +100,7 @@ index 90a0ae59c..cff13b03f 100644
  
      versions = args.versions or [v for v in VERSIONS if (ROOT / "orig" / f"baserom_{v}.nds").exists()]
      if not versions:
-@@ -945,7 +1007,12 @@ def main():
+@@ -945,7 +1009,12 @@ def main():
      n.rule("check_baserom", "echo '$sha1  $in' | sha1sum --quiet -c - && touch $out", "Checking base ROM $in")
      n.rule("extract", "$dsd rom extract --rom $in --output-path $extract_dir", "Extracting $in")
      n.rule("delink", "$dsd delink --config-path $config", "Delinking $config")

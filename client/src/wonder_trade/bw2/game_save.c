@@ -126,22 +126,26 @@ done:
     return result;
 }
 
-/* A full save rewrites every block of both copies, then both are checked. */
+/* The game's own save writes the changed blocks to both copies; if both are
+ * not then exactly the expected save, a second save rewrites every block of
+ * both copies. Both copies are checked after each. */
 static int SaveBoth(WtGame *game, const Image *image, const unsigned char expected[32])
 {
     unsigned char actual[32];
     u32 status;
-    int result = -1;
+    int result = -1, attempt;
     if (Hash(image, image->data, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
     if (Verify(image, expected) == 0) return 0;
     WtRecovery_InternalWrite(1);
-    SaveData_RequestFullWrite(image->sv);
-    SaveControl_StartSave(game->save);
-    do {
-        status = SaveControl_ContinueSave(game->save);
-        if (status == SAVE_RESULT_CONTINUE || status == SAVE_RESULT_LAST) OS_Sleep(1);
-    } while (status == SAVE_RESULT_CONTINUE || status == SAVE_RESULT_LAST);
-    if (status == SAVE_RESULT_OK) result = Verify(image, expected);
+    for (attempt = 0; attempt < 2 && result != 0; ++attempt) {
+        if (attempt) SaveData_RequestFullWrite(image->sv);
+        SaveControl_StartSave(game->save);
+        do {
+            status = SaveControl_ContinueSave(game->save);
+            if (status == SAVE_RESULT_CONTINUE || status == SAVE_RESULT_LAST) OS_Sleep(1);
+        } while (status == SAVE_RESULT_CONTINUE || status == SAVE_RESULT_LAST);
+        if (status == SAVE_RESULT_OK) result = Verify(image, expected);
+    }
     WtRecovery_InternalWrite(0);
     if (result != 0) WtRecovery_Block();
     return result;

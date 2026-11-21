@@ -162,10 +162,10 @@ static int Screen_Print(WtApp *app, const u16 *chars, int count, int x, int y)
 }
 
 /* Prints every line of a text from y; returns the y after it. */
-static int Screen_Text(WtApp *app, const u16 *text, int y)
+static int Screen_Text(WtApp *app, const u16 *text, int x, int y)
 {
     while (*text) {
-        text += Screen_Print(app, text, 64, 0, y);
+        text += Screen_Print(app, text, 64, x, y);
         y += LINE_HEIGHT;
         if (*text == '\n') text++;
     }
@@ -226,10 +226,10 @@ static void Draw(WtApp *app)
     if (!app->bitmap) return;
     MIi_CpuClear16(TEXT_BACKGROUND * 0x1111, (u8 *)G2_GetBG1CharPtr() + FIRST_TEXT_TILE * TILE_SIZE,
                    TEXT_WIDTH * TEXT_HEIGHT * TILE_SIZE);
-    Screen_Text(app, gWtText[WT_TEXT_TITLE], 0);
+    Screen_Text(app, gWtText[WT_TEXT_TITLE], 0, 0);
     if (app->state == WT_APP_PICKER) {
         PokeParty *party = Party(app);
-        y = Screen_Text(app, gWtText[WT_TEXT_PICK], LINE_HEIGHT);
+        y = Screen_Text(app, gWtText[WT_TEXT_PICK], 0, LINE_HEIGHT);
         for (i = 0; i < party->count && i < PARTY_SIZE; ++i) {
             if (i == app->cursor) Screen_Print(app, cursor, 2, 0, y);
             memset(name, 0xff, sizeof(name));
@@ -243,7 +243,7 @@ static void Draw(WtApp *app)
         }
         return;
     }
-    y = Screen_Text(app, gWtText[app->message], LINE_HEIGHT);
+    y = Screen_Text(app, gWtText[app->message], 0, LINE_HEIGHT);
     if (app->state == WT_APP_RECEIVED && app->network.hasReceived) {
         Screen_Print(app, gWtText[WT_TEXT_RECEIVED], 32, 0, y);
         Screen_Print(app, app->network.received.nickname, WT_GAME_NAME_LENGTH, 100, y);
@@ -263,7 +263,7 @@ static void Draw(WtApp *app)
     y = (TEXT_HEIGHT * 8) - count * LINE_HEIGHT;
     for (i = 0; i < count; ++i, y += LINE_HEIGHT) {
         if (i == app->cursor) Screen_Print(app, cursor, 2, 0, y);
-        Screen_Text(app, gWtText[labels[i]], y);
+        Screen_Text(app, gWtText[labels[i]], 12, y);
     }
 }
 
