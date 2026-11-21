@@ -12,7 +12,8 @@
 
 namespace dswt::server {
 
-using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, 136> &)>;
+// Validates a payload in its owner's format; see LegalityClient::CheckNewSubmission.
+using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, 136> &, PokemonFormat)>;
 
 namespace detail { class RecoveryGate; class ServiceAdmission; }
 

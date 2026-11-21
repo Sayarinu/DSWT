@@ -50,8 +50,9 @@ const std::string kQueued =
     "AND EXISTS (SELECT 1 FROM dswt.offer_screenings s WHERE s.trade_id=o.trade_id AND s.rule=" +
     std::to_string(kNameRule) + " AND NOT s.refused) "
     "AND NOT EXISTS (SELECT 1 FROM dswt.offer_screenings s WHERE s.trade_id=o.trade_id AND s.refused) ";
-// The destination bit of v's game family: DP 1, Pt 2, HGSS 4. Legacy code 1 is
-// Platinum; structured codes carry family 1-3 in their top byte.
+// The destination bit of v's game family: DP 1, Pt 2, HGSS 4, BW 8, B2W2 16.
+// Legacy code 1 is Platinum; structured codes carry family 1-5 in their top byte.
+// An offer's set lies within its owner's generation, so Gen IV and Gen V never pair.
 const std::string kGame = "(1<<((CASE WHEN v.variant=1 THEN 2 ELSE v.variant>>24 END)::integer-1))";
 const std::string kCandidates =
     "(SELECT o.trade_id,o.save_id,d.destinations," + kGame + " AS game FROM " + kQueued + ")";

@@ -119,7 +119,11 @@ TEST_F(IdentityTest, EveryGameFamilyStoresItsVariant) {
       detail::GameVariant(GameFamily::Platinum, 12, 2, 1),
       detail::GameVariant(GameFamily::Platinum, 12, 5, 0),
       detail::GameVariant(GameFamily::HeartGoldSoulSilver, 7, 3, 0),
-      detail::GameVariant(GameFamily::HeartGoldSoulSilver, 8, 7, 0)};
+      detail::GameVariant(GameFamily::HeartGoldSoulSilver, 8, 7, 0),
+      detail::GameVariant(GameFamily::BlackWhite, 20, 2, 0),
+      detail::GameVariant(GameFamily::BlackWhite, 21, 1, 0),
+      detail::GameVariant(GameFamily::Black2White2, 22, 4, 0),
+      detail::GameVariant(GameFamily::Black2White2, 23, 2, 1)};
   for (const auto variant : variants) {
     const auto nonce = NextId();
     const auto id = store.Enroll(nonce, credential, variant);
@@ -139,7 +143,11 @@ TEST_F(IdentityTest, UnknownVariantNeverCreatesIdentity) {
         detail::GameVariant(GameFamily::Platinum, 12, 0, 0),
         detail::GameVariant(GameFamily::Platinum, 12, 6, 0),
         detail::GameVariant(GameFamily::Platinum, 12, 9, 0),
-        detail::GameVariant(static_cast<GameFamily>(4), 12, 2, 0)}) {
+        detail::GameVariant(GameFamily::BlackWhite, 12, 2, 0),
+        detail::GameVariant(GameFamily::BlackWhite, 22, 2, 0),
+        detail::GameVariant(GameFamily::Black2White2, 21, 2, 0),
+        detail::GameVariant(GameFamily::Black2White2, 23, 6, 0),
+        detail::GameVariant(static_cast<GameFamily>(6), 20, 2, 0)}) {
     EXPECT_FALSE(store.Enroll(enrollment, credential, variant)) << variant;
   }
   auto row = database.Parameters("SELECT count(*) FROM dswt.save_identities "

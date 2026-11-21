@@ -68,7 +68,9 @@ RESPONSE_SIZES = {
 
 
 LEGACY_PLATINUM = 1
-GAME_FAMILIES = {1: (10, 11), 2: (12,), 3: (7, 8)}  # DP, Platinum, HGSS version IDs
+# Version IDs per family: DP, Platinum, HGSS (Gen IV); Black/White, Black 2/White 2 (Gen V).
+GAME_FAMILIES = {1: (10, 11), 2: (12,), 3: (7, 8), 4: (20, 21), 5: (22, 23)}
+GEN_V_FAMILIES = (4, 5)
 LANGUAGES = (1, 2, 3, 4, 5, 7, 8)
 
 
@@ -80,6 +82,17 @@ def game_family(build):
     if not 0 <= build < 1 << 32 or version not in GAME_FAMILIES.get(family, ()) or language not in LANGUAGES:
         raise ValueError("Unknown game variant")
     return family
+
+
+def destination_bit(family):
+    """Return a family's destination bit: the matcher pairs offers by these."""
+    return 1 << family - 1
+
+
+def generation_destinations(family):
+    """Return the destination bits an offer by this family's owner may carry."""
+    return sum(destination_bit(other) for other in GAME_FAMILIES
+               if (other in GEN_V_FAMILIES) == (family in GEN_V_FAMILIES))
 
 
 @dataclass(frozen=True)

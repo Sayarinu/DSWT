@@ -83,7 +83,7 @@ int main(int argc, char **argv) try {
   RecoveryBarrier localTest = [](auto) { return true; };
   auto admission = std::make_shared<detail::ServiceAdmission>(LoadSubmissionWorkers());
   IdentityService identities(kDatabase, localTest, admission);
-  TradeService trades(kDatabase, [&](const auto &bytes) { return legality.CheckNewSubmission(bytes); }, localTest, admission);
+  TradeService trades(kDatabase, [&](const auto &bytes, auto format) { return legality.CheckNewSubmission(bytes, format); }, localTest, admission);
   MatcherService matcher(kDatabase, localTest);
 
   grpc::ServerBuilder builder;
