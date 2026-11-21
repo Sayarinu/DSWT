@@ -37,8 +37,10 @@ page lists every file's checksum.
 ## Trade
 
 Open the menu and choose **Wonder Trade**. In HeartGold and SoulSilver it's on the
-touch-screen menu. In Black 2 and White 2, open the menu with X, then press
-Select. In other languages the entry uses your game's name for it, such
+touch-screen menu. In Black 2 and White 2 it's on the second page of the X menu:
+turn the page with Left or Right past the edge of the grid, with L or R, or by
+tapping the page number. If the menu has a free slot, Wonder Trade takes it
+instead. Pressing Select while the menu is open also opens it. In other languages the entry uses your game's name for it, such
 as **ECHANGE MIRACLE**, **WUNDERTAUSCH** or **ミラクルこうかん**, and its screens
 use your game's language. A brand-new save may ask
 you to keep playing for a moment first, to gather randomness that secures your
