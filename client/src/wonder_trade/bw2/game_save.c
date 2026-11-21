@@ -1,5 +1,6 @@
 #include "wonder_trade/bw2/game_save.h"
 
+#include <nitro.h>
 #include <string.h>
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include <mbedtls/private/sha256.h>
@@ -17,6 +18,7 @@
 #include "save/musical_savedata.h"
 #include "save/pokedex_savedata.h"
 #include "save/trainer_data_savedata.h"
+#include "wonder_trade/bw2/musical_area.h"
 #include "wonder_trade/flash.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
@@ -159,16 +161,62 @@ int WtGame_Checkpoint(WtGame *game)
     return SaveBoth(game, &image, digest);
 }
 
+static int MusicalRead(void *arg, int bank, unsigned char bytes[WT_MUSICAL_AREA_BANK_SIZE])
+{
+    (void)arg;
+    return WtFlash_ReadRange(gWtGameConfig.journalBank[bank], bytes, WT_MUSICAL_AREA_BANK_SIZE);
+}
+
+/* Programs erased flash over one bank, a page at a time, each verified. */
+static int MusicalErase(void *arg, int bank)
+{
+    static unsigned char erased[256];
+    u32 address = gWtGameConfig.journalBank[bank], offset, type;
+    int result = -1;
+    s32 lockID = OS_GetLockID();
+    (void)arg;
+    if (lockID == OS_LOCK_ID_ERROR) return -1;
+    memset(erased, 0xff, sizeof(erased));
+    WtGame_HoldAwake(TRUE);
+    CARD_LockBackup(lockID);
+    type = (u32)CARD_GetCurrentBackupType();
+    if (type == gWtGameConfig.flashType[0] || type == gWtGameConfig.flashType[1]) {
+        for (offset = 0; offset < WT_MUSICAL_AREA_BANK_SIZE; offset += sizeof(erased))
+            if (!CARD_WriteAndVerifyFlash(address + offset, erased, sizeof(erased))) break;
+        if (offset == WT_MUSICAL_AREA_BANK_SIZE) result = 0;
+    }
+    CARD_UnlockBackup(lockID);
+    OS_ReleaseLockID(lockID);
+    WtGame_HoldAwake(FALSE);
+    return result;
+}
+
+static const WtMusicalAreaIO sMusicalArea = { NULL, MusicalRead, MusicalErase };
+
+BOOL WtGameSave_MusicalLeftover(void)
+{
+    return WtMusicalArea_Inspect(sMusicalArea) == WT_MUSICAL_AREA_LEFTOVER;
+}
+
 /* The musical distribution save holds the journal banks. Before the first
  * journal write the game must never read it again: its trainer data marker
  * is cleared, the downloaded program marked absent, and both save copies
- * written. Zero when the area is free. */
+ * written, since a failed load at Continue clears the marker in RAM only.
+ * Only then is any data a musical left in the banks erased. Zero when the
+ * area is free for the journal. */
 int WtGameSave_ReleaseMusicalArea(WtGame *game)
 {
-    if (!TrainerDataSave_IsMarkerSet(game->save, MUSICAL_DIST_MARKER)) return 0;
-    TrainerDataSave_ClearMarker(game->save, MUSICAL_DIST_MARKER);
-    MusicalSave_SetHasDistProgram(getAddressOfMusicalDataInfo(game->save), FALSE);
-    return WtGame_Checkpoint(game);
+    int state = WtMusicalArea_Inspect(sMusicalArea);
+    BOOL marked = TrainerDataSave_IsMarkerSet(game->save, MUSICAL_DIST_MARKER);
+    if (state < 0) return -1;
+    if (state == WT_MUSICAL_AREA_JOURNAL && !marked) return 0;
+    if (marked) {
+        TrainerDataSave_ClearMarker(game->save, MUSICAL_DIST_MARKER);
+        MusicalSave_SetHasDistProgram(getAddressOfMusicalDataInfo(game->save), FALSE);
+    }
+    /* Writes nothing when both copies already hold the save in RAM. */
+    if (WtGame_Checkpoint(game) != 0) return -1;
+    return WtMusicalArea_Erase(sMusicalArea);
 }
 
 static void Counters(WtGame *game, WtJournalEntry *entry)
