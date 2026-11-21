@@ -11,11 +11,24 @@ namespace dswt::server {
 
 enum class LegalityVerdict { Legal, Illegal, Unavailable };
 
-// Bits of LegalityDecision::destinations: Gen IV games able to hold the Pokémon.
+// Bits of LegalityDecision::destinations: the games able to hold the Pokémon.
+// A game family's bit is 1 << (family - 1); see game_variant.h.
 inline constexpr std::uint32_t kDestinationDP = 1;
 inline constexpr std::uint32_t kDestinationPt = 2;
 inline constexpr std::uint32_t kDestinationHGSS = 4;
-inline constexpr std::uint32_t kAllDestinations = kDestinationDP | kDestinationPt | kDestinationHGSS;
+inline constexpr std::uint32_t kDestinationBW = 8;
+inline constexpr std::uint32_t kDestinationB2W2 = 16;
+// Pokémon never cross generations: an offer's set lies within its owner's pool.
+inline constexpr std::uint32_t kGenIVDestinations = kDestinationDP | kDestinationPt | kDestinationHGSS;
+inline constexpr std::uint32_t kGenVDestinations = kDestinationBW | kDestinationB2W2;
+
+// The payload format the validator reads (v1::PokemonFormat): the owner's generation.
+enum class PokemonFormat { PK4 = 0, PK5 = 1 };
+
+// The destinations a Pokémon of this format may name.
+constexpr std::uint32_t FormatDestinations(PokemonFormat format) {
+  return format == PokemonFormat::PK5 ? kGenVDestinations : kGenIVDestinations;
+}
 
 // The name screening rule offers are checked against (dswt.offer_screenings.rule).
 // Rule 1 is the Nintendo Switch word list the validator applies to the nickname and
@@ -45,7 +58,9 @@ public:
   LegalityClient(const LegalityClient &) = delete;
   LegalityClient &operator=(const LegalityClient &) = delete;
 
-  LegalityDecision CheckNewSubmission(const std::array<unsigned char, 136> &pk4);
+  // A reply naming a game outside the format's generation is malformed (Unavailable).
+  LegalityDecision CheckNewSubmission(const std::array<unsigned char, 136> &data,
+                                      PokemonFormat format = PokemonFormat::PK4);
 
 private:
   struct Impl;

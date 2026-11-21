@@ -2,6 +2,7 @@
 
 #include "identity_auth.h"
 #include "admission.h"
+#include "game_variant.h"
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
@@ -305,23 +306,33 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
     body += request->pokemon().pk4();
     body += request->pokemon().sha256();
     const auto hash = detail::MutationHash(wire::kSubmit, request->context(), body);
+    // The owner's game family decides how the payload is read and which pool it joins.
+    auto family = detail::GameFamily::None;
     {
       Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
+      auto variant = session.database.Parameters("SELECT variant::text FROM dswt.identity_variants "
+          "WHERE save_id=$1::uuid", {HexBytes(request->context().auth().save_id())});
+      if (PQntuples(variant.get()) != 1) throw std::runtime_error("identity has no variant");
+      family = detail::VariantFamily(static_cast<std::uint32_t>(Unsigned(PQgetvalue(variant.get(), 0, 0))));
+      if (family == detail::GameFamily::None) throw std::runtime_error("identity has an unknown variant");
       session.transaction.Commit();
     }
+    const auto format = detail::FamilyFormat(family);
     // Never hold an identity/database lock while waiting on the validator.
     std::array<unsigned char, wire::kPk4Size> data{};
     std::copy(request->pokemon().pk4().begin(), request->pokemon().pk4().end(), data.begin());
-    const auto legality = validator_ ? validator_(data) : LegalityDecision{};
+    const auto legality = validator_ ? validator_(data, format) : LegalityDecision{};
     Allocate([&] {
       Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
       if (!session.Begin(request->context(), hash, *reply)) return;
       if (session.Snapshot().state() != v1::TRADE_NONE) { session.Publish(*reply, v1::RESULT_CAPACITY); return; }
       // A legal verdict must name the games able to hold the Pokémon; the matcher
-      // pairs by them, so an empty or unknown set fails closed.
-      const bool destinations = legality.destinations != 0 && (legality.destinations & ~kAllDestinations) == 0;
+      // pairs by them, so an empty set, or one outside the owner's generation,
+      // fails closed. Gen IV and Gen V offers never share a pool.
+      const bool destinations = legality.destinations != 0 &&
+          (legality.destinations & ~FormatDestinations(format)) == 0;
       if (legality.verdict == LegalityVerdict::Unavailable ||
           (legality.verdict == LegalityVerdict::Legal && !destinations)) {
         session.Publish(*reply, v1::RESULT_UNAVAILABLE); return;

@@ -30,7 +30,7 @@ int main() {
     WalArchiveBarrier recovery(config.connection_info);
     auto admission = std::make_shared<detail::ServiceAdmission>(config.submission_workers);
     IdentityService identities(config.connection_info, recovery.Barrier(), admission);
-    const SubmissionValidator validate = [&](const auto &data) { return legality.CheckNewSubmission(data); };
+    const SubmissionValidator validate = [&](const auto &data, auto format) { return legality.CheckNewSubmission(data, format); };
     TradeService trades(config.connection_info, validate, recovery.Barrier(), admission);
     OfferScreener screener(config.connection_info, validate);
     grpc::ServerBuilder builder;

@@ -45,14 +45,14 @@ class MatcherTest : public testing::Test {
 protected:
   detail::Database database{""};
   // The validator's destination set for the next submission.
-  std::atomic<std::uint32_t> destinations{kAllDestinations};
-  TradeService trades{"", [this](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, destinations.load()}; },
+  std::atomic<std::uint32_t> destinations{kGenIVDestinations};
+  TradeService trades{"", [this](const auto &, auto) { return LegalityDecision{LegalityVerdict::Legal, {}, destinations.load()}; },
       [](auto) { return true; }};
   MatcherService matcher{"", [](auto) { return true; }};
   std::vector<v1::Credentials> owners;
 
   Client Queue(unsigned species = 1, std::uint32_t variant = detail::kLegacyPlatinum,
-               std::uint32_t holds = kAllDestinations) {
+               std::uint32_t holds = kGenIVDestinations) {
     IdentityId nonce{};
     const auto random = Identifier();
     std::copy(random.begin(), random.end(), nonce.begin());
@@ -127,6 +127,13 @@ protected:
     return reply;
   }
 
+  // How many retained matches include this offer.
+  int Matches(const Client &client) {
+    auto row = database.Parameters("SELECT count(*) FROM dswt.matches WHERE $1::uuid IN (first_trade_id, second_trade_id)",
+        {detail::HexBytes(client.offer.trade_id())});
+    return std::stoi(PQgetvalue(row.get(), 0, 0));
+  }
+
   std::string Scalar(const char *sql) {
     auto row = database.Execute(sql);
     return PQgetvalue(row.get(), 0, 0);
@@ -167,9 +174,9 @@ TEST_F(MatcherTest, NeverPairsAnOfferWhoseNameScreeningRefusedIt) {
   const auto refused = Queue(201);
   const auto other = Queue(202);
   // A later rule screens both queued offers again and refuses the first one's name.
-  OfferScreener screener("", [](const auto &data) {
+  OfferScreener screener("", [](const auto &data, auto) {
     return data[8] == 201 ? LegalityDecision{LegalityVerdict::Illegal, {kInappropriateName}, 0}
-                          : LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+                          : LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
   }, kNameRule + 1);
   while (screener.Poll(64) != 0) {}
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
@@ -257,18 +264,36 @@ TEST_F(MatcherTest, PairPreservesBothCanonicalPayloadsAndOriginalRetryOutcome) {
 TEST_F(MatcherTest, OldestEligibleOfferAnchorsEachPair) {
   std::vector<Client> clients;
   for (int i = 0; i < 6; ++i) clients.push_back(Queue(i + 1));
-  std::set<std::string> matched;
-  for (int i = 0; i < 3; ++i) {
-    const auto oldest = std::find_if(clients.begin(), clients.end(), [&](const auto &client) {
-      return !matched.count(client.offer.trade_id());
-    });
-    ASSERT_NE(oldest, clients.end());
-    const auto pair = Match();
-    ASSERT_EQ(pair.result(), v1::RESULT_OK);
-    EXPECT_TRUE(pair.first_trade_id() == oldest->offer.trade_id() || pair.second_trade_id() == oldest->offer.trade_id());
-    EXPECT_TRUE(matched.insert(pair.first_trade_id()).second);
-    EXPECT_TRUE(matched.insert(pair.second_trade_id()).second);
+  // One operation pairs the whole queue; the reply names its first pair, which the oldest anchored.
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_TRUE(pair.first_trade_id() == clients[0].offer.trade_id() || pair.second_trade_id() == clients[0].offer.trade_id());
+  for (const auto &client : clients) {
+    EXPECT_EQ(Matches(client), 1);
+    EXPECT_EQ(Status(client.auth).trade().state(), v1::TRADE_MATCHED);
   }
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+}
+
+TEST_F(MatcherTest, OneOperationPairsAtMostABatch) {
+  std::vector<Client> clients;
+  for (int i = 0; i < 18; ++i) clients.push_back(Queue(i + 1));
+  const auto operation = Identifier();
+  const auto first = Match(operation);
+  ASSERT_EQ(first.result(), v1::RESULT_OK);
+  const auto matched = [&] {
+    int count = 0;
+    for (const auto &client : clients) count += Matches(client);
+    return count;
+  };
+  EXPECT_EQ(matched(), 16) << "eight pairs share one operation";
+  EXPECT_EQ(Scalar("SELECT count(DISTINCT operation_id) FROM dswt.matches m JOIN dswt.matcher_attempts a USING(match_id, operation_id)"),
+            Scalar("SELECT count(*) FROM dswt.matches"));
+  EXPECT_EQ(Match(operation).SerializeAsString(), first.SerializeAsString());
+  EXPECT_EQ(matched(), 16) << "a replay pairs nothing more";
+  ASSERT_EQ(Match().result(), v1::RESULT_OK);
+  EXPECT_EQ(matched(), 18);
+  for (const auto &client : clients) EXPECT_EQ(Matches(client), 1);
 }
 
 TEST_F(MatcherTest, BusyOldestIdentityIsSkippedAndServedAfterRelease) {
@@ -292,6 +317,8 @@ TEST_F(MatcherTest, BusyOldestIdentityIsSkippedAndServedAfterRelease) {
 constexpr auto kDiamond = detail::GameVariant(detail::GameFamily::DiamondPearl, 10, 2, 0);
 constexpr auto kPlatinum = detail::GameVariant(detail::GameFamily::Platinum, 12, 2, 0);
 constexpr auto kSoulSilver = detail::GameVariant(detail::GameFamily::HeartGoldSoulSilver, 8, 2, 0);
+constexpr auto kBlack = detail::GameVariant(detail::GameFamily::BlackWhite, 21, 2, 0);
+constexpr auto kWhite2 = detail::GameVariant(detail::GameFamily::Black2White2, 22, 2, 0);
 
 std::set<std::string> Traded(const v1::MatchReply &reply) { return {reply.first_trade_id(), reply.second_trade_id()}; }
 
@@ -308,7 +335,7 @@ TEST_F(MatcherTest, IdleWorkerRecordsNoAttemptsUntilACompatiblePairQueues) {
   Idle();
   const auto form = Queue(1, kPlatinum, kDestinationPt);
   Idle();
-  Queue(2, kDiamond, kAllDestinations);
+  Queue(2, kDiamond, kGenIVDestinations);
   Idle();
   const auto platinum = Queue(3, kPlatinum, kDestinationPt);
   EXPECT_EQ(worker.Poll().count(), 0);
@@ -321,7 +348,7 @@ TEST_F(MatcherTest, IdleWorkerRecordsNoAttemptsUntilACompatiblePairQueues) {
 
 TEST_F(MatcherTest, PlatinumOnlyOfferNeverMatchesIntoDiamondPearl) {
   // Diamond's offer could go to Platinum, but a Platinum-only form cannot go to Diamond.
-  const auto form = Queue(1, kPlatinum, kDestinationPt), diamond = Queue(2, kDiamond, kAllDestinations);
+  const auto form = Queue(1, kPlatinum, kDestinationPt), diamond = Queue(2, kDiamond, kGenIVDestinations);
   EXPECT_FALSE(matcher.PairAvailable());
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
   EXPECT_EQ(Status(form.auth).trade().state(), v1::TRADE_QUEUED);
@@ -344,12 +371,48 @@ TEST_F(MatcherTest, CompatibleCrossGamePairMatches) {
   EXPECT_EQ(Collect(diamond).pokemon().pk4(), soulsilver.submission.pokemon().pk4());
 }
 
+TEST_F(MatcherTest, GenIVAndGenVOffersNeverPair) {
+  const auto platinum = Queue(1, kPlatinum, kGenIVDestinations), black = Queue(2, kBlack, kGenVDestinations);
+  const auto diamond = Queue(3, kDiamond, kGenIVDestinations);
+  // Only the two Gen IV offers pair; the Black offer waits for a Gen V peer.
+  EXPECT_EQ(Traded(Match()), (std::set<std::string>{platinum.offer.trade_id(), diamond.offer.trade_id()}));
+  Queue(4, kSoulSilver, kGenIVDestinations);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_EQ(Status(black.auth).trade().state(), v1::TRADE_QUEUED);
+  const auto white2 = Queue(5, kWhite2, kGenVDestinations);
+  EXPECT_TRUE(matcher.PairAvailable());
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{black.offer.trade_id(), white2.offer.trade_id()}));
+  EXPECT_EQ(Collect(black).pokemon().pk4(), white2.submission.pokemon().pk4());
+}
+
+TEST_F(MatcherTest, BlackWhiteAndBlack2White2PairWhenEachCanHoldTheOther) {
+  // A Black 2/White 2-only Pokémon cannot go to Black/White.
+  const auto sequel = Queue(1, kWhite2, kDestinationB2W2), black = Queue(2, kBlack, kGenVDestinations);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  const auto white2 = Queue(3, kWhite2, kDestinationBW | kDestinationB2W2);
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{sequel.offer.trade_id(), white2.offer.trade_id()}));
+  EXPECT_EQ(Status(black.auth).trade().state(), v1::TRADE_QUEUED);
+  const auto white = Queue(4, kBlack, kDestinationB2W2);
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND) << "Black cannot hold the Black 2/White 2-only offer";
+  const auto other = Queue(5, kWhite2, kDestinationBW);
+  const auto cross = Match();
+  ASSERT_EQ(cross.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(cross), (std::set<std::string>{black.offer.trade_id(), other.offer.trade_id()}));
+  EXPECT_EQ(Status(white.auth).trade().state(), v1::TRADE_QUEUED);
+}
+
 TEST_F(MatcherTest, LegacyOffersArePlatinumOnly) {
   // Migration 0005 stores Platinum only for offers queued before destination sets.
   const auto legacy = Queue(1, detail::kLegacyPlatinum, kDestinationPt);
-  const auto soulsilver = Queue(2, kSoulSilver, kAllDestinations);
+  const auto soulsilver = Queue(2, kSoulSilver, kGenIVDestinations);
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
-  const auto platinum = Queue(3, kPlatinum, kAllDestinations);
+  const auto platinum = Queue(3, kPlatinum, kGenIVDestinations);
   const auto pair = Match();
   ASSERT_EQ(pair.result(), v1::RESULT_OK);
   EXPECT_EQ(Traded(pair), (std::set<std::string>{legacy.offer.trade_id(), platinum.offer.trade_id()}));
@@ -377,7 +440,7 @@ TEST_F(MatcherTest, AnchorWithOnlyBusyPeersGivesWayToTheNextAnchor) {
   // The oldest Diamond-only offer pairs only with the other Diamond owner, whose
   // offer SoulSilver-only players cannot take; they pair with each other.
   const auto oldest = Queue(1, kDiamond, kDestinationDP);
-  const auto busy = Queue(2, kDiamond, kAllDestinations);
+  const auto busy = Queue(2, kDiamond, kGenIVDestinations);
   const auto first = Queue(3, kSoulSilver, kDestinationHGSS), second = Queue(4, kSoulSilver, kDestinationHGSS);
   {
     detail::Transaction transaction(database);
@@ -394,8 +457,8 @@ TEST_F(MatcherTest, AnchorWithOnlyBusyPeersGivesWayToTheNextAnchor) {
 }
 
 TEST_F(MatcherTest, IndependentReplicasMatchEveryOfferOnce) {
-  std::set<std::string> offered;
-  for (int i = 0; i < 24; ++i) offered.insert(Queue(i + 1).offer.trade_id());
+  std::vector<Client> clients;
+  for (int i = 0; i < 24; ++i) clients.push_back(Queue(i + 1));
   std::vector<std::future<v1::MatchReply>> workers;
   for (int i = 0; i < 12; ++i) workers.push_back(std::async(std::launch::async, [&] {
     MatcherService replica("", [](auto) { return true; });
@@ -404,18 +467,17 @@ TEST_F(MatcherTest, IndependentReplicasMatchEveryOfferOnce) {
     EXPECT_EQ(Final(operation, replica).SerializeAsString(), reply.SerializeAsString());
     return reply;
   }));
-  std::set<std::string> matched;
+  // A batch can take several pairs, so some workers find nothing left.
   for (auto &worker : workers) {
-    const auto pair = worker.get();
-    ASSERT_EQ(pair.result(), v1::RESULT_OK);
-    EXPECT_TRUE(matched.insert(pair.first_trade_id()).second);
-    EXPECT_TRUE(matched.insert(pair.second_trade_id()).second);
+    const auto reply = worker.get();
+    EXPECT_TRUE(reply.result() == v1::RESULT_OK || reply.result() == v1::RESULT_NOT_FOUND);
   }
-  EXPECT_EQ(matched, offered);
+  for (const auto &client : clients) EXPECT_EQ(Matches(client), 1);
 }
 
-TEST_F(MatcherTest, RepeatedConcurrentOperationRetainsExactlyOnePair) {
-  Queue(); Queue(); Queue(); Queue();
+TEST_F(MatcherTest, RepeatedConcurrentOperationRetainsExactlyOneBatch) {
+  std::vector<Client> clients;
+  for (int i = 0; i < 4; ++i) clients.push_back(Queue());
   const auto operation = Identifier();
   auto worker = [&] {
     MatcherService replica("", [](auto) { return true; });
@@ -425,10 +487,8 @@ TEST_F(MatcherTest, RepeatedConcurrentOperationRetainsExactlyOnePair) {
   const auto a = first.get(), b = second.get();
   EXPECT_EQ(a.result(), v1::RESULT_OK);
   EXPECT_EQ(a.SerializeAsString(), b.SerializeAsString());
-  const auto next = Match();
-  EXPECT_EQ(next.result(), v1::RESULT_OK);
-  EXPECT_NE(next.first_trade_id(), a.first_trade_id());
-  EXPECT_NE(next.second_trade_id(), a.second_trade_id());
+  for (const auto &client : clients) EXPECT_EQ(Matches(client), 1);
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
 }
 
 TEST_F(MatcherTest, CancellationAndMatchingHaveOneCommittedWinner) {
@@ -493,17 +553,39 @@ TEST_F(MatcherTest, PairChosenWhileWaitingMatchesOnceThatWaitIsArchived) {
     return count;
   };
   EXPECT_EQ(matched(), 0u);
-  // The retry matches the pair whose owners were observed during the first wait,
-  // and still withholds the outcome until the match itself is archived.
+  // The retry matches the pairs whose owners were observed during the first wait,
+  // and still withholds the outcome until the matches themselves are archived.
   const auto pending = Match(operation, &waiting);
   EXPECT_EQ(pending.result(), v1::RESULT_PROCESSING);
   EXPECT_TRUE(pending.first_trade_id().empty());
-  EXPECT_EQ(matched(), 2u);
+  EXPECT_EQ(matched(), 4u);
+  EXPECT_EQ(Status(clients.back().auth).trade().state(), v1::TRADE_QUEUED) << "queued after the wait began";
   archived = std::numeric_limits<std::uint64_t>::max();
   const auto reply = Match(operation, &waiting);
   EXPECT_EQ(reply.result(), v1::RESULT_OK);
   EXPECT_EQ(Match(operation, &waiting).SerializeAsString(), reply.SerializeAsString());
-  EXPECT_EQ(matched(), 2u);
+  EXPECT_EQ(matched(), 4u);
+}
+
+TEST_F(MatcherTest, BatchMemberCancelledDuringTheWaitLeavesTheRestToMatch) {
+  std::vector<Client> clients;
+  for (int index = 0; index < 4; ++index) clients.push_back(Queue());
+  std::atomic<bool> covered{false};
+  MatcherService waiting("", [&](std::uint64_t) { return covered.load(); });
+  const auto operation = Identifier();
+  EXPECT_EQ(Match(operation, &waiting).result(), v1::RESULT_PROCESSING);
+  ASSERT_EQ(Cancel(clients[0]).context().result(), v1::RESULT_OK);
+  covered = true;
+  ASSERT_EQ(Match(operation, &waiting).result(), v1::RESULT_OK);
+  EXPECT_EQ(Status(clients[0].auth).trade().state(), v1::TRADE_RETURN_READY);
+  int matched = 0, queued = 0;
+  for (std::size_t index = 1; index < clients.size(); ++index) {
+    const auto state = Status(clients[index].auth).trade().state();
+    matched += state == v1::TRADE_MATCHED;
+    queued += state == v1::TRADE_QUEUED;
+  }
+  EXPECT_EQ(matched, 2) << "the other chosen pair still matches";
+  EXPECT_EQ(queued, 1) << "the cancelled offer's partner goes back to the queue";
 }
 
 TEST_F(MatcherTest, MidTransactionFailureRollsBackBothOwnersAndRedactsDiagnostics) {
@@ -583,6 +665,47 @@ TEST_F(MatcherTest, KilledWorkerBetweenReceiptsCannotCommitAHalfMatch) {
   EXPECT_EQ(Status(first.auth).trade().state(), v1::TRADE_QUEUED);
   EXPECT_EQ(Status(second.auth).trade().state(), v1::TRADE_QUEUED);
   EXPECT_EQ(Match(operation).result(), v1::RESULT_OK);
+}
+
+TEST_F(MatcherTest, KilledWorkerMidBatchCommitsNoPairOfTheBatch) {
+  std::vector<Client> clients;
+  for (int i = 0; i < 4; ++i) clients.push_back(Queue(i + 1));
+  const auto operation = Identifier();
+  // Pause at the second pair's first receipt, after the first pair is written.
+  database.Execute("SELECT pg_advisory_lock(578892145199); "
+      "CREATE FUNCTION dswt.pause_match_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+      "PERFORM set_config('dswt.receipts_seen', (coalesce(nullif(current_setting('dswt.receipts_seen', true), ''), '0')::integer + 1)::text, true); "
+      "IF current_setting('dswt.receipts_seen')::integer = 3 THEN PERFORM pg_advisory_xact_lock(578892145199); END IF; "
+      "RETURN NULL; END $$; "
+      "CREATE TRIGGER pause_match_test AFTER INSERT ON dswt.receipts "
+      "FOR EACH ROW EXECUTE FUNCTION dswt.pause_match_test()");
+  std::string executable = "/proc/self/exe", mode = "--match", argument = detail::HexBytes(operation);
+  char *arguments[] = {executable.data(), mode.data(), argument.data(), nullptr};
+  pid_t child = 0;
+  const auto spawned = posix_spawn(&child, executable.c_str(), nullptr, nullptr, arguments, environ);
+  bool paused = false;
+  if (spawned == 0) {
+    for (int poll = 0; poll < 300; ++poll) {
+      paused = Scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+          "AND wait_event='advisory' AND query LIKE 'INSERT INTO dswt.receipts VALUES%')") == "t";
+      if (paused) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(kill(child, SIGKILL), 0);
+    int status = 0;
+    EXPECT_EQ(waitpid(child, &status, 0), child);
+    EXPECT_TRUE(WIFSIGNALED(status));
+  }
+  database.Execute("SELECT pg_advisory_unlock(578892145199); DROP TRIGGER pause_match_test ON dswt.receipts; "
+      "DROP FUNCTION dswt.pause_match_test()");
+  ASSERT_EQ(spawned, 0);
+  EXPECT_TRUE(paused);
+  for (const auto &client : clients) {
+    EXPECT_EQ(Status(client.auth).trade().state(), v1::TRADE_QUEUED);
+    EXPECT_EQ(Matches(client), 0);
+  }
+  EXPECT_EQ(Match(operation).result(), v1::RESULT_OK);
+  for (const auto &client : clients) EXPECT_EQ(Matches(client), 1);
 }
 
 TEST_F(MatcherTest, GrpcAndNewProcessReplayTheCommittedPair) {

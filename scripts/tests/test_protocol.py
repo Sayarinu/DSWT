@@ -90,10 +90,21 @@ class WireTests(unittest.TestCase):
                     for revision in (0, 1, 255):
                         build = family << 24 | version << 16 | language << 8 | revision
                         self.assertEqual(wire.game_family(build), family)
-        for build in (0, 2, -1, 1 << 32, 0x000C0200, 0x040C0200, 0x020A0200, 0x020C0000, 0x020C0600, 0x020C0900):
+        # Black ENG, White 2 JPN Rev 1: Gen V uses the games' own version IDs too.
+        self.assertEqual(wire.game_family(0x04150200), 4)
+        self.assertEqual(wire.game_family(0x05160101), 5)
+        for build in (0, 2, -1, 1 << 32, 0x000C0200, 0x040C0200, 0x020A0200, 0x020C0000, 0x020C0600, 0x020C0900,
+                      0x04160200, 0x05140200, 0x04150600, 0x06150200, 0x01140200):
             with self.subTest(build=hex(build)):
                 with self.assertRaises(ValueError):
                     wire.game_family(build)
+
+    def test_generation_pools(self):
+        self.assertEqual([wire.destination_bit(family) for family in wire.GAME_FAMILIES], [1, 2, 4, 8, 16])
+        for family in (1, 2, 3):
+            self.assertEqual(wire.generation_destinations(family), 7)
+        for family in (4, 5):
+            self.assertEqual(wire.generation_destinations(family), 24)
 
     def test_hint_and_page_bounds(self):
         for length in (0, 64):

@@ -683,6 +683,39 @@ class LedgerTests(unittest.TestCase):
                  f"DELETE FROM dswt.offer_destinations WHERE trade_id='{identifier(1002)}'; COMMIT;")
         self.assertIn("23514", self.tool("verify", ok=False))
 
+    def test_gen5_upgrade_adds_families_and_keeps_generations_apart(self):
+        previous = self.root / "v7_gen5_migrations"
+        previous.mkdir()
+        for name in ("0001_ledger.sql", "0002_matcher.sql", "0003_observation_time.sql",
+                     "0004_identity_variants.sql", "0005_offer_destinations.sql",
+                     "0006_offer_screenings.sql", "0007_refusals.sql"):
+            shutil.copy(self.migrations / name, previous)
+        self.database = f"gen5_{self.serial}"
+        self.sql(f"CREATE DATABASE {self.database}", database="postgres")
+        self.tool("migrate", str(previous))
+        # Black ENG: unknown before this migration.
+        self.enroll(9, 0x04150200, ok=False)
+        self.enroll(1)
+        self.submit(1, destinations=7)
+        self.tool("verify")
+        self.tool("migrate", str(self.migrations))
+        self.tool("verify")
+        # Black JPN, White ENG, White 2 KOR Rev 1, Black 2 GER.
+        for owner, variant in ((2, 0x04150100), (3, 0x04140200), (4, 0x05160801), (5, 0x05170500)):
+            self.enroll(owner, variant)
+        for variant in (0x04160200, 0x05150200, 0x04150600, 0x06150200, 0x02140200):
+            self.enroll(9, variant, ok=False)
+        self.enroll(6)
+        # A Gen V owner's offer names only Gen V games, a Gen IV owner's only Gen IV games.
+        for owner, destinations in ((2, 7), (2, 1), (2, 9), (2, 32), (6, 8), (6, 16), (6, 24)):
+            self.sql("BEGIN;" + self.submit_sql(owner, destinations=destinations) + "COMMIT;", ok=False)
+        self.submit(2, destinations=24)
+        self.submit(4, destinations=16)
+        self.submit(6, destinations=3)
+        self.assertEqual(self.sql("SELECT string_agg(destinations::text, ',' ORDER BY trade_id) "
+                                  "FROM dswt.offer_destinations"), "7,24,16,3")
+        self.tool("verify")
+
     def test_operation_has_exactly_one_outcome_event(self):
         self.enroll()
         self.submit()
