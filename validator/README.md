@@ -15,9 +15,12 @@ Run as a sidecar sharing the C++ service's network namespace, with no published
 port. The only listener is `127.0.0.1:50052`, HTTP/2 gRPC. Use container limits of
 512 MiB memory, two CPUs and 128 PIDs, a read-only filesystem and no external
 ingress. The deployment tickets supply those controls; this change deploys no
-service. Each analysis has a separate process, a one-second lifetime, 128 MiB
-managed-heap limit and a 1,024-byte output bound. Admission allows two workers
-and no waiting queue; the C++ caller has a 1.5-second deadline and no retries.
+service. Analyses run in separate worker processes, each with a 128 MiB
+managed-heap limit, a one-second budget per analysis and a 1,024-byte reply bound.
+Starting a worker costs far more than an analysis, so a worker that answered
+correctly serves later payloads, one at a time, up to 256; a timeout, crash or
+malformed or mismatched reply kills it and it is never reused. Admission allows
+two workers and no waiting queue; the C++ caller has a 1.5-second deadline and no retries.
 The whole-container memory/PID limits also cover native memory and runtime
 threads; a managed-heap setting alone is insufficient.
 
