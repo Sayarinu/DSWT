@@ -219,11 +219,10 @@ public static class Policy
     // TradeRestrictions.IsUntradable: Spiky-eared Pichu (172, form 1) cannot be traded
     // from any game; in Gen V neither can fused Kyurem (646, forms 1-2) nor a
     // battle-only form. PersonalTable.IsPresentInGame accepts those forms.
-    // PK5.NSparkle marks N's Pokémon, which DSWT does not trade.
+    // N's Pokémon trade normally, as the core treats them.
     private static bool IsUntradable(PKM pk) =>
         TradeRestrictions.IsUntradable(pk.Species, pk.Form, 0, pk.Format) ||
-        TradeRestrictions.IsUntradableHeld(pk.Context, pk.HeldItem) ||
-        pk is PK5 { NSparkle: true };
+        TradeRestrictions.IsUntradableHeld(pk.Context, pk.HeldItem);
 
     // PersonalTable.DP/Pt/HGSS/BW/B2W2.IsPresentInGame: the species and form exist in
     // that game's personal table, so Platinum forms (Giratina Origin, Shaymin Sky, Rotom

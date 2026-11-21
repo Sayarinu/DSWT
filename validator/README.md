@@ -39,8 +39,8 @@ species names, official Pokémon terms in every Gen IV and Gen V language and th
 as Lulu or grape) are exempt.
 Eggs, mail, invalid structures/species and forms no game of the format can hold
 or trade are rejected, as are Pokémon the pinned core marks untradable (such as
-Spiky-eared Pichu, fused Kyurem or battle-only forms) and N's Pokémon (PK5 N's
-sparkle). The game must reject attached capsules and protect its last usable
+Spiky-eared Pichu, fused Kyurem or battle-only forms). N's Pokémon trade
+normally, as the core treats them. The game must reject attached capsules and protect its last usable
 party Pokémon before escrow: those facts are absent from canonical PK4.
 
 Analysis assumes no home game. Gen IV and Gen V are separate pools. A legal
@@ -56,7 +56,7 @@ without destinations, such as one from an older validator, as unavailable.
 | Reason | Meaning |
 | --- | --- |
 | `INVALID_STRUCTURE`, `INVALID_SPECIES` | Canonical shape/checksum/reserved fields or species failed |
-| `EGG_NOT_ALLOWED`, `MAIL_NOT_ALLOWED`, `INCOMPATIBLE_FORM` | Unsupported trade content; `INCOMPATIBLE_FORM` also covers untradable Pokémon and N's Pokémon |
+| `EGG_NOT_ALLOWED`, `MAIL_NOT_ALLOWED`, `INCOMPATIBLE_FORM` | Unsupported trade content; `INCOMPATIBLE_FORM` also covers untradable Pokémon |
 | `INCOMPATIBLE_GAME` | Legal, but no game of its format (Diamond/Pearl, Platinum, HeartGold/SoulSilver; Black/White, Black 2/White 2) can hold it |
 | `ILLEGAL_ENCOUNTER`, `ILLEGAL_MOVES`, `ILLEGAL_RNG`, `ILLEGAL_DATA` | Pinned core legality checks failed |
 | `INAPPROPRIATE_NAME` | The nickname or original trainer's name fails the word list |

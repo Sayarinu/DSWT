@@ -396,14 +396,12 @@ await Test("Gen V names follow the Switch word list", () =>
     return Task.CompletedTask;
 });
 
-await Test("N's Pokémon and untradable Gen V forms are refused", () =>
+await Test("N's Pokémon trade and untradable Gen V forms are refused", () =>
 {
-    // A generated N's Pokémon is legal to the core, but carries N's sparkle.
+    // A generated N's Pokémon carries N's sparkle and trades like any other.
     var n = Convert5(Generate5<EncounterStatic5N>(509, trainer5, GameVersion.B2), trainer5);
     Require(new PK5(n.ToArray()).NSparkle, "N fixture lacks the sparkle");
-    var reply = Policy.Analyze(Pk5, n);
-    CheckReply(reply, n, Pk5);
-    Require(!reply.Legal && reply.ReasonCodes.SequenceEqual(["INCOMPATIBLE_FORM"]), "N's Pokémon accepted");
+    ExpectLegal5(n, Policy.Gen5Destinations);
     // Fused Kyurem and battle-only Zen Mode exist in the personal table but cannot be traded.
     foreach (var (species, form) in new (ushort, byte)[] { (646, 1), (646, 2), (555, 1) })
         Require(DestinationsOf5(wild5, pk => { pk.Species = species; pk.Form = form; }) == Destination.None,
@@ -420,7 +418,8 @@ var illegal5 = new (string Name, byte[] Data, string Reason)[]
     ("Gen V empty species", Mutate5(wild5, pk => pk.Species = 0), "INVALID_SPECIES"),
     ("Gen V fused Kyurem", Mutate5(wild5, pk => { pk.Species = 646; pk.Form = 1; }), "INCOMPATIBLE_FORM"),
     ("Gen V invalid form", Mutate5(wild5, pk => pk.Form = 31), "INCOMPATIBLE_FORM"),
-    ("Gen V N's sparkle on a wild Pokémon", Mutate5(wild5, pk => pk.NSparkle = true), "INCOMPATIBLE_FORM"),
+    // Only N's own encounters carry the sparkle.
+    ("Gen V N's sparkle on a wild Pokémon", Mutate5(wild5, pk => pk.NSparkle = true), "ILLEGAL_ENCOUNTER"),
     ("Gen V future move", Mutate5(wild5, pk => pk.Move1 = 600), "ILLEGAL_MOVES"),
     ("Gen V invalid EV sum", Mutate5(wild5, pk => { pk.EV_HP = 255; pk.EV_ATK = 255; pk.EV_DEF = 255; }), "ILLEGAL_DATA"),
     // Gen V wild PIDs correlate bit 31 with the trainer ID.
