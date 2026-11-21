@@ -72,6 +72,9 @@
     "client/res/graphics/start_menu/wonder_trade_icon.png",
     "client/res/graphics/start_menu/wonder_trade_icon_cell.json",
     "client/res/text/wonder_trade.json",
+    "client/retail/diamond-japanese-build.patch",
+    "client/retail/diamond-japanese-matching.patch",
+    "client/retail/diamond-japanese-start-menu.patch",
     "client/retail/diamond-korean-build.patch",
     "client/retail/diamond-port.patch",
     "client/retail/heartgold-japanese-build.patch",
@@ -194,6 +197,7 @@
     "scripts/retail_port/sdk.py",
     "scripts/retail_port/symbols.py",
     "scripts/retail_port/toolchain.py",
+    "scripts/retail_port/writeout.py",
     "scripts/run-emulator.py",
     "scripts/tests/test_backup_uploader.py",
     "scripts/tests/test_build_rom.py",
@@ -490,6 +494,40 @@
       ],
       "decision": "exclude",
       "requirements": "Freescale/Metrowerks MSL C headers, extracted by checksum into the local Diamond/Pearl build image only to compile the Wonder Trade core and Mbed TLS. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish the headers, the image or its layers."
+    },
+    {
+      "name": "Black 2 and White 2 decompilation source and build tools (fuddlesworth/pokebw2)",
+      "license": "GPL-3.0",
+      "evidence": [
+        "client/upstream-pokebw2.json",
+        "client/UPSTREAM.md",
+        "https://github.com/fuddlesworth/pokebw2/blob/1a66adc6a1105e1c05c40321bb31494faf47682d/LICENSE",
+        "https://github.com/fuddlesworth/pokebw2/tree/1a66adc6a1105e1c05c40321bb31494faf47682d"
+      ],
+      "decision": "pinned_local_source_build; matching_source_required_for_binary_distribution",
+      "requirements": "Keep the checkout local in game/pokebw2-pristine/; no pokebw2 source is vendored. Its GPL-3.0 covers the decompiled source, build scripts and the swan symbol names it imports (also GPL-3.0). Anything distributed that is based on it, such as a future integration patch, a modified source file or a BPS patch or ROM built from it, must be offered under GPL-3.0 with the license text, its notices and the complete corresponding source: the exact pokebw2 revision, the integration patch, the project additions it links and the build scripts. Project code combined into such a build must be GPL-3.0-compatible (MIT and Apache-2.0 are). The GPL does not cover the game's own code, graphics, text and data, which the build extracts from the player's dump: never commit or publish the dump, orig/, extract/ or build/ output."
+    },
+    {
+      "name": "pokebw2 build tools: wibo pokebw2-sjis-1, sjiswrap v1.2.2-pokebw2.1 and dsd v0.12.1-dsi.10",
+      "license": "wibo: MIT; sjiswrap: Apache-2.0; dsd (ds-decomp): MIT",
+      "evidence": [
+        "tools/rom-builder-bw2/Dockerfile",
+        "https://github.com/fuddlesworth/wibo/releases/tag/pokebw2-sjis-1",
+        "https://github.com/fuddlesworth/sjiswrap/releases/tag/v1.2.2-pokebw2.1",
+        "https://github.com/fuddlesworth/ds-decomp/releases/tag/v0.12.1-dsi.10"
+      ],
+      "decision": "build_dependency",
+      "requirements": "Release binaries fetched by checksum into the local Black 2/White 2 build image and the workspace's ignored tools/. Keep their notices if the image or binaries are ever redistributed; the image also holds the Metrowerks compilers, so it is not published."
+    },
+    {
+      "name": "Metrowerks CodeWarrior compiler binaries used by pokebw2 (decomp.aetias.com mwccarm.zip)",
+      "license": "NOASSERTION",
+      "evidence": [
+        "tools/rom-builder-bw2/Dockerfile",
+        "https://decomp.aetias.com/files/mwccarm.zip"
+      ],
+      "decision": "exclude",
+      "requirements": "Proprietary Metrowerks compilers, assemblers and linkers fetched by checksum into a local build image and the workspace's ignored tools/. Download availability is not a redistribution grant; establish permitted toolchain use before release builds and never publish its binaries, the image or its layers."
     },
     {
       "name": "Fetched game build dependencies: RapidJSON 1.1.0, yyjson 0.12.0, metang v0.2.0-python and Meson 1.12.0",

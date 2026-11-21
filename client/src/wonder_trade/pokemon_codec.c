@@ -22,22 +22,22 @@ static int Valid(const unsigned char *p)
 {
     unsigned sum = 0, i;
     if (Read16(p + 4) != 0) return 0;
-    for (i = 8; i < 136; i += 2) sum += Read16(p + i);
+    for (i = 8; i < WT_POKEMON_SIZE; i += 2) sum += Read16(p + i);
     return (sum & 65535) == Read16(p + 6);
 }
 
 static void Crypt(unsigned char *p, uint32_t seed)
 {
     unsigned i;
-    for (i = 8; i < 136; i += 2) {
+    for (i = 8; i < WT_POKEMON_SIZE; i += 2) {
         seed = seed * UINT32_C(0x41c64e6d) + UINT32_C(0x6073);
         p[i] ^= (unsigned char)(seed >> 16); p[i + 1] ^= (unsigned char)(seed >> 24);
     }
 }
 
-int WtPokemon_Decode(const unsigned char encrypted[136], unsigned char canonical[136])
+int WtPokemon_Decode(const unsigned char encrypted[WT_POKEMON_SIZE], unsigned char canonical[WT_POKEMON_SIZE])
 {
-    unsigned char image[136], order[4];
+    unsigned char image[WT_POKEMON_SIZE], order[4];
     unsigned i;
     memcpy(image, encrypted, sizeof(image)); Crypt(image, Read16(image + 6));
     Order(Read32(image), order); memcpy(canonical, image, 8);
@@ -45,9 +45,9 @@ int WtPokemon_Decode(const unsigned char encrypted[136], unsigned char canonical
     return Valid(canonical) ? 0 : -1;
 }
 
-int WtPokemon_Encode(const unsigned char canonical[136], unsigned char encrypted[136])
+int WtPokemon_Encode(const unsigned char canonical[WT_POKEMON_SIZE], unsigned char encrypted[WT_POKEMON_SIZE])
 {
-    unsigned char image[136], order[4];
+    unsigned char image[WT_POKEMON_SIZE], order[4];
     unsigned i;
     if (!Valid(canonical)) return -1;
     Order(Read32(canonical), order); memcpy(image, canonical, 8);
@@ -56,10 +56,10 @@ int WtPokemon_Encode(const unsigned char canonical[136], unsigned char encrypted
     return 0;
 }
 
-int WtPokemon_Fits(const unsigned char canonical[136], const WtPokemonLimits *limits)
+int WtPokemon_Fits(const unsigned char canonical[WT_POKEMON_SIZE], const WtPokemonLimits *limits)
 {
-    /* Block A: species 0x08, held item 0x0A. Block B: form in bits 3-7 of 0x40.
-     * Block D: the D/P/Pt ball at 0x83 (HG/SS also read 0x86). */
+    /* PK4 and PK5 alike (PKHeX PK4/PK5): block A species 0x08, held item 0x0A;
+     * block B form in bits 3-7 of 0x40; block D ball at 0x83 (HG/SS also read 0x86). */
     unsigned species = Read16(canonical + 0x08), item = Read16(canonical + 0x0A);
     unsigned form = canonical[0x40] >> 3, ball = canonical[0x83];
     if (!Valid(canonical) || species == 0 || species > limits->maxSpecies
