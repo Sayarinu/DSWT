@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DSWT patcher: add Wonder Trade to a clean dump of your own Gen IV Pokémon cartridge.
+"""DSWT patcher: add Wonder Trade to a clean dump of your own supported Pokémon cartridge.
 
 Run without arguments for the window. `--input ROM [--output FILE]` patches from the
 command line, and `--self-test` checks the embedded release bundle.
