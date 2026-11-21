@@ -245,6 +245,7 @@
     "server/migrations/0005_offer_destinations.sql",
     "server/migrations/0006_offer_screenings.sql",
     "server/migrations/0007_refusals.sql",
+    "server/migrations/0008_gen5_families.sql",
     "server/proto/connectivity.proto",
     "server/proto/trade.proto",
     "server/src/admission.cpp",

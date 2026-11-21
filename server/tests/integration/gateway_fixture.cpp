@@ -26,7 +26,7 @@ void Mark(const char *message) {
 class TestTrades final : public v1::WonderTrade::Service {
 public:
   explicit TestTrades(std::shared_ptr<detail::ServiceAdmission> admission, std::string release)
-      : trades("", [release = std::move(release)](const auto &data) {
+      : trades("", [release = std::move(release)](const auto &data, auto) {
           if (data[8] == 2) {
             Mark("TEST_VALIDATION_STARTED");
             std::this_thread::sleep_for(std::chrono::milliseconds(350));
@@ -40,7 +40,7 @@ public:
           if (!release.empty() && std::filesystem::exists(release + ".outage"))
             return LegalityDecision{LegalityVerdict::Unavailable, {}};
           if (data[8] == 3) return LegalityDecision{LegalityVerdict::Illegal, {"EGG_NOT_ALLOWED"}};
-          return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+          return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
         }, [](auto) { return true; }, std::move(admission)) {}
   TradeService trades;
 

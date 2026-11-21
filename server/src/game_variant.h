@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dswt/server/legality_client.h"
+
 #include <cstdint>
 
 // The enrollment build u32 names a save's game variant; see https://github.com/Sayarinu/DSWT/wiki/Protocol.
@@ -8,7 +10,9 @@
 // US English Platinum that released clients send.
 namespace dswt::server::detail {
 
-enum class GameFamily : std::uint8_t { None = 0, DiamondPearl = 1, Platinum = 2, HeartGoldSoulSilver = 3 };
+enum class GameFamily : std::uint8_t {
+  None = 0, DiamondPearl = 1, Platinum = 2, HeartGoldSoulSilver = 3, BlackWhite = 4, Black2White2 = 5
+};
 
 inline constexpr std::uint32_t kLegacyPlatinum = 1;
 
@@ -21,12 +25,19 @@ constexpr GameFamily VariantFamily(std::uint32_t code) {
   if (code == kLegacyPlatinum) return GameFamily::Platinum;
   const auto family = code >> 24, version = (code >> 16) & 0xFF, language = (code >> 8) & 0xFF;
   const bool game = (family == 1 && (version == 10 || version == 11)) || (family == 2 && version == 12) ||
-      (family == 3 && (version == 7 || version == 8));
+      (family == 3 && (version == 7 || version == 8)) || (family == 4 && (version == 20 || version == 21)) ||
+      (family == 5 && (version == 22 || version == 23));
   const bool known_language = language >= 1 && language <= 8 && language != 6;
   return game && known_language ? static_cast<GameFamily>(family) : GameFamily::None;
 }
 
 constexpr bool ValidVariant(std::uint32_t code) { return VariantFamily(code) != GameFamily::None; }
+
+// Black/White and Black 2/White 2 saves hold PK5; the rest hold PK4.
+constexpr PokemonFormat FamilyFormat(GameFamily family) {
+  return family == GameFamily::BlackWhite || family == GameFamily::Black2White2 ? PokemonFormat::PK5
+                                                                                 : PokemonFormat::PK4;
+}
 
 // A stored variant never changes. The legacy alias also matches an explicit
 // English Platinum code, so a client upgraded mid-enrollment keeps its identity.

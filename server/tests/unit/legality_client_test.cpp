@@ -11,12 +11,13 @@
 
 namespace dswt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt4";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt5";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
   std::function<grpc::Status(grpc::ServerContext *, v1::ValidateReply *)> respond;
   std::atomic<int> calls{0};
+  std::atomic<int> format{-1}; // Of the last request.
   grpc::Status Validate(grpc::ServerContext *context, const v1::ValidateRequest *request,
                         v1::ValidateReply *reply) override {
     ++calls;
@@ -25,8 +26,10 @@ public:
     EXPECT_EQ(request->pokemon().sha256(),
               std::string("\xb7\x07\x24\x15\x45\xa3\x46\x26\x5a\xab\x1f\xfb\x32\xff\x64\xb5"
                           "\x5b\xf8\xf8\xdc\x1b\x56\xa4\x6e\xf3\x3c\xe3\xd1\x5d\xb1\x1d\x33", 32));
+    format = request->format();
     reply->set_legal(true);
-    reply->set_destinations(kAllDestinations);
+    reply->set_format(request->format());
+    reply->set_destinations(request->format() == v1::FORMAT_PK5 ? kDestinationBW : kGenIVDestinations);
     reply->set_policy_version(kPolicy);
     reply->set_sha256(request->pokemon().sha256());
     return respond ? respond(context, reply) : grpc::Status::OK;
@@ -55,7 +58,48 @@ TEST_F(LegalityClientTest, AcceptsOnlyTheExpectedPolicyAndPayload) {
   LegalityClient client(address, kPolicy);
   auto result = client.CheckNewSubmission(payload);
   EXPECT_EQ(result.verdict, LegalityVerdict::Legal);
-  EXPECT_EQ(result.destinations, kAllDestinations);
+  EXPECT_EQ(result.destinations, kGenIVDestinations);
+  EXPECT_EQ(validator.format.load(), v1::FORMAT_PK4);
+}
+
+TEST_F(LegalityClientTest, AsksForTheOwnersFormatAndKeepsItsGeneration) {
+  LegalityClient client(address, kPolicy);
+  auto result = client.CheckNewSubmission(payload, PokemonFormat::PK5);
+  EXPECT_EQ(validator.format.load(), v1::FORMAT_PK5);
+  EXPECT_EQ(result.verdict, LegalityVerdict::Legal);
+  EXPECT_EQ(result.destinations, kDestinationBW);
+  validator.respond = [](auto *, auto *reply) { reply->set_destinations(kGenVDestinations); return grpc::Status::OK; };
+  EXPECT_EQ(client.CheckNewSubmission(payload, PokemonFormat::PK5).destinations, kGenVDestinations);
+  // A Gen V payload never names a Gen IV game, nor a Gen IV payload a Gen V game.
+  for (const std::uint32_t set : {kDestinationDP, kDestinationHGSS | kDestinationB2W2, 32U}) {
+    validator.respond = [set](auto *, auto *reply) { reply->set_destinations(set); return grpc::Status::OK; };
+    EXPECT_EQ(client.CheckNewSubmission(payload, PokemonFormat::PK5).verdict, LegalityVerdict::Unavailable) << set;
+  }
+  for (const std::uint32_t set : {kDestinationBW, kDestinationB2W2, kDestinationPt | kDestinationBW}) {
+    validator.respond = [set](auto *, auto *reply) { reply->set_destinations(set); return grpc::Status::OK; };
+    EXPECT_EQ(client.CheckNewSubmission(payload).verdict, LegalityVerdict::Unavailable) << set;
+  }
+}
+
+TEST_F(LegalityClientTest, ValidatorThatIgnoresTheFormatIsUnavailableForGenV) {
+  // A validator predating the field reads every payload as PK4 and echoes no format,
+  // so neither its legal nor its illegal verdict on a Gen V payload is trusted.
+  validator.respond = [](auto *, auto *reply) {
+    reply->clear_format();
+    reply->set_destinations(kGenIVDestinations);
+    return grpc::Status::OK;
+  };
+  LegalityClient client(address, kPolicy);
+  EXPECT_EQ(client.CheckNewSubmission(payload, PokemonFormat::PK5).verdict, LegalityVerdict::Unavailable);
+  validator.respond = [](auto *, auto *reply) {
+    reply->clear_format();
+    reply->set_legal(false);
+    reply->clear_destinations();
+    reply->add_reason_codes("ILLEGAL_DATA");
+    return grpc::Status::OK;
+  };
+  EXPECT_EQ(client.CheckNewSubmission(payload, PokemonFormat::PK5).verdict, LegalityVerdict::Unavailable);
+  EXPECT_EQ(client.CheckNewSubmission(payload).verdict, LegalityVerdict::Illegal);
 }
 
 TEST_F(LegalityClientTest, ReportsGamesThatCanHoldTheOffer) {
@@ -120,13 +164,16 @@ TEST_F(LegalityClientTest, RejectsMalformedUnboundOrAmbiguousReplies) {
       [](auto *r) { r->add_reason_codes("ILLEGAL_DATA"); },
       // Legal without destinations, as an older validator replies: never "all games".
       [](auto *r) { r->clear_destinations(); },
+      // A PK4 offer never fits the Gen V pool (bit 3 Black/White, bit 4 Black 2/White 2).
       [](auto *r) { r->set_destinations(8); },
-      [](auto *r) { r->set_destinations(kAllDestinations | 0x80000000U); },
+      [](auto *r) { r->set_destinations(kGenIVDestinations | 16U); },
+      [](auto *r) { r->set_destinations(kGenIVDestinations | 0x80000000U); },
       [](auto *r) { r->set_legal(false); r->add_reason_codes("ILLEGAL_DATA"); },
       [](auto *r) { r->set_legal(false); r->clear_destinations(); r->add_reason_codes("UNKNOWN_REASON"); },
       [](auto *r) { r->set_legal(false); r->clear_destinations(); for (int i = 0; i < 9; ++i) r->add_reason_codes("ILLEGAL_DATA"); },
       [](auto *r) { r->set_legal(false); r->clear_destinations(); r->add_reason_codes("ILLEGAL_RNG"); r->add_reason_codes("ILLEGAL_DATA"); },
-      [](auto *r) { r->set_policy_version(std::string(2048, 'x')); }};
+      [](auto *r) { r->set_policy_version(std::string(2048, 'x')); },
+      [](auto *r) { r->set_format(v1::FORMAT_PK5); }};
   LegalityClient client(address, kPolicy);
   for (const auto &corrupt : corruptions) {
     validator.respond = [&](auto *, auto *reply) { corrupt(reply); return grpc::Status::OK; };

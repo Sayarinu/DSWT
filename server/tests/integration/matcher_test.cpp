@@ -45,14 +45,14 @@ class MatcherTest : public testing::Test {
 protected:
   detail::Database database{""};
   // The validator's destination set for the next submission.
-  std::atomic<std::uint32_t> destinations{kAllDestinations};
-  TradeService trades{"", [this](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, destinations.load()}; },
+  std::atomic<std::uint32_t> destinations{kGenIVDestinations};
+  TradeService trades{"", [this](const auto &, auto) { return LegalityDecision{LegalityVerdict::Legal, {}, destinations.load()}; },
       [](auto) { return true; }};
   MatcherService matcher{"", [](auto) { return true; }};
   std::vector<v1::Credentials> owners;
 
   Client Queue(unsigned species = 1, std::uint32_t variant = detail::kLegacyPlatinum,
-               std::uint32_t holds = kAllDestinations) {
+               std::uint32_t holds = kGenIVDestinations) {
     IdentityId nonce{};
     const auto random = Identifier();
     std::copy(random.begin(), random.end(), nonce.begin());
@@ -174,9 +174,9 @@ TEST_F(MatcherTest, NeverPairsAnOfferWhoseNameScreeningRefusedIt) {
   const auto refused = Queue(201);
   const auto other = Queue(202);
   // A later rule screens both queued offers again and refuses the first one's name.
-  OfferScreener screener("", [](const auto &data) {
+  OfferScreener screener("", [](const auto &data, auto) {
     return data[8] == 201 ? LegalityDecision{LegalityVerdict::Illegal, {kInappropriateName}, 0}
-                          : LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+                          : LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
   }, kNameRule + 1);
   while (screener.Poll(64) != 0) {}
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
@@ -317,6 +317,8 @@ TEST_F(MatcherTest, BusyOldestIdentityIsSkippedAndServedAfterRelease) {
 constexpr auto kDiamond = detail::GameVariant(detail::GameFamily::DiamondPearl, 10, 2, 0);
 constexpr auto kPlatinum = detail::GameVariant(detail::GameFamily::Platinum, 12, 2, 0);
 constexpr auto kSoulSilver = detail::GameVariant(detail::GameFamily::HeartGoldSoulSilver, 8, 2, 0);
+constexpr auto kBlack = detail::GameVariant(detail::GameFamily::BlackWhite, 21, 2, 0);
+constexpr auto kWhite2 = detail::GameVariant(detail::GameFamily::Black2White2, 22, 2, 0);
 
 std::set<std::string> Traded(const v1::MatchReply &reply) { return {reply.first_trade_id(), reply.second_trade_id()}; }
 
@@ -333,7 +335,7 @@ TEST_F(MatcherTest, IdleWorkerRecordsNoAttemptsUntilACompatiblePairQueues) {
   Idle();
   const auto form = Queue(1, kPlatinum, kDestinationPt);
   Idle();
-  Queue(2, kDiamond, kAllDestinations);
+  Queue(2, kDiamond, kGenIVDestinations);
   Idle();
   const auto platinum = Queue(3, kPlatinum, kDestinationPt);
   EXPECT_EQ(worker.Poll().count(), 0);
@@ -346,7 +348,7 @@ TEST_F(MatcherTest, IdleWorkerRecordsNoAttemptsUntilACompatiblePairQueues) {
 
 TEST_F(MatcherTest, PlatinumOnlyOfferNeverMatchesIntoDiamondPearl) {
   // Diamond's offer could go to Platinum, but a Platinum-only form cannot go to Diamond.
-  const auto form = Queue(1, kPlatinum, kDestinationPt), diamond = Queue(2, kDiamond, kAllDestinations);
+  const auto form = Queue(1, kPlatinum, kDestinationPt), diamond = Queue(2, kDiamond, kGenIVDestinations);
   EXPECT_FALSE(matcher.PairAvailable());
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
   EXPECT_EQ(Status(form.auth).trade().state(), v1::TRADE_QUEUED);
@@ -369,12 +371,48 @@ TEST_F(MatcherTest, CompatibleCrossGamePairMatches) {
   EXPECT_EQ(Collect(diamond).pokemon().pk4(), soulsilver.submission.pokemon().pk4());
 }
 
+TEST_F(MatcherTest, GenIVAndGenVOffersNeverPair) {
+  const auto platinum = Queue(1, kPlatinum, kGenIVDestinations), black = Queue(2, kBlack, kGenVDestinations);
+  const auto diamond = Queue(3, kDiamond, kGenIVDestinations);
+  // Only the two Gen IV offers pair; the Black offer waits for a Gen V peer.
+  EXPECT_EQ(Traded(Match()), (std::set<std::string>{platinum.offer.trade_id(), diamond.offer.trade_id()}));
+  Queue(4, kSoulSilver, kGenIVDestinations);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_EQ(Status(black.auth).trade().state(), v1::TRADE_QUEUED);
+  const auto white2 = Queue(5, kWhite2, kGenVDestinations);
+  EXPECT_TRUE(matcher.PairAvailable());
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{black.offer.trade_id(), white2.offer.trade_id()}));
+  EXPECT_EQ(Collect(black).pokemon().pk4(), white2.submission.pokemon().pk4());
+}
+
+TEST_F(MatcherTest, BlackWhiteAndBlack2White2PairWhenEachCanHoldTheOther) {
+  // A Black 2/White 2-only Pokémon cannot go to Black/White.
+  const auto sequel = Queue(1, kWhite2, kDestinationB2W2), black = Queue(2, kBlack, kGenVDestinations);
+  EXPECT_FALSE(matcher.PairAvailable());
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
+  const auto white2 = Queue(3, kWhite2, kDestinationBW | kDestinationB2W2);
+  const auto pair = Match();
+  ASSERT_EQ(pair.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(pair), (std::set<std::string>{sequel.offer.trade_id(), white2.offer.trade_id()}));
+  EXPECT_EQ(Status(black.auth).trade().state(), v1::TRADE_QUEUED);
+  const auto white = Queue(4, kBlack, kDestinationB2W2);
+  EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND) << "Black cannot hold the Black 2/White 2-only offer";
+  const auto other = Queue(5, kWhite2, kDestinationBW);
+  const auto cross = Match();
+  ASSERT_EQ(cross.result(), v1::RESULT_OK);
+  EXPECT_EQ(Traded(cross), (std::set<std::string>{black.offer.trade_id(), other.offer.trade_id()}));
+  EXPECT_EQ(Status(white.auth).trade().state(), v1::TRADE_QUEUED);
+}
+
 TEST_F(MatcherTest, LegacyOffersArePlatinumOnly) {
   // Migration 0005 stores Platinum only for offers queued before destination sets.
   const auto legacy = Queue(1, detail::kLegacyPlatinum, kDestinationPt);
-  const auto soulsilver = Queue(2, kSoulSilver, kAllDestinations);
+  const auto soulsilver = Queue(2, kSoulSilver, kGenIVDestinations);
   EXPECT_EQ(Match().result(), v1::RESULT_NOT_FOUND);
-  const auto platinum = Queue(3, kPlatinum, kAllDestinations);
+  const auto platinum = Queue(3, kPlatinum, kGenIVDestinations);
   const auto pair = Match();
   ASSERT_EQ(pair.result(), v1::RESULT_OK);
   EXPECT_EQ(Traded(pair), (std::set<std::string>{legacy.offer.trade_id(), platinum.offer.trade_id()}));
@@ -402,7 +440,7 @@ TEST_F(MatcherTest, AnchorWithOnlyBusyPeersGivesWayToTheNextAnchor) {
   // The oldest Diamond-only offer pairs only with the other Diamond owner, whose
   // offer SoulSilver-only players cannot take; they pair with each other.
   const auto oldest = Queue(1, kDiamond, kDestinationDP);
-  const auto busy = Queue(2, kDiamond, kAllDestinations);
+  const auto busy = Queue(2, kDiamond, kGenIVDestinations);
   const auto first = Queue(3, kSoulSilver, kDestinationHGSS), second = Queue(4, kSoulSilver, kDestinationHGSS);
   {
     detail::Transaction transaction(database);

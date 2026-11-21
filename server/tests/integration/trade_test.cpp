@@ -31,13 +31,13 @@ std::string Identifier() {
   return id;
 }
 
-v1::Credentials Enroll(std::string enrollment = Identifier()) {
+v1::Credentials Enroll(std::string enrollment = Identifier(), std::uint32_t variant = detail::kLegacyPlatinum) {
   IdentityStore store("");
   IdentityId id{};
   std::copy(enrollment.begin(), enrollment.end(), id.begin());
   SaveCredential credential{};
   credential.fill(0x51);
-  const auto result = store.Enroll(id, credential, detail::kLegacyPlatinum);
+  const auto result = store.Enroll(id, credential, variant);
   if (!result) throw std::runtime_error("fixture enrollment failed");
   v1::Credentials auth;
   auth.set_save_id(result->data(), result->size());
@@ -69,11 +69,13 @@ class TradeTest : public testing::Test {
 protected:
   std::atomic<int> validations{0};
   std::atomic<LegalityVerdict> verdict{LegalityVerdict::Legal};
-  std::atomic<std::uint32_t> destinations{kAllDestinations};
+  std::atomic<std::uint32_t> destinations{kGenIVDestinations};
   std::atomic<bool> covered{true};
+  std::atomic<int> format{-1};  // The format of the last validation.
   std::vector<std::string> reasons{"ILLEGAL_DATA"};  // Of an illegal verdict; set before submitting.
-  TradeService service{"", [&](const auto &) {
+  TradeService service{"", [&](const auto &, auto requested) {
     ++validations;
+    format = static_cast<int>(requested);
     const auto current = verdict.load();
     const bool legal = current == LegalityVerdict::Legal;
     return LegalityDecision{current, current == LegalityVerdict::Illegal ? reasons : std::vector<std::string>{},
@@ -210,9 +212,9 @@ TEST_F(TradeTest, RefusedNameReturnsOnlyToClientsThatAcceptServerReturns) {
   const auto offer = Status().trade();
   const auto trade = "'" + detail::HexBytes(offer.trade_id()) + "'::uuid";
   EXPECT_EQ(Scalar(("SELECT count(*) FROM dswt.offer_screenings WHERE NOT refused AND rule=1 AND trade_id=" + trade).c_str()), "1");
-  OfferScreener screener("", [](const auto &pk4) {
+  OfferScreener screener("", [](const auto &pk4, auto) {
     return pk4[8] == 0x77 ? LegalityDecision{LegalityVerdict::Illegal, {"ILLEGAL_RNG", kInappropriateName}, 0}
-                          : LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+                          : LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
   }, kNameRule + 1);
   while (screener.Poll(64) != 0) {}
   EXPECT_EQ(Scalar(("SELECT refused::text FROM dswt.offer_screenings WHERE rule=2 AND trade_id=" + trade).c_str()), "true");
@@ -377,7 +379,7 @@ TEST_F(TradeTest, DefinitiveRejectionRetainsMatchingDigestAndRetry) {
 
 TEST_F(TradeTest, SubmissionStoresValidatorDestinationsAndFailsClosedWithoutThem) {
   const auto request = Submission(auth);
-  for (const std::uint32_t set : {0U, 8U, kAllDestinations | 8U}) {
+  for (const std::uint32_t set : {0U, 8U, kGenIVDestinations | 8U}) {
     destinations = set;
     EXPECT_EQ(Submit(request).context().result(), v1::RESULT_UNAVAILABLE) << set;
     EXPECT_EQ(Status().context().next_counter(), 1U);
@@ -391,6 +393,43 @@ TEST_F(TradeTest, SubmissionStoresValidatorDestinationsAndFailsClosedWithoutThem
   EXPECT_STREQ(PQgetvalue(row.get(), 0, 0), "6");
   EXPECT_THROW(database.Parameters("UPDATE dswt.offer_destinations SET destinations=7 WHERE trade_id=$1::uuid",
       {detail::HexBytes(submitted.outcome().trade_id())}), detail::DatabaseError);
+}
+
+TEST_F(TradeTest, GenVOwnerIsValidatedAsPk5AndStaysInItsOwnPool) {
+  Submit(Submission(auth));
+  EXPECT_EQ(format.load(), static_cast<int>(PokemonFormat::PK4));
+  const auto black = Enroll(Identifier(), detail::GameVariant(detail::GameFamily::BlackWhite, 21, 2, 0));
+  const auto request = Submission(black);
+  // A Gen V offer never names a Gen IV game, whatever the validator says.
+  for (const std::uint32_t set : {kDestinationPt, kGenIVDestinations, kDestinationDP | kDestinationBW, 32U}) {
+    destinations = set;
+    EXPECT_EQ(Submit(request).context().result(), v1::RESULT_UNAVAILABLE) << set;
+    EXPECT_EQ(format.load(), static_cast<int>(PokemonFormat::PK5));
+  }
+  destinations = kGenVDestinations;
+  const auto submitted = Submit(request);
+  ASSERT_EQ(submitted.context().result(), v1::RESULT_OK);
+  auto row = database.Parameters("SELECT destinations FROM dswt.offer_destinations WHERE trade_id=$1::uuid",
+      {detail::HexBytes(submitted.outcome().trade_id())});
+  ASSERT_EQ(PQntuples(row.get()), 1);
+  EXPECT_STREQ(PQgetvalue(row.get(), 0, 0), "24");
+}
+
+TEST_F(TradeTest, LedgerKeepsEachOfferInItsOwnersGeneration) {
+  // Even a write that bypasses Submit's check cannot mix the pools.
+  const auto black = Enroll(Identifier(), detail::GameVariant(detail::GameFamily::BlackWhite, 20, 2, 0));
+  for (const auto &[owner, set] : {std::pair{auth, kDestinationBW}, std::pair{black, kDestinationPt},
+                                    std::pair{black, kDestinationBW | kDestinationHGSS}, std::pair{auth, 32U}}) {
+    const auto trade = Identifier(), asset = Identifier();
+    detail::Transaction transaction(database);
+    database.Parameters("INSERT INTO dswt.payloads VALUES ($1::uuid,decode(repeat('00',136),'hex'),"
+        "pg_catalog.sha256(decode(repeat('00',136),'hex')))", {detail::HexBytes(asset)});
+    database.Parameters("INSERT INTO dswt.offers(trade_id,save_id,offered_asset_id,state,last_event) "
+        "VALUES ($1::uuid,$2::uuid,$3::uuid,1,2)",
+        {detail::HexBytes(trade), detail::HexBytes(owner.save_id()), detail::HexBytes(asset)});
+    EXPECT_THROW(database.Parameters("INSERT INTO dswt.offer_destinations VALUES ($1::uuid,$2::smallint)",
+        {detail::HexBytes(trade), std::to_string(set)}), detail::DatabaseError) << set;
+  }
 }
 
 TEST_F(TradeTest, ValidatorOutageDoesNotBlockAcceptedReturnCollectAndAck) {
@@ -550,10 +589,10 @@ TEST_F(TradeTest, MatchedTradeCannotCancelAndDeliversOnlyItsAssignedPeerAsset) {
 TEST_F(TradeTest, ValidatorWaitHoldsNoDatabaseOrIdentityLock) {
   std::promise<void> entered, release;
   auto released = release.get_future().share();
-  TradeService waiting("", [&](const auto &) {
+  TradeService waiting("", [&](const auto &, auto) {
     entered.set_value();
     released.wait();
-    return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations};
+    return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
   }, [](auto) { return true; });
   const auto request = Submission(auth);
   auto pending = std::async(std::launch::async, [&] {
@@ -659,7 +698,7 @@ TEST_F(TradeTest, ConcurrentIdenticalSubmissionAndAcknowledgementReplayExactlyOn
 }
 
 TEST_F(TradeTest, MissingRecoveryBarrierCannotPublishOrMutate) {
-  TradeService no_recovery("", [&](const auto &) { ++validations; return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations}; });
+  TradeService no_recovery("", [&](const auto &, auto) { ++validations; return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations}; });
   const auto request = Submission(auth);
   v1::MutationReply reply;
   ASSERT_TRUE(no_recovery.Submit(nullptr, &request, &reply).ok());
@@ -671,7 +710,7 @@ TEST_F(TradeTest, MissingRecoveryBarrierCannotPublishOrMutate) {
 
 TEST_F(TradeTest, LocallyCommittedUncoveredOutcomeBlocksReadsAndDependentWrites) {
   std::atomic<unsigned> checks{0};
-  TradeService delayed("", [&](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations}; },
+  TradeService delayed("", [&](const auto &, auto) { return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations}; },
       [&](auto) { return ++checks <= 2; });
   const auto request = Submission(auth);
   v1::MutationReply reply;
@@ -700,7 +739,7 @@ TEST_F(TradeTest, LaggingWalWatermarkCanFinishWithoutChasingRetryLocks) {
   };
   std::atomic<std::uint64_t> recoverable{0};
   std::atomic<bool> first_check{true};
-  TradeService lagged("", [](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations}; },
+  TradeService lagged("", [](const auto &, auto) { return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations}; },
       [&](auto required) {
         if (first_check.exchange(false)) recoverable = required;
         return required <= recoverable.load();
@@ -766,7 +805,7 @@ int RestartScenario() {
   auto auth = Enroll(std::string(16, '\x91'));
   auto request = Submission(auth);
   request.mutable_context()->set_operation_id(std::string(16, '\x92'));
-  TradeService service("", [](const auto &) { return LegalityDecision{LegalityVerdict::Legal, {}, kAllDestinations}; }, [](auto) { return true; });
+  TradeService service("", [](const auto &, auto) { return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations}; }, [](auto) { return true; });
   v1::MutationReply reply;
   auto status = service.Submit(nullptr, &request, &reply);
   return status.ok() && reply.context().result() == v1::RESULT_OK && reply.context().next_counter() == 2 &&
