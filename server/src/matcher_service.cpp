@@ -6,11 +6,14 @@
 #include "dswt/server/legality_client.h"
 #include "dswt/server/telemetry.h"
 
+#include <openssl/sha.h>
+
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace dswt::server {
 namespace {
@@ -57,7 +60,7 @@ const std::string kSelected =
     "SELECT replace(i.save_id::text,'-',''),replace(o.trade_id::text,'-',''),d.destinations::text," + kGame + "::text ";
 // Two offers are compatible when each owner's game can hold the other's Pokémon.
 const std::string kAnchor = kSelected +
-    "FROM " + kQueued + "AND NOT o.trade_id=ANY($1::uuid[]) "
+    "FROM " + kQueued + "AND NOT o.trade_id=ANY($1::uuid[]) AND NOT i.save_id=ANY($2::uuid[]) "
     "AND EXISTS (SELECT 1 FROM " + kCandidates + " p WHERE p.save_id<>o.save_id "
     "AND d.destinations&p.game<>0 AND p.destinations&" + kGame + "<>0) "
     "ORDER BY (SELECT a.sequence FROM dswt.audit_journal a WHERE a.table_name='offers' "
@@ -65,7 +68,7 @@ const std::string kAnchor = kSelected +
     "LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
 const std::string kPeer = kSelected +
     "FROM " + kQueued + "AND i.save_id<>$1::uuid AND d.destinations&$2::integer<>0 "
-    "AND $3::integer&" + kGame + "<>0 ORDER BY random() LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
+    "AND $3::integer&" + kGame + "<>0 AND NOT i.save_id=ANY($4::uuid[]) ORDER BY random() LIMIT 1 FOR UPDATE OF i SKIP LOCKED";
 // One offer of a pair this worker chose earlier, if it is still queued and its owner unlocked.
 const std::string kChosen = kSelected + "FROM " + kQueued + "AND o.trade_id=$1::uuid FOR UPDATE OF i SKIP LOCKED";
 const std::string kPairAvailable =
@@ -90,19 +93,52 @@ Offer Locked(Database &database, const detail::Result &selected) {
 // random unlocked compatible peer avoids a deterministic partner schedule. An
 // offer no other queued game can hold is passed over rather than waited on, and
 // if every compatible peer of an anchor is locked the next anchor is tried.
-std::optional<std::pair<Offer, Offer>> Select(Database &database) {
+// Owners already in this batch are excluded, so each owner gets one pair.
+std::optional<std::pair<Offer, Offer>> Select(Database &database, const std::string &owners) {
   std::string tried;
   for (;;) {
-    auto anchor = database.Parameters(kAnchor.c_str(), {"{" + tried + "}"});
+    auto anchor = database.Parameters(kAnchor.c_str(), {"{" + tried + "}", "{" + owners + "}"});
     if (PQntuples(anchor.get()) == 0) return std::nullopt;
     auto first = Locked(database, anchor);
-    auto peer = database.Parameters(kPeer.c_str(), {HexBytes(first.owner), first.game, first.destinations});
+    auto peer = database.Parameters(kPeer.c_str(), {HexBytes(first.owner), first.game, first.destinations, "{" + owners + "}"});
     if (PQntuples(peer.get()) == 1) {
       auto second = Locked(database, peer);
       return std::pair{std::move(first), std::move(second)};
     }
     tried += (tried.empty() ? "" : ",") + HexBytes(first.trade);
   }
+}
+
+using Pairs = std::vector<std::pair<Offer, Offer>>;
+
+// At most this many pairs share one operation, its archive waits and its commit.
+constexpr std::size_t kBatch = 8;
+
+std::string Owners(const Pairs &pairs) {
+  std::string owners;
+  for (const auto &pair : pairs)
+    for (const auto *offer : {&pair.first, &pair.second}) owners += (owners.empty() ? "" : ",") + HexBytes(offer->owner);
+  return owners;
+}
+
+// Adds pairs, each by Select's rule, until the batch is full or no pair remains.
+void Fill(Database &database, Pairs &pairs) {
+  while (pairs.size() < kBatch) {
+    auto pair = Select(database, Owners(pairs));
+    if (!pair) return;
+    pairs.push_back(std::move(*pair));
+  }
+}
+
+// The operation recorded for a batch's later pairs: the first pair keeps the
+// worker's own ID, and pair N a fixed derivation of it, so a replay finds them all.
+std::string BatchOperation(const std::string &operation, std::size_t index) {
+  if (index == 0) return operation;
+  std::string input = "dswt-matcher-batch" + operation;
+  input.push_back(static_cast<char>(index));
+  unsigned char digest[SHA256_DIGEST_LENGTH];
+  SHA256(reinterpret_cast<const unsigned char *>(input.data()), input.size(), digest);
+  return std::string(reinterpret_cast<const char *>(digest), 16);
 }
 
 // The pair an operation chose before, relocked. Anything that changed since
@@ -174,22 +210,24 @@ bool Retry(const detail::DatabaseError &error) {
 
 namespace detail {
 
-// The pair each waiting operation chose. Retrying the same pair lets the coverage
-// of its owners, first observed while the operation waited, complete with it;
-// a fresh random peer on every retry would restart that wait each time.
+// The pairs each waiting operation chose. Retrying the same pairs lets the coverage
+// of their owners, first observed while the operation waited, complete with it;
+// fresh random peers on every retry would restart that wait each time.
 class ChosenPairs {
 public:
-  std::optional<std::pair<std::string, std::string>> Find(const std::string &operation) {
+  std::vector<std::pair<std::string, std::string>> Find(const std::string &operation) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto found = pairs_.find(operation);
-    if (found == pairs_.end()) return std::nullopt;
+    if (found == pairs_.end()) return {};
     return found->second;
   }
-  void Remember(const std::string &operation, const Offer &first, const Offer &second) {
+  void Remember(const std::string &operation, const Pairs &pairs) {
     std::lock_guard<std::mutex> lock(mutex_);
     // Forgetting only costs a later retry its head start, never safety.
     if (pairs_.size() >= 4096 && !pairs_.count(operation)) pairs_.erase(pairs_.begin());
-    pairs_[operation] = {first.trade, second.trade};
+    auto &trades = pairs_[operation];
+    trades.clear();
+    for (const auto &pair : pairs) trades.emplace_back(pair.first.trade, pair.second.trade);
   }
   void Forget(const std::string &operation) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -198,7 +236,7 @@ public:
 
 private:
   std::mutex mutex_;
-  std::unordered_map<std::string, std::pair<std::string, std::string>> pairs_;
+  std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> pairs_;
 };
 
 } // namespace detail
@@ -238,32 +276,35 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
           Publish(database, *recovery_, operation, *reply);
           return grpc::Status::OK;
         }
-        const auto chosen = chosen_->Find(operation);
-        std::optional<std::pair<Offer, Offer>> pair;
-        if (chosen) pair = Reselect(database, *chosen);
+        Pairs pairs;
+        for (const auto &chosen : chosen_->Find(operation))
+          if (auto pair = Reselect(database, chosen)) pairs.push_back(std::move(*pair));
         if (!recovery_->Covers(database, "operation" + operation, 0)) {
-          // Choose the pair during this wait, so its owners' coverage is first
+          // Choose the pairs during this wait, so their owners' coverage is first
           // observed now and completes in the same archive cycle as the operation's.
-          if (!pair) pair = Select(database);
-          if (pair) {
-            recovery_->Covers(database, "identity" + pair->first.owner, pair->first.highwater);
-            recovery_->Covers(database, "identity" + pair->second.owner, pair->second.highwater);
-            chosen_->Remember(operation, pair->first, pair->second);
+          Fill(database, pairs);
+          for (const auto &pair : pairs) {
+            recovery_->Covers(database, "identity" + pair.first.owner, pair.first.highwater);
+            recovery_->Covers(database, "identity" + pair.second.owner, pair.second.highwater);
           }
+          if (!pairs.empty()) chosen_->Remember(operation, pairs);
           Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
         }
-        if (!pair) pair = Select(database);
-        if (pair) {
-          const auto *first = &pair->first, *second = &pair->second;
-          if (!recovery_->Covers(database, "identity" + first->owner, first->highwater) ||
-              !recovery_->Covers(database, "identity" + second->owner, second->highwater)) {
-            chosen_->Remember(operation, *first, *second);
-            Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
-          }
-          Pair(database, *first, *second, operation);
-        } else {
-          database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(operation)});
+        if (pairs.empty()) Fill(database, pairs);
+        // Pair every chosen pair whose owners are covered; the rest stay queued.
+        Pairs ready;
+        for (auto &pair : pairs)
+          if (recovery_->Covers(database, "identity" + pair.first.owner, pair.first.highwater) &&
+              recovery_->Covers(database, "identity" + pair.second.owner, pair.second.highwater))
+            ready.push_back(std::move(pair));
+        if (!pairs.empty() && ready.empty()) {
+          chosen_->Remember(operation, pairs);
+          Result(*reply, v1::RESULT_PROCESSING); return grpc::Status::OK;
         }
+        if (ready.empty())
+          database.Parameters("INSERT INTO dswt.matcher_attempts VALUES ($1::uuid,NULL)", {HexBytes(operation)});
+        for (std::size_t index = 0; index < ready.size(); ++index)
+          Pair(database, ready[index].first, ready[index].second, BatchOperation(operation, index));
         transaction.Commit();
         chosen_->Forget(operation);
         Publish(database, *recovery_, operation, *reply);
