@@ -210,8 +210,16 @@ message MatchReply {
   bytes second_trade_id = 3;
 }
 
+// Structure of CanonicalPokemon.pk4: both formats are 136 decrypted,
+// unshuffled stored bytes. Callers predating the field send FORMAT_PK4.
+enum PokemonFormat {
+  FORMAT_PK4 = 0;
+  FORMAT_PK5 = 1;
+}
+
 message ValidateRequest {
   CanonicalPokemon pokemon = 1;
+  PokemonFormat format = 2;
 }
 
 message ValidateReply {
@@ -220,8 +228,9 @@ message ValidateReply {
   repeated string reason_codes = 3; // At most 8 codes, each at most 32 ASCII bytes.
   bytes sha256 = 4; // 32 bytes identifying the exact submitted canonical payload.
   // No repaired or substituted payload: validation cannot mutate an asset.
-  // Gen IV games able to hold a legal Pokémon: bit 0 Diamond/Pearl, bit 1
-  // Platinum, bit 2 HeartGold/SoulSilver; other bits are zero. Non-zero exactly
+  // Games able to hold a legal Pokémon. PK4: bit 0 Diamond/Pearl, bit 1
+  // Platinum, bit 2 HeartGold/SoulSilver. PK5: bit 3 Black/White, bit 4
+  // Black 2/White 2. Other bits, and the other format's bits, are zero. Non-zero exactly
   // when legal. Zero never means "all games": a legal reply without a bit, as an
   // older validator would send, is malformed and treated as unavailable.
   uint32 destinations = 5;

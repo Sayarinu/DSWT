@@ -13,6 +13,8 @@ namespace DSWT.Validator;
 // Starting a worker costs far more than an analysis, so a worker that answered
 // correctly serves later payloads, up to MaxUses. Any timeout, crash, malformed
 // or mismatched reply kills it, and it is never reused.
+// Request frame: one format byte (PokemonFormat: 0 PK4, 1 PK5), then the 136-byte payload.
+// Reply frame: a little-endian u16 length, then that many ValidateReply bytes.
 public sealed class WorkerRunner : IDisposable
 {
     internal const int MaxReplyBytes = 1024;
@@ -84,8 +86,14 @@ public sealed class WorkerRunner : IDisposable
         }
     }
 
-    public async Task<ValidateReply> Run(byte[] payload, CancellationToken cancellation)
+    public Task<ValidateReply> Run(byte[] payload, CancellationToken cancellation) =>
+        Run(PokemonFormat.FormatPk4, payload, cancellation);
+
+    public async Task<ValidateReply> Run(PokemonFormat format, byte[] payload, CancellationToken cancellation)
     {
+        if (!Policy.IsKnown(format) || payload.Length != Policy.PayloadSize)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "invalid canonical payload"));
+        var allowed = (uint)Policy.DestinationsFor(format);
         if (!await slots.WaitAsync(0, cancellation))
             throw new RpcException(new Status(StatusCode.ResourceExhausted, "validator busy"));
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -104,13 +112,14 @@ public sealed class WorkerRunner : IDisposable
             worker ??= Start();
             worker.Uses++;
             var input = worker.Process.StandardInput.BaseStream;
+            await input.WriteAsync(new[] { (byte)format }, deadline.Token);
             await input.WriteAsync(payload, deadline.Token);
             await input.FlushAsync(deadline.Token);
             var reply = ValidateReply.Parser.ParseFrom(await ReadFrame(worker.Process.StandardOutput.BaseStream, deadline.Token));
             if (reply.PolicyVersion != Policy.Version ||
                 !reply.Sha256.Span.SequenceEqual(SHA256.HashData(payload)) ||
                 reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > MaxReasonCodes ||
-                reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~(uint)Policy.AllDestinations) != 0 ||
+                reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~allowed) != 0 ||
                 reply.ReasonCodes.Any(r => r.Length is 0 or > MaxReasonCodeLength || r.Any(c => c is not (>= 'A' and <= 'Z' or '_'))))
                 throw new InvalidOperationException();
             reusable = worker.Uses < MaxUses;

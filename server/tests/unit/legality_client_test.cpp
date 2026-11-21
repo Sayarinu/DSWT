@@ -11,7 +11,7 @@
 
 namespace dswt::server {
 namespace {
-constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt4";
+constexpr char kPolicy[] = "pkhex-26.08.26-74b88906-dswt5";
 
 class FakeValidator final : public v1::PokemonLegality::Service {
 public:
@@ -21,6 +21,7 @@ public:
                         v1::ValidateReply *reply) override {
     ++calls;
     EXPECT_EQ(request->pokemon().pk4().size(), 136U);
+    EXPECT_EQ(request->format(), v1::FORMAT_PK4);
     EXPECT_EQ(request->pokemon().sha256().size(), 32U);
     EXPECT_EQ(request->pokemon().sha256(),
               std::string("\xb7\x07\x24\x15\x45\xa3\x46\x26\x5a\xab\x1f\xfb\x32\xff\x64\xb5"
@@ -120,7 +121,9 @@ TEST_F(LegalityClientTest, RejectsMalformedUnboundOrAmbiguousReplies) {
       [](auto *r) { r->add_reason_codes("ILLEGAL_DATA"); },
       // Legal without destinations, as an older validator replies: never "all games".
       [](auto *r) { r->clear_destinations(); },
+      // A PK4 offer never fits the Gen V pool (bit 3 Black/White, bit 4 Black 2/White 2).
       [](auto *r) { r->set_destinations(8); },
+      [](auto *r) { r->set_destinations(kAllDestinations | 16U); },
       [](auto *r) { r->set_destinations(kAllDestinations | 0x80000000U); },
       [](auto *r) { r->set_legal(false); r->add_reason_codes("ILLEGAL_DATA"); },
       [](auto *r) { r->set_legal(false); r->clear_destinations(); r->add_reason_codes("UNKNOWN_REASON"); },
