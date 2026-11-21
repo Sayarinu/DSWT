@@ -1,0 +1,15 @@
+diff --git a/lib/src/rom/dsi.rs b/lib/src/rom/dsi.rs
+index 8950130..8fb08e7 100644
+--- a/lib/src/rom/dsi.rs
++++ b/lib/src/rom/dsi.rs
+@@ -543,7 +543,10 @@ impl<'a> Dsi<'a> {
+         };
+         if let Some(plaintext_sha1) = stored_secure_area.and_then(|values| values.plaintext_sha1)
+             && secure_area_sha1(arm9_data) != plaintext_sha1
++            && std::env::var_os("DSD_ALLOW_STALE_SECURE_AREA").is_none()
+         {
++            // With DSD_ALLOW_STALE_SECURE_AREA set, the stored digests are kept: the ROM then boots in DS mode,
++            // which does not check them, and fails the DSi's checks.
+             return SecureAreaChangedSnafu {}.fail();
+         }
+ 

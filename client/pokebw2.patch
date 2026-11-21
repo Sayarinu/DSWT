@@ -1,0 +1,673 @@
+diff --git a/configure.py b/configure.py
+index 90a0ae59c..40ce79c01 100644
+--- a/configure.py
++++ b/configure.py
+@@ -640,6 +640,58 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
+     return dsd
+ 
+ 
++# DSWT Wonder Trade: the Mbed TLS source tree, the connection header and CodeWarrior's MSL C headers, from
++# --wonder-trade-tls, --wonder-trade-profile and --wonder-trade-msl. The shared core (src/wonder_trade/), the
++# Black 2/White 2 adapter (src/wonder_trade/bw2/) and Mbed TLS link at the end of ARM9 main
++# (src/wonder_trade/bw2/link.py), which moves every overlay and the arena after them.
++WONDER_TRADE = None
++# Enroll's game variant code of each version: family 5 (Black 2/White 2) << 24, the game version (Black 2 23, White 2
++# 22) << 16, the language (English 2) << 8 and the revision
++WT_VARIANTS = {"b2_us": 0x05170200, "w2_us": 0x05160200}
++WT_TLS_SRC_DIRS = ["library", "tf-psa-crypto/core", "tf-psa-crypto/extras", "tf-psa-crypto/platform",
++                   "tf-psa-crypto/utilities", "tf-psa-crypto/drivers/builtin/src"]
++WT_TLS_INCLUDE_DIRS = ["include", "library", "tf-psa-crypto/include", "tf-psa-crypto/core", "tf-psa-crypto/dispatch",
++                       "tf-psa-crypto/extras", "tf-psa-crypto/platform", "tf-psa-crypto/utilities",
++                       "tf-psa-crypto/drivers/builtin/include", "tf-psa-crypto/drivers/builtin/src",
++                       "tf-psa-crypto/drivers/p256-m", "tf-psa-crypto/drivers/pqcp/include",
++                       "tf-psa-crypto/drivers/everest/include"]
++
++
++def add_wonder_trade(n: Writer, build_dir: Path, version: str) -> list[str]:
++    """Compiles Wonder Trade and Mbed TLS; returns the objects and the archive to link."""
++    tls_dir = Path(WONDER_TRADE[0])
++    include = build_dir / "wt" / "include"
++    include.mkdir(parents=True, exist_ok=True)
++    shutil.copyfile(WONDER_TRADE[1], include / "wonder_trade_config.h")
++    msl = Path(WONDER_TRADE[2]) / "MSL_C"
++    flags = " ".join([*CC_FLAGS, f"-ir {msl / 'MSL_Common/Include'}", f"-ir {msl / 'MSL_ARM/Include'}",
++                      *(f"-i {d}" for d in INCLUDE_DIRS),
++                      f"-i {include}", *(f"-i {tls_dir / d}" for d in WT_TLS_INCLUDE_DIRS),
++                      "'-DMBEDTLS_CONFIG_FILE=\"wonder_trade/tls_config.h\"'",
++                      "'-DTF_PSA_CRYPTO_CONFIG_FILE=\"wonder_trade/crypto_config.h\"'"])
++    # The core and the adapter see the SDK through include/wonder_trade/bw2/sdk, after the prefix header
++    wt_flags = " ".join([flags, "-i include/wonder_trade/bw2/sdk", "-prefix wonder_trade/bw2/sdk_prefix.h",
++                         f"-DWT_GAME_VARIANT={WT_VARIANTS[version]:#010x}u",
++                         *(f"-d {define}" for define in VERSIONS[version]["defines"])])
++    objects = []
++    for source in sorted([*Path("src/wonder_trade").glob("*.c"), *Path("src/wonder_trade/bw2").glob("*.c")]):
++        prefix = "wt_bw2_" if source.parent.name == "bw2" else "wt_"
++        obj = build_dir / "wt" / f"{prefix}{source.stem}.o"
++        # The rule has no dependency file: a new connection profile rebuilds every Wonder Trade object
++        n.build([obj], "wt_cc", [str(source)], variables={"flags": wt_flags}, order_only=["constants_headers"],
++                implicit=[str(include / "wonder_trade_config.h")])
++        objects.append(str(obj))
++    tls_objects = []
++    for directory in WT_TLS_SRC_DIRS:
++        for source in sorted((tls_dir / directory).glob("*.c")):
++            obj = build_dir / "wt" / "tls" / directory / source.with_suffix(".o").name
++            n.build([obj], "wt_cc", [str(source)], variables={"flags": flags})
++            tls_objects.append(obj)
++    archive = build_dir / "wt" / "libwt_tls.a"
++    n.build([archive], "wt_ar", tls_objects)
++    return [*objects, str(archive)]
++
++
+ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) -> tuple[list[Path], list[str]]:
+     """Adds the build steps of one version. Returns its check targets and dsd config files. A build with the bugs fixed
+     or with its code shifted does not match, so its only targets are the ROM and its archives."""
+@@ -680,8 +732,13 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+     n.build(delink_outputs, "delink", dsd_configs, implicit=[extract_dir / "config.yaml"],
+             variables={"config": str(arm9_config)})
+     # The linker script also defines NitroSDK's linker symbols, as the SDK's template does, from linker_symbols.toml
++    wt_objects = add_wonder_trade(n, build_dir, version) if WONDER_TRADE else []
++    wt_link = (f"&& $python src/wonder_trade/bw2/link.py {lcf_file} {objects_file} {' '.join(wt_objects)}"
++               if wt_objects else "")
+     n.build([lcf_file, objects_file], "lcf", dsd_configs,
+-            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml"], variables={"config": str(arm9_config)})
++            implicit=[extract_dir / "config.yaml", "config/linker_symbols.toml",
++                      *(["src/wonder_trade/bw2/link.py"] if wt_objects else [])],
++            variables={"config": str(arm9_config), "wt_link": wt_link})
+     link_lcf = lcf_file
+     if shift:
+         # Padding in the linker script moves the code and data after it, see tools/build/shift_lcf.py
+@@ -779,7 +836,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+         link_objects = [str(veneer_object) if obj == dsprot_object else obj for obj in link_objects]
+ 
+     arm9_o = build_dir / "arm9.o"
+-    n.build([arm9_o], "mwld", link_objects, implicit=[link_lcf, link_response],
++    n.build([arm9_o], "mwld", [*link_objects, *wt_objects], implicit=[link_lcf, link_response],
+             variables={"objects": link_response, "lcf": link_lcf})
+ 
+     # The ROM's file system is the extracted one, with the archives built from source in place of the extracted ones.
+@@ -907,7 +964,14 @@ def main():
+                              "code sizes; the ROMs no longer match. A multiple of 32, such as 0x100")
+     parser.add_argument("--bugfix", action="store_true",
+                         help="fix the game's bugs that are marked with BUGFIX in the source; the ROMs no longer match")
++    parser.add_argument("--wonder-trade-tls", type=Path, help="Mbed TLS source tree for the DSWT Wonder Trade spike")
++    parser.add_argument("--wonder-trade-profile", type=Path, help="DSWT connection header for the spike")
++    parser.add_argument("--wonder-trade-msl", type=Path, help="CodeWarrior MSL headers (msl/) for the spike")
+     args = parser.parse_args()
++    global WONDER_TRADE
++    if args.wonder_trade_tls:
++        WONDER_TRADE = (args.wonder_trade_tls.resolve(), args.wonder_trade_profile.resolve(),
++                        args.wonder_trade_msl.resolve())
+ 
+     versions = args.versions or [v for v in VERSIONS if (ROOT / "orig" / f"baserom_{v}.nds").exists()]
+     if not versions:
+@@ -945,7 +1009,12 @@ def main():
+     n.rule("check_baserom", "echo '$sha1  $in' | sha1sum --quiet -c - && touch $out", "Checking base ROM $in")
+     n.rule("extract", "$dsd rom extract --rom $in --output-path $extract_dir", "Extracting $in")
+     n.rule("delink", "$dsd delink --config-path $config", "Delinking $config")
+-    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml",
++    if WONDER_TRADE:
++        n.rule("wt_cc", f"mkdir -p $$(dirname $out) && $wine {shlex.quote(str(mwcc))} $flags -o $out $in",
++               "Compiling $in")
++        n.rule("wt_ar", f"{shlex.quote(shutil.which('llvm-ar') or 'llvm-ar')} --format=gnu rcs $out $in",
++               "Archiving $out")
++    n.rule("lcf", "$dsd lcf --config-path $config --symbols config/linker_symbols.toml $wt_link",
+            "Generating linker script for $config")
+     # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
+     n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
+diff --git a/include/field/field_menu.h b/include/field/field_menu.h
+index e5c8587b8..c29d75457 100644
+--- a/include/field/field_menu.h
++++ b/include/field/field_menu.h
+@@ -43,6 +43,8 @@ enum {
+     FIELD_MENU_ITEM_OPTIONS,
+     FIELD_MENU_ITEM_NONE,
+     FIELD_MENU_ITEM_RETIRE,
++    // DSWT Wonder Trade (src/wonder_trade/bw2/application.c)
++    FIELD_MENU_ITEM_WONDER_TRADE,
+     FIELD_MENU_ITEM_MAX,
+ };
+ 
+diff --git a/res/text/system/field_menu.txt b/res/text/system/field_menu.txt
+index 82ef6fae3..c8c76628b 100644
+--- a/res/text/system/field_menu.txt
++++ b/res/text/system/field_menu.txt
+@@ -18,4 +18,7 @@ FieldMenu_Text_Empty_11 =               \x{ffff}
+ FieldMenu_Text_Empty_12 =                   \x{ffff}
+ FieldMenu_Text_Empty_13 =                       \x{ffff}
+ FieldMenu_Text_Empty_14 =                     \x{ffff}
++FieldMenu_Text_WonderTrade = WONDER TRADE
++FieldMenu_Text_Page1 = < 1/2 >
++FieldMenu_Text_Page2 = < 2/2 >
+ \pad{42}
+diff --git a/src/field/event/event_field_menu.c b/src/field/event/event_field_menu.c
+index 2f91cd757..d20530175 100644
+--- a/src/field/event/event_field_menu.c
++++ b/src/field/event/event_field_menu.c
+@@ -10,6 +10,7 @@
+ #include "field/player_action.h"
+ #include "field/subscreen.h"
+ #include "field/zone.h"
++#include "gfl/key.h"
+ #include "gfl/std.h"
+ #include "gfl/ui.h"
+ #include "system/game_data.h"
+@@ -32,6 +33,8 @@ enum {
+ };
+ 
+ static u32 FieldMenu_GetAppId(u32 index);
++// DSWT Wonder Trade's field event (src/wonder_trade/bw2/application.c)
++GameEvent *WtEvent_Create(GameSystem *gsys, Field *field);
+ static BOOL FieldMenu_CanRetry(FieldAppCallInput *input, void *arg);
+ static BOOL FieldMenu_CanLeaveField(FieldAppCallInput *input, void *arg);
+ static BOOL FieldMenu_OnAppEnd(FieldAppCallInput *input, void *arg);
+@@ -108,6 +111,13 @@ GameEventReturnCode EventFieldMenu_Callback(GameEvent *event, u32 *state, void *
+         }
+         break;
+     case FIELD_MENU_EVENT_STATE_WAIT_SELECTION:
++        if (GCTX_HIDGetPressedKeys() & PAD_BUTTON_SELECT) {
++            // DSWT: Select opens Wonder Trade too; like an app, it returns to the menu
++            GameData_SetFieldMenuItem(GSYS_GetGameData(work->gameSystem), FIELD_MENU_ITEM_WONDER_TRADE);
++            GameData_SetLastSubscreen(GSYS_GetGameData(work->gameSystem), 1);
++            GameEvent_ChainNext(event, WtEvent_Create(work->gameSystem, work->field));
++            break;
++        }
+         returnSubscreen = FieldSubscreen_GetReturnSubscreen(Field_GetSubscreen(work->field));
+         if (returnSubscreen == FIELD_MENU_RESULT_SELECTED) {
+             work->state = FIELD_MENU_EVENT_STATE_SELECTED;
+@@ -121,6 +131,13 @@ GameEventReturnCode EventFieldMenu_Callback(GameEvent *event, u32 *state, void *
+         gameData = GSYS_GetGameData(GameEvent_GetGameSystem(event));
+         selection = FieldSubscreen_GetMenuSelectedButton(Field_GetSubscreen(work->field));
+         GameData_SetFieldMenuItem(gameData, selection);
++        if (selection == FIELD_MENU_ITEM_WONDER_TRADE) {
++            // Like an app the menu opens, Wonder Trade returns to the menu
++            GameData_SetLastSubscreen(gameData, 1);
++            GameEvent_ChainNext(event, WtEvent_Create(work->gameSystem, work->field));
++            work->state = FIELD_MENU_EVENT_STATE_WAIT_SELECTION;
++            break;
++        }
+         work->selectedButton = FieldSubscreen_GetMenuSelectedButton(Field_GetSubscreen(work->field));
+         work->appCall.appId = FieldMenu_GetAppId(selection);
+         work->state = FIELD_MENU_EVENT_STATE_APP_CALL;
+@@ -181,7 +198,7 @@ GameEventReturnCode EventFieldMenu_Callback(GameEvent *event, u32 *state, void *
+ }
+ 
+ // The app each item of the field menu opens, an index of FIELD_PROC_LINK_LIST, or -1 for none
+-static const s32 sFieldMenuAppIds[9] = {
++static const s32 sFieldMenuAppIds[FIELD_MENU_ITEM_MAX] = {
+     -1,
+     FIELD_APP_POKELIST,
+     FIELD_APP_POKEDEX,
+@@ -191,6 +208,7 @@ static const s32 sFieldMenuAppIds[9] = {
+     FIELD_APP_CONFIG,
+     -1,
+     FIELD_APP_INF_DUNGEON_RETIRE,
++    -1,
+ };
+ 
+ static u32 FieldMenu_GetAppId(u32 index) {
+diff --git a/src/field/field_menu.c b/src/field/field_menu.c
+index 441b9d2c3..5443d30f9 100644
+--- a/src/field/field_menu.c
++++ b/src/field/field_menu.c
+@@ -67,6 +67,8 @@ enum {
+     FIELD_MENU_STATE_SELECTED,
+     FIELD_MENU_STATE_SCROLL_OUT,
+     FIELD_MENU_STATE_DONE,
++    // DSWT: a page's names are printing
++    FIELD_MENU_STATE_PAGE,
+ };
+ 
+ // An item of the menu
+@@ -119,6 +121,10 @@ struct FieldMenu {
+     PrintQueue *printQueue;
+     TCB *vblankTcb;
+     u32 cursorFadeFrame;
++    // DSWT: the page shown, of pageCount, and its label
++    u8 page;
++    u8 pageCount;
++    BmpWin *pageWin;
+ };
+ 
+ // What FieldMenu_CreateItem makes an item from
+@@ -189,10 +195,12 @@ static const u16 FIELD_MENU_NAME_MESSAGES[FIELD_MENU_ITEM_MAX] = { FieldMenu_Tex
+                                                                    FieldMenu_Text_Pokedex, FieldMenu_Text_Bag,
+                                                                    FieldMenu_Text_Empty_2, FieldMenu_Text_Save,
+                                                                    FieldMenu_Text_Options, FieldMenu_Text_Empty_5,
+-                                                                   FieldMenu_Text_Retire };
++                                                                   FieldMenu_Text_Retire, FieldMenu_Text_WonderTrade };
+ 
+ // The screen of each kind of menu
+-static const u32 FIELD_MENU_SCREEN_FILES[FIELD_MENU_TYPE_MAX] = { 0x12, 0x14, 0x14, 0x13, 0x14, 0x14, 0x12 };
++static const u32 FIELD_MENU_SCREEN_FILES[FIELD_MENU_TYPE_MAX] = { 0x12, 0x14, 0x12, 0x14, 0x14, 0x14, 0x12 };
++// The screens of six, five and four buttons
++#define FIELD_MENU_SCREEN_FOUR 0x13
+ 
+ // The cursor's colors 0 and 1, each pulsing between a start and an end endpoint
+ static const FieldMenuCursorColor sCursorColorEndpoints[2][2] = {
+@@ -241,11 +249,11 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+     },
+     [FIELD_MENU_TYPE_NO_POKEDEX] = {
+         FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD, FIELD_MENU_ITEM_SAVE,
+-        FIELD_MENU_ITEM_OPTIONS, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_RETURN,
++        FIELD_MENU_ITEM_OPTIONS, FIELD_MENU_ITEM_WONDER_TRADE, FIELD_MENU_ITEM_RETURN,
+     },
+     [FIELD_MENU_TYPE_NO_POKEMON] = {
+         FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD, FIELD_MENU_ITEM_SAVE, FIELD_MENU_ITEM_OPTIONS,
+-        FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_RETURN,
++        FIELD_MENU_ITEM_WONDER_TRADE, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_RETURN,
+     },
+     [FIELD_MENU_TYPE_ROYAL_UNOVA] = {
+         FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_POKEDEX, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD,
+@@ -262,6 +270,21 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+ };
+ // clang-format on
+ 
++// DSWT: the normal menu's second page, Wonder Trade's
++static const u32 FIELD_MENU_WONDER_TRADE_PAGE[FIELD_MENU_SLOT_COUNT] = {
++    FIELD_MENU_ITEM_WONDER_TRADE, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_NONE,
++    FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_NONE, FIELD_MENU_ITEM_RETURN,
++};
++// Wonder Trade's icon: its own characters (res/graphics/field_menu/43.png) with the Pokemon item's cells
++#define FIELD_MENU_WONDER_TRADE_CHARS 0x2b
++
++static const u32 *FieldMenu_PageItems(FieldMenu *menu) {
++    return menu->page == 1 ? FIELD_MENU_WONDER_TRADE_PAGE : FIELD_MENU_ITEMS[menu->menuType];
++}
++
++static void FieldMenu_CreateItems(FieldMenu *menu, ArcTool *arc, u8 first, u8 last);
++static void FieldMenu_PrintPage(FieldMenu *menu);
++
+ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *subscreen, Field *field, BOOL open) {
+     FieldMenu *menu = GFL_HeapAllocate(heapId, sizeof(FieldMenu), FALSE, "field_menu.c", 323);
+     GameSystem *gsys = Field_GetGameSystem(field);
+@@ -289,9 +312,17 @@ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *sub
+     arc = GFL_ArcSysCreateFileHandle(ARCID_FIELD_MENU, menu->tmpHeapId);
+     menuType = FieldMenu_GetMenuType(gameData, menu->eventWork, menu->zoneId);
+     menu->menuType = menuType;
++    menu->page = 0;
++    menu->pageCount = menuType == FIELD_MENU_TYPE_NORMAL ? 2 : 1;
++    menu->pageWin = NULL;
+     FieldMenu_LoadResources(menu, arc, menuType, menu->msgBGSys);
+     LoadFieldMenuTexts(menu, arc, menuType);
+     GFL_ArcToolFree(arc);
++    if (menu->pageCount > 1) {
++        menu->pageWin = BmpWin_CreateDynamic(6, 12, 1, 8, 2, 13, TRUE);
++        BmpWin_FlushMap(menu->pageWin);
++        FieldMenu_PrintPage(menu);
++    }
+     GFL_BGSysSetBGEnabled(1, TRUE);
+     if (open == TRUE) {
+         menu->cursorX = 0;
+@@ -324,6 +355,9 @@ void FieldMenu_Free(FieldMenu *menu) {
+     for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
+         FieldMenu_FreeItem(menu, &menu->items[i]);
+     }
++    if (menu->pageWin != NULL) {
++        BmpWin_Free(menu->pageWin);
++    }
+     FieldMenu_RestoreSubscreenOnCancel(menu);
+     GFL_TCBRemove(menu->vblankTcb);
+     ClActor_Delete(menu->returnButton);
+@@ -363,6 +397,9 @@ void FieldMenu_Update(FieldMenu *menu) {
+             for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
+                 FieldMenu_FlushItem(menu, &menu->items[i]);
+             }
++            if (menu->pageWin != NULL) {
++                BmpWin_FlushChar(menu->pageWin);
++            }
+             if (menu->scrollY != 0) {
+                 GFL_SndSEPlay(SEQ_SE_OPEN1);
+                 menu->state = FIELD_MENU_STATE_SCROLL_IN;
+@@ -437,6 +474,19 @@ void FieldMenu_Update(FieldMenu *menu) {
+         FieldSubscreen_SaveReturnSubscreen(menu->subscreen, FIELD_MENU_RESULT_SELECTED);
+         menu->state = FIELD_MENU_STATE_DONE;
+         break;
++    case FIELD_MENU_STATE_PAGE:
++        if (PrintQueue_IsEmpty(menu->printQueue) == TRUE) {
++            u8 i;
++
++            for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
++                FieldMenu_FlushItem(menu, &menu->items[i]);
++            }
++            BmpWin_FlushChar(menu->pageWin);
++            GFL_BGSysLoadScr(5);
++            GFL_BGSysLoadScr(6);
++            menu->state = FIELD_MENU_STATE_INPUT;
++        }
++        break;
+     case FIELD_MENU_STATE_SCROLL_OUT:
+         if (menu->scrollY + 0x40 > 0xc0) {
+             menu->scrollY = 0xc0;
+@@ -596,16 +646,60 @@ static int FieldMenu_CountItems(u8 menuType) {
+ }
+ 
+ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
+-    FieldMenuItemSetup setup;
+-    MsgData *msgData = GFL_MsgSysLoadData(FALSE, ARCID_SYSTEM_MESSAGE, TEXT_BANK_FIELD_MENU, menu->tmpHeapId);
+-    const u32 *items;
+     u8 i;
+ 
+     for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
+         menu->items[i].active = FALSE;
+     }
+-    items = FIELD_MENU_ITEMS[menuType];
+-    for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
++    FieldMenu_CreateItems(menu, arc, 0, FIELD_MENU_SLOT_COUNT);
++}
++
++// DSWT: prints the page label
++static void FieldMenu_PrintPage(FieldMenu *menu) {
++    MsgData *msgData = GFL_MsgSysLoadData(FALSE, ARCID_SYSTEM_MESSAGE, TEXT_BANK_FIELD_MENU, menu->tmpHeapId);
++    StrBuf *label = GFL_MsgDataLoadStrbufNew(msgData, menu->page == 0 ? FieldMenu_Text_Page1 : FieldMenu_Text_Page2);
++    Font *font = MsgBGPrinter_GetFont(Field_GetMsgBGSys(menu->field));
++
++    GFL_BitmapFill(BmpWin_GetBitmap(menu->pageWin), 0);
++    PrintQueue_PrintColor(menu->printQueue, BmpWin_GetBitmap(menu->pageWin), 2, 1, label, font, 0x440);
++    GFL_StrBufFree(label);
++    GFL_MsgDataFree(msgData);
++}
++
++// DSWT: shows the other page, its buttons, items and label, with the cursor on its first item
++static void FieldMenu_TurnPage(FieldMenu *menu) {
++    ArcTool *arc;
++    u8 i;
++
++    GFL_SndSEPlay(SEQ_SE_SELECT1);
++    for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
++        if (menu->items[i].active == TRUE) {
++            BmpWin_ClearScreen(menu->items[i].win);
++        }
++        FieldMenu_FreeItem(menu, &menu->items[i]);
++        menu->items[i].active = FALSE;
++    }
++    menu->page ^= 1;
++    arc = GFL_ArcSysCreateFileHandle(ARCID_FIELD_MENU, menu->tmpHeapId);
++    loadBGScrToVramByFileNoReserveNegAlign(arc, menu->page == 1 ? FIELD_MENU_SCREEN_FOUR :
++                                           FIELD_MENU_SCREEN_FILES[menu->menuType], 5, 0, 0, FALSE, menu->tmpHeapId);
++    FieldMenu_CreateItems(menu, arc, 0, FIELD_MENU_SLOT_BOTTOM);
++    GFL_ArcToolFree(arc);
++    FieldMenu_PrintPage(menu);
++    menu->cursorX = 0;
++    menu->cursorY = 0;
++    menu->curItem = NULL;
++    menu->cursorDirty = TRUE;
++    menu->state = FIELD_MENU_STATE_PAGE;
++}
++
++static void FieldMenu_CreateItems(FieldMenu *menu, ArcTool *arc, u8 first, u8 last) {
++    FieldMenuItemSetup setup;
++    MsgData *msgData = GFL_MsgSysLoadData(FALSE, ARCID_SYSTEM_MESSAGE, TEXT_BANK_FIELD_MENU, menu->tmpHeapId);
++    const u32 *items = FieldMenu_PageItems(menu);
++    u8 i;
++
++    for (i = first; i < last; i++) {
+         u32 itemId = items[i];
+ 
+         if (itemId == FIELD_MENU_ITEM_TRAINER_CARD) {
+@@ -646,6 +740,11 @@ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
+                 setup.cellFile = 0x1b;
+                 setup.animFile = 0x26;
+             }
++            if (itemId == FIELD_MENU_ITEM_WONDER_TRADE) {
++                setup.charFile = FIELD_MENU_WONDER_TRADE_CHARS;
++                setup.cellFile = FIELD_MENU_ICON_FILES[FIELD_MENU_ITEM_POKEMON][1];
++                setup.animFile = FIELD_MENU_ICON_FILES[FIELD_MENU_ITEM_POKEMON][2];
++            }
+         } else {
+             setup.x = 0x80;
+             setup.y = 0xb4;
+@@ -720,7 +819,28 @@ static int FieldMenu_GetSlot(u8 x, u8 y) {
+ // Moves the cursor in the direction, and returns whether it moved
+ static BOOL FieldMenu_MoveCursor(FieldMenu *menu, u32 dir) {
+     int slot = FieldMenu_GetSlot(menu->cursorX, menu->cursorY);
+-    u8 next = FIELD_MENU_CURSOR_MOVES[FieldMenu_CountItems(menu->menuType) - 4][slot][dir];
++    u8 next;
++
++    // DSWT: Left and Right past the grid's edge turn the page; the second page has one item over the return button
++    if (menu->pageCount > 1 && slot != FIELD_MENU_SLOT_BOTTOM
++        && ((dir == DIR_LEFT && (menu->cursorX == 0 || menu->page == 1))
++            || (dir == DIR_RIGHT && (menu->cursorX == 1 || menu->page == 1)))) {
++        FieldMenu_TurnPage(menu);
++        return FALSE;
++    }
++    if (menu->page == 1) {
++        if (dir == DIR_DOWN && slot != FIELD_MENU_SLOT_BOTTOM) {
++            menu->cursorY = FIELD_MENU_ROW_BOTTOM;
++            return TRUE;
++        }
++        if (dir == DIR_UP && slot == FIELD_MENU_SLOT_BOTTOM) {
++            menu->cursorX = 0;
++            menu->cursorY = 0;
++            return TRUE;
++        }
++        return FALSE;
++    }
++    next = FIELD_MENU_CURSOR_MOVES[FieldMenu_CountItems(menu->menuType) - 4][slot][dir];
+ 
+     if (slot != next) {
+         if (next == FIELD_MENU_MOVE_TO_ROW_2) {
+@@ -756,6 +876,10 @@ static void FieldMenu_UpdateKeys(FieldMenu *menu) {
+         ClActor_SetVisible(menu->cursor, TRUE);
+         return;
+     }
++    if (menu->pageCount > 1 && (trg & (PAD_BUTTON_L | PAD_BUTTON_R))) {
++        FieldMenu_TurnPage(menu);
++        return;
++    }
+     if (repeat & PAD_KEY_UP) {
+         if (FieldMenu_MoveCursor(menu, DIR_UP)) {
+             menu->cursorDirty = TRUE;
+@@ -801,8 +925,15 @@ static void FieldMenu_UpdateTouch(FieldMenu *menu) {
+         { 0x18, 0x40, 0x08, 0x78 }, { 0x18, 0x40, 0x88, 0xf8 }, { 0x48, 0x70, 0x08, 0x78 }, { 0x48, 0x70, 0x88, 0xf8 },
+         { 0x78, 0xa0, 0x08, 0x78 }, { 0x78, 0xa0, 0x88, 0xf8 }, { 0xa8, 0xbf, 0xe0, 0xf8 }, { TOUCH_RECT_END, 0, 0, 0 },
+     };
+-    int slot = GFL_HIDGetTouchPressedRect(rects);
++    // DSWT: the page label
++    static const TouchRect pageRect[2] = { { 0x00, 0x17, 0x58, 0xa8 }, { TOUCH_RECT_END, 0, 0, 0 } };
++    int slot;
+ 
++    if (menu->pageCount > 1 && GFL_HIDGetTouchPressedRect(pageRect) == 0) {
++        FieldMenu_TurnPage(menu);
++        return;
++    }
++    slot = GFL_HIDGetTouchPressedRect(rects);
+     if (slot != TOUCH_RECT_NONE && menu->items[slot].itemId != FIELD_MENU_ITEM_NONE) {
+         menu->cursorX = slot % 2;
+         menu->cursorY = slot / 2;
+@@ -866,7 +997,8 @@ static void FieldMenu_CreateItem(FieldMenu *menu, FieldMenuItem *item, const Fie
+     item->itemId = setup->itemId;
+     item->cursorX = setup->x;
+     item->cursorY = setup->y;
+-    item->win = BmpWin_CreateDynamic(6, setup->winX, setup->winY, 8, 2, 13, TRUE);
++    item->win = BmpWin_CreateDynamic(6, setup->winX, setup->winY, setup->itemId == FIELD_MENU_ITEM_WONDER_TRADE ? 10 : 8,
++                                     2, 13, TRUE);
+     BmpWin_FlushMap(item->win);
+     GFL_BitmapFill(BmpWin_GetBitmap(item->win), 0);
+     PrintQueue_PrintColor(menu->printQueue, BmpWin_GetBitmap(item->win), 2, 1, setup->name, font, 0x440);
+diff --git a/src/gfl/backup_card.c b/src/gfl/backup_card.c
+index 8537e153c..0fe8b19e0 100644
+--- a/src/gfl/backup_card.c
++++ b/src/gfl/backup_card.c
+@@ -9,6 +9,10 @@ static void unlockBackupAndReportError(u16 lockId, BOOL noResponse, BackupWriteE
+ 
+ // Whether the last write has ended
+ static BOOL sWriteDone = TRUE;
++// DSWT Wonder Trade: the last write was refused
++static BOOL sWonderTradeRefused;
++
++int WtRecovery_CanWrite(void);
+ 
+ static BOOL sLocked;
+ 
+@@ -66,6 +70,11 @@ u16 startWriteFlash(u32 dest, const void *src, u32 size, BackupWriteErrorCallbac
+     if (!CARD_ReadBackup(0, &header, sizeof(header))) {
+         unlockBackupAndReportError(lock_id, TRUE, callback);
+     }
++    if (!WtRecovery_CanWrite()) {
++        sWonderTradeRefused = TRUE;
++        sWriteDone = TRUE;
++        return lock_id;
++    }
+     sWriteDone = FALSE;
+     CARD_WriteAndVerifyBackupAsync(dest, src, size, setCardWrittenVerified, NULL);
+     return lock_id;
+@@ -76,6 +85,11 @@ BOOL finishBackupGetResult(u16 lockId, BOOL *result, BackupWriteErrorCallback ca
+         CARD_UnlockBackup(lockId);
+         OS_ReleaseLockID(lockId);
+         sLocked = FALSE;
++        if (sWonderTradeRefused) {
++            sWonderTradeRefused = FALSE;
++            *result = FALSE;
++            return TRUE;
++        }
+         switch (CARD_GetResultCode()) {
+         case CARD_RESULT_SUCCESS:
+             *result = TRUE;
+diff --git a/src/gfl/backup_system.c b/src/gfl/backup_system.c
+index cebec822b..90b1601d9 100644
+--- a/src/gfl/backup_system.c
++++ b/src/gfl/backup_system.c
+@@ -1085,3 +1085,21 @@ BOOL SaveData_ReadBlockFromCard(SaveData *sv, u32 gmdataid, u32 copy, void *dest
+                                     getStartOffsetOfSaveBlockDataInSave(sv->table, gmdataid),
+                                 dest, size, svsys->readErrorCallback);
+ }
++
++// DSWT Wonder Trade (src/wonder_trade/bw2/game_save.c): the save's block table and count, and a request that the
++// next save writes every block to both copies
++SaveDataTable *SaveData_GetTablePtr(SaveData *sv);
++u32 SaveData_GetSaveCount(SaveData *sv);
++void SaveData_RequestFullWrite(SaveData *sv);
++
++SaveDataTable *SaveData_GetTablePtr(SaveData *sv) {
++    return sv->table;
++}
++
++u32 SaveData_GetSaveCount(SaveData *sv) {
++    return sv->count;
++}
++
++void SaveData_RequestFullWrite(SaveData *sv) {
++    SaveData_SetAllBlockStatuses(sv, BLOCK_STATUS_WRITE_MAIN);
++}
+diff --git a/src/system/boot_proc.c b/src/system/boot_proc.c
+index 0e68d3764..0b4dac30d 100644
+--- a/src/system/boot_proc.c
++++ b/src/system/boot_proc.c
+@@ -23,6 +23,10 @@ const GameProcFunctions EVENT_TITLE_FUNCS = {
+     StartMenuEventEnd,
+ };
+ 
++// DSWT Wonder Trade's boot check (src/wonder_trade/bw2/boot.c)
++extern const GameProcFunctions gWtBootProcFunctions;
++int WtRecovery_Started(void);
++
+ static BootScreensParam sBootScreensParam;
+ static CDemoParam sCDemoParam;
+ 
+@@ -35,6 +39,10 @@ static BOOL StartMenuEventInit(GameProc *proc, u32 *state, void *param, void *wo
+ static BOOL StartMenuEventTick(GameProc *proc, u32 *state, void *param, void *work) {
+     switch (*state) {
+     case 0:
++        if (!WtRecovery_Started()) {
++            GCTX_ProcMgrQueueProc(OVERLAY_NONE, &gWtBootProcFunctions, NULL);
++            break;
++        }
+         GCTX_ProcMgrQueueProc(OVERLAY_ID(162), &BOOT_SCREENS_PROC_FUNCTIONS, &sBootScreensParam);
+         *state = 1;
+         break;
+diff --git a/src/system/main.c b/src/system/main.c
+index c5cdfa6e7..5b3d42a08 100644
+--- a/src/system/main.c
++++ b/src/system/main.c
+@@ -39,6 +39,9 @@ static void GameUpdateVBlank(void);
+ static void GameInit(void);
+ static void GameUpdate(void);
+ static void setMonoSnd(const Config *config);
++// DSWT Wonder Trade (src/wonder_trade/entropy_game.c)
++void WonderTradeEntropy_Init(void);
++void WonderTradeEntropy_Frame(void);
+ 
+ // Not static: it is the first object of .bss, and the boot code's parameter block (0x02004fb8), which is not
+ // decompiled, points at the start of .bss through this symbol
+@@ -47,6 +50,7 @@ BOOL g_MainMemoryPriorityBlocked;
+ void main(void) {
+     SystemInit();
+     GFLAppInit();
++    WonderTradeEntropy_Init();
+     OS_SetIrqFunction(OS_IE_H_BLANK, GFLAppIRQHBlank);
+     OS_SetIrqFunction(OS_IE_V_BLANK, GFLAppIRQVBlank);
+     OS_EnableIrqMask(OS_IE_V_BLANK | OS_IE_H_BLANK);
+@@ -62,6 +66,7 @@ void main(void) {
+         Machine_ProcessExitRequest();
+         GFLAppUpdate();
+         GameUpdate();
++        WonderTradeEntropy_Frame();
+         GflUse_NoOpFrameHook();
+         GFL_G3DSysCheckSwapBuffers();
+ 
+diff --git a/src/system/save_control.c b/src/system/save_control.c
+index 99a7df5e2..ad0cf02ed 100644
+--- a/src/system/save_control.c
++++ b/src/system/save_control.c
+@@ -268,13 +268,24 @@ void SaveControl_SetGiftsBroken(SaveControl *save, u32 value) {
+     save->giftsBroken = value;
+ }
+ 
++int WtRecovery_CanClear(void);
++void OS_ResetSystem(u32 parameter);
++
+ void SaveControl_InitNewGame(SaveControl *save) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return;
++    }
+     save->newGame = TRUE;
+     save->loadNotClean = TRUE;
+     initSaveBlkCallbacks(save->sv);
+ }
+ 
+ void SaveControl_Erase(SaveControl *save) {
++    if (!WtRecovery_CanClear()) {
++        OS_ResetSystem(0);
++        return;
++    }
+     SaveData_Erase(save->sv, HEAPID_USER);
+ }
+ 
+diff --git a/src/wifi/gsync/gsync_state.c b/src/wifi/gsync/gsync_state.c
+index 77ed25ea4..9c6ee7836 100644
+--- a/src/wifi/gsync/gsync_state.c
++++ b/src/wifi/gsync/gsync_state.c
+@@ -1024,7 +1024,8 @@ static void GSync_ReadResult(GSyncWork *wk, DreamWorldSave *dreamWorld, GSyncRes
+     }
+     if (!result->skipUpdate && result->id != DreamWorldSave_GetLastResultID(dreamWorld)) {
+         wk->resultId = result->id;
+-        wk->getMusical = result->musical;
++        // DSWT Wonder Trade keeps its journal where the downloaded musical was saved
++        wk->getMusical = FALSE;
+         wk->getCGear = result->cgear;
+         wk->getPokedex = result->dex;
+         wk->levels = result->levels;
+diff --git a/tools/data/graphics_archive.py b/tools/data/graphics_archive.py
+index f6ddb1f0d..55686e55b 100644
+--- a/tools/data/graphics_archive.py
++++ b/tools/data/graphics_archive.py
+@@ -682,6 +682,8 @@ def pack(directory: Path, game: str, output: Path):
+     originals = read_narc((ROOT / "extract" / VERSIONS[game] / "files" / path).read_bytes())
+     settings = json.loads((directory / "archive.json").read_text()) if (directory / "archive.json").exists() else {}
+     compressed = settings.get("compressed", {})
++    # DSWT: {"templates": {"43.png": 9}} builds the new member 43.png in member 9's format
++    templates = settings.get("templates", {})
+     movie = settings.get("movie")
+     members = member_files(directory, game, movie["frames"] if movie else 0)
+     for name, kind in compressed.items():
+@@ -696,7 +698,8 @@ def pack(directory: Path, game: str, output: Path):
+         if [width, height] != movie["size"]:
+             raise GraphicsError(f"{file}: the movie is {width}x{height}, not {movie['size'][0]}x{movie['size'][1]}")
+         built_members += [(pixels_bitmap(frame), movie["compressed"]) for frame in frames]
+-    built_members += [(build_member(file, None if index >= len(originals) else unpack(originals[index])[0],
++    built_members += [(build_member(file, unpack(originals[templates[file.name]])[0] if file.name in templates
++                                    else None if index >= len(originals) else unpack(originals[index])[0],
+                                     settings.get("bitmaps")),
+                        compressed.get(file.name))
+                       for index, (_, file) in enumerate(members, len(built_members))]

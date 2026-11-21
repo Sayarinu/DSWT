@@ -23,9 +23,18 @@
 typedef char WtImageSizeCheck[sizeof(((WtJournalEntry *)0)->original) == WT_GAME_IMAGE_SIZE
     && sizeof(((WtJournalEntry *)0)->destinationAfter) == WT_GAME_IMAGE_SIZE ? 1 : -1];
 
+#ifndef WT_DWC_SKIP_NET_CHECK
+#define WT_DWC_SKIP_NET_CHECK(config) ((config).option.skipNetCheck = TRUE)
+#endif
+
 #define WT_ACK "DSWT_ACK_V1\n"
 #define WT_NETWORK_HEAP_SIZE 0x20000
 #define WT_STACK_SIZE 0x8000
+/* The SDK's guard words at both ends of a thread stack: the top one and the
+ * bottom one, which TwlSDK keeps 8 bytes before the bottom. */
+#ifndef WT_STACK_GUARD_BYTES
+#define WT_STACK_GUARD_BYTES (2 * sizeof(u32))
+#endif
 
 enum WonderTradeTransportPhase {
     WT_TRANSPORT_CONNECTING,
@@ -429,7 +438,7 @@ static BOOL WonderTradeNetwork_FinishWorker(WonderTradeNetwork *network)
     network->handshakeMs = transport->handshakeMs;
     network->tlsPeakBytes = transport->peakBytes;
     stack = (const unsigned char *)(transport->thread.stackTop + sizeof(u32));
-    size = transport->thread.stackBottom - transport->thread.stackTop - 2 * sizeof(u32);
+    size = transport->thread.stackBottom - transport->thread.stackTop - WT_STACK_GUARD_BYTES;
     for (unused = 0; unused < size && stack[unused] == 0xa5; unused++) {
         (void)0;
     }
@@ -519,7 +528,7 @@ static BOOL WonderTradeNetwork_BeginRequest(WonderTradeNetwork *network, const u
         stackTop, WT_STACK_SIZE - 8, OS_GetThreadPriority(OS_GetCurrentThread()) + 1);
     /* Creation clears the interior and writes SDK guards; preserve those guards. */
     memset((void *)(transport->thread.stackTop + sizeof(u32)), 0xa5,
-        transport->thread.stackBottom - transport->thread.stackTop - 2 * sizeof(u32));
+        transport->thread.stackBottom - transport->thread.stackTop - WT_STACK_GUARD_BYTES);
     OS_WakeupThreadDirect(&transport->thread);
     return TRUE;
 }
@@ -603,7 +612,7 @@ void WonderTradeNetwork_Update(WonderTradeNetwork *network)
         config.free = WonderTradeNetwork_AccessPointFree;
         config.dmaNo = gWtGameConfig.wifiDma;
         config.powerMode = gWtGameConfig.wifiPowerMode;
-        config.option.skipNetCheck = TRUE;
+        WT_DWC_SKIP_NET_CHECK(config);
         if (!DWC_AC_Create(&config)) {
             network->error = -3;
             network->state = WT_NET_ERROR;

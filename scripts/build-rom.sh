@@ -43,14 +43,10 @@ case "$game" in
         ;;
     black2|white2)
         # fuddlesworth/pokebw2 builds the one USA/Europe release of each version
-        # from the player's own dump. It has no Wonder Trade integration yet.
+        # from the player's own dump.
         revision="${ROM_REVISION:-0}"
         if [[ "$revision" != 0 ]]; then
             echo "ROM_REVISION must be 0 for Black 2 and White 2" >&2
-            exit 2
-        fi
-        if [[ "$build_mode" != pristine ]]; then
-            echo "Black 2 and White 2 build only with --pristine for now" >&2
             exit 2
         fi
         if [[ ! -f "${DSWT_BW2_ROM:-}" ]]; then
@@ -119,8 +115,20 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
         if [[ ! -f tools/mwccarm/dswt-rom-builder-bw2 ]]; then
             cp -R /opt/pokebw2/tools/. tools/
         fi
-        python3 configure.py --no-download "${ROM_GAME:0:1}2_us"
-        ninja -j"$ROM_BUILD_JOBS"
+        version="${ROM_GAME:0:1}2_us"
+        if [[ "$DSWT_BUILD_MODE" == pristine ]]; then
+            python3 configure.py --no-download "$version"
+            ninja -j"$ROM_BUILD_JOBS"
+        else
+            # Wonder Trade links into ARM9 main, which changes its first 0x4000
+            # bytes; the image'"'"'s dsd then keeps the stored DSi digests, so the
+            # ROM runs in DS mode only. A modified build skips the SHA-1 checks.
+            export DSD_ALLOW_STALE_SECURE_AREA=1
+            python3 configure.py --no-download "$version" --wonder-trade-tls /tls \
+                --wonder-trade-profile /workspace/.git/dswt-connection.h --wonder-trade-msl /opt/pokebw2/msl
+            if [[ "$ROM_GAME" == black2 ]]; then rom=build/pokeblack2_us.nds; else rom=build/pokewhite2_us.nds; fi
+            ninja -j"$ROM_BUILD_JOBS" "$rom"
+        fi
         exit
     fi
     if [[ "$ROM_GAME" == diamond || "$ROM_GAME" == pearl ]]; then
