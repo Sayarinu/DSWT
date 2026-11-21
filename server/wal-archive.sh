@@ -101,9 +101,9 @@ archive)
     fi
     publish "$path" "$destination" "$name"
     if [[ -e $destination/offsite.required ]]; then
-        for _ in {1..80}; do
+        for _ in {1..400}; do
             [[ ! -e $destination/.uploaded/$name ]] || exit 0
-            sleep 0.25
+            sleep 0.05
         done
         fail "$name is not off the server yet"
     fi
