@@ -53,7 +53,7 @@ typedef struct WtJournalEntry {
     uint32_t globalCounter, generalCounter, boxCounter;
     unsigned char inventoryBefore[32], inventoryAfter[32];
     /* Original hashes stored source.length bytes; incoming/applied hash
-     * canonical PK4. The game proves applied canonicalization against the
+     * canonical PK4 or PK5. The game proves applied canonicalization against the
      * encrypted destinationAfter image, as it proves original/outgoing binding. */
     /* QUEUED may retain a receipt/digest learned from authenticated history
      * before Collect supplies the payload. No insertion is authorized by it. */

@@ -6,11 +6,13 @@
 
 #include "wonder_trade/engine.h"
 #include "wonder_trade/entropy.h"
+#include "wonder_trade/game_family.h"
 
 /* The shared core (engine, wire, journal, flash, TLS, HTTP, recovery and the
  * network worker) uses only the C library, Mbed TLS and the DS SDK. Everything
  * it needs from a particular game goes through this interface; a port to
- * another Generation IV game implements it and its own menu, nothing else.
+ * another game implements it and its own menu, nothing else, and builds the
+ * core for its family (wonder_trade/game_family.h).
  *
  * The game also calls the core: WonderTradeEntropy_Init once at boot,
  * WonderTradeEntropy_Frame once per main-loop frame, and the WtRecovery gates
@@ -47,14 +49,16 @@ typedef struct WtReceivedPokemon {
     uint32_t sent[WT_GAME_IMAGE_SIZE / 4], image[WT_GAME_IMAGE_SIZE / 4];
 } WtReceivedPokemon;
 
-/* Save footer magic for this build's language; Korean builds define 0x20070903. */
+/* Save footer magic for this build's family and language; Korean Generation IV
+ * builds define 0x20070903. */
 #ifndef WT_SAVE_MAGIC
-#define WT_SAVE_MAGIC 0x20060623
+#define WT_SAVE_MAGIC WT_GAME_SAVE_MAGIC
 #endif
 
 typedef struct WtGameConfig {
-    /* Flash addresses of the two 4 KiB journal banks. Each starts a 64 KiB
-     * sector of the 4 Mbit save flash that the game never uses. */
+    /* Flash addresses of the two 4 KiB journal banks, each the start of
+     * WT_GAME_BANK_RESERVED_SIZE bytes of the 4 Mbit save flash that the game
+     * leaves to the journal (protocol/save-layout*.json journal_banks). */
     uint32_t journalBank[2];
     /* Wi-Fi access point DMA channel and power mode the game's SDK use expects. */
     uint8_t wifiDma, wifiPowerMode;
@@ -63,8 +67,9 @@ typedef struct WtGameConfig {
     uint32_t flashType[2];
     /* Enroll's game variant code (wiki Protocol, "Game variants": https://github.com/Sayarinu/DSWT/wiki/Protocol). */
     uint32_t enrollVariant;
-    /* The magic number in this cartridge's save block footers: 0x20060623, or
-     * 0x20070903 in every Korean game. Block sizes are the same in every language. */
+    /* The magic number in this cartridge's save block footers: WT_SAVE_MAGIC,
+     * 0x20070903 in every Korean Generation IV game. Block sizes are the same in
+     * every language. */
     uint32_t saveMagic;
 } WtGameConfig;
 
@@ -105,12 +110,12 @@ int WtGame_Checkpoint(WtGame *);
  * pending, or the outgoing Pokémon is provably absent from both copies. */
 int WtGame_CanLeave(WtGame *, const WtJournalEntry *);
 /* The engine's receive check (WtEngineIO.canHold), on a matched delivery's
- * canonical PK4 before anything is recorded or imported: nonzero when this
+ * canonical PK4 or PK5 before anything is recorded or imported: nonzero when this
  * game can hold it. Check species, form, held item and ball against the game's
  * own limits, typically through WtPokemon_Fits (wonder_trade/pokemon_codec.h).
  * Zero leaves the trade pending on the server and the save unchanged, so a
  * later build that accepts it can still collect it. The argument is the WtGame. */
-int WtGame_CanHold(void *, const unsigned char pk4[136]);
+int WtGame_CanHold(void *, const unsigned char pokemon[WT_POKEMON_SIZE]);
 /* Read the delivered image as saved, including any trade evolution. Zero on success. */
 int WtGame_Received(const WtJournalEntry *, WtReceivedPokemon *);
 
