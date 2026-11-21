@@ -1,0 +1,369 @@
+Wonder Trade's start menu changes (client/pokediamond.patch, asm/unk_02035068.s), made to
+the Japanese start menu the port writes out from the player's own dump
+(scripts/retail_port/writeout.py).
+
+--- a/arm9/asm/unk_02035068.s
++++ b/arm9/asm/unk_02035068.s
+@@ -6,6 +6,11 @@
+ 	.include "global.inc"
+ 
+ 	.extern UNK_020F96DC
++	.extern WonderTrade_StartMenuHidden
++	.extern WonderTrade_StartMenuAddWindow
++	.extern WonderTrade_StartMenuScaleCursor
++	.extern WonderTrade_StartMenuSelect
++	.extern WonderTrade_StartMenuInput
+ 	.section .rodata
+ 
+ 	.global UNK_020F2A8C
+@@ -41,17 +46,19 @@
+ 	.word sub_020365BC, 0x00000005, sub_02036684, 0x00000006
+ 	.word 0xFFFFFFFE, 0x00000007, sub_02036700, 0x00000008
+ 	.word sub_020367E8
++	; Wonder Trade (entry 9): label 12, src/wonder_trade/dp/hooks.c
++	.word 0x0000000C, WonderTrade_StartMenuSelect
+ 
+ 	.global UNK_020F2B14
+ UNK_020F2B14: ; 0x020F2B14
+-	.byte 0xCC, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00
++	.byte 0xBC, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00
+ 	.byte 0x01, 0x00, 0x00, 0x00, 0xD8, 0x34, 0x00, 0x00, 0xD8, 0x34, 0x00, 0x00, 0xD8, 0x34, 0x00, 0x00
+ 	.byte 0xD8, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+ 	.byte 0x00, 0x00, 0x00, 0x00
+ 
+ 	.global UNK_020F2B48
+ UNK_020F2B48: ; 0x020F2B48
+-	.byte 0xAE, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++	.byte 0x8E, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+ 	.byte 0x01, 0x00, 0x00, 0x00, 0xD9, 0x34, 0x00, 0x00, 0xD8, 0x34, 0x00, 0x00, 0xD9, 0x34, 0x00, 0x00
+ 	.byte 0xD9, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+ 	.byte 0x00, 0x00, 0x00, 0x00
+@@ -2399,10 +2406,11 @@
+ 
+ 	thumb_func_start sub_02035BE8
+ sub_02035BE8: ; 0x020385c8
+-	push {r4-r6, lr}
++	push {r3-r7, lr}
+ 	sub sp, #0x10
+ 	add r5, r0, #0x0
+ 	add r4, r1, #0x0
++	add r7, r2, #0x0
+ 	bl sub_0202011C
+ 	add r6, r0, #0x0
+ 	add r3, sp, #0x0
+@@ -2411,7 +2419,7 @@
+ 	stmia r3!, {r0-r1}
+ 	ldr r0, [r6, #0x0]
+ 	str r0, [r3, #0x0]
+-	mov r0, #0x18
++	add r0, r7, #0x0
+ 	mul r4, r0
+ 	add r4, #0x14
+ 	lsl r0, r4, #0xc
+@@ -2420,7 +2428,7 @@
+ 	add r1, r2, #0x0
+ 	bl sub_02020044
+ 	add sp, #0x10
+-	pop {r4-r6, pc}
++	pop {r3-r7, pc}
+ 	thumb_func_end sub_02035BE8
+ 
+ 	thumb_func_start sub_02035BB0
+@@ -2429,7 +2437,7 @@
+ 	sub sp, #0x4
+ 	add r5, r0, #0x0
+ 	mov r4, #0x0
+-	ldr r6, _02038628 ; =0x000001BC
++	ldr r6, _02038628 ; =0x00000200
+ 	ldr r0, [r5, r6]
+ 	cmp r0, #0x0
+ 	bls _02038624
+@@ -2450,7 +2458,7 @@
+ _02038624:
+ 	add sp, #0x4
+ 	pop {r4-r7, pc}
+-_02038628: .word 0x000001BC
++_02038628: .word 0x00000200
+ _0203862C: .word 0x0000019C
+ _02038630: .word 0x00001000
+ 	thumb_func_end sub_02035BB0
+@@ -2461,7 +2469,7 @@
+ 	sub sp, #0x4
+ 	add r5, r0, #0x0
+ 	mov r4, #0x0
+-	ldr r0, _0203866C ; =0x000001BC
++	ldr r0, _0203866C ; =0x00000200
+ 	add r6, r5, r0
+ 	ldr r0, [r6, #0x0]
+ 	cmp r0, #0x0
+@@ -2485,7 +2493,7 @@
+ 	add sp, #0x4
+ 	pop {r4-r7, pc}
+ 	mov r8, r8
+-_0203866C: .word 0x000001BC
++_0203866C: .word 0x00000200
+ _02038670: .word 0x0000019C
+ 	thumb_func_end sub_02035B78
+ 
+@@ -2509,7 +2517,7 @@
+ 	ldr r0, [sp, #0xc]
+ 	add r0, #0x38
+ 	add r1, r2, #0x0
+-	mov r2, #0x8
++	mov r2, #0x9
+ 	mov r3, #0xb
+ 	bl ov05_021D959C
+ 	mov r0, #0x2
+@@ -2558,10 +2566,16 @@
+ 	ldr r1, [sp, #0xc]
+ 	add r1, r1, r2
+ 	str r0, [r1, #0x0]
+-	ldr r0, [r1, #0x0]
++	ldr r0, [sp, #0xc]
++	bl WonderTrade_StartMenuScaleCursor
++	ldr r3, [sp, #0xc]
++	ldr r0, _02038828 ; =0x0000019C
++	ldr r0, [r3, r0]
+ 	ldr r0, [r0, #0x0]
+-	ldr r1, [sp, #0xc]
+-	ldrh r1, [r1, #0x28]
++	ldrh r1, [r3, #0x28]
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r2, [r3, r2]
+ 	bl sub_02035BE8
+ 	ldr r0, _0203882C ; =0x000034D9
+ 	str r0, [sp, #0x0]
+@@ -2589,6 +2603,16 @@
+ 	mov r2, #0x6
+ 	mov r3, #0x0
+ 	bl ov05_021D971C
++	mov r0, #0x1
++	str r0, [sp, #0x0]
++	ldr r0, _02038674_WonderTradeIcon ; =0x000034DA
++	str r0, [sp, #0x4]
++	ldr r0, [sp, #0xc]
++	add r0, #0x38
++	mov r1, #0x42
++	mov r2, #0xb
++	mov r3, #0x0
++	bl ov05_021D971C
+ 	mov r5, #0x0
+ 	ldr r0, [sp, #0x14]
+ 	cmp r0, #0x0
+@@ -2632,6 +2656,15 @@
+ 	strh r1, [r0, #0x1a]
+ 	ldr r0, [sp, #0x10]
+ 	ldrb r1, [r0, r5]
++	cmp r1, #0x9
++	bne _02038674_NotWonderTrade
++	mov r1, #0x0
++	add r0, sp, #0x1c
++	strh r1, [r0, #0x1e]
++	ldr r1, _02038674_WonderTradeIcon ; =0x000034DA
++	str r1, [r0, #0x2c]
++	b _020387B6
++_02038674_NotWonderTrade:
+ 	cmp r1, #0x2
+ 	bne _020387AE
+ 	ldr r0, [sp, #0x18]
+@@ -2666,7 +2699,11 @@
+ 	add r1, r6, #0x0
+ 	mov r2, #0x1
+ 	bl sub_02020074
+-	add r7, #0x18
++	ldr r1, [sp, #0xc]
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r1, [r1, r2]
++	add r7, r7, r1
+ 	add r4, r4, #0x4
+ 	add r5, r5, #0x1
+ 	ldr r0, [sp, #0x14]
+@@ -2687,7 +2724,7 @@
+ 	bl sub_02035C18
+ 	ldr r0, [sp, #0x14]
+ 	add r2, r0, #0x1
+-	ldr r1, _0203883C ; =0x000001BC
++	ldr r1, _0203883C ; =0x00000200
+ 	ldr r0, [sp, #0xc]
+ 	str r2, [r0, r1]
+ 	mov r0, #0x10
+@@ -2703,7 +2740,8 @@
+ _02038830: .word UNK_020F2B48
+ _02038834: .word UNK_020F2AA8
+ _02038838: .word 0x000001A0
+-_0203883C: .word 0x000001BC
++_0203883C: .word 0x00000200
++_02038674_WonderTradeIcon: .word 0x000034DA
+ 	thumb_func_end sub_020359B8
+ 
+ 	thumb_func_start sub_0203598C
+@@ -2735,6 +2773,15 @@
+ 	push {r4-r7, lr}
+ 	sub sp, #0x4
+ 	add r7, r0, #0x0
++	; Wonder Trade: Select opens it too, a fallback for its entry (src/wonder_trade/dp/hooks.c).
++	bl WonderTrade_StartMenuInput
++	cmp r0, #0x0
++	beq _02038870_WonderTradeNotSelected
++	mov r0, #0x1
++	add sp, #0x4
++	pop {r4-r7, pc}
++_02038870_WonderTradeNotSelected:
++	add r0, r7, #0x0
+ 	bl TaskManager_GetFieldSystem
+ 	add r4, r0, #0x0
+ 	add r0, r7, #0x0
+@@ -2756,6 +2803,9 @@
+ 	ldr r0, _02038918 ; =0x0000019C
+ 	ldr r0, [r5, r0]
+ 	ldr r0, [r0, #0x0]
++	mov r2, #0x81
++	lsl r2, r2, #0x2
++	ldr r2, [r5, r2]
+ 	bl sub_02035BE8
+ 	add r0, r5, #0x0
+ 	add r1, r6, #0x0
+@@ -3069,6 +3119,16 @@
+ 	strb r3, [r1, r2]
+ 	add r2, r2, #0x1
+ _02038B3A:
++	ldr r3, _02038B9C ; =0x000001C0
++	ldr r4, [r0, r3]
++	mov r3, #0x80
++	lsl r3, r3, #0x2
++	tst r3, r4
++	bne _02038B3A_WonderTradeHidden
++	mov r3, #0x9
++	strb r3, [r1, r2]
++	add r2, r2, #0x1
++_02038B3A_WonderTradeHidden:
+ 	ldr r3, _02038B9C ; =0x000001C0
+ 	ldr r4, [r0, r3]
+ 	mov r3, #0x4
+@@ -3141,25 +3201,10 @@
+ 	add r1, #0x30
+ 	bl sub_0203566C
+ 	str r0, [sp, #0x1c]
+-	mov r0, #0x1
+-	str r0, [sp, #0x0]
+-	mov r0, #0xb
+-	str r0, [sp, #0x4]
+-	mov r2, #0x3
+-	ldr r0, [sp, #0x1c]
+-	mul r0, r2
+-	lsl r0, r0, #0x18
+-	lsr r0, r0, #0x18
+-	str r0, [sp, #0x8]
+-	mov r0, #0xc
+-	str r0, [sp, #0xc]
+-	ldr r0, _02038D64 ; =0x0000023B
+-	str r0, [sp, #0x10]
++	add r2, r0, #0x0
+ 	ldr r0, [sp, #0x14]
+-	ldr r0, [r0, #0x8]
+ 	add r1, r5, #0x0
+-	mov r3, #0x14
+-	bl AddWindowParameterized
++	bl WonderTrade_StartMenuAddWindow
+ 	mov r0, #0x1
+ 	str r0, [sp, #0x0]
+ 	mov r3, #0xb
+@@ -3281,7 +3326,10 @@
+ 	ldrb r2, [r0, #0xb]
+ 	mov r1, #0xf
+ 	bic r2, r1
+-	mov r1, #0x8
++	mov r1, #0x81
++	lsl r1, r1, #0x2
++	ldr r1, [r5, r1]
++	sub r1, #0x10
+ 	orr r2, r1
+ 	strb r2, [r0, #0xb]
+ 	ldrb r2, [r0, #0xb]
+@@ -3335,7 +3383,6 @@
+ 	add sp, #0x3c
+ 	pop {r4-r7, pc}
+ 	mov r8, r8
+-_02038D64: .word 0x0000023B
+ _02038D68: .word 0x000003D9
+ _02038D6C: .word 0x00000141
+ _02038D70: .word UNK_020F2ACC
+@@ -3547,34 +3594,36 @@
+ 
+ 	thumb_func_start sub_020352DC
+ sub_020352DC: ; 0x02038f3c
+-	ldr r0, _02038F40 ; =0x00000191
++	ldr r0, _02038F40 ; =0x00000391
+ 	bx lr
+-_02038F40: .word 0x00000191
++_02038F40: .word 0x00000391
+ 	thumb_func_end sub_020352DC
+ 
+ 	thumb_func_start sub_020352D4
+ sub_020352D4: ; 0x02038f44
+-	ldr r0, _02038F48 ; =0x00000110
++	ldr r0, _02038F48 ; =0x00000310
+ 	bx lr
+-_02038F48: .word 0x00000110
++_02038F48: .word 0x00000310
+ 	thumb_func_end sub_020352D4
+ 
+ 	thumb_func_start sub_020352CC
+ sub_020352CC: ; 0x02038f4c
+-	ldr r0, _02038F50 ; =0x00000195
++	ldr r0, _02038F50 ; =0x00000395
+ 	bx lr
+-_02038F50: .word 0x00000195
++_02038F50: .word 0x00000395
+ 	thumb_func_end sub_020352CC
+ 
+ 	thumb_func_start sub_020352C8
+ sub_020352C8: ; 0x02038f54
+-	mov r0, #0x94
++	mov r0, #0xa5
++	lsl r0, r0, #0x2
+ 	bx lr
+ 	thumb_func_end sub_020352C8
+ 
+ 	thumb_func_start sub_020352C4
+ sub_020352C4: ; 0x02038f58
+-	mov r0, #0x90
++	mov r0, #0xa4
++	lsl r0, r0, #0x2
+ 	bx lr
+ 	thumb_func_end sub_020352C4
+ 
+@@ -3616,9 +3665,10 @@
+ 	mov r0, #0x6
+ 	orr r4, r0
+ _02038FAA:
+-	ldr r0, _02038FB4 ; =0x00000180
+-	orr r4, r0
+-	add r0, r4, #0x0
++	ldr r1, _02038FB4 ; =0x00000180
++	orr r1, r4
++	add r0, r5, #0x0
++	bl WonderTrade_StartMenuHidden
+ 	add sp, #0x4
+ 	pop {r4-r5, pc}
+ _02038FB4: .word 0x00000180
+@@ -3629,7 +3679,7 @@
+ 	push {lr}
+ 	sub sp, #0x4
+ 	mov r0, #0xb
+-	ldr r1, _02038FD4 ; =0x00000200
++	ldr r1, _02038FD4 ; =0x00000208
+ 	bl Heap_Alloc
+ 	mov r2, #0x0
+ 	strh r2, [r0, #0x2a]
+@@ -3639,7 +3689,7 @@
+ 	add sp, #0x4
+ 	pop {pc}
+ 	mov r8, r8
+-_02038FD4: .word 0x00000200
++_02038FD4: .word 0x00000208
+ _02038FD8: .word 0x000001F8
+ 	thumb_func_end sub_02035254
+ 

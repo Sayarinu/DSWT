@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "upstream_repository": "https://github.com/Project-Holon/aletheia.git",
+  "upstream_revision": "50731dd699fb0fb3f881cd028a67d8f6aa649a88",
+  "verified_targets": ["black-us", "white-us"],
+  "rom_sha1": {"black-us": "26ad0b9967aa279c4a266ee69f52b9b2332399a5", "white-us": "bc696a0dfb448c7b3a8a206f0f8214411a039208"},
+  "footer_magic": {"international": 822424871},
+  "flash_size": 524288,
+  "block_alignment": 256,
+  "block_footer": {"size": 4, "format": "<HH", "fields": ["count", "crc"]},
+  "save_footer": {"size": 16, "format": "<IIIHH", "fields": ["count", "size", "magic", "padding", "crc"]},
+  "retail_regions": [
+    {"name": "main", "offset": 0, "size": 147456, "used": 147356},
+    {"name": "main_backup", "offset": 147456, "size": 147456, "used": 147356},
+    {"name": "battle_video_0", "offset": 294912, "size": 8192, "used": 6420},
+    {"name": "battle_video_0_backup", "offset": 303104, "size": 8192, "used": 6420},
+    {"name": "battle_video_1", "offset": 311296, "size": 8192, "used": 6420},
+    {"name": "battle_video_2", "offset": 319488, "size": 8192, "used": 6420},
+    {"name": "battle_video_3", "offset": 327680, "size": 8192, "used": 6420},
+    {"name": "cgear_skin", "offset": 335872, "size": 12288, "used": 10004},
+    {"name": "trial_house", "offset": 348160, "size": 4096, "used": 1556},
+    {"name": "musical_distribution", "offset": 352256, "size": 131072, "used": 130324},
+    {"name": "pokedex_skin", "offset": 483328, "size": 26624, "used": 25364},
+    {"name": "hall_of_fame", "offset": 509952, "size": 6144, "used": 5652},
+    {"name": "hall_of_fame_backup", "offset": 516096, "size": 6144, "used": 5652},
+    {"name": "save_outside", "offset": 522240, "size": 2048, "used": 2048}
+  ],
+  "delete_save_writes": [
+    {"offset": 0, "size": 147456},
+    {"offset": 294796, "size": 16},
+    {"offset": 522240, "size": 2048}
+  ],
+  "journal_host_region": "musical_distribution",
+  "journal_banks": [475136, 479232],
+  "bank_reserved_size": 4096,
+  "persistence_address": 294848,
+  "persistence_size": 32,
+  "record_size": 4096,
+  "record_sections": [
+    {"name": "header", "offset": 0, "size": 32},
+    {"name": "identity", "offset": 32, "size": 64},
+    {"name": "progress", "offset": 96, "size": 64},
+    {"name": "transaction", "offset": 160, "size": 256},
+    {"name": "pokemon_images", "offset": 416, "size": 1024},
+    {"name": "transport_private_state", "offset": 1440, "size": 512},
+    {"name": "pending_request", "offset": 1952, "size": 264},
+    {"name": "reserved_zero", "offset": 2216, "size": 1844},
+    {"name": "sha256", "offset": 4060, "size": 32},
+    {"name": "commit_tag", "offset": 4092, "size": 4}
+  ],
+  "notes": [
+    "Offsets are absolute flash addresses. size is the area the save table reserves; used is the part the game reads and writes (blocks with their 4-byte count/CRC footers, aligned to 0x100, the CRC table and the 16-byte save footer).",
+    "The journal reuses the musical distribution area (owner decision on LUNE-831). The game reads that area only while the trainer data marks a musical distribution as saved, and treats a failed load as no distribution; the integration patch must stop the game from importing distributions and clear that marker before the first journal write.",
+    "Black/White: bank 1 covers the musical distribution's save footer at 0x75D04, inside the record's reserved_zero bytes, so any load of the area fails on the footer size and reports no distribution.",
+    "Deleting the save from the title screen erases the main copy, the backup copy's footer and the data outside the save (delete_save_writes), but not the extra saves: erasing the main save resets the trainer data markers first, so no extra save is opened. The journal and the persistence page survive a deleted save, so a new game can find an earlier journal.",
+    "The persistence page is the virtual, read-only page the durable melonDS supplies; it lies in the unused tail of the main save's backup copy, which the game never reads or writes."
+  ]
+}

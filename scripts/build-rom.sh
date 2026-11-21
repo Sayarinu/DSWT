@@ -41,8 +41,26 @@ case "$game" in
         fi
         prepare_args=(--game dp)
         ;;
+    black2|white2)
+        # fuddlesworth/pokebw2 builds the one USA/Europe release of each version
+        # from the player's own dump. It has no Wonder Trade integration yet.
+        revision="${ROM_REVISION:-0}"
+        if [[ "$revision" != 0 ]]; then
+            echo "ROM_REVISION must be 0 for Black 2 and White 2" >&2
+            exit 2
+        fi
+        if [[ "$build_mode" != pristine ]]; then
+            echo "Black 2 and White 2 build only with --pristine for now" >&2
+            exit 2
+        fi
+        if [[ ! -f "${DSWT_BW2_ROM:-}" ]]; then
+            echo "Set DSWT_BW2_ROM to your own USA/Europe dump of $game" >&2
+            exit 2
+        fi
+        prepare_args=(--game bw2)
+        ;;
     *)
-        echo "ROM_GAME must be platinum, heartgold, soulsilver, diamond or pearl" >&2
+        echo "ROM_GAME must be platinum, heartgold, soulsilver, diamond, pearl, black2 or white2" >&2
         exit 2
         ;;
 esac
@@ -57,6 +75,10 @@ if [[ "$game" == diamond || "$game" == pearl ]]; then
     # pokediamond's Make build runs Metrowerks and Nitro SDK 3.2 tools under Wine.
     image="dswt-rom-builder-dp"
     builder="$repo_root/tools/rom-builder-dp"
+elif [[ "$game" == black2 || "$game" == white2 ]]; then
+    # pokebw2 runs Metrowerks tools through wibo, with its own pinned dsd.
+    image="dswt-rom-builder-bw2"
+    builder="$repo_root/tools/rom-builder-bw2"
 fi
 if [[ "$build_mode" == modified && -z "${WONDER_TRADE_PROFILE:-}" ]]; then
     echo "Set WONDER_TRADE_PROFILE to your local public endpoint/pins JSON (see https://github.com/Sayarinu/DSWT/wiki/Local-Testing)" >&2
@@ -72,6 +94,11 @@ fi
 workspace="$("$python" "$repo_root/scripts/prepare-game.py" ${prepare_args[@]+"${prepare_args[@]}"} "$@")"
 if [[ "$game" == platinum && "$revision" == 10 ]]; then
     "$python" "$repo_root/scripts/prepare-europe.py" "$DSWT_EUROPE_ROM" "$workspace" >/dev/null
+elif [[ "$game" == black2 || "$game" == white2 ]]; then
+    # pokebw2 reads the dump from its ignored orig/ and checks its SHA-1 first.
+    baserom="$workspace/orig/baserom_${game:0:1}2_us.nds"
+    mkdir -p "$workspace/orig"
+    cmp -s "$DSWT_BW2_ROM" "$baserom" 2>/dev/null || cp "$DSWT_BW2_ROM" "$baserom"
 fi
 docker_args=(--platform linux/amd64 --rm --user "$(id -u):$(id -g)" -e "ROM_GAME=$game" -e "ROM_REVISION=$revision" -e "ROM_BUILD_JOBS=$build_jobs" -e "DSWT_BUILD_MODE=$build_mode" -v "$workspace:/workspace" -w /workspace)
 if [[ "$build_mode" == modified ]]; then
@@ -85,6 +112,17 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
     set -euo pipefail
     meson=subprojects/meson-1.12.0/meson.py
     wonder_trade=(-Dwonder_trade_tls_dir=/tls -Dwonder_trade_profile_header=/workspace/.git/dswt-connection.h)
+    if [[ "$ROM_GAME" == black2 || "$ROM_GAME" == white2 ]]; then
+        # Install the image'"'"'s pinned tools into the ignored tools/, unlike
+        # the ones configure.py downloads for a native build. Ninja builds the
+        # version whose dump is in orig/ and checks its SHA-1.
+        if [[ ! -f tools/mwccarm/dswt-rom-builder-bw2 ]]; then
+            cp -R /opt/pokebw2/tools/. tools/
+        fi
+        python3 configure.py --no-download "${ROM_GAME:0:1}2_us"
+        ninja -j"$ROM_BUILD_JOBS"
+        exit
+    fi
     if [[ "$ROM_GAME" == diamond || "$ROM_GAME" == pearl ]]; then
         # Install the image'"'"'s pinned compilers and SDK tools into ignored paths.
         if [[ ! -f tools/mwccarm/license.dat ]]; then

@@ -12,6 +12,8 @@ COPY scripts/prepare-emulator.py scripts/prepare-tls.py scripts/
 COPY scripts/run-emulator.py scripts/provision-save.py scripts/
 COPY client/include/wonder_trade/persistence.h client/include/wonder_trade/persistence.h
 COPY client/include/wonder_trade/journal.h client/include/wonder_trade/journal.h
+COPY client/include/wonder_trade/game_family.h client/include/wonder_trade/game_family.h
+COPY client/include/wonder_trade/pokemon_codec.h client/include/wonder_trade/pokemon_codec.h
 COPY client/src/wonder_trade/journal.c client/src/wonder_trade/journal.c
 COPY client/include/wonder_trade/wire.h client/include/wonder_trade/wire.h
 COPY client/include/wonder_trade/wire_layout.h client/include/wonder_trade/wire_layout.h

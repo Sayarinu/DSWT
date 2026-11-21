@@ -8,6 +8,7 @@ workspaces:
 | Platinum | [`pret/pokeplatinum`](https://github.com/pret/pokeplatinum) | [`upstream.json`](upstream.json) | `game/pokeplatinum/` |
 | HeartGold, SoulSilver | [`pret/pokeheartgold`](https://github.com/pret/pokeheartgold) | [`upstream-pokeheartgold.json`](upstream-pokeheartgold.json) | `game/pokeheartgold/` |
 | Diamond, Pearl | [`pret/pokediamond`](https://github.com/pret/pokediamond) | [`upstream-pokediamond.json`](upstream-pokediamond.json) | `game/pokediamond/` |
+| Black 2, White 2 | [`fuddlesworth/pokebw2`](https://github.com/fuddlesworth/pokebw2) | [`upstream-pokebw2.json`](upstream-pokebw2.json) | `game/pokebw2-pristine/` |
 
 - Each pin records the upstream revision, tree and pristine US ROM checksums.
 - Platinum revision `10` is European English, which upstream does not build:
@@ -16,7 +17,9 @@ workspaces:
   differing inputs from a verified local dump.
 - Upstream build and development instructions: `INSTALL.md` and `CONTRIBUTING.md`
   in each local workspace.
-- Upstream top-level license: none was present at either recorded revision.
+- Upstream top-level license: none was present at the pret revisions.
+  pokebw2 is GPL-3.0 (its `LICENSE`); see `licensing/redistribution.json`
+  for what that requires of anything built from it.
 
 The build script prepares the workspace automatically. To prepare source alone:
 
@@ -24,6 +27,7 @@ The build script prepares the workspace automatically. To prepare source alone:
 python3 scripts/prepare-game.py               # Platinum
 python3 scripts/prepare-game.py --game hgss   # HeartGold and SoulSilver
 python3 scripts/prepare-game.py --game dp     # Diamond and Pearl
+python3 scripts/prepare-game.py --game bw2 --pristine  # Black 2 and White 2
 ```
 
 Preparation is repeatable and rejects incompatible source or local edits. Keep
@@ -67,6 +71,26 @@ data grows by its sprite count and row spacing. The icon is a project drawing,
 graphics archive and animated with the first icon's cell and animations.
 Pressing Select while the menu is open still starts Wonder Trade as a
 fallback, refused wherever the entry is hidden.
+
+The Black 2/White 2 pin is the newest pokebw2 revision whose own CI rebuilt both
+ROMs; the two commits after it did not build when it was pinned. pokebw2 has no Wonder Trade integration
+yet, so only its pristine workspace exists, and it builds one USA/Europe ROM
+per version from the player's own dump, which `build-rom.sh` copies into the
+ignored `orig/`:
+
+```sh
+ROM_GAME=black2 DSWT_BW2_ROM=/path/to/black2.nds ./scripts/build-rom.sh --pristine
+ROM_GAME=white2 DSWT_BW2_ROM=/path/to/white2.nds ./scripts/build-rom.sh --pristine
+```
+
+Its `configure.py` and Ninja extract and delink the dump, compile with
+Metrowerks compilers run through wibo, rebuild the ROM to
+`build/pokeblack2_us.nds` or `build/pokewhite2_us.nds` and check its SHA-1.
+`tools/rom-builder-bw2/Dockerfile` fetches the tools `configure.py` would
+download, by checksum, and the build runs it with `--no-download`. wibo needs
+32-bit code segments, which Docker's Rosetta and QEMU emulation lack, so on an
+Apple silicon Mac build natively instead: `python3 configure.py` and `ninja`
+in the workspace, as pokebw2's `docs/building.md` describes.
 
 Upstream notices stay in the local workspace. Its source, SDKs, toolchain and
 ROM output are excluded from this repository and require their own rights review.

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/fuddlesworth/pokebw2.git",
+  "revision": "1a66adc6a1105e1c05c40321bb31494faf47682d",
+  "tree": "1c87eb37c73dc9a8919ce3f0af1738bb47eaf7f6",
+  "rom_sha1": {
+    "b2_us": "e51e6dfb8678a3d19dcd2a10691b96a569ca0abb",
+    "w2_us": "b5d7490be7b415b8f1e672a53e978a9cc667e56a"
+  }
+}

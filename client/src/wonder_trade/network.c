@@ -190,10 +190,10 @@ static int WonderTradeNetwork_Inventory(void *arg, enum WtInventoryStep step, Wt
     return result;
 }
 
-static int WonderTradeNetwork_CanHold(void *arg, const unsigned char pk4[136])
+static int WonderTradeNetwork_CanHold(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
 {
     WonderTradeTransport *transport = arg;
-    return WtGame_CanHold(transport->game, pk4);
+    return WtGame_CanHold(transport->game, pokemon);
 }
 
 static void WonderTradeNetwork_DrainSocket(WonderTradeTransport *transport)
