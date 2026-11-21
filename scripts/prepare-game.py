@@ -51,17 +51,18 @@ GAMES = {
         "destinations": {"src": "arm9/src", "files-dp": "files"},
     },
     # fuddlesworth/pokebw2 builds Black 2 and White 2 from one tree, with
-    # configure.py and Ninja, from the player's own dumps in orig/. It has no
-    # integration patch yet, so only its pristine workspace is prepared.
+    # configure.py and Ninja, from the player's own dumps in orig/. The core
+    # and the bw2 adapter land in src/ and include/ as in Platinum.
     "bw2": {
         "pin": "client/upstream-pokebw2.json",
-        "patch": None,
+        "patch": "client/pokebw2.patch",
         "build_patches": (),
         "staged_revisions": (),
         "workspace": "pokebw2",
         "adapter": "bw2",
-        "resources": (),
+        "resources": ("res-bw2",),
         "rom_sha1": "{}.sha1",
+        "destinations": {"res-bw2": "res"},
     },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
@@ -212,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
                         help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
-                             "dp for Diamond and Pearl, or bw2 for Black 2 and White 2 (--pristine only)")
+                             "dp for Diamond and Pearl, or bw2 for Black 2 and White 2")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))
