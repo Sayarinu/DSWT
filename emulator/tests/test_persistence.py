@@ -16,15 +16,19 @@ import unittest
 SIZE = 524288
 
 
-def image(owner, generation):
+# Journal banks: Generation IV, and Black 2/White 2 in the musical distribution area.
+GEN4_BANKS, B2W2_BANKS = (0x30000, 0x70000), (0x6B000, 0x6C000)
+
+
+def image(owner, generation, banks=GEN4_BANKS):
     data = bytearray(b'\xff' * SIZE)
     # Preserve distinct identity, escrow, incoming, pre/post image and receipt
     # bytes through every host fault, independent of later game state handling.
     for offset, label, size in ((32, b'identity', 64), (160, b'escrow', 256),
                                 (416, b'incoming/pre/post', 1024), (1952, b'operation/receipt', 264)):
         seed = hashlib.sha256(owner + label + struct.pack('<Q', generation)).digest()
-        data[0x30000 + offset:0x30000 + offset + size] = (seed * (size // 32 + 1))[:size]
-    data[0x70000:0x71000] = data[0x30000:0x31000]
+        data[banks[0] + offset:banks[0] + offset + size] = (seed * (size // 32 + 1))[:size]
+    data[banks[1]:banks[1] + 4096] = data[banks[0]:banks[0] + 4096]
     return bytes(data)
 
 
@@ -69,6 +73,19 @@ class PersistenceTests(unittest.TestCase):
         return subprocess.run([str(self.probe), str(self.save), *paths], env=env, capture_output=True, timeout=5)
 
     def test_every_persistence_fence_survives_process_kill_and_write_failure(self):
+        self.every_fence_survives()
+
+    def test_every_black2_persistence_fence_survives_process_kill_and_write_failure(self):
+        self.before, self.after = image(b'owner-a', 0, B2W2_BANKS), image(b'owner-a', 1, B2W2_BANKS)
+        self.save.write_bytes(self.before)
+        shutil.rmtree(str(self.save) + '.dswt')
+        self.tool('prepare')
+        shutil.rmtree(self.baseline)
+        shutil.copytree(str(self.save) + '.dswt', self.baseline)
+        self.input.write_bytes(self.after)
+        self.every_fence_survives()
+
+    def every_fence_survives(self):
         # The log append and its fsync, then the checkpoint: closing the log, four
         # atomic publications (write/fsync/close/rename/dir-fsync) and a new log.
         # Every fault point is tried until a run passes them all and completes.

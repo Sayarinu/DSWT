@@ -28,6 +28,7 @@ def prepare(root=ROOT, archive=None):
         'src/frontend/qt_sdl/dswt/durable_save.cpp': root / 'emulator/durable_save.cpp',
         'src/frontend/qt_sdl/dswt/durable_save.h': root / 'emulator/durable_save.h',
         'src/DSWTPersistence.h': root / 'client/include/wonder_trade/persistence.h',
+        'src/DSWTPersistencePage.h': root / 'emulator/persistence_page.h',
     }
     inputs = {'revision': pin['revision'], 'archive_sha256': pin['sha256'],
               'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),

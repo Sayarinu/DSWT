@@ -1,25 +1,27 @@
 --- a/src/NDSCart.cpp
 +++ b/src/NDSCart.cpp
-@@ -20,6 +20,7 @@
+@@ -20,6 +20,8 @@
  #include "NDS.h"
  #include "DSi.h"
  #include "NDSCart.h"
 +#include "DSWTPersistence.h"
++#include "DSWTPersistencePage.h"
  #include "CRC32.h"
  #include "Platform.h"
  #include "ROMList.h"
-@@ -708,6 +709,15 @@
+@@ -708,6 +710,16 @@
  
  u8 CartRetail::SRAMWrite_FLASH(u8 val, u32 pos, bool last)
  {
 +    // Read-only virtual capability; no descriptor is placed in SRAM or a save.
-+    if (((SRAMCmd == 0x03 && pos > 3) || (SRAMCmd == 0x0B && pos > 4)) &&
-+        SRAMAddr >= WT_PERSISTENCE_ADDRESS && SRAMAddr < WT_PERSISTENCE_ADDRESS + WT_PERSISTENCE_SIZE &&
-+        Platform::HasDurableNDSSave(UserData))
++    // Each game family has its own page address, chosen by the cartridge.
++    const u32 page = dswt::PersistencePageAddress(Header.GameCode);
++    if (((SRAMCmd == 0x03 && pos > 3) || (SRAMCmd == 0x0B && pos > 4)) && page != dswt::kNoPersistencePage &&
++        SRAMAddr >= page && SRAMAddr < page + WT_PERSISTENCE_SIZE && Platform::HasDurableNDSSave(UserData))
 +    {
 +        static const u8 descriptor[] = WT_PERSISTENCE_DESCRIPTOR;
 +        static_assert(sizeof(descriptor) == WT_PERSISTENCE_SIZE + 1);
-+        return descriptor[SRAMAddr++ - WT_PERSISTENCE_ADDRESS];
++        return descriptor[SRAMAddr++ - page];
 +    }
      switch (SRAMCmd)
      {

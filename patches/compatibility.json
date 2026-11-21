@@ -693,6 +693,38 @@
       "port_base": "us-rev1",
       "pristine_verified": true,
       "planned_patch": "dswt-korea.bps"
+    },
+    {
+      "id": "black2-us",
+      "game": "Pokémon Black 2",
+      "name": "USA, Europe",
+      "game_code": "IREO",
+      "revision": 0,
+      "language": "English",
+      "size": 536870912,
+      "sha256": "2e6b2415354aa41471bc7617068dce059a59931bf5c4348a264f8043f297683a",
+      "sha1": "e51e6dfb8678a3d19dcd2a10691b96a569ca0abb",
+      "crc32": "d4427fd1",
+      "reference": "https://github.com/fuddlesworth/pokebw2/blob/1a66adc6a1105e1c05c40321bb31494faf47682d/b2_us.sha1",
+      "build_revision": 0,
+      "pristine_verified": true,
+      "planned_patch": "dswt-black2-us.bps"
+    },
+    {
+      "id": "white2-us",
+      "game": "Pokémon White 2",
+      "name": "USA, Europe",
+      "game_code": "IRDO",
+      "revision": 0,
+      "language": "English",
+      "size": 536870912,
+      "sha256": "3e50aec3db401332175a5d2b5fe2a68ac1a05ec63995dba9d1506b1b51837446",
+      "sha1": "b5d7490be7b415b8f1e672a53e978a9cc667e56a",
+      "crc32": "777eb04f",
+      "reference": "https://github.com/fuddlesworth/pokebw2/blob/1a66adc6a1105e1c05c40321bb31494faf47682d/w2_us.sha1",
+      "build_revision": 0,
+      "pristine_verified": true,
+      "planned_patch": "dswt-white2-us.bps"
     }
   ]
 }
