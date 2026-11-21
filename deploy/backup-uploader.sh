@@ -115,5 +115,6 @@ while :; do
         fi
     fi
     [ "${1:-}" != once ] || exit 0
-    sleep 1
+    # A trade waits for its segment to leave, so look again soon; a scan is a directory listing.
+    sleep 0.1
 done

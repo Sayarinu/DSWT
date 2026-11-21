@@ -343,6 +343,11 @@ class Target:
                 # place it: look for this build's own bytes, once, in the file's module.
                 keep = [symbol["value"] + i not in mask for i in range(symbol["size"])]
                 at = symbols.unique_match(self.modules, module, body, keep, 4)
+                if at is None:
+                    # Tables of this file's functions (app templates) can be alike but for the
+                    # functions: fill in the addresses where those functions were found.
+                    body, keep = self._with_located_pointers(filename, obj, shndx, symbol, body, keep)
+                    at = symbols.unique_match(self.modules, module, body, keep, 4)
             if at is None:
                 problems.append(f"{filename}: data {symbol['name']} was not found in the retail game")
                 continue
@@ -354,6 +359,21 @@ class Target:
                 problems.append(f"{filename}: data {symbol['name']} at {at:#x} differs from +{differ[0]:#x}")
             self.located_data[(filename, symbol["name"])] = (at, candidates[0])
         return problems
+
+    def _with_located_pointers(self, filename, obj, shndx, symbol, body, keep):
+        """A data object's bytes with each absolute pointer to an already located function of
+        its own file filled in."""
+        body, keep = bytearray(body), list(keep)
+        for position, kind, index, addend in obj.relocs.get(shndx, ()):
+            offset = position - symbol["value"]
+            target = obj.symbols[index]["name"]
+            if kind != elf.R_ARM_ABS32 or not 0 <= offset <= len(body) - 4 or (filename, target) not in self.located:
+                continue
+            at = self.located[(filename, target)][0]
+            thumb = next((f[4] for f in obj.functions() if f[0] == target), False)
+            struct.pack_into("<I", body, offset, (at | int(thumb)) + addend)
+            keep[offset:offset + 4] = [True] * 4
+        return bytes(body), keep
 
     def _by_neighbour(self, us):
         """Place a function at its US distance from the nearest mapped function before it."""
@@ -642,8 +662,9 @@ class Target:
                     if moved.get(old & ~1, old & ~1) | (old & 1) == new:
                         continue
                     symbol = obj.symbols[index]
-                    if (symbol["bind"] == 0 and self.base <= new < self.base + len(self.linked.binary) + 0x10000):
-                        continue  # the file's own constant data, copied into the module
+                    if ((symbol["bind"] == 0 or symbol["shndx"] != 0)
+                            and self.base <= new < self.base + len(self.linked.binary) + 0x10000):
+                        continue  # the file's own data, copied into the module (Metrowerks 1.2 names it, 2.0 its section)
                     problems.append(f"{key[0]}: {key[1]}+{k:#x} retail word {old:#x}, module {new:#x} ({symbol['name']})")
         return problems
 

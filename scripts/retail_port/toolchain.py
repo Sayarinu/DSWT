@@ -123,8 +123,9 @@ def dp_object(source, version):
     return f"build/{version.lower()}.us/{posixpath.splitext(inner)[0]}.o"
 
 
-def dp_commands(workspace, sources, version, tls):
-    """The compiler command make runs for each source, read from a dry run in arm9/."""
+def dp_commands(workspace, sources, version, tls, tool="mwccarm.exe"):
+    """The command make runs for each source with tool (the compiler, or mwasmarm.exe for
+    assembly), read from a dry run in arm9/."""
     targets = " ".join(dp_object(name, version) for name in sources)
     always = " ".join(f"-W {shlex.quote(posixpath.relpath(name, 'arm9'))}" for name in sources)
     out = docker({str(Path(workspace).resolve()): "/workspace", str(Path(tls).resolve()): "/tls"},
@@ -132,7 +133,7 @@ def dp_commands(workspace, sources, version, tls):
     commands = {}
     for line in out.splitlines():
         words = shlex.split(line)
-        if "-c" not in words or "-o" not in words or not any(w.endswith("mwccarm.exe") for w in words):
+        if "-o" not in words or not any(w.endswith(tool) for w in words) or tool == "mwccarm.exe" and "-c" not in words:
             continue
         for name in sources:
             if words[words.index("-o") + 1] == dp_object(name, version):
@@ -141,6 +142,18 @@ def dp_commands(workspace, sources, version, tls):
     if missing:
         raise ToolchainError(f"make does not compile {', '.join(missing)}")
     return commands
+
+
+def _older_compiler(words):
+    """Make's command for Metrowerks 1.x: it has no -ipa, and it warns about struct padding the
+    2.0 build is quiet about, so its warnings do not stop the build. Neither changes the code."""
+    out = []
+    for word in words:
+        if out and (out[-1], word) in (("-ipa", "file"), ("-W", "error")):
+            out.pop()
+            continue
+        out.append(word)
+    return out
 
 
 def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_trade=False, tls=None, defines=None,
@@ -169,9 +182,11 @@ def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_
             words[-1] = f"{SOURCES}/{name}"
         kind = "wonder_trade" if name.startswith("arm9/src/wonder_trade/") else "game"
         if compiler and kind == "game":
-            # A cartridge built later than US used a newer compiler for the game's own code.
+            # A cartridge built at another time than US used another compiler for the game's own code.
             at = next(i for i, w in enumerate(words) if w.endswith("mwccarm.exe"))
             words[at] = f"../tools/mwccarm/{compiler}/mwccarm.exe"
+            if compiler.startswith("1."):
+                words = _older_compiler(words)
         lines.append(f"{DP_LICENSE} MWCIncludes={shlex.quote(DP_INCLUDES[kind])} {shlex.join(words)}")
     mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
               str(Path(sources).resolve()): SOURCES, str(Path(headers).resolve()): HEADERS}
@@ -179,6 +194,20 @@ def compile_dp_objects(workspace, sources, headers, out, files, version, wonder_
         mounts[str(Path(tls).resolve())] = "/tls"
     docker(mounts, "\n".join(lines) + "\n", image=DP_IMAGE)
     return sorted(out.glob("*.o"))
+
+
+def assemble_dp(workspace, sources, out, name, version, tls):
+    """Assemble one Diamond or Pearl assembly file (name, such as arm9/asm/unk_02035068.s) from
+    sources, a tree like the workspace, with make's own command; returns the object's bytes."""
+    words = dp_commands(workspace, [name], version, tls, tool="mwasmarm.exe")[name]
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    words[words.index("-o") + 1] = f"/out/{name.replace('/', '_')}.o"
+    words[-1] = f"{SOURCES}/{name}"
+    mounts = {str(Path(workspace).resolve()): "/workspace", str(out.resolve()): "/out",
+              str(Path(sources).resolve()): SOURCES, str(Path(tls).resolve()): "/tls"}
+    docker(mounts, "\n".join(["set -e", DP_WINE, "cd /workspace/arm9", shlex.join(words)]) + "\n", image=DP_IMAGE)
+    return (out / f"{name.replace('/', '_')}.o").read_bytes()
 
 
 def assemble(source, output):

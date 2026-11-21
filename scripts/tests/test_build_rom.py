@@ -123,6 +123,10 @@ if Path('build/regenerate').exists():
     Path('build/regenerate').unlink()
 Path('built').touch()
 ''')
+        self.tool(self.workspace / 'configure.py', '''
+record('configure', sys.argv[1:])
+Path('build.ninja').touch()
+''')
         meson = self.workspace / 'subprojects/meson-1.12.0/meson.py'
         meson.parent.mkdir(parents=True)
         self.tool(meson, '''
@@ -311,6 +315,49 @@ def record(tool, args):
                     'WT_MSL_DIR=/opt/pokediamond/msl', 'WT_PROFILE_HEADER=/workspace/.git/dswt-connection.h']])
                 self.assertFalse(self.calls_for('meson') or self.calls_for('ninja'))
                 self.assert_docker('modified', '5', '4', 'dswt-rom-builder-dp', 'tools/rom-builder-dp')
+
+    def test_black2_and_white2_build_from_the_players_dump(self):
+        # The image's tools are already installed in this workspace.
+        marker = self.workspace / 'tools/mwccarm/dswt-rom-builder-bw2'
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        for game, version in (('black2', 'b2_us'), ('white2', 'w2_us')):
+            dump = self.root / f'{game} dump.nds'
+            dump.write_bytes(game.encode() + b' ROM')
+            env = dict(self.env, ROM_GAME=game, ROM_BUILD_JOBS='4', DSWT_BW2_ROM=str(dump))
+            del env['ROM_REVISION'], env['WONDER_TRADE_PROFILE']
+            baserom = self.workspace / f'orig/baserom_{version}.nds'
+            for fresh in (True, False):
+                with self.subTest(game=game, fresh=fresh):
+                    result = self.run_build('--pristine', env=env)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(self.calls_for('prepare'), [['--game', 'bw2', '--pristine']])
+                    self.assertEqual(baserom.read_bytes(), game.encode() + b' ROM')
+                    self.assertEqual(self.calls_for('configure'), [['--no-download', version]])
+                    self.assertEqual(self.calls_for('ninja'), [['-j4']])
+                    self.assertFalse(self.calls_for('make') or self.calls_for('meson'))
+                    self.assertFalse(self.calls_for('tls') or self.calls_for('profile'))
+                    self.assert_docker('pristine', '0', '4', 'dswt-rom-builder-bw2', 'tools/rom-builder-bw2')
+                    self.assertIn('ROM_GAME=' + game, self.calls_for('docker')[1])
+            self.assertEqual(dump.read_bytes(), game.encode() + b' ROM')
+
+    def test_black2_and_white2_need_a_dump_and_a_pristine_build(self):
+        dump = self.root / 'dump.nds'
+        dump.write_bytes(b'ROM')
+        base = dict(self.env, DSWT_BW2_ROM=str(dump))
+        del base['ROM_REVISION']
+        cases = [((), base, '--pristine'),
+                 (('--pristine',), dict(base, ROM_REVISION='1'), 'ROM_REVISION'),
+                 (('--pristine',), dict(base, DSWT_BW2_ROM=''), 'DSWT_BW2_ROM'),
+                 (('--pristine',), dict(base, DSWT_BW2_ROM=str(self.root / 'missing.nds')), 'DSWT_BW2_ROM')]
+        for args, env, message in cases:
+            for game in ('black2', 'white2'):
+                with self.subTest(game=game, message=message, rom=env['DSWT_BW2_ROM']):
+                    result = self.run_build(*args, env=dict(env, ROM_GAME=game))
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertEqual(self.calls, [])
+                    self.assertFalse((self.workspace / 'orig').exists())
 
     def test_unknown_game_or_hgss_revision_stops_before_preparation(self):
         for game, revision in (('diamond', '0'), ('pearl', '4'), ('Diamond', '5'), ('HeartGold', '0'),
