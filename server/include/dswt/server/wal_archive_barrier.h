@@ -46,7 +46,7 @@ WalForce NextWalForce(const WalForceInput &);
 class WalArchiveBarrier {
 public:
   explicit WalArchiveBarrier(std::string connection_info,
-                             std::chrono::milliseconds interval = std::chrono::milliseconds(250),
+                             std::chrono::milliseconds interval = std::chrono::milliseconds(50),
                              std::chrono::milliseconds switch_interval = std::chrono::seconds(1),
                              std::chrono::milliseconds unknown_interval = std::chrono::seconds(15));
   ~WalArchiveBarrier();
