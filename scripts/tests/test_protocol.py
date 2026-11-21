@@ -264,5 +264,91 @@ class SaveLayoutTests(unittest.TestCase):
         self.assertGreaterEqual(sizes["pending_request"], 8 + wire.REQUEST.size + max(wire.REQUEST_SIZES.values()))
 
 
+class GenVSaveLayoutTests(unittest.TestCase):
+    """Black/White and Black 2/White 2: the journal shares the musical distribution area."""
+
+    LAYOUTS = ("protocol/save-layout-bw.json", "protocol/save-layout-b2w2.json")
+
+    @staticmethod
+    def used(block_size, blocks=1, end=None):
+        """Bytes a save reads and writes: each block 4-aligned, with its 4-byte footer, padded to 0x100,
+        then the CRC table (padded to 4) and the 16-byte save footer (savedata.c SaveData_BuildTable)."""
+        if end is None:
+            size = (block_size + 3) // 4 * 4 + 4
+            end = blocks * (size + -size % 0x100)
+        return end + (blocks + blocks % 2) * 2 + 16
+
+    def load(self, path):
+        return json.loads((ROOT / path).read_text())
+
+    def test_layouts_match_the_save_tables(self):
+        """Offsets from pokebw2's save_table.c and aletheia's _MainSaveDesc/_ExtraSaveDescs (0x0209D938);
+        used sizes from the linked size functions."""
+        regions = {r["name"]: (r["offset"], r["size"], r["used"])
+                   for r in self.load("protocol/save-layout-b2w2.json")["retail_regions"]}
+        self.assertEqual(regions["main"], (0, 0x26000, self.used(0, 73, 0x25F00)))
+        self.assertEqual(regions["main_backup"], (0x26000, 0x26000, self.used(0, 73, 0x25F00)))
+        self.assertEqual(regions["musical_distribution"], (0x55800, 0x18000, self.used(0x17C00)))
+        self.assertEqual(regions["battle_video_3"], (0x50E00, 0x1A00, self.used(0x18A4)))
+        self.assertEqual(regions["hall_of_fame_backup"], (0x75800, 0x1800, self.used(0x155C)))
+        self.assertEqual(regions["extra_block_20"], (0x7DC00, 0x400, self.used(0xC8)))
+        self.assertEqual(regions["dream_radar"][:2], (0x7F000, 0x98))
+        regions = {r["name"]: (r["offset"], r["size"], r["used"])
+                   for r in self.load("protocol/save-layout-bw.json")["retail_regions"]}
+        self.assertEqual(regions["main"], (0, 0x24000, self.used(0, 69, 0x23F00)))
+        self.assertEqual(regions["battle_video_0"][:2], (0x48000, 0x2000))
+        self.assertEqual(regions["battle_video_0_backup"][:2], (0x4A000, 0x2000))
+        self.assertEqual(regions["musical_distribution"][:2], (0x56000, 0x20000))
+        self.assertEqual(regions["save_outside"][:2], (0x7F800, 0x800))
+
+    def test_journal_and_persistence_page_avoid_every_other_save_area(self):
+        platinum = self.load("protocol/save-layout.json")
+        for path in self.LAYOUTS:
+            with self.subTest(layout=path):
+                layout = self.load(path)
+                for key in ("version", "record_size", "record_sections"):
+                    self.assertEqual(layout[key], platinum[key], key)
+                regions = sorted((r["offset"], r["offset"] + r["size"], r) for r in layout["retail_regions"])
+                for start, end, region in regions:
+                    self.assertTrue(0 <= start < end <= layout["flash_size"], region)
+                    self.assertLessEqual(region["used"], region["size"], region)
+                for previous, current in zip(regions, regions[1:]):
+                    self.assertLessEqual(previous[1], current[0], (previous[2], current[2]))
+                host = next(r for r in layout["retail_regions"] if r["name"] == layout["journal_host_region"])
+                banks = layout["journal_banks"]
+                size = layout["bank_reserved_size"]
+                self.assertEqual((len(banks), size, layout["record_size"]), (2, 4096, 4096))
+                self.assertEqual(banks[1], banks[0] + size)
+                for bank in banks:
+                    self.assertEqual(bank % 0x1000, 0)
+                    self.assertTrue(host["offset"] <= bank and bank + size <= host["offset"] + host["size"])
+                page = (layout["persistence_address"], layout["persistence_address"] + layout["persistence_size"])
+                self.assertEqual(layout["persistence_size"], 32)
+                for start, end, region in regions:
+                    if region is not host:
+                        for bank in banks:
+                            self.assertFalse(bank < end and start < bank + size, region)
+                    self.assertFalse(page[0] < start + region["used"] and start < page[1], region)
+                for write in layout["delete_save_writes"]:
+                    for start, end in [(bank, bank + size) for bank in banks] + [page]:
+                        self.assertFalse(start < write["offset"] + write["size"] and write["offset"] < end, write)
+
+    def test_bw_journal_bank_replaces_the_musical_footer_with_reserved_zero_bytes(self):
+        layout = self.load("protocol/save-layout-bw.json")
+        host = next(r for r in layout["retail_regions"] if r["name"] == "musical_distribution")
+        footer = host["offset"] + host["used"] - layout["save_footer"]["size"]
+        bank = next(b for b in layout["journal_banks"] if b <= footer < b + layout["bank_reserved_size"])
+        reserved = next(s for s in layout["record_sections"] if s["name"] == "reserved_zero")
+        self.assertTrue(reserved["offset"] <= footer - bank
+                        and footer - bank + layout["save_footer"]["size"] <= reserved["offset"] + reserved["size"])
+
+    def test_upstream_pin_matches_when_present(self):
+        layout = self.load("protocol/save-layout-b2w2.json")
+        pin = ROOT / layout["upstream_pin"]
+        if not pin.exists():
+            self.skipTest("Black 2/White 2 upstream pin not merged yet")
+        self.assertEqual(json.loads(pin.read_text())["revision"], layout["upstream_revision"])
+
+
 if __name__ == "__main__":
     unittest.main()
