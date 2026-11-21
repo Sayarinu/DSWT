@@ -1,6 +1,7 @@
 #include "journal_seed.h"
 #include "durable_save.h"
 #include "wonder_trade/journal.h"
+#include "journal_b2w2.h"
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -18,11 +19,32 @@
 
 namespace dswt {
 namespace {
-constexpr std::size_t kSize = 524288, kBankSize = 65536;
-constexpr std::array<std::size_t, 2> kBanks{0x30000, 0x70000};
+constexpr std::size_t kSize = 524288;
 using Bytes = std::vector<std::uint8_t>;
 
 void Require(bool condition) { if (!condition) throw std::runtime_error("unsupported journal; preserve recovery evidence"); }
+
+// The journal core of the target's game family (journal_b2w2.h).
+struct JournalApi {
+    int (*open)(WtJournal *, WtJournalIO);
+    int (*read)(const WtJournal *, WtJournalEntry *);
+    int (*commit)(WtJournal *, const WtJournalEntry *);
+    void (*close)(WtJournal *);
+};
+constexpr JournalApi kGen4Journal{WtJournal_Open, WtJournal_Read, WtJournal_Commit, WtJournal_Close};
+constexpr JournalApi kB2W2Journal{WtJournalB2W2_Open, WtJournalB2W2_Read, WtJournalB2W2_Commit, WtJournalB2W2_Close};
+
+// Where a family keeps its two journal banks; every byte of a bank after its
+// 4 KiB record must stay blank (protocol/save-layout*.json).
+struct Banks {
+    std::array<std::size_t, 2> offsets;
+    std::size_t size;
+};
+constexpr Banks kGen4Banks{{0x30000, 0x70000}, 65536};
+constexpr Banks kB2W2Banks{{0x6B000, 0x6C000}, 4096};
+
+bool IsB2W2(const std::string &target) { return target == "black2-us" || target == "white2-us"; }
+const Banks &BanksFor(const std::string &target) { return IsB2W2(target) ? kB2W2Banks : kGen4Banks; }
 
 Bytes ReadOwned(const std::string &path) {
     int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -62,10 +84,10 @@ std::uint16_t Crc(const std::uint8_t *bytes, std::size_t size) {
     return static_cast<std::uint16_t>(crc);
 }
 
-void CheckTail(const Bytes &bytes, unsigned bank) {
-    const auto begin = bytes.begin() + kBanks.at(bank) + 4096;
-    const auto end = bytes.begin() + kBanks.at(bank) + kBankSize;
-    Require((*begin == 0 || *begin == 255) && std::all_of(begin, end, [&](auto byte) { return byte == *begin; }));
+void CheckTail(const Bytes &bytes, const Banks &banks, unsigned bank) {
+    const auto begin = bytes.begin() + banks.offsets.at(bank) + 4096;
+    const auto end = bytes.begin() + banks.offsets.at(bank) + banks.size;
+    Require(std::all_of(begin, end, [&](auto byte) { return (byte == 0 || byte == 255) && byte == *begin; }));
 }
 
 // Retail block layouts from protocol/save-layout*.json: each game family's two
@@ -103,7 +125,44 @@ std::uint32_t FooterMagic(const std::string &target) {
     return isKorean ? 0x20070903 : 0x20060623;
 }
 
+// Black 2/White 2 (protocol/save-layout-b2w2.json and pokebw2's
+// src/system/save_table.c): two copies of the main save, 0x25FA4 bytes each.
+// Each ends with a CRC of every one of its 74 blocks and a 16-byte footer
+// {count, size, magic, padding, CRC of the CRCs}. The trainer data block (27)
+// holds a marker per extra save; marker 6 set means the game still reads the
+// musical distribution area that holds the journal banks.
+constexpr std::array<std::size_t, 2> kB2W2Copies{0, 0x26000};
+constexpr std::size_t kB2W2Used = 0x25FA4, kB2W2Crcs = 74 * 2, kB2W2Magic = 0x31053527;
+constexpr std::size_t kB2W2TrainerBlock = 27, kB2W2Trainer = 0x19400, kB2W2TrainerSize = 0xB0;
+constexpr std::size_t kB2W2MusicalMarker = 0x30 + 6 * 2, kMarkerSet = 0xC21E;
+
+void CheckB2W2(const Bytes &bytes) {
+    bool found = false;
+    for (const auto copy : kB2W2Copies) {
+        const auto *table = bytes.data() + copy + kB2W2Used - 16 - kB2W2Crcs;
+        const auto *footer = table + kB2W2Crcs;
+        if (Number(footer + 4, 4) != kB2W2Used || Number(footer + 8, 4) != kB2W2Magic ||
+            Number(footer + 14, 2) != Crc(table, kB2W2Crcs)) continue;
+        // A block may be current in either copy; the game loads the one whose CRC matches.
+        const auto expected = Number(table + 2 * kB2W2TrainerBlock, 2);
+        for (const auto other : kB2W2Copies) {
+            const auto *trainer = bytes.data() + other + kB2W2Trainer;
+            if (Number(trainer + kB2W2TrainerSize + 2, 2) != expected || Crc(trainer, kB2W2TrainerSize) != expected)
+                continue;
+            Require(Number(trainer + kB2W2MusicalMarker, 2) != kMarkerSet);
+            found = true;
+        }
+    }
+    Require(found);
+}
+
 void CheckLayout(const Bytes &bytes, const std::string &target) {
+    const auto &banks = BanksFor(target);
+    if (IsB2W2(target)) {
+        CheckB2W2(bytes);
+        for (unsigned bank = 0; bank < 2; ++bank) CheckTail(bytes, banks, bank);
+        return;
+    }
     const auto &layout = LayoutFor(target);
     const auto magic = FooterMagic(target);
     for (unsigned block = 0; block < 2; ++block) {
@@ -117,7 +176,7 @@ void CheckLayout(const Bytes &bytes, const std::string &target) {
                 Number(footer + layout.crc_at, 2) == Crc(body, size - layout.footer);
         }
         Require(valid);
-        CheckTail(bytes, block);
+        CheckTail(bytes, banks, block);
     }
 }
 
@@ -129,11 +188,13 @@ int Hash(const unsigned char *bytes, std::size_t size, unsigned char digest[32])
 struct Context {
     const std::string &path;
     DurableSave *save;
+    const Banks &banks;
+    const JournalApi &api;
     Bytes image;
     WtJournal journal{};
     WtJournalEntry entry{};
     ~Context() {
-        WtJournal_Close(&journal);
+        api.close(&journal);
         OPENSSL_cleanse(&entry, sizeof(entry));
         OPENSSL_cleanse(image.data(), image.size());
     }
@@ -144,8 +205,8 @@ int ReadBank(void *arg, int bank, unsigned char record[4096]) {
         auto &context = *static_cast<Context *>(arg);
         Require(bank == 0 || bank == 1);
         const auto actual = context.save ? context.save->Image() : ReadOwned(context.path);
-        CheckTail(actual, static_cast<unsigned>(bank));
-        std::memcpy(record, actual.data() + kBanks[bank], 4096);
+        CheckTail(actual, context.banks, static_cast<unsigned>(bank));
+        std::memcpy(record, actual.data() + context.banks.offsets[bank], 4096);
         return 0;
     } catch (...) { return -1; }
 }
@@ -154,7 +215,7 @@ int WriteBank(void *arg, int bank, const unsigned char record[4096]) {
     try {
         auto &context = *static_cast<Context *>(arg);
         Require(context.save && (bank == 0 || bank == 1));
-        std::memcpy(context.image.data() + kBanks[bank], record, 4096);
+        std::memcpy(context.image.data() + context.banks.offsets[bank], record, 4096);
         context.save->Commit(context.image.data(), context.image.size());
         return 0;
     } catch (...) { return -1; }
@@ -164,9 +225,11 @@ void Open(Context &context, const std::string &target) {
     context.image = ReadOwned(context.path);
     CheckLayout(context.image, target);
     WtJournalIO io{&context, ReadBank, WriteBank, Hash};
-    Require(WtJournal_Open(&context.journal, io) == 0 && WtJournal_Read(&context.journal, &context.entry) == 0);
+    Require(context.api.open(&context.journal, io) == 0 && context.api.read(&context.journal, &context.entry) == 0);
     Require(context.entry.generation != std::numeric_limits<std::uint64_t>::max());
 }
+
+const JournalApi &JournalFor(const std::string &target) { return IsB2W2(target) ? kB2W2Journal : kGen4Journal; }
 
 std::array<unsigned char, 32> FreshSeed(const unsigned char previous[32]) {
     std::array<unsigned char, 32> seed{};
@@ -186,19 +249,19 @@ std::array<unsigned char, 32> FreshSeed(const unsigned char previous[32]) {
 }
 
 void InspectJournal(const std::string &path, const std::string &target) {
-    Context context{path, nullptr, {}};
+    Context context{path, nullptr, BanksFor(target), JournalFor(target), {}};
     Open(context, target);
 }
 
 void RefreshJournalSeed(const std::string &path, const std::string &target) {
     DurableSave save(path);
-    Context context{path, &save, {}};
+    Context context{path, &save, BanksFor(target), JournalFor(target), {}};
     Open(context, target);
     auto seed = FreshSeed(context.entry.seed);
     ++context.entry.generation;
     std::copy(seed.begin(), seed.end(), context.entry.seed);
     OPENSSL_cleanse(seed.data(), seed.size());
-    Require(WtJournal_Commit(&context.journal, &context.entry) == 0);
+    Require(context.api.commit(&context.journal, &context.entry) == 0);
     save.Checkpoint();
     Require(ReadOwned(path) == save.Image());
 }

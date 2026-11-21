@@ -27,10 +27,23 @@ def seed_record(seed, generation):
     return bytes(record)
 
 
-LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json")
+LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json",
+           "protocol/save-layout-b2w2.json")
 TARGETS = ("us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain", "japan", "platinum-korea", "heartgold-us-rev0", "soulsilver-us-rev0",
            "diamond-us-rev5", "pearl-us-rev5", "heartgold-europe", "soulsilver-europe", "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain", "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan", "diamond-europe-rev5",
-           "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan")
+           "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan", "black2-us", "white2-us")
+
+# Generation V main-save facts the layout files leave out, by the layout's
+# decompilation pin (pokebw2 src/system/save_table.c, backup_system.c and
+# trainer_data_savedata.c): the block count (a CRC of each block precedes the
+# save footer, whose own CRC covers them), the trainer data block, and where it
+# keeps the musical distribution's marker (set: the game reads the area that
+# holds the journal banks).
+MAIN_SAVES = {
+    "client/upstream-pokebw2.json": {"blocks": 74, "trainer_block": 27, "trainer_offset": 0x19400,
+                                     "trainer_size": 0xB0, "musical_marker": 0x3C},
+}
+MARKER_SET = 0xC21E
 
 
 def layout_for(target):
@@ -48,14 +61,46 @@ def footer_magic(layout, target):
     return magic["korean"] if target.endswith(layout["korean_target_suffix"]) else magic["international"]
 
 
-def provision(data, target):
-    layout = layout_for(target)
+def musical_marker_set(data, layout):
+    """Check a Generation V main save; true when it still reads the musical distribution area.
+
+    A block can be current in either copy: the game loads the one whose CRC the
+    save's CRC table lists, so every such copy of the trainer data is read."""
+    facts = MAIN_SAVES[layout["upstream_pin"]]
+    regions = {region["name"]: region for region in layout["retail_regions"]}
+    used, footer = regions["main"]["used"], layout["save_footer"]
+    crcs = facts["blocks"] * 2 + facts["blocks"] % 2 * 2
+    copies = (regions["main"]["offset"], regions["main_backup"]["offset"])
+    markers = []
+    for copy in copies:
+        table = data[copy + used - footer["size"] - crcs:copy + used - footer["size"]]
+        fields = dict(zip(footer["fields"], struct.unpack_from(footer["format"], data, copy + used - footer["size"])))
+        if (fields["size"] != used or fields["magic"] != layout["footer_magic"]["international"]
+                or fields["crc"] != binascii.crc_hqx(table, 0xffff)):
+            continue
+        expected = struct.unpack_from("<H", table, 2 * facts["trainer_block"])[0]
+        for other in copies:
+            start = other + facts["trainer_offset"]
+            body = data[start:start + facts["trainer_size"]]
+            if (struct.unpack_from("<H", data, start + facts["trainer_size"] + 2)[0] == expected
+                    and binascii.crc_hqx(body, 0xffff) == expected):
+                markers.append(struct.unpack_from("<H", body, facts["musical_marker"])[0])
+    if not markers:
+        raise ValueError("Retail save has no valid copy; preserve it for recovery")
+    return MARKER_SET in markers
+
+
+def check_retail(data, layout, target):
+    """Refuse a save without a valid retail copy; never rewrite one."""
+    if "save_footer" in layout:
+        if musical_marker_set(data, layout):
+            raise ValueError("The save keeps a downloaded musical where Wonder Trade stores its journal; "
+                             "it is preserved and not provisioned")
+        return
     magic = footer_magic(layout, target)
-    if len(data) != layout["flash_size"]:
-        raise ValueError("Only a full 512 KiB save for a verified target is supported")
     footer_format = layout["block_footer"]
     fields, footer_size = footer_format["fields"], footer_format["size"]
-    # Both retail blocks need at least one valid fallback. Do not rewrite either.
+    # Both retail blocks need at least one valid fallback.
     for block_id, region in enumerate(layout["retail_regions_per_half"][:2]):
         valid = False
         for half in (0, layout["half_size"]):
@@ -66,9 +111,21 @@ def provision(data, target):
                       and binascii.crc_hqx(body, 0xffff) == footer["crc"])
         if not valid:
             raise ValueError("Retail save block has no valid copy; preserve it for recovery")
+
+
+def provision(data, target):
+    layout = layout_for(target)
+    if len(data) != layout["flash_size"]:
+        raise ValueError("Only a full 512 KiB save for a verified target is supported")
+    check_retail(data, layout, target)
     for bank in layout["journal_banks"]:
         area = data[bank:bank + layout["bank_reserved_size"]]
-        if area not in (b"\0" * len(area), b"\xff" * len(area)):
+        if area in (b"\0" * len(area), b"\xff" * len(area)):
+            continue
+        # Generation V banks lie in the musical distribution area. With its
+        # marker clear (checked above) the game never reads it again, so a
+        # stale distribution there is free space; a journal never is.
+        if "journal_host_region" not in layout or area.startswith(b"DSWJ"):
             raise ValueError("Reserved bank is not blank; refusing to replace seeds, identities or recovery evidence")
     record = seed_record(secrets.token_bytes(32), 1)
     result = bytearray(data)
