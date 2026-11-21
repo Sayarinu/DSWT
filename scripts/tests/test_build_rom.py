@@ -366,6 +366,11 @@ def record(tool, args):
         (self.workspace / 'tools/mwccarm/mwccarm/dsi/1.1p1').mkdir(parents=True)
         for tool in ('ndsrom', 'delink', 'romlink'):
             self.tool(self.workspace / f'tools/{tool}.py', f"record({tool!r}, sys.argv[1:])\n")
+        units = self.workspace / 'layout/units_arm9.json'
+        units.parent.mkdir(parents=True, exist_ok=True)
+        units.write_text('tracked\n')
+        self.tool(self.workspace / 'tools/disasm.py',
+                  "record('disasm', sys.argv[1:])\nopen('layout/units_arm9.json', 'w').write('recounted')\n")
         for game, extract in (('black', 'extract'), ('white', 'extract_white')):
             dump = self.root / f'{game} dump.nds'
             dump.write_bytes(game.encode())
@@ -379,6 +384,8 @@ def record(tool, args):
                 self.assertEqual(self.calls_for('ndsrom'), [['extract', f'{game}.nds', '-o', extract]])
                 self.assertEqual(self.calls_for('delink'), [['-e', extract, '-l', f'build/{game}/layout']])
                 self.assertEqual(self.calls_for('romlink'), [['--target', game, '--relink']])
+                self.assertEqual(self.calls_for('disasm'), [['arm9', '--split'], ['overlay', '--all']])
+                self.assertEqual(units.read_text(), 'tracked\n')
                 self.assertEqual(self.calls_for('wineserver'), [['-p']])
                 self.assert_docker('pristine', '0', '1', 'dswt-rom-builder-bw', 'tools/rom-builder-bw')
             with self.subTest(game=game, mode='modified'):

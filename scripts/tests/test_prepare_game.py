@@ -316,11 +316,16 @@ class PrepareGameTests(unittest.TestCase):
             "rom_sha1": {"black": "a" * 40, "white": "b" * 40},
         }
         (self.root / "client/upstream-aletheia.json").write_text(json.dumps(pin))
+        (self.root / "client/aletheia-build.patch").write_text(
+            "diff --git a/src/game/main.c b/src/game/main.c\n"
+            "--- a/src/game/main.c\n+++ b/src/game/main.c\n"
+            "@@ -1 +1 @@\n-original\n+linked through wine\n"
+        )
         with self.assertRaisesRegex(RuntimeError, "--pristine"):
             prepare_game.prepare(self.root, name="bw")
         bw = prepare_game.prepare(self.root, pristine=True, name="bw")
         self.assertEqual(bw, self.root / "game/aletheia-pristine")
-        self.assertEqual((bw / "src/game/main.c").read_text(), "original\n")
+        self.assertEqual((bw / "src/game/main.c").read_text(), "linked through wine\n")
         (bw / "black.nds").write_bytes(b"dump")
         self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)
         pin["rom_sha1"]["white"] = "c" * 40

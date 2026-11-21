@@ -149,7 +149,13 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
         extract=extract; [[ "$ROM_GAME" == white ]] && extract=extract_white
         python3 tools/ndsrom.py extract "$ROM_GAME.nds" -o "$extract"
         python3 tools/delink.py -e "$extract" -l "build/$ROM_GAME/layout"
+        # The data-mode links take their companions from the disassembly, which
+        # recounts a tracked layout file; put it back so the workspace stays clean.
+        cp layout/units_arm9.json "$WINEPREFIX/units_arm9.json"
+        python3 tools/disasm.py arm9 --split
+        python3 tools/disasm.py overlay --all
         python3 tools/romlink.py --target "$ROM_GAME" --relink
+        cp "$WINEPREFIX/units_arm9.json" layout/units_arm9.json
         exit
     fi
     if [[ "$ROM_GAME" == black2 || "$ROM_GAME" == white2 ]]; then

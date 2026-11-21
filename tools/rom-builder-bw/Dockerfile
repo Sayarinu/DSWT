@@ -26,6 +26,13 @@ RUN dpkg --add-architecture i386 \
         wine32:i386 \
     && rm -rf /var/lib/apt/lists/*
 
+# aletheia's disassembler needs Capstone (its README); the wheel is fetched by
+# checksum.
+ADD --checksum=sha256:b809a9654844ce0d35099121a851ddd2ab2689df1ff6687037babcedcaae6391 https://files.pythonhosted.org/packages/py3/c/capstone/capstone-5.0.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /opt/aletheia/capstone-5.0.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+RUN python3 -m zipfile -e /opt/aletheia/capstone-5.0.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /opt/aletheia/python \
+    && rm /opt/aletheia/capstone-*.whl
+ENV PYTHONPATH=/opt/aletheia/python
+
 # The CodeWarrior releases aletheia's README lists (dsi/1.1p1, 2.0/sp2,
 # 2.0/sp1p2, 2.0/sp2p2, 1.2/sp2 and 1.2, the 1.2 base release), by checksum
 # from the same archive pokebw2 downloads. They are copied into each

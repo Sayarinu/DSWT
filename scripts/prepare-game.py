@@ -71,7 +71,10 @@ GAMES = {
     "bw": {
         "pin": "client/upstream-aletheia.json",
         "patch": None,
-        "build_patches": (),
+        # Runs the linker through Wine off Windows, as aletheia runs the compiler,
+        # includes generated data through a drive path there, and builds without the
+        # DSi key, keeping the dump's DSi block.
+        "build_patches": ("client/aletheia-build.patch",),
         "staged_revisions": (),
         "workspace": "aletheia",
         "adapter": "bw",
