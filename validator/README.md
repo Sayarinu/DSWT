@@ -1,7 +1,9 @@
 The isolated validator accepts only canonical 136-byte PK4 or PK5 data and its
 SHA-256 through `PokemonLegality.Validate`. The request's `format` names the
 structure: `FORMAT_PK4` (0, the default, so older callers stay valid) or
-`FORMAT_PK5` (1); other values are invalid arguments. It returns a boolean, the
+`FORMAT_PK5` (1); other values are invalid arguments. The reply's `format`
+echoes the format the validator read; a worker reply naming another format is
+unavailable, and the server treats a mismatched reply the same way. It returns a boolean, the
 exact payload hash, policy `pkhex-26.08.26-74b88906-dswt5`, up to eight stable reason codes and, when
 legal, the destination games that can hold the Pokémon. It never
 returns a Pokémon or repairs data. No ROM, save, UI, sprite or package icon is

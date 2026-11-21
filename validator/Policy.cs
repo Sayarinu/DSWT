@@ -47,7 +47,8 @@ public static class Policy
         if (!IsKnown(format))
             throw new ArgumentOutOfRangeException(nameof(format));
         bool gen5 = format == PokemonFormat.FormatPk5;
-        var reply = new ValidateReply { PolicyVersion = Version, Sha256 = ByteString.CopyFrom(SHA256.HashData(data)) };
+        // The reply echoes the format it read, so a caller can tell it from an older validator's PK4 reading.
+        var reply = new ValidateReply { PolicyVersion = Version, Sha256 = ByteString.CopyFrom(SHA256.HashData(data)), Format = format };
         ValidateReply Reject(string reason)
         {
             reply.ReasonCodes.Add(reason);

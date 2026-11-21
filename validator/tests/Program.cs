@@ -31,6 +31,7 @@ async Task Test(string name, Func<Task> test)
 void CheckReply(ValidateReply reply, byte[] data, PokemonFormat format = PokemonFormat.FormatPk4)
 {
     Require(reply.PolicyVersion == Policy.Version, "policy mismatch");
+    Require(reply.Format == format, "format not echoed");
     Require(reply.Sha256.Span.SequenceEqual(SHA256.HashData(data)), "payload mismatch");
     Require(reply.ReasonCodes.Count <= 8 && reply.ReasonCodes.All(r => r.Length is > 0 and <= 32 && r.All(c => c is >= 'A' and <= 'Z' or '_')), "reason bounds");
     Require(reply.Legal == (reply.ReasonCodes.Count == 0), "ambiguous verdict");
@@ -527,6 +528,31 @@ await Test("worker requests lead with the format byte", async () =>
         }
         finally { File.Delete(path); }
     }
+    // A worker reply naming another format than the request is unavailable, never a verdict.
+    var egg = illegal[0].Data;
+    var pk4Reply = Policy.Analyze(egg);
+    Require(pk4Reply.Format == PokemonFormat.FormatPk4 && pk4Reply.Destinations == 0, "PK4 reply fixture");
+    var body = pk4Reply.ToByteArray();
+    string framePath = Path.Combine(Path.GetTempPath(), "validator-test-" + Guid.NewGuid().ToString("N"));
+    var replyFrame = new byte[2 + body.Length];
+    BinaryPrimitives.WriteUInt16LittleEndian(replyFrame, (ushort)body.Length);
+    body.CopyTo(replyFrame, 2);
+    await File.WriteAllBytesAsync(framePath, replyFrame);
+    try
+    {
+        ProcessStartInfo Replay()
+        {
+            var start = Shell("cat \"$1\"; exec sleep 20");
+            start.ArgumentList.Add("fixture");
+            start.ArgumentList.Add(framePath);
+            return start;
+        }
+        using (var matching = new WorkerRunner(Replay, TimeSpan.FromSeconds(1)))
+            Require(!(await matching.Run(egg, CancellationToken.None)).Legal, "replayed PK4 reply");
+        using var mismatched = new WorkerRunner(Replay, TimeSpan.FromSeconds(1));
+        await ExpectStatus(async () => await mismatched.Run(Pk5, egg, CancellationToken.None), StatusCode.Unavailable);
+    }
+    finally { File.Delete(framePath); }
     // Unknown formats never reach a worker.
     using var unused = new WorkerRunner(() => Shell("exit 2"), TimeSpan.FromMilliseconds(200));
     await ExpectStatus(async () => await unused.Run((PokemonFormat)2, good, CancellationToken.None), StatusCode.InvalidArgument);

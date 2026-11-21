@@ -116,7 +116,7 @@ public sealed class WorkerRunner : IDisposable
             await input.WriteAsync(payload, deadline.Token);
             await input.FlushAsync(deadline.Token);
             var reply = ValidateReply.Parser.ParseFrom(await ReadFrame(worker.Process.StandardOutput.BaseStream, deadline.Token));
-            if (reply.PolicyVersion != Policy.Version ||
+            if (reply.PolicyVersion != Policy.Version || reply.Format != format ||
                 !reply.Sha256.Span.SequenceEqual(SHA256.HashData(payload)) ||
                 reply.Legal != (reply.ReasonCodes.Count == 0) || reply.ReasonCodes.Count > MaxReasonCodes ||
                 reply.Legal != (reply.Destinations != 0) || (reply.Destinations & ~allowed) != 0 ||
