@@ -44,9 +44,112 @@ static void Limits(void)
     pk4[6] ^= 1; pk4[4] = 1; assert(!WtPokemon_Fits(pk4, &limits));        /* sanity flags */
 }
 
+/* PKHeX PokeCrypto.BlockPosition, shared by PK4 and PK5: canonical block b of
+ * shuffle value sv = (PID >> 13) & 31 is stored as physical block [sv * 4 + b]. */
+static const unsigned char kBlockPosition[32 * 4] = {
+    0, 1, 2, 3, 0, 1, 3, 2, 0, 2, 1, 3, 0, 3, 1, 2, 0, 2, 3, 1, 0, 3, 2, 1,
+    1, 0, 2, 3, 1, 0, 3, 2, 2, 0, 1, 3, 3, 0, 1, 2, 2, 0, 3, 1, 3, 0, 2, 1,
+    1, 2, 0, 3, 1, 3, 0, 2, 2, 1, 0, 3, 3, 1, 0, 2, 2, 3, 0, 1, 3, 2, 0, 1,
+    1, 2, 3, 0, 1, 3, 2, 0, 2, 1, 3, 0, 3, 1, 2, 0, 2, 3, 1, 0, 3, 2, 1, 0,
+    0, 1, 2, 3, 0, 1, 3, 2, 0, 2, 1, 3, 0, 3, 1, 2, 0, 2, 3, 1, 0, 3, 2, 1,
+    1, 0, 2, 3, 1, 0, 3, 2,
+};
+
+static void Checksum(unsigned char pokemon[WT_POKEMON_SIZE])
+{
+    unsigned i, sum = 0;
+    for (i = 8; i < WT_POKEMON_SIZE; i += 2) sum += pokemon[i] | (unsigned)pokemon[i + 1] << 8;
+    pokemon[6] = (unsigned char)sum; pokemon[7] = (unsigned char)(sum >> 8);
+}
+
+static void Put16(unsigned char *bytes, unsigned value)
+{
+    bytes[0] = (unsigned char)value; bytes[1] = (unsigned char)(value >> 8);
+}
+
+/* A made-up PK5, at the offsets of PKHeX PK5.cs: Generation V values that a
+ * PK4 cannot hold (Genesect, its fourth form, the Dream Ball). */
+static void Pk5(unsigned char pk5[WT_POKEMON_SIZE], uint32_t pid)
+{
+    unsigned i;
+    memset(pk5, 0, WT_POKEMON_SIZE);
+    pk5[0] = (unsigned char)pid; pk5[1] = (unsigned char)(pid >> 8);
+    pk5[2] = (unsigned char)(pid >> 16); pk5[3] = (unsigned char)(pid >> 24);
+    Put16(pk5 + 0x08, 649);                   /* species: Genesect */
+    Put16(pk5 + 0x0A, 116);                   /* held item: Douse Drive */
+    Put16(pk5 + 0x0C, 12345); Put16(pk5 + 0x0E, 54321); /* TID, SID */
+    pk5[0x14] = 70; pk5[0x15] = 133; pk5[0x17] = 2;      /* friendship, ability, language */
+    Put16(pk5 + 0x28, 546);                   /* move 1: Techno Blast */
+    pk5[0x40] = 4 << 3 | 1;                   /* form 4 (Chill Drive), fateful encounter */
+    pk5[0x41] = 10; pk5[0x42] = 1;            /* nature; hidden ability flag */
+    for (i = 0; i < 5; ++i) Put16(pk5 + 0x48 + 2 * i, 0x41 + i); /* nickname */
+    Put16(pk5 + 0x52, 0xffff);
+    pk5[0x5F] = 21;                           /* origin version: Black */
+    for (i = 0; i < 4; ++i) Put16(pk5 + 0x68 + 2 * i, 0x50 + i); /* OT name */
+    Put16(pk5 + 0x70, 0xffff);
+    Put16(pk5 + 0x80, 40002);                 /* met location: an event */
+    pk5[0x83] = 25;                           /* ball: Dream Ball */
+    pk5[0x84] = 15;                           /* met level, OT male */
+    Checksum(pk5);
+}
+
+static unsigned Pk5Forms(unsigned species) { return species == 649 ? 5 : 1; }
+static int Pk5Holdable(void *arg, unsigned item) { (void)arg; return item != 0; }
+
+static int Pk5Fits(unsigned char pk5[WT_POKEMON_SIZE], unsigned offset, unsigned value, unsigned maxSpecies, unsigned maxBall)
+{
+    const WtPokemonLimits limits = { maxSpecies, 638, maxBall, Pk5Forms, Pk5Holdable, NULL };
+    unsigned char copy[WT_POKEMON_SIZE];
+    memcpy(copy, pk5, sizeof(copy));
+    if (offset == 0x08 || offset == 0x0A) Put16(copy + offset, value);
+    else if (offset) copy[offset] = (unsigned char)value;
+    Checksum(copy);
+    return WtPokemon_Fits(copy, &limits);
+}
+
+static void Pk5Codec(void)
+{
+    unsigned char canonical[WT_POKEMON_SIZE], physical[WT_POKEMON_SIZE], encrypted[WT_POKEMON_SIZE];
+    unsigned char decoded[WT_POKEMON_SIZE];
+    unsigned sv, block, i;
+    uint32_t seed;
+    assert(WT_POKEMON_SIZE == 136 && WT_POKEMON_PK5_PARTY_SIZE == 220 && WT_POKEMON_PK4_PARTY_SIZE == 236);
+    for (sv = 0; sv < 32; ++sv) {
+        Pk5(canonical, UINT32_C(0x80000005) | (uint32_t)sv << 13);
+        /* Independent reference: shuffle by PKHeX's table, then XOR the blocks
+         * with the LCG keyed by the checksum. */
+        memcpy(physical, canonical, 8);
+        for (block = 0; block < 4; ++block)
+            memcpy(physical + 8 + 32 * kBlockPosition[sv * 4 + block], canonical + 8 + 32 * block, 32);
+        seed = canonical[6] | (uint32_t)canonical[7] << 8;
+        for (i = 8; i < WT_POKEMON_SIZE; i += 2) {
+            seed = seed * UINT32_C(0x41c64e6d) + UINT32_C(0x6073);
+            physical[i] ^= (unsigned char)(seed >> 16); physical[i + 1] ^= (unsigned char)(seed >> 24);
+        }
+        assert(WtPokemon_Encode(canonical, encrypted) == 0 && memcmp(encrypted, physical, sizeof(physical)) == 0);
+        assert(WtPokemon_Decode(physical, decoded) == 0 && memcmp(decoded, canonical, sizeof(canonical)) == 0);
+        physical[0x90 - 0x10] ^= 0x80; assert(WtPokemon_Decode(physical, decoded) != 0);
+    }
+}
+
+static void Pk5Limits(void)
+{
+    unsigned char pk5[WT_POKEMON_SIZE];
+    Pk5(pk5, 0x12345678);
+    assert(Pk5Fits(pk5, 0, 0, 649, 25));                                     /* a Black/White game */
+    assert(!Pk5Fits(pk5, 0, 0, 493, 25) && !Pk5Fits(pk5, 0, 0, 649, 24));  /* a Generation IV game */
+    assert(Pk5Fits(pk5, 0x40, 0 << 3, 649, 25) && !Pk5Fits(pk5, 0x40, 5 << 3, 649, 25));
+    assert(!Pk5Fits(pk5, 0x08, 650, 649, 25) && !Pk5Fits(pk5, 0x0A, 639, 649, 25));
+    assert(!Pk5Fits(pk5, 0x83, 26, 649, 25) && !Pk5Fits(pk5, 0x83, 0, 649, 25));
+    assert(Pk5Fits(pk5, 0x86, 7, 649, 25));   /* PK5 keeps no second ball byte */
+    pk5[0x04] = 1; assert(!Pk5Fits(pk5, 0, 0, 649, 25));
+}
+
 int main(void)
 {
     Limits();
+    Pk5Codec();
+    Pk5Limits();
     unsigned char canonical[136], encrypted[136], decoded[136], physical[136];
     unsigned permutation, i, sum;
     uint32_t seed;
