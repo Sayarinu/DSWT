@@ -37,6 +37,7 @@ def archive_name(version):
 
 
 WIKI = "https://github.com/Sayarinu/DSWT/wiki"
+UPSTREAM = re.compile(r"upstream(?:-[a-z0-9]+)?\.json")
 MERGED = re.compile(r"(?:[A-Z][A-Z0-9]*-[0-9]+ - )?(?P<title>.+ \(#[0-9]+\))")
 
 
@@ -66,7 +67,21 @@ def changes(version, commit, repository):
     return previous, titles
 
 
-def notes(manifest, previous=None, titles=()):
+def upstreams(commit, repository):
+    """(name, revision) of every decompilation the commit pins, from its client/upstream*.json."""
+    listing = json.loads(gh("api", f"repos/{repository}/contents/client?ref={commit}"))
+    names = [item["name"] for item in listing if UPSTREAM.fullmatch(item["name"])]
+    pinned = []
+    for name in names:
+        record = json.loads(gh("api", f"repos/{repository}/contents/client/{name}?ref={commit}",
+                               "-H", "Accept: application/vnd.github.raw"))
+        pinned.append((record["repository"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1], record["revision"]))
+    if not pinned:
+        raise build.BuildError(f"{commit} pins no upstream")
+    return sorted(pinned)
+
+
+def notes(manifest, previous=None, titles=(), pinned=()):
     version = manifest["version"]
     if previous is None:
         changelog = "First release."
@@ -75,6 +90,7 @@ def notes(manifest, previous=None, titles=()):
     else:
         changelog = "No changes to the game patches."
     heading = "## Changes" if previous is None else f"## Changes since {previous}"
+    upstream_line = ", ".join(f"{name} {revision[:7]}" for name, revision in pinned)
     return f"""Wonder Trade for your own copy of a supported Pokémon game.
 
 Download one file, DSWT Patcher for your computer: `dswt-patcher-{version}-windows.zip`,
@@ -84,8 +100,9 @@ dumps work; the original file is never changed. Patches apply only through DSWT 
 generic BPS patchers are not supported.
 
 Tested on melonDS with the US versions of Platinum, Diamond, Pearl, HeartGold and
-SoulSilver. Other languages are ports: see [Language support]({WIKI}/Language-support).
-DS hardware is not tested yet.
+SoulSilver, and the USA/Europe versions of Black, White, Black 2 and White 2. Black, White,
+Black 2 and White 2 run in DS mode only. Other languages are ports: see
+[Language support]({WIKI}/Language-support). DS hardware is not tested yet.
 
 {heading}
 
@@ -94,7 +111,7 @@ DS hardware is not tested yet.
 The apps are not code-signed: Windows SmartScreen and macOS Gatekeeper ask you to confirm
 the first launch. `SHA256SUMS` lists every file in this release.
 
-Source: {manifest['source']['commit']}, upstream {manifest['upstream']['revision']}.
+Source: {manifest['source']['commit']}. Upstreams: {upstream_line}.
 """
 
 
@@ -105,18 +122,20 @@ def draft(version, archive, repository):
     commit = manifest["source"]["commit"]
     gh("api", f"repos/{repository}/commits/{commit}", "--silent")
     gh("release", "create", f"v{version}", str(archive), "--repo", repository, "--draft", "--target", commit,
-       "--title", f"DSWT {version}", "--notes", notes(manifest, *changes(version, commit, repository)))
+       "--title", f"DSWT {version}", "--notes",
+       notes(manifest, *changes(version, commit, repository), upstreams(commit, repository)))
     return {"release": f"v{version}", "commit": commit, "draft": True}
 
 
 def rewrite(version, repository):
-    """Replace a published release's notes, keeping the source line it was released with."""
+    """Replace a published release's notes, keeping the source commit it was released with."""
     body = json.loads(gh("release", "view", f"v{version}", "--repo", repository, "--json", "body"))["body"]
-    source = re.search(r"^Source: ([0-9a-f]{40}), upstream ([0-9a-f]{40})\.$", body, re.MULTILINE)
+    # Earlier notes read "Source: COMMIT, upstream REVISION."; current ones list every upstream.
+    source = re.search(r"^Source: ([0-9a-f]{40})(?:, upstream [0-9a-f]{40}\.|\. Upstreams: .+\.)$", body, re.MULTILINE)
     if source is None:
         raise build.BuildError(f"v{version}'s notes have no source line")
-    manifest = {"version": version, "source": {"commit": source[1]}, "upstream": {"revision": source[2]}}
-    text = notes(manifest, *changes(version, source[1], repository))
+    manifest = {"version": version, "source": {"commit": source[1]}}
+    text = notes(manifest, *changes(version, source[1], repository), upstreams(source[1], repository))
     gh("release", "edit", f"v{version}", "--repo", repository, "--notes", text)
     return {"release": f"v{version}", "notes": text}
 
