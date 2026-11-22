@@ -16,8 +16,8 @@ import unittest
 SIZE = 524288
 
 
-# Journal banks: Generation IV, and Black 2/White 2 in the musical distribution area.
-GEN4_BANKS, B2W2_BANKS = (0x30000, 0x70000), (0x6B000, 0x6C000)
+# Journal banks: Generation IV, and Black/White and Black 2/White 2 in the musical distribution area.
+GEN4_BANKS, BW_BANKS, B2W2_BANKS = (0x30000, 0x70000), (0x74000, 0x75000), (0x6B000, 0x6C000)
 
 
 def image(owner, generation, banks=GEN4_BANKS):
@@ -75,15 +75,17 @@ class PersistenceTests(unittest.TestCase):
     def test_every_persistence_fence_survives_process_kill_and_write_failure(self):
         self.every_fence_survives()
 
-    def test_every_black2_persistence_fence_survives_process_kill_and_write_failure(self):
-        self.before, self.after = image(b'owner-a', 0, B2W2_BANKS), image(b'owner-a', 1, B2W2_BANKS)
-        self.save.write_bytes(self.before)
-        shutil.rmtree(str(self.save) + '.dswt')
-        self.tool('prepare')
-        shutil.rmtree(self.baseline)
-        shutil.copytree(str(self.save) + '.dswt', self.baseline)
-        self.input.write_bytes(self.after)
-        self.every_fence_survives()
+    def test_every_gen_v_persistence_fence_survives_process_kill_and_write_failure(self):
+        for banks in (BW_BANKS, B2W2_BANKS):
+            with self.subTest(banks=banks):
+                self.before, self.after = image(b'owner-a', 0, banks), image(b'owner-a', 1, banks)
+                self.save.write_bytes(self.before)
+                shutil.rmtree(str(self.save) + '.dswt')
+                self.tool('prepare')
+                shutil.rmtree(self.baseline)
+                shutil.copytree(str(self.save) + '.dswt', self.baseline)
+                self.input.write_bytes(self.after)
+                self.every_fence_survives()
 
     def every_fence_survives(self):
         # The log append and its fsync, then the checkpoint: closing the log, four

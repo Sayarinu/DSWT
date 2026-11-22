@@ -16,7 +16,16 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 BANKS = (0x30000, 0x70000)
-B2W2_BANKS = (0x6B000, 0x6C000)
+# Generation V (protocol/save-layout-bw.json, protocol/save-layout-b2w2.json): the
+# main copies, the end of their blocks (where the CRC table starts), the block
+# count, the trainer data block's size, the musical distribution area and the
+# journal banks inside it, and the targets.
+GEN_V = {
+    "bw": {"copies": (0, 0x24000), "blocks_end": 0x23F00, "blocks": 69, "trainer_size": 0x68,
+           "musical": (0x56000, 0x1FD14), "banks": (0x74000, 0x75000), "targets": ("black-us", "white-us")},
+    "b2w2": {"copies": (0, 0x26000), "blocks_end": 0x25F00, "blocks": 74, "trainer_size": 0xB0,
+             "musical": (0x55800, 0x17D14), "banks": (0x6B000, 0x6C000), "targets": ("black2-us", "white2-us")},
+}
 
 
 def seal(record):
@@ -48,21 +57,26 @@ def retail_save(record, target="us-rev1"):
     return bytes(data)
 
 
-def b2w2_save(record, marker=0):
-    """Black 2/White 2 (protocol/save-layout-b2w2.json): both main copies with a valid
-    CRC table and footer, trainer data block 27 holding musical marker 6, and the
-    record in both banks of the musical distribution area."""
+def gen_v_save(family, record, marker=0):
+    """A Black/White or Black 2/White 2 save: both main copies with a valid CRC table
+    and footer, trainer data block 27 holding musical marker 6, a stale musical
+    distribution, and the record in both banks of its area."""
+    facts = GEN_V[family]
+    end, trainer, size = facts["blocks_end"], 0x19400, facts["trainer_size"]
+    crcs = (facts["blocks"] + facts["blocks"] % 2) * 2
     data = bytearray(b"\xff" * 524288)
-    for copy in (0, 0x26000):
-        data[copy:copy + 0x25F00] = bytes(0x25F00)
-        struct.pack_into("<H", data, copy + 0x19400 + 0x3C, marker)
-        crc = binascii.crc_hqx(data[copy + 0x19400:copy + 0x194B0], 0xffff)
-        struct.pack_into("<HH", data, copy + 0x194B0, 1, crc)
-        struct.pack_into("<H", data, copy + 0x25F00 + 54, crc)
-        table = data[copy + 0x25F00:copy + 0x25F94]
-        struct.pack_into("<IIIHH", data, copy + 0x25F94, 1, 0x25FA4, 0x31053527, 0, binascii.crc_hqx(table, 0xffff))
-    data[0x55800:0x6D514] = b"stale musical distribution"[:16] * (0x17D14 // 16) + bytes(0x17D14 % 16)
-    for bank in B2W2_BANKS:
+    for copy in facts["copies"]:
+        data[copy:copy + end] = bytes(end)
+        struct.pack_into("<H", data, copy + trainer + 0x3C, marker)
+        crc = binascii.crc_hqx(data[copy + trainer:copy + trainer + size], 0xffff)
+        struct.pack_into("<HH", data, copy + trainer + size, 1, crc)
+        struct.pack_into("<H", data, copy + end + 2 * 27, crc)
+        table = data[copy + end:copy + end + crcs]
+        struct.pack_into("<IIIHH", data, copy + end + crcs, 1, end + crcs + 16, 0x31053527, 0,
+                         binascii.crc_hqx(table, 0xffff))
+    start, used = facts["musical"]
+    data[start:start + used] = (b"stale musical distribution" * (used // 26 + 1))[:used]
+    for bank in facts["banks"]:
         data[bank:bank + 4096] = record
     return bytes(data)
 
@@ -204,17 +218,20 @@ class JournalSeedTests(unittest.TestCase):
     def test_every_seed_publication_survives_kill_or_write_failure(self):
         self.seed_survives_every_fault(self.install(5), "us-rev1")
 
-    def test_every_black2_seed_publication_survives_kill_or_write_failure(self):
-        self.banks = B2W2_BANKS
-        original = b2w2_save(self.record(5, self.fixture_b2w2))
-        self.save.write_bytes(original); self.save.chmod(0o600)
-        self.tool("inspect", target="black2-us")
-        self.seed_survives_every_fault(original, "black2-us")
+    def test_every_gen_v_seed_publication_survives_kill_or_write_failure(self):
+        for family, target in (("bw", "black-us"), ("b2w2", "black2-us")):
+            with self.subTest(family=family):
+                self.banks = GEN_V[family]["banks"]
+                self.save = self.root / f"{family}.sav"
+                original = gen_v_save(family, self.record(5, self.fixtures[family]))
+                self.save.write_bytes(original); self.save.chmod(0o600)
+                self.tool("inspect", target=target)
+                self.seed_survives_every_fault(original, target)
 
     def seed_survives_every_fault(self, original, target):
         self.tool("prepare")
         store = Path(str(self.save) + ".dswt")
-        baseline = self.root / "baseline"
+        baseline = Path(str(self.save) + ".baseline")
         shutil.copytree(store, baseline)
         # Each journal mirror is one logged record (append and fsync); the
         # checkpoint then closes the log, makes four atomic host publications
@@ -278,59 +295,71 @@ class JournalSeedTests(unittest.TestCase):
         self.assertFalse(Path(str(self.save) + ".dswt").exists())
         self.assertEqual(self.save.read_bytes(), original)
 
-    def test_black2_and_white2_journals_refresh_in_every_phase(self):
-        self.banks = B2W2_BANKS
-        for target in ("black2-us", "white2-us"):
-            for phase in range(11):
-                with self.subTest(target=target, phase=phase):
-                    self.save = self.root / f"{target}-{phase}.sav"
-                    original = b2w2_save(self.record(phase, self.fixture_b2w2))
-                    self.save.write_bytes(original); self.save.chmod(0o600)
-                    for other in ("us-rev1", "heartgold-us-rev0"):
-                        self.tool("inspect", target=other, ok=False)
-                    self.tool("inspect", target=target)
-                    self.assertEqual(self.save.read_bytes(), original)
-                    self.tool("prepare")
-                    self.tool("seed", target=target)
-                    self.preserved(original)
+    def test_gen_v_journals_refresh_in_every_phase(self):
+        for family, facts in GEN_V.items():
+            self.banks = facts["banks"]
+            others = [target for name, other in GEN_V.items() if name != family for target in other["targets"]]
+            for target in facts["targets"]:
+                for phase in range(11):
+                    with self.subTest(target=target, phase=phase):
+                        self.save = self.root / f"{target}-{phase}.sav"
+                        original = gen_v_save(family, self.record(phase, self.fixtures[family]))
+                        self.save.write_bytes(original); self.save.chmod(0o600)
+                        for other in ("us-rev1", "heartgold-us-rev0", *others):
+                            self.tool("inspect", target=other, ok=False)
+                        self.tool("inspect", target=target)
+                        self.assertEqual(self.save.read_bytes(), original)
+                        self.tool("prepare")
+                        self.tool("seed", target=target)
+                        self.preserved(original)
 
-    def test_black2_inspection_refuses_other_families_and_a_musical_in_use(self):
+    def test_gen_v_inspection_refuses_other_families_and_a_musical_in_use(self):
         gen4 = retail_save(self.record(5))
-        variants = {
-            "a Generation IV save": gen4,
-            # Phase 5 holds a party Pokémon: a Generation IV-sized one is not a Black 2 journal.
-            "a Generation IV journal": b2w2_save(self.record(5)),
-            "a musical still in use": b2w2_save(self.record(5, self.fixture_b2w2), marker=0xC21E),
-            "no journal": b2w2_save(b"\xff" * 4096),
-        }
-        damaged = bytearray(b2w2_save(self.record(5, self.fixture_b2w2)))
-        damaged[0x25F94 + 8] ^= 1; damaged[0x26000 + 0x25F94 + 8] ^= 1
-        variants["no valid footer"] = bytes(damaged)
-        for name, data in variants.items():
-            with self.subTest(name):
-                self.save = self.root / f"refused-{len(name)}.sav"
-                self.save.write_bytes(data); self.save.chmod(0o600)
-                self.tool("inspect", target="black2-us", ok=False)
-                self.assertEqual(self.save.read_bytes(), data)
-                self.assertFalse(Path(str(self.save) + ".dswt").exists())
-        self.save = self.root / "black2.sav"
-        self.save.write_bytes(b2w2_save(self.record(5, self.fixture_b2w2))); self.save.chmod(0o600)
-        self.tool("inspect", target="us-rev1", ok=False)
+        for family, facts in GEN_V.items():
+            fixture, target = self.fixtures[family], facts["targets"][0]
+            variants = {
+                "a Generation IV save": gen4,
+                # Phase 5 holds a party Pokémon: a Generation IV-sized one is not a Generation V journal.
+                "a Generation IV journal": gen_v_save(family, self.record(5)),
+                "a musical still in use": gen_v_save(family, self.record(5, fixture), marker=0xC21E),
+                "no journal": gen_v_save(family, b"\xff" * 4096),
+            }
+            for other in GEN_V:
+                if other != family:
+                    variants[f"a {other} save"] = gen_v_save(other, self.record(5, self.fixtures[other]))
+            damaged = bytearray(gen_v_save(family, self.record(5, fixture)))
+            footer = facts["blocks_end"] + (facts["blocks"] + facts["blocks"] % 2) * 2
+            for copy in facts["copies"]:
+                damaged[copy + footer + 8] ^= 1
+            variants["no valid footer"] = bytes(damaged)
+            for name, data in variants.items():
+                with self.subTest(family=family, variant=name):
+                    self.save = self.root / f"refused-{family}-{len(name)}.sav"
+                    self.save.write_bytes(data); self.save.chmod(0o600)
+                    self.tool("inspect", target=target, ok=False)
+                    self.assertEqual(self.save.read_bytes(), data)
+                    self.assertFalse(Path(str(self.save) + ".dswt").exists())
+            self.save = self.root / f"{family}.sav"
+            self.save.write_bytes(gen_v_save(family, self.record(5, fixture))); self.save.chmod(0o600)
+            self.tool("inspect", target="us-rev1", ok=False)
 
-    def test_durable_launcher_refreshes_a_black2_journal(self):
-        self.banks = B2W2_BANKS
-        original = b2w2_save(self.record(8, self.fixture_b2w2))
-        self.save.write_bytes(original); self.save.chmod(0o600)
-        marker = self.root / "child-observed"
-        code = ("import os,sys; from pathlib import Path; "
-                "assert os.environ['DSWT_DURABLE_SAVE']==sys.argv[1]; Path(sys.argv[2]).write_text('started')")
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/run-emulator.py"),
-                                 "--save", str(self.save), "--target", "black2-us", "--store-tool", str(self.store),
-                                 "--", sys.executable, "-c", code, str(self.save), str(marker)],
-                                capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(marker.read_text(), "started")
-        self.preserved(original)
+    def test_durable_launcher_refreshes_a_gen_v_journal(self):
+        for family, target in (("bw", "white-us"), ("b2w2", "black2-us")):
+            with self.subTest(family=family):
+                self.banks = GEN_V[family]["banks"]
+                self.save = self.root / f"{family}.sav"
+                original = gen_v_save(family, self.record(8, self.fixtures[family]))
+                self.save.write_bytes(original); self.save.chmod(0o600)
+                marker = self.root / f"{family}-child-observed"
+                code = ("import os,sys; from pathlib import Path; "
+                        "assert os.environ['DSWT_DURABLE_SAVE']==sys.argv[1]; Path(sys.argv[2]).write_text('started')")
+                result = subprocess.run([sys.executable, str(ROOT / "scripts/run-emulator.py"),
+                                         "--save", str(self.save), "--target", target, "--store-tool", str(self.store),
+                                         "--", sys.executable, "-c", code, str(self.save), str(marker)],
+                                        capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(marker.read_text(), "started")
+                self.preserved(original)
 
     def test_inspection_rejects_symlink_and_hardlink_aliases(self):
         original = self.install(1)
@@ -360,9 +389,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("store", type=Path)
     parser.add_argument("fixture", type=Path)
+    parser.add_argument("fixture_bw", type=Path)
     parser.add_argument("fixture_b2w2", type=Path)
     parser.add_argument("faults", type=Path)
     args = parser.parse_args()
-    JournalSeedTests.store, JournalSeedTests.fixture, JournalSeedTests.fixture_b2w2, JournalSeedTests.faults = (
-        args.store.resolve(), args.fixture.resolve(), args.fixture_b2w2.resolve(), args.faults.resolve())
+    JournalSeedTests.store, JournalSeedTests.fixture, JournalSeedTests.faults = (
+        args.store.resolve(), args.fixture.resolve(), args.faults.resolve())
+    JournalSeedTests.fixtures = {"bw": args.fixture_bw.resolve(), "b2w2": args.fixture_b2w2.resolve()}
     unittest.main(argv=[__file__], verbosity=2)

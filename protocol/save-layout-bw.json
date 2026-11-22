@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "upstream_pin": "client/upstream-aletheia.json",
   "upstream_repository": "https://github.com/Project-Holon/aletheia.git",
   "upstream_revision": "50731dd699fb0fb3f881cd028a67d8f6aa649a88",
   "verified_targets": ["black-us", "white-us"],

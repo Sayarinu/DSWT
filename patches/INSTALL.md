@@ -11,12 +11,14 @@ https://github.com/Sayarinu/DSWT/wiki.
     Platinum, Diamond or Pearl (Rev 5), HeartGold or SoulSilver.
   - Japanese: Pokémon Platinum, HeartGold or SoulSilver.
   - Korean: Pokémon Platinum, Diamond, Pearl, HeartGold or SoulSilver.
-  - Pokémon Black 2 or White 2, the English cartridge sold in the US and Europe.
+  - Pokémon Black, White, Black 2 or White 2, the English cartridge sold in the
+    US and Europe.
 
   Other versions and languages are recognised but not supported yet.
-- melonDS 1.1. Physical DS hardware isn't supported yet. Run a patched Black 2
-  or White 2 in DS mode: in melonDS's **Config** > **Emu settings**, set
-  **Console type** to **DS**. DSi mode doesn't work with the patched game.
+- melonDS 1.1. Physical DS hardware isn't supported yet. Run a patched Black,
+  White, Black 2 or White 2 in DS mode: in melonDS's **Config** > **Emu
+  settings**, set **Console type** to **DS**. DSi mode doesn't work with the
+  patched game.
 - DSWT Patcher for your computer: the one file to download from the release page.
   It carries every patch. Other patching tools such as Flips don't work.
 

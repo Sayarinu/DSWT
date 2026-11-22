@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-#if !defined(WT_PERSISTENCE_ADDRESS_GEN4) || !defined(WT_PERSISTENCE_ADDRESS_B2W2)
+#if !defined(WT_PERSISTENCE_ADDRESS_GEN4) || !defined(WT_PERSISTENCE_ADDRESS_BW) || !defined(WT_PERSISTENCE_ADDRESS_B2W2)
 #error "Include the persistence header first"
 #endif
 
@@ -24,6 +24,8 @@ inline std::uint32_t PersistencePageAddress(const char code[4])
     static const char gen4[][4] = {"ADA", "APA", "CPU", "IPK", "IPG"};
     for (const auto &game : gen4)
         if (std::memcmp(code, game, 3) == 0) return WT_PERSISTENCE_ADDRESS_GEN4;
+    // Black and White (USA, Europe).
+    if (std::memcmp(code, "IRBO", 4) == 0 || std::memcmp(code, "IRAO", 4) == 0) return WT_PERSISTENCE_ADDRESS_BW;
     // Black 2 and White 2 (USA, Europe).
     if (std::memcmp(code, "IREO", 4) == 0 || std::memcmp(code, "IRDO", 4) == 0) return WT_PERSISTENCE_ADDRESS_B2W2;
     return kNoPersistencePage;
