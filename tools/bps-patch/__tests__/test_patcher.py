@@ -1,6 +1,7 @@
 import base64
 import errno
 import hashlib
+import struct
 import json
 import os
 from pathlib import Path
@@ -469,6 +470,77 @@ class RetailIndexTests(unittest.TestCase):
                 self.assertIsNone(self.check(literal, retail))
         # 40 zero bytes are shorter than the limit, though the retail padding is longer.
         self.assertIsNone(self.check(self.noise(b"a", 7) + bytes(40) + self.noise(b"b", 7), retail))
+
+
+class DigestTableTests(unittest.TestCase):
+    """DSi hash tables hold digests, so the retail check leaves them out of literals."""
+
+    @staticmethod
+    def rom(dsi=True):
+        header = bytearray(0x200)
+        header[0x12] = 2 if dsi else 0
+        struct.pack_into("<4I", header, 0x1F0, 0x1000, 0x400, 0x2000, 0x100)
+        return bytes(header) + bytes(0x3000)
+
+    def test_tables_come_from_the_dsi_header(self):
+        self.assertEqual(patcher.digest_tables(self.rom()), [(0x1000, 0x1400), (0x2000, 0x2100)])
+        self.assertEqual(patcher.digest_tables(self.rom(dsi=False)), [])
+
+    def test_literals_keep_only_the_bytes_outside_the_tables(self):
+        tables = patcher.digest_tables(self.rom())
+        data = bytes(range(256)) * 8
+        self.assertEqual(patcher.outside(0x1000, data[:0x400], tables), [])
+        self.assertEqual(patcher.outside(0x0F00, data, tables),
+                         [(0x0F00, data[:0x100]), (0x1400, data[0x500:0x800])])
+        self.assertEqual(patcher.outside(0x3000, data[:16], tables), [(0x3000, data[:16])])
+
+    def test_a_copied_table_run_passes_and_the_same_run_elsewhere_fails(self):
+        retail = RetailIndexTests.noise(b"retail", 4096)
+        run = retail[1000:1100]
+        rom = self.rom()
+        for offset, expected in ((0x1100, None), (0x1800, "retail ROM content")):
+            item = RetailIndexTests.Item(b"")
+            item.literals = [piece for piece in patcher.outside(offset, run, patcher.digest_tables(rom))
+                             if len(piece[1]) >= patcher.VERBATIM_WINDOW + patcher.VERBATIM_STRIDE - 1]
+            index = patcher.RetailIndex([item])
+            index.search(retail)
+            with self.subTest(offset=offset):
+                if expected is None:
+                    self.assertIsNone(item.problem())
+                else:
+                    self.assertIn(expected, item.problem())
+
+
+class AddressTableTests(unittest.TestCase):
+    """A literal may match another cartridge only with a run of ARM9 code addresses."""
+
+    table = b"".join((0x0205F445 + 8 * k).to_bytes(4, "little") for k in range(16))
+
+    def check(self, literal, retail, base, offset=0x100):
+        item = RetailIndexTests.Item(literal)
+        item.base, item.literals = "own", [(offset, literal)]
+        index = patcher.RetailIndex([item])
+        index.search(retail, base)
+        return item.problem()
+
+    def test_an_address_table_may_match_another_cartridge(self):
+        retail = RetailIndexTests.noise(b"r", 1000) + self.table + RetailIndexTests.noise(b"s", 1000)
+        literal = RetailIndexTests.noise(b"a", 9) + self.table[1:] + RetailIndexTests.noise(b"b", 9)
+        self.assertIsNone(self.check(literal, retail, "other", offset=0x100 - 9 + 1 - 4))
+        self.assertIn("retail ROM content", self.check(literal, retail, "own", offset=0x100 - 9 + 1 - 4))
+
+    def test_other_runs_still_fail_against_another_cartridge(self):
+        retail = RetailIndexTests.noise(b"r", 4096)
+        literal = RetailIndexTests.noise(b"a", 5) + retail[100:160] + RetailIndexTests.noise(b"b", 5)
+        self.assertIn("retail ROM content", self.check(literal, retail, "other"))
+        mixed = self.table[:24] + retail[100:140]
+        self.assertIn("retail ROM content", self.check(mixed, self.table[:24] + retail[100:140] + bytes(8), "other"))
+
+    def test_addresses_only_reads_aligned_words(self):
+        self.assertTrue(patcher.addresses_only(0x1000, self.table))
+        self.assertTrue(patcher.addresses_only(0x1003, self.table[3:]))
+        self.assertFalse(patcher.addresses_only(0x1000, self.table[2:]))
+        self.assertFalse(patcher.addresses_only(0x1000, b"\x00\x00\x00\x03" + self.table))
 
 
 if __name__ == "__main__":
