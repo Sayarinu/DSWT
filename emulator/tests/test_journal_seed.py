@@ -250,6 +250,79 @@ class JournalSeedTests(unittest.TestCase):
             else:
                 self.fail(f"{mode}: the seed never completed")
 
+    def test_a_kill_during_the_first_journal_write_leaves_unused_banks(self):
+        self.first_write_survives_every_kill(retail_save(b"\xff" * 4096), BANKS, self.fixture)
+
+    def test_a_kill_during_the_first_black2_journal_write_leaves_unused_banks(self):
+        self.first_write_survives_every_kill(b2w2_save(b"\xff" * 4096), B2W2_BANKS, self.fixture_b2w2)
+
+    def first_write_survives_every_kill(self, blank, banks, fixture):
+        """The game's first journal write as the durable melonDS logs it, one
+        flash write at a time (wonder_trade/flash.c: tag cleared, the body a page
+        at a time, then the tag), in each bank in turn. The emulator is killed at
+        every fault point. Whatever survives is either unused banks, which the
+        journal core erases and initializes, or a record; never a blocked save."""
+        record = bytearray(4096)
+        struct.pack_into("<4sHHIIQ", record, 0, b"DSWJ", 1, 0, 4096, 0, 1)
+        struct.pack_into("<HH", record, 1440, 1, 32)
+        record[1444:1476] = bytes(range(1, 33))
+        seal(record)
+        writes = []
+        for bank in banks:
+            writes.append((bank + 4092, bytes(4)))
+            writes += [(bank + page, record[page:min(page + 256, 4092)]) for page in range(0, 4092, 256)]
+            writes.append((bank + 4092, bytes(record[4092:])))
+        images, data = [], bytearray(blank)
+        for address, chunk in writes:
+            data[address:address + len(chunk)] = chunk
+            images.append(bytes(data))
+        paths = []
+        for index, image in enumerate(images):
+            path = self.root / f"first-write-{index}"
+            path.write_bytes(image)
+            paths.append(str(path))
+        self.save.write_bytes(blank); self.save.chmod(0o600)
+        store = Path(str(self.save) + ".dswt")
+        self.tool("prepare")
+        baseline = self.root / "first-write-baseline"
+        shutil.copytree(store, baseline)
+        states = [blank] + images
+        for mode in ("before", "after"):
+            for stage in range(1, 400):
+                shutil.rmtree(store); shutil.copytree(baseline, store); self.save.write_bytes(blank)
+                env = dict(os.environ, LD_PRELOAD=str(self.faults), DSWT_FAULT_SAVE=str(self.save),
+                           DSWT_FAULT_AT=str(stage), DSWT_FAULT_MODE=mode)
+                process = subprocess.Popen([str(self.probe), str(self.save), *paths], env=env,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(process.stderr, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(5), "fault checkpoint did not report")
+                        if process.stderr.readline() == b"STOPPED\n":
+                            process.kill()
+                    out, err = process.communicate(timeout=5)
+                finally:
+                    if process.poll() is None:
+                        process.kill(); process.communicate()
+                completed = out == b"COMMITTED\n" and process.returncode == 0
+                with self.subTest(mode=mode, stage=stage):
+                    if not completed:
+                        self.assertEqual(process.returncode, -signal.SIGKILL, err)
+                    self.tool("prepare")
+                    actual = self.save.read_bytes()
+                    self.assertIn(actual, states)
+                    state = states.index(actual)
+                    banked = b"".join(actual[bank:bank + 4096] for bank in banks)
+                    result = subprocess.run([str(fixture), "classify"], input=banked, capture_output=True, timeout=5)
+                    # Until the first bank's tag is written no record exists.
+                    self.assertEqual(result.stdout, b"unused\n" if state < len(writes) // 2 else b"journal\n")
+                if completed:
+                    self.assertEqual(self.save.read_bytes(), images[-1])
+                    self.assertGreater(stage, len(images), f"{mode}: only {stage - 1} fault points")
+                    break
+            else:
+                self.fail(f"{mode}: the probe never completed")
+
     def test_durable_launcher_uses_native_active_refresh_and_preserves_lock(self):
         original = self.install(8)
         marker = self.root / "child-observed"
@@ -362,7 +435,9 @@ if __name__ == "__main__":
     parser.add_argument("fixture", type=Path)
     parser.add_argument("fixture_b2w2", type=Path)
     parser.add_argument("faults", type=Path)
+    parser.add_argument("probe", type=Path)
     args = parser.parse_args()
     JournalSeedTests.store, JournalSeedTests.fixture, JournalSeedTests.fixture_b2w2, JournalSeedTests.faults = (
         args.store.resolve(), args.fixture.resolve(), args.fixture_b2w2.resolve(), args.faults.resolve())
+    JournalSeedTests.probe = args.probe.resolve()
     unittest.main(argv=[__file__], verbosity=2)

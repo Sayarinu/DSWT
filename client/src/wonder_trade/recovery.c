@@ -28,14 +28,6 @@ static int NoWrite(void *arg, int bank, const unsigned char record[WT_JOURNAL_RE
     return -1;
 }
 
-static int Blank(const unsigned char record[WT_JOURNAL_RECORD_SIZE])
-{
-    size_t i;
-    if (record[0] != 0 && record[0] != 255) return 0;
-    for (i = 1; i < WT_JOURNAL_RECORD_SIZE; i++) if (record[i] != record[0]) return 0;
-    return 1;
-}
-
 int WtRecovery_Started(void) { return sState != UNCHECKED; }
 int WtRecovery_CanWrite(void) { return sState == SAFE || sState == PENDING || sInternalWrite; }
 int WtRecovery_CanClear(void) { return sState == UNCHECKED || sState == SAFE; }
@@ -68,7 +60,9 @@ int WtRecovery_Check(WtJournalIO source)
     if (result == 0) {
         if (WtJournal_Read(&store, &entry) != 0 || entry.generation == UINT64_MAX) result = WT_JOURNAL_ERROR_UNKNOWN;
         WtJournal_Close(&store);
-    } else if (result == WT_JOURNAL_ERROR_UNKNOWN && read.seen == 3 && Blank(read.banks[0]) && Blank(read.banks[1])) {
+    } else if (result == WT_JOURNAL_ERROR_UNKNOWN && read.seen == 3
+        && WtJournal_Unused(read.banks[0], read.banks[1], source.hash)) {
+        /* Blank, or a first write cut short: Wonder Trade erases it and starts over. */
         result = 0;
     }
 done:

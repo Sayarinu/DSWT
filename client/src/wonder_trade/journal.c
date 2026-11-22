@@ -313,6 +313,31 @@ static int Sealed(const unsigned char *record, WtJournalHash hash)
         && memcmp(record + WT_REC_DIGEST, digest, 32) == 0;
 }
 
+/* What a cut first write can leave: every byte that a phase-EMPTY record
+ * fixes holds its value or a blank one (0 or 255), and no seal. The seed, the
+ * generation, the digest and the tag may hold anything. Such a bank names no
+ * enrollment and no Pokémon: nothing in it was ever sent or escrowed. */
+static int Unwritten(const unsigned char *record, WtJournalHash hash)
+{
+    static const unsigned char header[WT_REC_GENERATION] = "DSWJ\1\0\0\0\0\20\0\0\0\0\0";
+    static const unsigned char entropy[4] = { 1, 0, 32, 0 };
+    size_t i;
+    for (i = 0; i < WT_REC_DIGEST; i++) {
+        unsigned char expected = 0;
+        if (i < WT_REC_GENERATION) expected = header[i];
+        else if (i < WT_REC_RESERVED_HEADER_TAIL) continue;
+        else if (i >= WT_REC_ENTROPY_FORMAT && i < WT_REC_SEED) expected = entropy[i - WT_REC_ENTROPY_FORMAT];
+        else if (i >= WT_REC_SEED && i < WT_REC_RESERVED_ENTROPY_TAIL) continue;
+        if (record[i] != expected && record[i] != 0 && record[i] != 255) return 0;
+    }
+    return !Sealed(record, hash);
+}
+
+int WtJournal_Unused(const unsigned char *first, const unsigned char *second, WtJournalHash hash)
+{
+    return first && second && hash && Unwritten(first, hash) && Unwritten(second, hash);
+}
+
 static int PrefixAndZeros(const unsigned char *bytes, const unsigned char *complete, size_t length)
 {
     size_t prefix;
@@ -416,7 +441,7 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
     unsigned char other[WT_JOURNAL_RECORD_SIZE], digest[32];
     WtJournalEntry entry;
     uint64_t firstGeneration = 0, secondGeneration = 0;
-    int firstValid, secondValid;
+    int firstValid, secondValid, firstEmpty, secondEmpty, firstBlank, secondBlank;
     int result = WT_JOURNAL_ERROR_UNKNOWN;
     if (!store) return -1;
     WtJournal_Close(store);
@@ -426,12 +451,19 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
         result = WT_JOURNAL_ERROR_READ;
         goto failed;
     }
-    if ((!Blank(store->record) && (!LayoutKnown(store->record) || (emptyOnly && Get(store->record + WT_REC_PHASE, 2) != 0)))
-        || (!Blank(other) && (!LayoutKnown(other) || (emptyOnly && Get(other + 6, 2) != 0)))) goto failed;
     firstValid = WtJournal_Decode(store->record, io.hash, &entry) == 0;
+    firstEmpty = firstValid && entry.phase == WT_JOURNAL_EMPTY;
     if (firstValid) firstGeneration = entry.generation;
     secondValid = WtJournal_Decode(other, io.hash, &entry) == 0;
+    secondEmpty = secondValid && entry.phase == WT_JOURNAL_EMPTY;
     if (secondValid) secondGeneration = entry.generation;
+    /* Before enrollment, a bank cut while it was written counts as blank:
+     * the other holds no record or an EMPTY one, and neither names anything. */
+    firstBlank = Blank(store->record)
+        || (Unwritten(store->record, io.hash) && (secondEmpty || Unwritten(other, io.hash)));
+    secondBlank = Blank(other) || (Unwritten(other, io.hash) && (firstEmpty || Unwritten(store->record, io.hash)));
+    if ((!firstBlank && (!LayoutKnown(store->record) || (emptyOnly && Get(store->record + WT_REC_PHASE, 2) != 0)))
+        || (!secondBlank && (!LayoutKnown(other) || (emptyOnly && Get(other + 6, 2) != 0)))) goto failed;
     if ((!firstValid && Sealed(store->record, io.hash)) || (!secondValid && Sealed(other, io.hash))) goto failed;
     if (!firstValid && !secondValid) goto failed;
     if (firstValid && secondValid && firstGeneration == secondGeneration && memcmp(store->record, other, WT_JOURNAL_RECORD_SIZE) != 0) {
@@ -440,8 +472,8 @@ static int Open(WtJournal *store, WtJournalIO io, int emptyOnly)
     }
     if (firstValid && secondValid && (firstGeneration < secondGeneration
         ? !Follows(store->record, other) : !Follows(other, store->record))) goto failed;
-    if ((!firstValid && !TornIdentityKnown(store->record, other))
-        || (!secondValid && !TornIdentityKnown(other, store->record))) goto failed;
+    if ((!firstValid && !firstBlank && !TornIdentityKnown(store->record, other))
+        || (!secondValid && !secondBlank && !TornIdentityKnown(other, store->record))) goto failed;
     if (io.hash(store->record, WT_JOURNAL_RECORD_SIZE, store->observed[0]) != 0 || io.hash(other, WT_JOURNAL_RECORD_SIZE, store->observed[1]) != 0) goto failed;
     if (!firstValid || (secondValid && secondGeneration > firstGeneration)) {
         memcpy(store->record, other, WT_JOURNAL_RECORD_SIZE); store->selected = 1;
@@ -471,8 +503,18 @@ int WtJournal_Initialize(WtJournal *store, WtJournalIO io, const unsigned char *
     if (io.read(io.arg, 0, store->record) != 0 || io.read(io.arg, 1, other) != 0) {
         result = WT_JOURNAL_ERROR_READ; goto done;
     }
-    if (!Blank(store->record) || !Blank(other)) goto done;
+    if (!WtJournal_Unused(store->record, other, io.hash)) goto done;
     if (!seed) { result = WT_JOURNAL_NEEDS_SEED; goto done; }
+    /* A first write cut short left only bytes it can redo: erase them, each
+     * erasure verified. A cut erasure leaves the bank unwritten still. */
+    memset(store->record, 0, WT_JOURNAL_RECORD_SIZE);
+    for (bank = 0; bank < 2; bank++) {
+        if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
+        if (Blank(other)) continue;
+        if (!Unwritten(other, io.hash) || io.write(io.arg, bank, store->record) != 0) goto done;
+        if (io.read(io.arg, bank, other) != 0) { result = WT_JOURNAL_ERROR_READ; goto done; }
+        if (!Blank(other)) goto done;
+    }
     entry.generation = 1;
     memcpy(entry.seed, seed, 32);
     if (WtJournal_Encode(&entry, io.hash, store->record) != 0) goto done;
