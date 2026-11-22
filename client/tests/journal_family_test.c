@@ -42,6 +42,99 @@ static int Box(unsigned box, unsigned slot, unsigned char record[WT_JOURNAL_RECO
     return WtJournal_Encode(&entry, Hash, record);
 }
 
+static unsigned char banks[2][WT_JOURNAL_RECORD_SIZE];
+static int writes, cutWrite, cutAt, tagFirst;
+
+static int ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    (void)arg;
+    memcpy(record, banks[bank], WT_JOURNAL_RECORD_SIZE);
+    return 0;
+}
+
+/* The flash backend's order (wonder_trade/flash.c): the tag cleared, the body,
+ * then the tag. Power lost at cutAt keeps only the steps before it. Without
+ * tagFirst, the bytes go in order, as the crafted torn saves of LUNE-840 hold. */
+static int WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    int step, count = ++writes == cutWrite ? cutAt : WT_JOURNAL_RECORD_SIZE + 4;
+    (void)arg;
+    for (step = 0; step < count; step++) {
+        if (!tagFirst) { if (step < WT_JOURNAL_RECORD_SIZE) banks[bank][step] = record[step]; }
+        else if (step < 4) banks[bank][4092 + step] = 0;
+        else banks[bank][step - 4] = record[step - 4];
+    }
+    return writes == cutWrite ? -1 : 0;
+}
+
+/* Power lost at every byte of the first journal write, over either blank. A
+ * cut in the first bank leaves no record: the banks are unused, and the next
+ * initialization erases them, even when that is cut too. A cut in the second
+ * keeps the first bank's record, which repairs the second. */
+static void FirstWriteTears(void)
+{
+    WtJournalIO io = { NULL, ReadBank, WriteBank, Hash };
+    WtJournal store;
+    WtJournalEntry entry;
+    unsigned char first[32], second[32], expected[WT_JOURNAL_RECORD_SIZE];
+    int fill, bank, cut, erase, order;
+    memset(first, 0x31, 32); memset(second, 0x52, 32);
+    memset(&entry, 0, sizeof(entry)); entry.generation = 1; memcpy(entry.seed, second, 32);
+    assert(WtJournal_Encode(&entry, Hash, expected) == 0);
+    for (order = 0; order < 2; order++) for (fill = 0; fill < 2; fill++) for (bank = 1; bank <= 2; bank++)
+    for (cut = 0; cut <= WT_JOURNAL_RECORD_SIZE + 4 - order * 4; cut++) {
+        memset(banks, fill ? 255 : 0, sizeof(banks));
+        tagFirst = !order; writes = 0; cutWrite = bank; cutAt = cut;
+        assert(WtJournal_Initialize(&store, io, first) != 0 && !store.usable);
+        cutWrite = 0; writes = 0;
+        /* A first bank written in full, but reported failed, is a record. */
+        if (bank == 2 || cut == WT_JOURNAL_RECORD_SIZE + 4 - order * 4) {
+            assert(!WtJournal_Unused(banks[0], banks[1], Hash));
+            assert(WtJournal_Open(&store, io) == 0 && WtJournal_Read(&store, &entry) == 0);
+            assert(entry.phase == WT_JOURNAL_EMPTY && entry.generation == 1 && memcmp(entry.seed, first, 32) == 0);
+            assert(WtJournal_Repair(&store) == 0 && memcmp(banks[0], banks[1], sizeof(banks[0])) == 0);
+            WtJournal_Close(&store);
+            writes = 0; assert(WtJournal_Initialize(&store, io, second) != 0 && writes == 0);
+            continue;
+        }
+        assert(WtJournal_Unused(banks[0], banks[1], Hash));
+        assert(WtJournal_Open(&store, io) == WT_JOURNAL_ERROR_UNKNOWN && WtJournal_OpenEmpty(&store, io) != 0);
+        assert(WtJournal_Initialize(&store, io, NULL) == WT_JOURNAL_NEEDS_SEED && writes == 0);
+        /* Cut the erasure (and any write after it) at a spread of bytes, for a
+         * spread of first cuts: every cut leaves the banks unused. */
+        for (erase = 0; cut % 512 == 3 && erase < WT_JOURNAL_RECORD_SIZE; erase += 61) {
+            writes = 0; cutWrite = 1; cutAt = erase;
+            assert(WtJournal_Initialize(&store, io, second) != 0 && !store.usable);
+            assert(WtJournal_Unused(banks[0], banks[1], Hash));
+        }
+        cutWrite = 0; writes = 0;
+        assert(WtJournal_Initialize(&store, io, second) == 0);
+        assert(store.usable && memcmp(banks[0], expected, sizeof(expected)) == 0);
+        assert(memcmp(banks[1], expected, sizeof(expected)) == 0);
+        WtJournal_Close(&store);
+    }
+    tagFirst = 1;
+}
+
+/* Once a record has been committed, unwritten-looking bytes are a torn write
+ * as before: never unused, and kept beside an active record. */
+static void CommittedTears(void)
+{
+    WtJournalIO io = { NULL, ReadBank, WriteBank, Hash };
+    WtJournal store;
+    WtJournalEntry entry;
+    unsigned phase;
+    for (phase = WT_JOURNAL_ENROLLING; phase <= WT_JOURNAL_RECOVERY_REQUIRED; phase++) {
+        assert(WtTest_JournalEntry(phase, Hash, &entry) == 0);
+        if (entry.source.kind) Source(&entry, WT_GAME_PARTY_SIZE);
+        assert(WtJournal_Encode(&entry, Hash, banks[1]) == 0);
+        memset(banks[0], 255, sizeof(banks[0])); memcpy(banks[0], "DSWJ", 4);
+        assert(!WtJournal_Unused(banks[0], banks[1], Hash) && !WtJournal_Unused(banks[1], banks[0], Hash));
+        writes = 0;
+        assert(WtJournal_Open(&store, io) != 0 && WtJournal_Initialize(&store, io, entry.seed) != 0 && writes == 0);
+    }
+}
+
 int main(void)
 {
     unsigned char record[WT_JOURNAL_RECORD_SIZE];
@@ -69,5 +162,7 @@ int main(void)
         assert(Hash(entry.original, WT_GAME_PARTY_SIZE, entry.originalDigest) == 0);
         assert(WtJournal_Encode(&entry, Hash, record) != 0);
     }
+    FirstWriteTears();
+    CommittedTears();
     return 0;
 }
