@@ -17,6 +17,7 @@ import secrets
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -488,6 +489,35 @@ def shares_run(data, retail, at):
     return False
 
 
+def digest_tables(rom):
+    """The (start, end) target ranges of a DSi-enhanced ROM's sector and block hash tables.
+
+    dsd rebuilds them as SHA-1 digests of 1 KiB ROM blocks. A block the build leaves
+    unchanged keeps its cartridge digest at a moved offset, so the patch holds the same
+    digests as a literal. They are digests, not retail content, so the retail check
+    leaves them out."""
+    if len(rom) < 0x200 or not rom[0x12] & 2:
+        return []
+    tables = []
+    for field in (0x1F0, 0x1F8):
+        start, length = struct.unpack_from("<2I", rom, field)
+        if length and start >= 0x200 and start + length <= len(rom):
+            tables.append((start, start + length))
+    return tables
+
+
+def outside(offset, data, tables):
+    """Split a literal written at target offset into the pieces that lie outside tables."""
+    pieces, start = [], 0
+    for low, high in sorted(tables):
+        low, high = max(low - offset, start), min(high - offset, len(data))
+        if low < high:
+            pieces.append((offset + start, data[start:low]))
+            start = high
+    pieces.append((offset + start, data[start:]))
+    return [(at, piece) for at, piece in pieces if piece]
+
+
 class Checked:
     """One patch's data the retail check searches: long literals and recompressed modules.
 
@@ -496,10 +526,12 @@ class Checked:
 
     def __init__(self, variant, patch, report, base, target):
         self.variant, self.literals, self.modules = variant, [], []
+        tables = digest_tables(target)
         for item in report["literals"]["items"]:
             if item["length"] >= VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
-                self.literals.append((item["target_offset"],
-                                      bytes(patch[item["patch_offset"]:item["patch_offset"] + item["length"]])))
+                data = bytes(patch[item["patch_offset"]:item["patch_offset"] + item["length"]])
+                self.literals += [(at, piece) for at, piece in outside(item["target_offset"], data, tables)
+                                  if len(piece) >= VERBATIM_WINDOW + VERBATIM_STRIDE - 1]
         # Recompressed code encodes retail code without copying its bytes, so expand
         # every compressed module the target does not copy unchanged from its base.
         unchanged = {code for _, code, _ in compressed_code(base, "Base ROM")}
