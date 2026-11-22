@@ -13,6 +13,7 @@ struct SaveControl;
 struct BackupSaveData;
 struct SaveDataTable;
 struct GameSystem;
+struct GameData;
 struct GameEvent;
 struct FieldMap;
 struct GameComm;
@@ -203,6 +204,34 @@ u32 SHINKA_CHECK_CheckEvolution(WtParty *party, WtPartyPokemon *pokemon, u32 mod
 u16 ZUKAN_SAVE_GetFormCount(u32 species);
 void ZUKAN_SAVE_RegisterCaught(void *zukan, void *pokemon);
 WtParty *POKEPARTY_GetSaveData(struct SaveControl *save);
+
+/* The trade animation (overlay 119, ov119/pokemontrade_proc.c) as the Global
+ * Trade Station plays it (ov135/worldtrade_demo.c), from a process system of
+ * its own (arm9/procsys.h), with a partner made like the game's (arm9/mystatus.h). */
+struct ProcSys;
+struct MyStatus;
+struct ProcSys *PROCSYS_Create(int heapId);
+u32 PROCSYS_Main(struct ProcSys *sys);
+void PROCSYS_Delete(struct ProcSys *sys);
+void PROCSYS_Push(struct ProcSys *sys, u32 overlayId, const WtProcData *data, void *procWork);
+struct GameData *GAMESYSTEM_GetGameData(struct GameSystem *gsys);
+struct MyStatus *GAME_DATA_GetMyStatus(struct GameData *gameData);
+struct MyStatus *MYSTATUS_Create(int heapId);
+const u16 *MYSTATUS_GetName(const struct MyStatus *status);
+void MYSTATUS_CopyName(u16 *dest, const u16 *src);
+void MYSTATUS_SetSex(struct MyStatus *status, u32 sex);
+u32 POKETRADE_PROC_StartRequest8(void *proc, u32 *seq, void *procWork, void *work);
+u32 POKETRADE_PROC_Main(void *proc, u32 *seq, void *procWork, void *work);
+u32 POKETRADE_PROC_Exit(void *proc, u32 *seq, void *procWork, void *work);
+void GX_ResetBankForOBJ(void);
+void GX_ResetBankForBGExtPltt(void);
+void GX_ResetBankForOBJExtPltt(void);
+void GX_ResetBankForTex(void);
+void GX_ResetBankForTexPltt(void);
+void GX_ResetBankForClearImage(void);
+void GX_ResetBankForSubOBJ(void);
+void GX_ResetBankForSubBGExtPltt(void);
+void GX_ResetBankForSubOBJExtPltt(void);
 
 /* Items (arm9/file_util.h): parameter 5 is the bag pocket. */
 u32 FILE_UTIL_IsMailItem(u16 item);
