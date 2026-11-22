@@ -377,11 +377,13 @@ class GenVSaveLayoutTests(unittest.TestCase):
                              layout["bank_reserved_size"])
 
     def test_upstream_pin_matches_when_present(self):
-        layout = self.load("protocol/save-layout-b2w2.json")
-        pin = ROOT / layout["upstream_pin"]
-        if not pin.exists():
-            self.skipTest("Black 2/White 2 upstream pin not merged yet")
-        self.assertEqual(json.loads(pin.read_text())["revision"], layout["upstream_revision"])
+        for path in self.LAYOUTS:
+            with self.subTest(layout=path):
+                layout = self.load(path)
+                pin = ROOT / layout["upstream_pin"]
+                if not pin.exists():
+                    self.skipTest(f"{path} upstream pin not merged yet")
+                self.assertEqual(json.loads(pin.read_text())["revision"], layout["upstream_revision"])
 
 
 if __name__ == "__main__":

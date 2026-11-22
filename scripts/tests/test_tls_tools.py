@@ -42,70 +42,93 @@ def synthetic_save(magic=0x20060623):
     return bytes(data)
 
 
-B2W2_BANKS = (0x6B000, 0x6C000)
+# Generation V saves (protocol/save-layout-bw.json, protocol/save-layout-b2w2.json): the
+# main copies, the end of their blocks (where the CRC table starts), the block count,
+# the trainer data block's size, the musical distribution area, the journal banks and the targets.
+GEN_V = {
+    "bw": {"copies": (0, 0x24000), "blocks_end": 0x23F00, "blocks": 69, "trainer_size": 0x68,
+           "musical": (0x56000, 0x1FD14), "banks": (0x74000, 0x75000), "targets": ("black-us", "white-us")},
+    "b2w2": {"copies": (0, 0x26000), "blocks_end": 0x25F00, "blocks": 74, "trainer_size": 0xB0,
+             "musical": (0x55800, 0x17D14), "banks": (0x6B000, 0x6C000), "targets": ("black2-us", "white2-us")},
+}
+TRAINER = 0x19400
 
 
-def b2w2_save(markers=(0, 0), musical=b"\xff"):
-    """A synthetic Black 2/White 2 save: both main copies with a valid CRC table and
-    footer, the trainer data block (27) with marker 6 per copy, and a musical area."""
+def gen_v_footer(family):
+    facts = GEN_V[family]
+    return facts["blocks_end"] + (facts["blocks"] + facts["blocks"] % 2) * 2
+
+
+def gen_v_save(family, markers=(0, 0), musical=b"\xff"):
+    """A synthetic Black/White or Black 2/White 2 save: both main copies with a valid CRC
+    table and footer, the trainer data block (27) with marker 6 per copy, and a musical area."""
+    facts = GEN_V[family]
+    end, size, footer = facts["blocks_end"], facts["trainer_size"], gen_v_footer(family)
     data = bytearray(b"\xff" * 524288)
-    for copy, marker in zip((0, 0x26000), markers):
-        data[copy:copy + 0x25F00] = bytes(0x25F00)
-        trainer = copy + 0x19400
+    for copy, marker in zip(facts["copies"], markers):
+        data[copy:copy + end] = bytes(end)
+        trainer = copy + TRAINER
         struct.pack_into("<H", data, trainer + 0x3C, marker)
-        crc = binascii.crc_hqx(data[trainer:trainer + 0xB0], 0xffff)
-        struct.pack_into("<HH", data, trainer + 0xB0, 1, crc)
-        struct.pack_into("<H", data, copy + 0x25F00 + 2 * 27, crc)
-        table = data[copy + 0x25F00:copy + 0x25F94]
-        struct.pack_into("<IIIHH", data, copy + 0x25F94, 1, 0x25FA4, 0x31053527, 0, binascii.crc_hqx(table, 0xffff))
-    data[0x55800:0x6D514] = (musical * 0x17D14)[:0x17D14]
+        crc = binascii.crc_hqx(data[trainer:trainer + size], 0xffff)
+        struct.pack_into("<HH", data, trainer + size, 1, crc)
+        struct.pack_into("<H", data, copy + end + 2 * 27, crc)
+        table = data[copy + end:copy + footer]
+        struct.pack_into("<IIIHH", data, copy + footer, 1, footer + 16, 0x31053527, 0, binascii.crc_hqx(table, 0xffff))
+    start, used = facts["musical"]
+    data[start:start + used] = (musical * used)[:used]
     return bytes(data)
 
 
 class TlsToolTests(unittest.TestCase):
-    def test_b2w2_saves_take_the_journal_in_the_released_musical_area(self):
-        for target in ("black2-us", "white2-us"):
-            for musical in (b"\xff", b"\0", b"stale musical distribution"):
-                with self.subTest(target=target, musical=musical[:4]):
-                    original = b2w2_save(musical=musical)
-                    result = provision.provision(original, target)
-                    first, second = B2W2_BANKS
-                    record = result[first:first + 4096]
-                    self.assertEqual(record, result[second:second + 4096])
-                    self.assertEqual(record[:4], b"DSWJ")
-                    self.assertEqual(record[4092:], b"CMIT")
-                    self.assertEqual(result[:first], original[:first])
-                    self.assertEqual(result[second + 4096:], original[second + 4096:])
-                    with self.assertRaisesRegex(ValueError, "not blank"):
-                        provision.provision(result, target)
-        with self.assertRaisesRegex(ValueError, "no valid copy"):
-            provision.provision(synthetic_save(), "black2-us")
-        with self.assertRaisesRegex(ValueError, "no valid copy"):
-            provision.provision(b2w2_save(), "us-rev1")
+    def test_gen_v_saves_take_the_journal_in_the_released_musical_area(self):
+        for family, facts in GEN_V.items():
+            first, second = facts["banks"]
+            for target in facts["targets"]:
+                for musical in (b"\xff", b"\0", b"stale musical distribution"):
+                    with self.subTest(target=target, musical=musical[:4]):
+                        original = gen_v_save(family, musical=musical)
+                        result = provision.provision(original, target)
+                        record = result[first:first + 4096]
+                        self.assertEqual(record, result[second:second + 4096])
+                        self.assertEqual(record[:4], b"DSWJ")
+                        self.assertEqual(record[4092:], b"CMIT")
+                        self.assertEqual(result[:first], original[:first])
+                        self.assertEqual(result[second + 4096:], original[second + 4096:])
+                        with self.assertRaisesRegex(ValueError, "not blank"):
+                            provision.provision(result, target)
+            with self.subTest(family=family), self.assertRaisesRegex(ValueError, "no valid copy"):
+                provision.provision(synthetic_save(), facts["targets"][0])
+            with self.subTest(family=family), self.assertRaisesRegex(ValueError, "no valid copy"):
+                provision.provision(gen_v_save(family), "us-rev1")
+        # Each Generation V family's save is refused as the other's.
+        for family, other in (("bw", "black2-us"), ("b2w2", "white-us")):
+            with self.subTest(family=family), self.assertRaisesRegex(ValueError, "no valid copy"):
+                provision.provision(gen_v_save(family), other)
 
-    def test_b2w2_save_still_reading_its_musical_is_preserved(self):
+    def test_gen_v_save_still_reading_its_musical_is_preserved(self):
         # Either copy's current trainer data with marker 6 set means the game
         # still loads the musical distribution from the area.
-        for markers in ((0xC21E, 0), (0, 0xC21E)):
-            for musical in (b"\xff", b"downloaded musical"):
-                with self.subTest(markers=markers, musical=musical[:4]), self.assertRaisesRegex(ValueError, "musical"):
-                    provision.provision(b2w2_save(markers, musical), "black2-us")
+        for family, facts in GEN_V.items():
+            for markers in ((0xC21E, 0), (0, 0xC21E)):
+                for musical in (b"\xff", b"downloaded musical"):
+                    with self.subTest(family=family, markers=markers, musical=musical[:4]), \
+                            self.assertRaisesRegex(ValueError, "musical"):
+                        provision.provision(gen_v_save(family, markers, musical), facts["targets"][0])
 
-    def test_b2w2_retail_footer_and_trainer_block_are_checked(self):
-        damaged = []
-        for offset in (0x25F94 + 4, 0x25F94 + 8, 0x25F00, 0x19400):
-            data = bytearray(b2w2_save())
-            data[offset] ^= 1
-            data[0x26000 + offset] ^= 1
-            damaged.append(bytes(data))
-        for index, data in enumerate(damaged):
-            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "no valid copy"):
-                provision.provision(data, "black2-us")
-        # One valid copy of the footer and of the trainer data is enough.
-        data = bytearray(b2w2_save()); data[0x25F00] ^= 1
-        self.assertTrue(provision.provision(bytes(data), "white2-us"))
-        data = bytearray(b2w2_save()); data[0x19400] ^= 1
-        self.assertTrue(provision.provision(bytes(data), "white2-us"))
+    def test_gen_v_retail_footer_and_trainer_block_are_checked(self):
+        for family, facts in GEN_V.items():
+            footer, backup = gen_v_footer(family), facts["copies"][1]
+            for offset in (footer + 4, footer + 8, facts["blocks_end"], TRAINER):
+                data = bytearray(gen_v_save(family))
+                data[offset] ^= 1
+                data[backup + offset] ^= 1
+                with self.subTest(family=family, offset=hex(offset)), self.assertRaisesRegex(ValueError, "no valid copy"):
+                    provision.provision(bytes(data), facts["targets"][0])
+            # One valid copy of the footer and of the trainer data is enough.
+            for offset in (facts["blocks_end"], TRAINER):
+                data = bytearray(gen_v_save(family)); data[offset] ^= 1
+                with self.subTest(family=family, valid_backup=hex(offset)):
+                    self.assertTrue(provision.provision(bytes(data), facts["targets"][1]))
 
     def test_profile_rejects_injection_invalid_ports_and_missing_pins(self):
         good = {"hostname": "wt.example.invalid", "ipv4": "192.0.2.1", "port": 8443,
@@ -253,24 +276,28 @@ class EmulatorLauncherTests(unittest.TestCase):
             for start, end in ((0, 0x30000), (0x31000, 0x70000), (0x71000, 0x80000)):
                 self.assertEqual(data[start:end], original[start:end])
 
-    def test_b2w2_launch_refreshes_both_musical_area_banks(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            save, observed = root / "black2.sav", root / "observed"
-            original = provision.provision(b2w2_save(musical=b"stale"), "black2-us")
-            provision.write_new(save, original)
-            code = ("import struct,sys; from pathlib import Path; "
-                    "d=Path(sys.argv[1]).read_bytes(); "
-                    "assert struct.unpack_from('<Q',d,0x6B010)[0]==2; "
-                    "assert d[0x6B000:0x6C000]==d[0x6C000:0x6D000]; "
-                    "Path(sys.argv[2]).write_text('ok')")
-            self.assertEqual(launcher.run(save, "black2-us", [sys.executable, "-c", code, str(save), str(observed)]), 0)
-            self.assertEqual(observed.read_text(), "ok")
-            data = save.read_bytes()
-            self.assertEqual(len(data), 524288)
-            self.assertNotEqual(data[0x6B000 + 1444:0x6B000 + 1476], original[0x6B000 + 1444:0x6B000 + 1476])
-            for start, end in ((0, 0x6B000), (0x6D000, 0x80000)):
-                self.assertEqual(data[start:end], original[start:end])
+    def test_gen_v_launch_refreshes_both_musical_area_banks(self):
+        for family, facts in GEN_V.items():
+            first, second = facts["banks"]
+            target = facts["targets"][0]
+            with self.subTest(family=family), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                save, observed = root / f"{family}.sav", root / "observed"
+                original = provision.provision(gen_v_save(family, musical=b"stale"), target)
+                provision.write_new(save, original)
+                code = ("import struct,sys; from pathlib import Path; "
+                        "d=Path(sys.argv[1]).read_bytes(); b=int(sys.argv[3]); c=int(sys.argv[4]); "
+                        "assert struct.unpack_from('<Q',d,b+16)[0]==2; "
+                        "assert d[b:b+4096]==d[c:c+4096]; "
+                        "Path(sys.argv[2]).write_text('ok')")
+                command = [sys.executable, "-c", code, str(save), str(observed), str(first), str(second)]
+                self.assertEqual(launcher.run(save, target, command), 0)
+                self.assertEqual(observed.read_text(), "ok")
+                data = save.read_bytes()
+                self.assertEqual(len(data), 524288)
+                self.assertNotEqual(data[first + 1444:first + 1476], original[first + 1444:first + 1476])
+                for start, end in ((0, first), (second + 4096, 0x80000)):
+                    self.assertEqual(data[start:end], original[start:end])
 
     def test_abrupt_child_rollback_still_gets_fresh_entropy_on_next_launch(self):
         with tempfile.TemporaryDirectory() as temp:

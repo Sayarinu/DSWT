@@ -76,6 +76,11 @@ if sys.argv[1] == 'run':
             key, value = sys.argv[i + 1].split('=', 1)
             os.environ[key] = value
     command = sys.argv[sys.argv.index('bash') + 2]
+    for i, arg in enumerate(sys.argv):
+        if arg == '-v' and sys.argv[i + 1].endswith(':/dswt:ro'):
+            # The repository mount: its scripts run from the host copy.
+            host = sys.argv[i + 1].removesuffix(':/dswt:ro')
+            command = re.sub(r'(?<![\w/])/dswt/(\S+)', lambda m: shlex.quote(host + '/' + m[1]), command)
     raise SystemExit(subprocess.run([os.environ['TEST_BASH'], '-c', command],
                                    cwd=os.environ['TEST_WORKSPACE']).returncode)
 assert sys.argv[1] == 'build'
@@ -148,7 +153,7 @@ previous.write_text(revision)
 
     def tool(self, path, source):
         path.write_text('#!' + sys.executable + '''
-import json, os, shlex, shutil, subprocess, sys
+import json, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 def record(tool, args):
     with open(os.environ['TEST_LOG'], 'a') as log:
@@ -168,7 +173,7 @@ def record(tool, args):
     def calls_for(self, tool):
         return [args for name, args in self.calls if name == tool]
 
-    def assert_docker(self, mode, revision, jobs='1', image='dswt-rom-builder', builder='tools/rom-builder'):
+    def assert_docker(self, mode, revision, jobs='1', image='dswt-rom-builder', builder='tools/rom-builder', extra=()):
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '--platform', 'linux/amd64', '-f',
                                 str(self.root / builder / 'Dockerfile'), '-t',
@@ -180,7 +185,7 @@ def record(tool, args):
         self.assertEqual(run[run.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         mounts = [run[i + 1] for i, arg in enumerate(run) if arg == '-v']
         self.assertEqual(mounts, [str(self.workspace) + ':/workspace'] +
-                         ([str(self.tls) + ':/tls:ro'] if mode == 'modified' else []))
+                         ([str(self.tls) + ':/tls:ro'] if mode == 'modified' else []) + list(extra))
         self.assertEqual(run[run.index('-w') + 1], '/workspace')
         self.assertEqual(run[-4:-1], [image, 'bash', '-c'])
 
@@ -361,6 +366,51 @@ def record(tool, args):
                     '--wonder-trade-msl', '/opt/pokebw2/msl']])
                 self.assertEqual(self.calls_for('ninja'), [['-j1', 'build/' + rom]])
                 self.assert_docker('modified', '0', '1', 'dswt-rom-builder-bw2', 'tools/rom-builder-bw2')
+
+    def test_black_and_white_build_from_the_players_dump(self):
+        (self.workspace / 'tools/mwccarm/mwccarm/dsi/1.1p1').mkdir(parents=True)
+        for tool in ('ndsrom', 'delink', 'romlink'):
+            self.tool(self.workspace / f'tools/{tool}.py', f"record({tool!r}, sys.argv[1:])\n")
+        units = self.workspace / 'layout/units_arm9.json'
+        units.parent.mkdir(parents=True, exist_ok=True)
+        units.write_text('tracked\n')
+        self.tool(self.workspace / 'tools/disasm.py',
+                  "record('disasm', sys.argv[1:])\nopen('layout/units_arm9.json', 'w').write('recounted')\n")
+        for game, extract in (('black', 'extract'), ('white', 'extract_white')):
+            dump = self.root / f'{game} dump.nds'
+            dump.write_bytes(game.encode())
+            env = dict(self.env, ROM_GAME=game, DSWT_BW_ROM=str(dump))
+            del env['ROM_REVISION'], env['WONDER_TRADE_PROFILE']
+            with self.subTest(game=game):
+                result = self.run_build('--pristine', env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'bw', '--pristine']])
+                self.assertEqual((self.workspace / f'{game}.nds').read_bytes(), game.encode())
+                self.assertEqual(self.calls_for('ndsrom'), [['extract', f'{game}.nds', '-o', extract]])
+                self.assertEqual(self.calls_for('delink'), [['-e', extract, '-l', f'build/{game}/layout']])
+                self.assertEqual(self.calls_for('romlink'), [['--target', game, '--relink']])
+                self.assertEqual(self.calls_for('disasm'), [['arm9', '--split'], ['overlay', '--all']])
+                self.assertEqual(units.read_text(), 'tracked\n')
+                self.assertEqual(self.calls_for('wineserver'), [['-p']])
+                self.assert_docker('pristine', '0', '1', 'dswt-rom-builder-bw', 'tools/rom-builder-bw')
+            with self.subTest(game=game, mode='modified'):
+                report = self.workspace / ('build/rom/report.json' if game == 'black' else 'build/rom/report_white.json')
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text('{"identical": true}')
+                self.tool(self.scripts / 'port-bw.py', "record('port', sys.argv[1:])\n")
+                result = self.run_build(env=dict(env, WONDER_TRADE_PROFILE=str(self.profile)))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.calls_for('prepare'), [['--game', 'bw']])
+                # The finished pristine link is reused; the port adds Wonder Trade to the dump.
+                self.assertEqual(self.calls_for('romlink'), [])
+                self.assertEqual(self.calls_for('port'), [[game, f'{game}.nds', f'build/dswt/{game}.nds',
+                                                           '--workspace', '/workspace', '--profile',
+                                                           '/workspace/.git/dswt-connection.h', '--tls', '/tls',
+                                                           '--msl', '/opt/aletheia/msl', '--work',
+                                                           f'build/dswt/port-{game}']])
+                self.assert_docker('modified', '0', '1', 'dswt-rom-builder-bw', 'tools/rom-builder-bw',
+                                   [f'{self.root}:/dswt:ro'])
+                report.unlink()
 
     def test_black2_and_white2_need_a_dump_and_a_profile(self):
         dump = self.root / 'dump.nds'

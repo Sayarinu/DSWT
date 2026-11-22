@@ -294,6 +294,45 @@ class PrepareGameTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
             prepare_game.prepare(self.root, pristine=True, name="bw2")
 
+    def test_black_and_white_prepare_a_pristine_aletheia_workspace(self):
+        upstream = Path(self.temp.name) / "bw-upstream"
+        upstream.mkdir()
+        for name, text in {
+            "src/game/main.c": "original\n",
+            "tools/targets.py": 'TARGETS = {"black": ("a", "' + "a" * 40 + '"), "white": ("b", "' + "b" * 40 + '")}\n',
+            ".gitignore": "*.nds\n/extract/\n/build/\n",
+        }.items():
+            (upstream / name).parent.mkdir(parents=True, exist_ok=True)
+            (upstream / name).write_text(text)
+        git = ["git", "-C", str(upstream)]
+        subprocess.check_call([*git, "init", "--quiet"])
+        subprocess.check_call([*git, "add", "."])
+        subprocess.check_call([*git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                               "commit", "--quiet", "-m", "Synthetic aletheia"])
+        pin = {
+            "repository": str(upstream),
+            "revision": subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip(),
+            "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
+            "rom_sha1": {"black": "a" * 40, "white": "b" * 40},
+        }
+        (self.root / "client/upstream-aletheia.json").write_text(json.dumps(pin))
+        (self.root / "client/aletheia-build.patch").write_text(
+            "diff --git a/src/game/main.c b/src/game/main.c\n"
+            "--- a/src/game/main.c\n+++ b/src/game/main.c\n"
+            "@@ -1 +1 @@\n-original\n+linked through wine\n"
+        )
+        # Wonder Trade is ported into the dump, so a modified build reads the pristine workspace.
+        bw = prepare_game.prepare(self.root, name="bw")
+        self.assertEqual(bw, self.root / "game/aletheia-pristine")
+        self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)
+        self.assertEqual((bw / "src/game/main.c").read_text(), "linked through wine\n")
+        (bw / "black.nds").write_bytes(b"dump")
+        self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)
+        pin["rom_sha1"]["white"] = "c" * 40
+        (self.root / "client/upstream-aletheia.json").write_text(json.dumps(pin))
+        with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
+            prepare_game.prepare(self.root, pristine=True, name="bw")
+
     def test_workspace_symlink_does_not_write_outside_project(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

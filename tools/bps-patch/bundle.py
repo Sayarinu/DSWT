@@ -31,7 +31,7 @@ USED_SIZE = 0x80
 # The header's device capacity: the cartridge holds 128 KiB << this value. It is
 # per cartridge, not per game: the first Japanese Diamond and Pearl revisions are
 # 128 MiB, later ones (Japanese Pearl Rev 6) and every other Diamond and Pearl 64 MiB;
-# Black 2 and White 2 are 512 MiB.
+# Black and White are 256 MiB, Black 2 and White 2 512 MiB.
 CAPACITY = 0x14
 # Supported Pokémon games by the first three letters of the header game code.
 GAMES = {
@@ -40,6 +40,8 @@ GAMES = {
     "CPU": "Pokémon Platinum",
     "IPK": "Pokémon HeartGold",
     "IPG": "Pokémon SoulSilver",
+    "IRB": "Pokémon Black",
+    "IRA": "Pokémon White",
     "IRE": "Pokémon Black 2",
     "IRD": "Pokémon White 2",
 }
@@ -57,7 +59,7 @@ REGIONS = {
 }
 # Retail cartridges by game code: (game, region, language).
 CARTRIDGES = {prefix + letter: (game, *REGIONS[letter]) for prefix, game in GAMES.items() for letter in REGIONS}
-GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black 2 or White 2"
+GAME_NAMES = "Pokémon Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black, White, Black 2 or White 2"
 # European English cartridges that reuse the US game code, told apart by their
 # header revision: Platinum reads CPUE revision 10, Diamond and Pearl revision 13,
 # HeartGold and SoulSilver revision 10.

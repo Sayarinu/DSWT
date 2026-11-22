@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/Project-Holon/aletheia.git",
+  "revision": "50731dd699fb0fb3f881cd028a67d8f6aa649a88",
+  "tree": "8d0dd9d2e8ddc99e2513b70f57e32756d9864447",
+  "rom_sha1": {
+    "black": "26ad0b9967aa279c4a266ee69f52b9b2332399a5",
+    "white": "bc696a0dfb448c7b3a8a206f0f8214411a039208"
+  }
+}

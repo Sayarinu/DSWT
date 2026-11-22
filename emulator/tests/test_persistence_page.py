@@ -17,15 +17,17 @@ class PersistencePageTests(unittest.TestCase):
 
     def test_every_catalogued_cartridge_uses_its_family_page(self):
         catalog = json.loads((ROOT / "patches/compatibility.json").read_text())
-        b2w2 = json.loads((ROOT / "protocol/save-layout-b2w2.json").read_text())["persistence_address"]
+        bw, b2w2 = (json.loads((ROOT / f"protocol/save-layout-{family}.json").read_text())["persistence_address"]
+                    for family in ("bw", "b2w2"))
+        pages = {"IRB": bw, "IRA": bw, "IRE": b2w2, "IRD": b2w2}
         expected = {}
         for variant in catalog["variants"]:
-            expected[variant["game_code"]] = b2w2 if variant["game_code"][:2] == "IR" else GEN4
-        self.assertIn(b2w2, expected.values())
+            expected[variant["game_code"]] = pages.get(variant["game_code"][:3], GEN4)
+        self.assertLessEqual({bw, b2w2}, set(expected.values()))
         self.assertEqual(self.addresses(expected), expected)
 
     def test_other_games_and_unverified_gen_v_cartridges_get_no_page(self):
-        codes = ("IRBO", "IRAO", "IREJ", "IRDK", "IREF", "####", "AMHE", "AAAA")
+        codes = ("IRBJ", "IRAK", "IRBF", "IREJ", "IRDK", "IREF", "####", "AMHE", "AAAA")
         self.assertEqual(set(self.addresses(codes).values()), {0})
 
 

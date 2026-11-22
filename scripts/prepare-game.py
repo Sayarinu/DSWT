@@ -64,6 +64,24 @@ GAMES = {
         "rom_sha1": "{}.sha1",
         "destinations": {"res-bw2": "res"},
     },
+    # Project-Holon/aletheia builds Black and White from one tree with its own
+    # Python tools and CodeWarrior under Wine. Its targets table
+    # (tools/targets.py) lists each cartridge's SHA-1. Wonder Trade is added to
+    # the player's dump with aletheia's link as the map (scripts/port-bw.py),
+    # so its only workspace is the pristine one.
+    "bw": {
+        "pin": "client/upstream-aletheia.json",
+        "patch": None,
+        # Runs the linker through Wine off Windows, as aletheia runs the compiler,
+        # includes generated data through a drive path there, and builds without the
+        # DSi key, keeping the dump's DSi block.
+        "build_patches": ("client/aletheia-build.patch",),
+        "staged_revisions": (),
+        "workspace": "aletheia",
+        "adapter": "bw",
+        "resources": (),
+        "rom_sha1": "tools/targets.py",
+    },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
 RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
@@ -149,6 +167,11 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
     for revision, digest in pin["rom_sha1"].items():
         if revision in game["staged_revisions"]:
             continue
+        if "{}" not in game["rom_sha1"]:
+            # A table of every target's SHA-1 in one file
+            if f'"{digest}"'.encode() not in git(workspace, "show", "HEAD:" + game["rom_sha1"]):
+                raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
+            continue
         upstream = git(workspace, "show", "HEAD:" + game["rom_sha1"].format(revision))
         if upstream.decode().split()[0] != digest:
             raise RuntimeError("Pristine ROM checksums differ from the recorded inputs")
@@ -187,8 +210,9 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
 def prepare(root, pristine=False, name="platinum"):
     root = root.resolve()
     game = GAMES[name]
-    if not pristine and game["patch"] is None:
-        raise RuntimeError(f"{game['workspace']} has no Wonder Trade integration yet; prepare it with --pristine")
+    if game["patch"] is None:
+        # Wonder Trade is not built in this workspace: the port reads its pristine build.
+        pristine = True
     pin = json.loads((root / game["pin"]).read_text())
     if (root / "game").is_symlink():
         raise RuntimeError("Game workspace directory must not be a symlink")
@@ -213,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
                         help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
-                             "dp for Diamond and Pearl, or bw2 for Black 2 and White 2")
+                             "dp for Diamond and Pearl, bw2 for Black 2 and White 2, or bw for Black and White (always pristine)")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))

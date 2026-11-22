@@ -28,18 +28,21 @@ def seed_record(seed, generation):
 
 
 LAYOUTS = ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json",
-           "protocol/save-layout-b2w2.json")
+           "protocol/save-layout-bw.json", "protocol/save-layout-b2w2.json")
 TARGETS = ("us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain", "japan", "platinum-korea", "heartgold-us-rev0", "soulsilver-us-rev0",
            "diamond-us-rev5", "pearl-us-rev5", "heartgold-europe", "soulsilver-europe", "heartgold-france", "heartgold-germany", "heartgold-italy", "heartgold-spain", "soulsilver-france", "soulsilver-germany", "soulsilver-italy", "soulsilver-spain", "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan", "diamond-europe-rev5",
-           "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan", "black2-us", "white2-us")
+           "pearl-europe-rev5", "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain", "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan", "black-us", "white-us", "black2-us", "white2-us")
 
 # Generation V main-save facts the layout files leave out, by the layout's
-# decompilation pin (pokebw2 src/system/save_table.c, backup_system.c and
+# decompilation pin (aletheia's _MainSaveDesc, system_data.c and
+# backup_system.c; pokebw2 src/system/save_table.c, backup_system.c and
 # trainer_data_savedata.c): the block count (a CRC of each block precedes the
 # save footer, whose own CRC covers them), the trainer data block, and where it
 # keeps the musical distribution's marker (set: the game reads the area that
 # holds the journal banks).
 MAIN_SAVES = {
+    "client/upstream-aletheia.json": {"blocks": 69, "trainer_block": 27, "trainer_offset": 0x19400,
+                                      "trainer_size": 0x68, "musical_marker": 0x3C},
     "client/upstream-pokebw2.json": {"blocks": 74, "trainer_block": 27, "trainer_offset": 0x19400,
                                      "trainer_size": 0xB0, "musical_marker": 0x3C},
 }

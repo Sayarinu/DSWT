@@ -1,6 +1,7 @@
 #include "journal_seed.h"
 #include "durable_save.h"
 #include "wonder_trade/journal.h"
+#include "journal_bw.h"
 #include "journal_b2w2.h"
 
 #include <openssl/crypto.h>
@@ -24,7 +25,7 @@ using Bytes = std::vector<std::uint8_t>;
 
 void Require(bool condition) { if (!condition) throw std::runtime_error("unsupported journal; preserve recovery evidence"); }
 
-// The journal core of the target's game family (journal_b2w2.h).
+// The journal core of the target's game family (journal_bw.h, journal_b2w2.h).
 struct JournalApi {
     int (*open)(WtJournal *, WtJournalIO);
     int (*read)(const WtJournal *, WtJournalEntry *);
@@ -32,6 +33,7 @@ struct JournalApi {
     void (*close)(WtJournal *);
 };
 constexpr JournalApi kGen4Journal{WtJournal_Open, WtJournal_Read, WtJournal_Commit, WtJournal_Close};
+constexpr JournalApi kBWJournal{WtJournalBW_Open, WtJournalBW_Read, WtJournalBW_Commit, WtJournalBW_Close};
 constexpr JournalApi kB2W2Journal{WtJournalB2W2_Open, WtJournalB2W2_Read, WtJournalB2W2_Commit, WtJournalB2W2_Close};
 
 // Where a family keeps its two journal banks; every byte of a bank after its
@@ -41,10 +43,14 @@ struct Banks {
     std::size_t size;
 };
 constexpr Banks kGen4Banks{{0x30000, 0x70000}, 65536};
+constexpr Banks kBWBanks{{0x74000, 0x75000}, 4096};
 constexpr Banks kB2W2Banks{{0x6B000, 0x6C000}, 4096};
 
+bool IsBW(const std::string &target) { return target == "black-us" || target == "white-us"; }
 bool IsB2W2(const std::string &target) { return target == "black2-us" || target == "white2-us"; }
-const Banks &BanksFor(const std::string &target) { return IsB2W2(target) ? kB2W2Banks : kGen4Banks; }
+const Banks &BanksFor(const std::string &target) {
+    return IsBW(target) ? kBWBanks : IsB2W2(target) ? kB2W2Banks : kGen4Banks;
+}
 
 Bytes ReadOwned(const std::string &path) {
     int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -125,31 +131,36 @@ std::uint32_t FooterMagic(const std::string &target) {
     return isKorean ? 0x20070903 : 0x20060623;
 }
 
-// Black 2/White 2 (protocol/save-layout-b2w2.json and pokebw2's
-// src/system/save_table.c): two copies of the main save, 0x25FA4 bytes each.
-// Each ends with a CRC of every one of its 74 blocks and a 16-byte footer
-// {count, size, magic, padding, CRC of the CRCs}. The trainer data block (27)
-// holds a marker per extra save; marker 6 set means the game still reads the
-// musical distribution area that holds the journal banks.
-constexpr std::array<std::size_t, 2> kB2W2Copies{0, 0x26000};
-constexpr std::size_t kB2W2Used = 0x25FA4, kB2W2Crcs = 74 * 2, kB2W2Magic = 0x31053527;
-constexpr std::size_t kB2W2TrainerBlock = 27, kB2W2Trainer = 0x19400, kB2W2TrainerSize = 0xB0;
-constexpr std::size_t kB2W2MusicalMarker = 0x30 + 6 * 2, kMarkerSet = 0xC21E;
+// Generation V main saves (protocol/save-layout-bw.json and aletheia's
+// _MainSaveDesc, protocol/save-layout-b2w2.json and pokebw2's
+// src/system/save_table.c): two copies of the main save. Each ends with a CRC
+// of every one of its blocks (padded to 4 bytes) and a 16-byte footer {count,
+// size, magic, padding, CRC of the CRCs}. The trainer data block (27) holds a
+// marker per extra save; marker 6 set means the game still reads the musical
+// distribution area that holds the journal banks.
+struct MainSave {
+    std::array<std::size_t, 2> copies;
+    std::size_t used, crcs, trainer, trainerSize;
+};
+constexpr MainSave kBWSave{{0, 0x24000}, 0x23F9C, (69 + 1) * 2, 0x19400, 0x68};
+constexpr MainSave kB2W2Save{{0, 0x26000}, 0x25FA4, 74 * 2, 0x19400, 0xB0};
+constexpr std::size_t kGenVMagic = 0x31053527, kTrainerBlock = 27;
+constexpr std::size_t kMusicalMarker = 0x30 + 6 * 2, kMarkerSet = 0xC21E;
 
-void CheckB2W2(const Bytes &bytes) {
+void CheckGenV(const Bytes &bytes, const MainSave &save) {
     bool found = false;
-    for (const auto copy : kB2W2Copies) {
-        const auto *table = bytes.data() + copy + kB2W2Used - 16 - kB2W2Crcs;
-        const auto *footer = table + kB2W2Crcs;
-        if (Number(footer + 4, 4) != kB2W2Used || Number(footer + 8, 4) != kB2W2Magic ||
-            Number(footer + 14, 2) != Crc(table, kB2W2Crcs)) continue;
+    for (const auto copy : save.copies) {
+        const auto *table = bytes.data() + copy + save.used - 16 - save.crcs;
+        const auto *footer = table + save.crcs;
+        if (Number(footer + 4, 4) != save.used || Number(footer + 8, 4) != kGenVMagic ||
+            Number(footer + 14, 2) != Crc(table, save.crcs)) continue;
         // A block may be current in either copy; the game loads the one whose CRC matches.
-        const auto expected = Number(table + 2 * kB2W2TrainerBlock, 2);
-        for (const auto other : kB2W2Copies) {
-            const auto *trainer = bytes.data() + other + kB2W2Trainer;
-            if (Number(trainer + kB2W2TrainerSize + 2, 2) != expected || Crc(trainer, kB2W2TrainerSize) != expected)
+        const auto expected = Number(table + 2 * kTrainerBlock, 2);
+        for (const auto other : save.copies) {
+            const auto *trainer = bytes.data() + other + save.trainer;
+            if (Number(trainer + save.trainerSize + 2, 2) != expected || Crc(trainer, save.trainerSize) != expected)
                 continue;
-            Require(Number(trainer + kB2W2MusicalMarker, 2) != kMarkerSet);
+            Require(Number(trainer + kMusicalMarker, 2) != kMarkerSet);
             found = true;
         }
     }
@@ -158,8 +169,8 @@ void CheckB2W2(const Bytes &bytes) {
 
 void CheckLayout(const Bytes &bytes, const std::string &target) {
     const auto &banks = BanksFor(target);
-    if (IsB2W2(target)) {
-        CheckB2W2(bytes);
+    if (IsBW(target) || IsB2W2(target)) {
+        CheckGenV(bytes, IsBW(target) ? kBWSave : kB2W2Save);
         for (unsigned bank = 0; bank < 2; ++bank) CheckTail(bytes, banks, bank);
         return;
     }
@@ -229,7 +240,9 @@ void Open(Context &context, const std::string &target) {
     Require(context.entry.generation != std::numeric_limits<std::uint64_t>::max());
 }
 
-const JournalApi &JournalFor(const std::string &target) { return IsB2W2(target) ? kB2W2Journal : kGen4Journal; }
+const JournalApi &JournalFor(const std::string &target) {
+    return IsBW(target) ? kBWJournal : IsB2W2(target) ? kB2W2Journal : kGen4Journal;
+}
 
 std::array<unsigned char, 32> FreshSeed(const unsigned char previous[32]) {
     std::array<unsigned char, 32> seed{};

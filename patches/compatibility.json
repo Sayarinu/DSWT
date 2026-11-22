@@ -725,6 +725,38 @@
       "build_revision": 0,
       "pristine_verified": true,
       "planned_patch": "dswt-white2-us.bps"
+    },
+    {
+      "id": "black-us",
+      "game": "Pokémon Black",
+      "name": "USA, Europe",
+      "game_code": "IRBO",
+      "revision": 0,
+      "language": "English",
+      "size": 268435456,
+      "sha256": "b9979189d299a0231d01c8885c0d054b706976ffc75427ca59d84e0ce1493034",
+      "sha1": "26ad0b9967aa279c4a266ee69f52b9b2332399a5",
+      "crc32": "4f6e5580",
+      "reference": "https://github.com/Project-Holon/aletheia/blob/50731dd699fb0fb3f881cd028a67d8f6aa649a88/docs/ROMS.md",
+      "build_revision": 0,
+      "pristine_verified": true,
+      "planned_patch": "dswt-black-us.bps"
+    },
+    {
+      "id": "white-us",
+      "game": "Pokémon White",
+      "name": "USA, Europe",
+      "game_code": "IRAO",
+      "revision": 0,
+      "language": "English",
+      "size": 268435456,
+      "sha256": "b288bb061fd646894f5059f55cd0a1efb13b4f0cfd3d9e06e9e42a5bd9431ac6",
+      "sha1": "bc696a0dfb448c7b3a8a206f0f8214411a039208",
+      "crc32": "b552501c",
+      "reference": "https://github.com/Project-Holon/aletheia/blob/50731dd699fb0fb3f881cd028a67d8f6aa649a88/docs/ROMS.md",
+      "build_revision": 0,
+      "pristine_verified": true,
+      "planned_patch": "dswt-white-us.bps"
     }
   ]
 }

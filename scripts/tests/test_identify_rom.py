@@ -89,7 +89,8 @@ class IdentifyRomTests(unittest.TestCase):
             "korean": (cartridge("IPGK", 0), r"Pokémon SoulSilver \(Korea, Korean, Rev 0\) is not supported yet"),
             "european": (cartridge("ADAP", 0), r"Pokémon Diamond \(Europe, English, Rev 0\) is not supported yet"),
             "japanese black 2": (cartridge("IREJ", 0), r"Pokémon Black 2 \(Japan, Japanese, Rev 0\) is not supported yet"),
-            "other game": (cartridge("IRBO", 0), "Unrecognized input"),
+            "japanese white": (cartridge("IRAJ", 0), r"Pokémon White \(Japan, Japanese, Rev 0\) is not supported yet"),
+            "other game": (cartridge("AMHE", 0), "Unrecognized input"),
         }
         for name, (data, message) in cases.items():
             with self.subTest(name):
@@ -123,7 +124,8 @@ class IdentifyRomTests(unittest.TestCase):
             "heartgold-korea", "soulsilver-korea", "heartgold-japan", "soulsilver-japan",
             "diamond-france", "diamond-germany", "diamond-italy", "diamond-spain", "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
             "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan",
-            "france", "germany", "italy", "spain", "japan", "platinum-korea", "black2-us", "white2-us"])
+            "france", "germany", "italy", "spain", "japan", "platinum-korea", "black2-us", "white2-us",
+            "black-us", "white-us"])
         for key in ("id", "sha256", "sha1", "crc32"):
             self.assertEqual(len({row[key] for row in variants}), len(variants))
         patches = [row["planned_patch"] for row in variants if row["planned_patch"] is not None]
@@ -133,9 +135,9 @@ class IdentifyRomTests(unittest.TestCase):
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][0], row["game"])
             self.assertEqual(identify_rom.bundle.CARTRIDGES[row["game_code"]][2], row["language"])
             # Only the first Japanese Diamond and Pearl revisions are 128 MiB; Japanese Pearl Rev 6 is 64.
-            # Black 2 and White 2 are 512 MiB.
+            # Black and White are 256 MiB, Black 2 and White 2 512 MiB.
             small = row["game_code"][:3] in ("ADA", "APA") and not (row["game_code"][3] == "J" and row["revision"] < 5)
-            mebibytes = 512 if row["game_code"][:3] in ("IRE", "IRD") else 64 if small else 128
+            mebibytes = {"IRE": 512, "IRD": 512, "IRB": 256, "IRA": 256}.get(row["game_code"][:3], 64 if small else 128)
             self.assertEqual(row["size"], mebibytes * 1024 * 1024)
             self.assertIs(type(row["revision"]), int)
             for key, length in (("sha256", 64), ("sha1", 40), ("crc32", 8)):
@@ -155,7 +157,7 @@ class IdentifyRomTests(unittest.TestCase):
                                                         "pearl-france", "pearl-germany", "pearl-italy", "pearl-spain",
                                                         "diamond-korea", "pearl-korea", "diamond-japan", "pearl-japan",
                                                         "france", "germany", "italy", "spain", "japan", "platinum-korea",
-                                                        "black2-us", "white2-us"])
+                                                        "black2-us", "white2-us", "black-us", "white-us"])
         for row in built:
             if "port_base" in row:
                 continue
@@ -192,6 +194,10 @@ class IdentifyRomTests(unittest.TestCase):
         self.assertEqual({"b2_us": rows["black2-us"]["sha1"], "w2_us": rows["white2-us"]["sha1"]}, bw2["rom_sha1"])
         for version, key in (("black2", "b2_us"), ("white2", "w2_us")):
             self.assertIn(f"{bw2['revision']}/{key}.sha1", rows[f"{version}-us"]["reference"])
+        bw = json.loads((SCRIPT.parent.parent / "client/upstream-aletheia.json").read_text())
+        self.assertEqual({"black": rows["black-us"]["sha1"], "white": rows["white-us"]["sha1"]}, bw["rom_sha1"])
+        for version in ("black", "white"):
+            self.assertIn(f"{bw['revision']}/docs/ROMS.md", rows[f"{version}-us"]["reference"])
 
 if __name__ == "__main__":
     unittest.main()
