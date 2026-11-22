@@ -74,6 +74,28 @@ def with_overlay(base, code):
     return bytes(data)
 
 
+ARM9_AT, ARM9_RAM = 0x800, 0x02000000
+
+
+def arm9(code, run, compressed=True):
+    """An ARM9 binary: module parameters, then code, BLZ-compressed (whose last run bytes are zero) or not."""
+    body = blz(code, run) if compressed else code
+    end = ARM9_RAM + 0x24 + len(body) if compressed else 0
+    params = struct.pack("<9I", 0, 0, 0, 0, 0, end, 0, 0xDEC00621, 0x2106C0DE)
+    return params + body
+
+
+def with_arm9(base, binary, footer):
+    """Place an ARM9 binary at 0x800. Gen IV ends it with the Nitro footer naming its parameters;
+    DSi-enhanced Gen V cartridges have none, so the parameters must be found by their magic."""
+    data = bytearray(base)
+    data[0x20:0x30] = struct.pack("<IIII", ARM9_AT, ARM9_RAM, ARM9_RAM, len(binary))
+    data[ARM9_AT:ARM9_AT + len(binary)] = binary
+    tail = ARM9_AT + len(binary)
+    data[tail:tail + 12] = struct.pack("<III", 0xDEC00621, 0, 0) if footer else b"\xff" * 12
+    return bytes(data)
+
+
 # ROM-shaped fixtures: a cartridge header, a pseudo-random body and erased-flash padding.
 SIZE, USED = 4096, 4096 - 0x100
 PINS = [bytes([0x31] * 32), bytes([0x32] * 32)]

@@ -70,6 +70,10 @@ EUROPE_AS_US = {("CPUE", 10), ("ADAE", 13), ("APAE", 13), ("IPKE", 10), ("IPGE",
 # compressed code (Platinum, Diamond, Pearl) adds nothing.
 # The ARM9 binary ends with this marker and the offset of its module parameters.
 NITRO_FOOTER = 0xDEC00621
+# DSi-enhanced cartridges (Black, White, Black 2, White 2) have no such footer. Their
+# module parameters are found by the two words that close them, 0x1C bytes in.
+NITRO_PARAMS_MAGIC = struct.pack("<II", NITRO_FOOTER, 0x2106C0DE)
+PARAMS_MAGIC_AT = 0x1C
 
 
 class BundleError(ValueError):
@@ -190,13 +194,32 @@ def _blz_expand(data, label):
     return bytes(out)
 
 
+def _arm9_params(rom, offset, size, label):
+    """Offset of the ARM9 module parameters within the ARM9 binary, or None if it has none.
+
+    The footer after the binary gives it; without a footer, the parameters' closing magic
+    must appear exactly once, word-aligned, inside the binary."""
+    if offset + size + 8 <= len(rom):
+        if struct.unpack_from("<I", rom, offset + size)[0] == NITRO_FOOTER:
+            return struct.unpack_from("<I", rom, offset + size + 4)[0]
+    stop = min(offset + size, len(rom))
+    found, at = [], rom.find(NITRO_PARAMS_MAGIC, offset, stop)
+    while at >= 0:
+        if (at - offset) % 4 == 0 and at - offset >= PARAMS_MAGIC_AT:
+            found.append(at - offset - PARAMS_MAGIC_AT)
+        at = rom.find(NITRO_PARAMS_MAGIC, at + 1, stop)
+    if len(found) > 1:
+        raise BundleError(f"{label} has malformed compressed code")
+    return found[0] if found else None
+
+
 def compressed_code(rom, label):
     """Return [(name, compressed bytes, expanded bytes)] for the ARM9 binary and each compressed overlay."""
     modules = []
     try:
         offset, _, ram, size = struct.unpack_from("<IIII", rom, 0x20)
-        if offset + size + 8 <= len(rom) and struct.unpack_from("<I", rom, offset + size)[0] == NITRO_FOOTER:
-            params = struct.unpack_from("<I", rom, offset + size + 4)[0]
+        params = _arm9_params(rom, offset, size, label)
+        if params is not None:
             end = struct.unpack_from("<I", rom, offset + params + 0x14)[0] if params + 0x18 <= size else 0
             if end:
                 if not 0 < end - ram <= size:
