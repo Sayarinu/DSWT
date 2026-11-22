@@ -26,6 +26,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import zlib
 
 from . import aletheia, elf, link, nds
 
@@ -58,9 +59,23 @@ OVERLAY_START = "FS_StartOverlay"
 OVERLAY_DETOUR = "WtOverlay_Detour"
 ARM_VENEER, THUMB_VENEER = 8, 6
 ARENA_FUNCTION = "OS_GetInitArenaLo"
-# Main RAM left after the game's own heaps must stay at least this large.
+# Main RAM left free after the module and the game's own allocations from the
+# main arena must stay at least this large. Measured in melonDS on White with a
+# 131 KiB module: 41,680 bytes (0x023D5D30 to 0x023E0000 once the game set up
+# its heaps). 16 KiB leaves room for the game's own variation and stops a
+# module that grows by about 25 KiB more.
 MIN_HEADROOM = 16 * 1024
+# The main arena's end in DS mode (OS_GetInitArenaHi for the main arena).
+ARENA_HI = 0x023E0000
+# The game's heaps (GFL_USE_InitSystem: GFL_HEAP_Init with the DS table of two
+# heaps), and what it takes from the arena besides them (the overlay table, the
+# heap manager's tables and their alignment), measured with the figure above.
+HEAP_TABLE, HEAP_COUNT, ARENA_OTHER = "_ArenaTableDs", 2, 0x15D0
 TWL_ALIGN = 0x80000
+# Wonder Trade's X-menu icon: Black 2/White 2's art, as a new member of the
+# field menu's graphics archive in the format of the Pokémon button's characters.
+ICON_ARCHIVE, ICON_TEMPLATE, ICON_MEMBER = "a/0/7/1", 8, 39
+ICON_PNG = ROOT / "client/res-bw2/graphics/field_menu/43.png"
 
 
 class PortError(ValueError):
@@ -428,7 +443,7 @@ class Target:
         self.hooks, self.arm9_patches = hooks, arm9_patches
         self.segment, self.bss = segment, bss
         new_arm9 = self._arm9(segment, bss, arm9_patches)
-        rom = relayout(self.rom, new_arm9)
+        rom = relayout(self.rom, new_arm9, {self.icon_fid: self.icons})
         self.log(f"module {self.base:#x}-{self.arena:#x}: {len(arm9_patches)} ARM9 entries, "
                  f"{len(hooks)} overlay entries")
         return rom
@@ -453,6 +468,34 @@ class Target:
         struct.pack_into("<I", body, literals[0], self.arena)
         self.arena_literal = base + literals[0]
         return bytes(body)
+
+    def check_headroom(self):
+        """Main RAM the game leaves free after the module, its heaps and its other arena use."""
+        tables = self.unmapped.get(HEAP_TABLE, set())
+        require(len(tables) == 1, f"the game's heap table {HEAP_TABLE} was not found")
+        base, body = self.modules["arm9"]
+        at = next(iter(tables)) - base
+        sizes = [nds.u32(body, at + 8 * i) for i in range(HEAP_COUNT)]
+        arenas = [nds.u32(body, at + 8 * i + 4) for i in range(HEAP_COUNT)]
+        require(arenas == [0] * HEAP_COUNT, "a game heap is outside the main arena")
+        self.headroom = ARENA_HI - self.arena - sum(sizes) - ARENA_OTHER
+        require(self.headroom >= MIN_HEADROOM,
+                f"only {self.headroom} bytes of main RAM stay free; at least {MIN_HEADROOM} are needed")
+        self.log(f"{self.headroom} bytes of main RAM stay free (heaps {', '.join(hex(s) for s in sizes)})")
+
+    def menu_icon(self):
+        """The field menu's graphics archive with Wonder Trade's icon as its next member."""
+        self.icon_fid = nds.file_ids(self.rom)[ICON_ARCHIVE]
+        members, names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.icon_fid))])
+        require(len(members) == ICON_MEMBER, f"{ICON_ARCHIVE} does not end at member {ICON_MEMBER}")
+        template = members[ICON_TEMPLATE]
+        require(template[:4] == b"RGCN" and template[0x10:0x14] == b"RAHC" and nds.u32(template, 0x1C) == 3,
+                f"{ICON_ARCHIVE} member {ICON_TEMPLATE} is not 4-bit characters")
+        size = nds.u32(template, 0x28)
+        tiles = icon_tiles(ICON_PNG.read_bytes())
+        require(len(tiles) == size and 0x30 + size == len(template), f"{ICON_PNG.name} does not fit the character data")
+        self.icons = nds.narc_join([*members, template[:0x30] + tiles], names)
+        self.log(f"Wonder Trade's icon is member {ICON_MEMBER} of {ICON_ARCHIVE}")
 
     # --- 6. Read the cartridge back -------------------------------------------------------------------
     def verify(self, rom):
@@ -493,7 +536,10 @@ class Target:
             else:
                 require(target & ~1 == self.linked.symbols[symbol.name], f"{symbol.name} jumps to the wrong place")
         files = lambda r: [r[slice(*nds.file_span(r, fid))] for fid in range(nds.u32(r, 0x4C) // 8)]
-        require(files(rom) == files(self.rom), "a cartridge file changed")
+        old, new = files(self.rom), files(rom)
+        require(new[self.icon_fid] == self.icons, "the icon archive was not written")
+        new[self.icon_fid] = old[self.icon_fid]
+        require(new == old, "a cartridge file changed")
         self.log("the new cartridge differs from the dump only where the port wrote")
 
     def build(self):
@@ -502,7 +548,9 @@ class Target:
         self.check_game_sources()
         self.compile_wonder_trade()
         self.link()
+        self.menu_icon()
         rom = self.assemble()
+        self.check_headroom()
         self.verify(rom)
         return rom
 
@@ -540,10 +588,54 @@ def same_function(a_obj, a, b_obj, b):
     return shape(a_obj, a) == shape(b_obj, b)
 
 
-def relayout(rom, arm9):
+def icon_tiles(png):
+    """4-bit characters, 8x8 tiles in rows, from an 8-bit indexed PNG whose pixels use colors 0 to 15."""
+    require(png[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG")
+    at, data, header = 8, b"", None
+    while at < len(png):
+        length, kind = struct.unpack_from(">I4s", png, at)
+        body = png[at + 8:at + 8 + length]
+        if kind == b"IHDR":
+            header = struct.unpack(">IIBBBBB", body)
+        elif kind == b"IDAT":
+            data += body
+        at += 12 + length
+    width, height, depth, color, _, _, interlace = header
+    require(depth == 8 and color == 3 and not interlace and width % 8 == 0 and height % 8 == 0,
+            "the icon must be an 8-bit indexed, non-interlaced PNG of whole tiles")
+    raw, rows, previous = zlib.decompress(data), [], bytes(width)
+    for y in range(height):
+        kind, line = raw[y * (width + 1)], bytearray(raw[y * (width + 1) + 1:(y + 1) * (width + 1)])
+        for x in range(width):
+            left, up = line[x - 1] if x else 0, previous[x]
+            corner = previous[x - 1] if x else 0
+            if kind == 1:
+                line[x] = (line[x] + left) & 0xFF
+            elif kind == 2:
+                line[x] = (line[x] + up) & 0xFF
+            elif kind == 3:
+                line[x] = (line[x] + (left + up) // 2) & 0xFF
+            elif kind == 4:
+                guess = left + up - corner
+                best = min((abs(guess - left), 0, left), (abs(guess - up), 1, up), (abs(guess - corner), 2, corner))[2]
+                line[x] = (line[x] + best) & 0xFF
+        rows.append(bytes(line))
+        previous = line
+    require(all(value < 16 for row in rows for value in row), "the icon uses more than 16 colors")
+    out = bytearray()
+    for ty in range(0, height, 8):
+        for tx in range(0, width, 8):
+            for y in range(ty, ty + 8):
+                for x in range(tx, tx + 8, 2):
+                    out.append(rows[y][x] | rows[y][x + 1] << 4)
+    return bytes(out)
+
+
+def relayout(rom, arm9, files=None):
     """The cartridge with a new ARM9 static binary.
 
-    Everything after it in the DS area moves by its growth; the DSi area moves
+    Everything after it in the DS area moves by its growth, and each replaced
+    file moves to the end of the DS area; the DSi area moves
     to the next 512 KiB boundary after the DS area if it no longer fits where it
     was. Its digests and signature are left as they were: the cartridge runs in
     DS mode only."""
@@ -564,6 +656,10 @@ def relayout(rom, arm9):
         start, end = struct.unpack_from("<II", out, entry)
         if start >= old_end:
             struct.pack_into("<II", out, entry, start + delta, end + delta)
+    for fid, body in sorted((files or {}).items()):
+        place = nds.align(len(out), nds.FILE_ALIGN)
+        out += b"\xff" * (place - len(out)) + body
+        struct.pack_into("<II", out, fat + 8 * fid, place, place + len(body))
     struct.pack_into("<I", out, 0x80, len(out))
     if out[0x12] & 2:
         twl_start, twl_end = nds.u16(rom, 0x92) * TWL_ALIGN, nds.u32(rom, 0x210)

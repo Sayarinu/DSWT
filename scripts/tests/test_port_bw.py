@@ -3,6 +3,7 @@ from pathlib import Path
 import struct
 import sys
 import unittest
+import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from retail_port import bw, nds  # noqa: E402
@@ -54,6 +55,43 @@ class RelayoutTests(unittest.TestCase):
         rom = cartridge(0x1000, 0x6000, 0x80000, 0x400, capacity=2)
         with self.assertRaises(bw.PortError):
             bw.relayout(rom, rom[0x4000:0x5000] + bytes(0x80000))
+
+
+def png(width, height, rows, filters):
+    """An 8-bit indexed PNG with the given rows and per-row filter types (only None and Up/Sub encoded here)."""
+    raw, previous = b"", bytes(width)
+    for row, kind in zip(rows, filters):
+        if kind == 2:
+            encoded = bytes((row[x] - previous[x]) & 0xFF for x in range(width))
+        elif kind == 1:
+            encoded = bytes((row[x] - (row[x - 1] if x else 0)) & 0xFF for x in range(width))
+        else:
+            encoded = bytes(row)
+        raw += bytes([kind]) + encoded
+        previous = row
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0))
+            + chunk(b"PLTE", bytes(48)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+class IconTests(unittest.TestCase):
+    def test_pixels_become_4bit_tiles_in_rows(self):
+        rows = [bytes((x + y) % 16 for x in range(16)) for y in range(8)]
+        tiles = bw.icon_tiles(png(16, 8, rows, [0, 1, 2, 0, 2, 1, 0, 2]))
+        self.assertEqual(len(tiles), 64)
+        self.assertEqual(tiles[0], rows[0][0] | rows[0][1] << 4)
+        self.assertEqual(tiles[32], rows[0][8] | rows[0][9] << 4)  # the second tile starts at x 8
+        self.assertEqual(tiles[4], rows[1][0] | rows[1][1] << 4)
+
+    def test_more_than_sixteen_colors_are_refused(self):
+        with self.assertRaises(bw.PortError):
+            bw.icon_tiles(png(8, 8, [bytes([16] * 8)] * 8, [0] * 8))
+
+    def test_the_black_2_icon_fits_the_pokemon_button(self):
+        icon = bw.icon_tiles(bw.ICON_PNG.read_bytes())
+        self.assertEqual(len(icon), 0x400)
 
 
 class VeneerTests(unittest.TestCase):
