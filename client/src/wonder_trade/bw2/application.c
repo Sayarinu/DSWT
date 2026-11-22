@@ -2,6 +2,7 @@
 #include <string.h>
 #include <mbedtls/platform_util.h>
 
+#include "communication/pokemon_trade.h"
 #include "constants/arc.h"
 #include "constants/pokemon.h"
 #include "field/field.h"
@@ -18,6 +19,7 @@
 #include "gfl/str.h"
 #include "nnsys/g2d.h"
 #include "pml/poke_party.h"
+#include "save/player_info.h"
 #include "system/game_comm.h"
 #include "system/game_data.h"
 #include "system/game_event.h"
@@ -35,12 +37,18 @@
  * heap 1, and at boot when the save needs recovery. The screen is the error
  * window the game shows for a save error (src/system/save_error.c) with the
  * text drawn into it: a title, the status and a short list of actions, chosen
- * with the +Control Pad and A, B to go back. */
+ * with the +Control Pad and A, B to go back. A received Pokémon is shown with
+ * the game's own trade animation first. */
 
 typedef char WtWideCharCheck[sizeof(L"a"[0]) == 2 ? 1 : -1];
 
 #define WT_HEAPID 0xBA
 #define WT_HEAP_SIZE 0x70000
+/* The boot check's message needs only the screen. */
+#define WT_CHECKING_HEAP_SIZE 0x10000
+/* The trade animation's work heap, which it makes in heap 1 (pokemontrade_proc.c). */
+#define WT_TRADE_HEAP_SIZE 0x96000
+#define WT_FADE_FRAMES 16
 /* The error window's text area (save_error.c): tiles from 0x20, 30x16 tiles at (1, 4). */
 #define TILE_SIZE 0x20
 #define FIRST_TEXT_TILE 0x20
@@ -62,6 +70,9 @@ enum WtAppState {
     WT_APP_CANCEL_CONFIRM,
     WT_APP_MESSAGE,
     WT_APP_RECEIVED,
+    WT_APP_TRADE_FADE,
+    WT_APP_TRADE,
+    WT_APP_CHECKING,
     WT_APP_ERROR,
     WT_APP_RESTART,
     WT_APP_RECOVERY,
@@ -75,9 +86,18 @@ struct WtApp {
     GFLBitmap *bitmap;
     Font *font;
     StrBuf *line;
-    int state, message, cursor, selectedSlot;
+    int state, message, cursor, selectedSlot, fade;
     BOOL boot, started;
+    /* For the trade animation; gameData is NULL at boot, which shows none. */
+    GameData *gameData;
+    GameProcManager *procs;
+    PlayerInfo *partner;
+    GXDispSelect select;
+    PartyPkm pkm[2];
+    PokemonTradeDemoParam demo;
 };
+
+typedef char WtTradeImageCheck[sizeof(PartyPkm) <= WT_GAME_IMAGE_SIZE ? 1 : -1];
 
 static void Screen_Init(WtApp *app)
 {
@@ -388,6 +408,88 @@ static void Input(WtApp *app)
     }
 }
 
+/* The Global Trade Station's trade animation (POKEMONTRADE_GTS_TRADE_PROC_FUNCTIONS),
+ * which the GTS plays for an online trade with Wi-Fi up, from a process
+ * manager of its own (worldtrade_demo.c). It only shows the two Pokémon, the
+ * one sent and the one received as saved: its GTS trade type ends without
+ * touching the party, the boxes or the save (PoketradeSave_StepAfterTrade).
+ * Its overlays follow Wi-Fi's 11 and 29; 139 and 189 are the ones the GTS
+ * keeps loaded for it (worldtrade.c). FALSE leaves the result to show alone. */
+static BOOL Trade_Begin(WtApp *app)
+{
+    WtReceivedPokemon *received = &app->network.received;
+    PokemonTradeDemoParam *demo = &app->demo;
+    if (!app->gameData || !app->network.hasReceived
+        || GFL_HeapGetHighestAllocatableSize(HEAPID_USER) < WT_TRADE_HEAP_SIZE + 0x1000) return FALSE;
+    memcpy(&app->pkm[0], received->sent, sizeof(PartyPkm));
+    /* A Pokémon received into the PC was saved as a box Pokémon: give it party
+     * data as the receive does (game_save.c ReceiveEffects). */
+    memset(&app->pkm[1], 0, sizeof(PartyPkm));
+    memcpy(&app->pkm[1].base, received->image, sizeof(BoxPkm));
+    PokeParty_RecalcStats(&app->pkm[1]);
+    PokeParty_Recover(&app->pkm[1]);
+    if (PokeParty_GetParam(&app->pkm[0], PKM_PARAM_SPECIES, NULL) == 0
+        || PokeParty_GetParam(&app->pkm[1], PKM_PARAM_SPECIES, NULL) == 0) return FALSE;
+    app->partner = PlayerInfo_Create(WT_HEAPID);
+    PlayerInfo_Init(app->partner);
+    copyTrainerName(app->partner, received->originalTrainer);
+    setTrainerGender(app->partner, received->originalTrainerGender);
+    memset(demo, 0, sizeof(*demo));
+    demo->gameData = app->gameData;
+    demo->pkm[0] = &app->pkm[0];
+    demo->pkm[1] = &app->pkm[1];
+    demo->myInfo = GetGameDataPlayerInfo(app->gameData);
+    demo->partnerInfo = app->partner;
+    GFL_OvlLoad(OVERLAY_ID(139));
+    GFL_OvlLoad(OVERLAY_ID(189));
+    app->procs = CreateGameProcManager(WT_HEAPID);
+    QueueGameProc(app->procs, OVERLAY_POKEMONTRADE, &POKEMONTRADE_GTS_TRADE_PROC_FUNCTIONS, demo);
+    app->state = WT_APP_TRADE;
+    return TRUE;
+}
+
+static void Trade_End(WtApp *app)
+{
+    FreeGameProcManager(app->procs);
+    app->procs = NULL;
+    GFL_OvlUnload(OVERLAY_ID(189));
+    GFL_OvlUnload(OVERLAY_ID(139));
+    GFL_HeapFree(app->partner);
+    app->partner = NULL;
+    /* The animation leaves its banks and engine layout; the screen takes the banks it needs. */
+    GX_ResetBankForOBJ(); GX_ResetBankForBGExtPltt(); GX_ResetBankForOBJExtPltt(); GX_ResetBankForTex();
+    GX_ResetBankForTexPltt(); GX_ResetBankForClearImage(); GX_ResetBankForSubOBJ(); GX_ResetBankForSubBGExtPltt();
+    GX_ResetBankForSubOBJExtPltt();
+}
+
+/* The received Pokémon: fade out, play the animation, then fade the result in. */
+static void Trade_Update(WtApp *app)
+{
+    if (app->state == WT_APP_TRADE_FADE) {
+        if (++app->fade < WT_FADE_FRAMES) {
+            GX_SetMasterBrightness(-app->fade);
+            GXS_SetMasterBrightness(-app->fade);
+            return;
+        }
+        app->select = GX_GetDispSelect();
+        Screen_Free(app);
+        if (Trade_Begin(app)) return;
+    } else if (GFL_ProcMgrUpdate(app->procs) != PROCMGR_DONE) {
+        return;
+    } else {
+        Trade_End(app);
+    }
+    GX_SetDispSelect(app->select);
+    mbedtls_platform_zeroize(app->pkm, sizeof(app->pkm));
+    mbedtls_platform_zeroize(app->network.received.sent, sizeof(app->network.received.sent));
+    mbedtls_platform_zeroize(app->network.received.image, sizeof(app->network.received.image));
+    Screen_Init(app);
+    GX_SetMasterBrightness(-WT_FADE_FRAMES);
+    GXS_SetMasterBrightness(-WT_FADE_FRAMES);
+    Show(app, WT_APP_RECEIVED, WT_TEXT_COMPLETED);
+    app->fade = WT_FADE_FRAMES;
+}
+
 static void Responded(WtApp *app)
 {
     WonderTradeNetwork *net = &app->network;
@@ -395,7 +497,10 @@ static void Responded(WtApp *app)
     if (net->needsEntropy) Show(app, WT_APP_MESSAGE, WT_TEXT_KEEP_PLAYING);
     else if (app->boot && net->canLeave && WtRecovery_CanWrite()) Close(app);
     else if (net->completed && net->returned) Show(app, WT_APP_MESSAGE, RefusalText(net->refusal, WT_TEXT_RETURNED));
-    else if (net->completed) Show(app, WT_APP_RECEIVED, WT_TEXT_COMPLETED);
+    else if (net->completed) {
+        app->state = WT_APP_TRADE_FADE;
+        app->fade = 0;
+    }
     else if (net->rejected) Show(app, WT_APP_MESSAGE, RefusalText(net->refusal, WT_TEXT_REJECTED));
     else if (net->superseded && net->tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_MESSAGE, WT_TEXT_SUPERSEDED);
     else if (net->refused) Show(app, WT_APP_MESSAGE, WT_TEXT_CANNOT_HOLD);
@@ -406,11 +511,11 @@ static void Responded(WtApp *app)
     else Show(app, WT_APP_MENU, net->tradePhase == WT_JOURNAL_IDLE ? WT_TEXT_CHOOSE : WT_TEXT_QUEUED);
 }
 
-WtApp *WtApp_Create(BOOL boot)
+static WtApp *Create(BOOL boot, u32 heapSize)
 {
     WtApp *app;
-    if (GFL_HeapGetHighestAllocatableSize(HEAPID_USER) < WT_HEAP_SIZE + 0x1000) return NULL;
-    GFL_HeapCreateChild(HEAPID_USER, WT_HEAPID, WT_HEAP_SIZE);
+    if (GFL_HeapGetHighestAllocatableSize(HEAPID_USER) < heapSize + 0x1000) return NULL;
+    GFL_HeapCreateChild(HEAPID_USER, WT_HEAPID, heapSize);
     app = GFL_HeapAllocateCore(WT_HEAPID, sizeof(*app));
     if (!app) {
         GFL_HeapDelete(WT_HEAPID);
@@ -422,6 +527,21 @@ WtApp *WtApp_Create(BOOL boot)
     app->game.heapId = WT_HEAPID;
     app->selectedSlot = -1;
     Screen_Init(app);
+    return app;
+}
+
+/* "Checking saved game...", while a slow boot check runs; free it before the check's result is shown. */
+WtApp *WtApp_CreateChecking(void)
+{
+    WtApp *app = Create(TRUE, WT_CHECKING_HEAP_SIZE);
+    if (app) Show(app, WT_APP_CHECKING, WT_TEXT_CHECKING_SAVE);
+    return app;
+}
+
+WtApp *WtApp_Create(BOOL boot)
+{
+    WtApp *app = Create(boot, WT_HEAP_SIZE);
+    if (!app) return NULL;
     if (boot) {
         Show(app, WT_APP_RECOVERY, WT_TEXT_RECOVERY_REQUIRED);
     } else if (WtGameSave_ReleaseMusicalArea(&app->game) != 0) {
@@ -438,6 +558,11 @@ BOOL WtApp_Update(WtApp *app)
 {
     BOOL couldLeave = app->network.canLeave;
     if (app->state == WT_APP_DONE) return TRUE;
+    if (app->state != WT_APP_TRADE_FADE && app->state != WT_APP_TRADE && app->fade > 0) {
+        --app->fade;
+        GX_SetMasterBrightness(-app->fade);
+        GXS_SetMasterBrightness(-app->fade);
+    }
     if (!app->started) {
         Input(app);
         if (app->state == WT_APP_CLOSING || (app->state == WT_APP_MESSAGE && GCTX_HIDGetPressedKeys() & PAD_BUTTON_A)) {
@@ -455,6 +580,10 @@ BOOL WtApp_Update(WtApp *app)
     }
     if (app->state == WT_APP_RESTART) {
         if (app->network.state == WT_NET_CLOSED) Connect(app);
+        return FALSE;
+    }
+    if (app->state == WT_APP_TRADE_FADE || app->state == WT_APP_TRADE) {
+        Trade_Update(app);
         return FALSE;
     }
     if (app->state == WT_APP_CONNECTING || app->state == WT_APP_PINGING) {
@@ -488,8 +617,9 @@ static WtApp *sApp;
 
 static BOOL WtProc_Init(GameProc *proc, u32 *state, void *param, void *work)
 {
-    (void)proc; (void)state; (void)param; (void)work;
+    (void)proc; (void)state; (void)work;
     sApp = WtApp_Create(FALSE);
+    if (sApp) sApp->gameData = param;
     return TRUE;
 }
 
@@ -540,7 +670,7 @@ static GameEventReturnCode WtEvent_Callback(GameEvent *event, u32 *state, void *
         *state = STEP_START_PROC;
         break;
     case STEP_START_PROC:
-        GSYS_QueueProc(wk->gsys, OVERLAY_NONE, &sWtProcFunctions, NULL);
+        GSYS_QueueProc(wk->gsys, OVERLAY_NONE, &sWtProcFunctions, GSYS_GetGameData(wk->gsys));
         *state = STEP_WAIT_PROC;
         break;
     case STEP_WAIT_PROC:

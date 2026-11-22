@@ -13,7 +13,8 @@
 /* The first process of the game (src/system/boot_proc.c queues it once): the
  * journal is checked against the save before the title screen, on a worker
  * thread. Retail writes stay refused until it succeeds; when it does not, the
- * game stops here. */
+ * game stops here. A check that takes longer than WT_BOOT_SILENT_FRAMES, as
+ * after an interrupted trade, says so on screen. */
 
 #define WT_BOOT_STACK_SIZE 0x8000
 
@@ -27,6 +28,7 @@ typedef struct WtBootWorker {
 
 static WtBootWorker *sWorker;
 static WtApp *sApp;
+static int sFrames;
 
 static void WtBoot_Worker(void *arg)
 {
@@ -73,7 +75,10 @@ static BOOL WtBoot_Tick(GameProc *proc, u32 *state, void *param, void *work)
     u32 size, unused;
     (void)proc; (void)param; (void)work;
     if (worker) {
-        if (!OS_IsThreadTerminated(&worker->thread)) return FALSE;
+        if (!OS_IsThreadTerminated(&worker->thread)) {
+            if (!sApp && ++sFrames == WT_BOOT_SILENT_FRAMES) sApp = WtApp_CreateChecking();
+            return FALSE;
+        }
         OS_JoinThread(&worker->thread);
         stack = (const unsigned char *)(worker->thread.stackTop + sizeof(u32));
         size = worker->thread.stackBottom - worker->thread.stackTop - WT_STACK_GUARD_BYTES;
@@ -83,6 +88,8 @@ static BOOL WtBoot_Tick(GameProc *proc, u32 *state, void *param, void *work)
         mbedtls_platform_zeroize(worker, sizeof(*worker));
         GFL_HeapFreeCore(worker);
         sWorker = NULL;
+        if (sApp) WtApp_Free(sApp);
+        sApp = NULL;
     }
     (void)state;
     if (WtRecovery_CanWrite()) return TRUE;
