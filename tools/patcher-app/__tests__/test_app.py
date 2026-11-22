@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -16,7 +17,7 @@ import build_app
 import dswt_patcher
 import patcher
 import release
-from support import BASES, TARGETS, USED, rom
+from support import BASES, PINS, TARGETS, USED, arm9, rom, with_arm9
 from test_patcher import Fixture
 
 
@@ -76,6 +77,29 @@ class CommandLineTests(AppFixture):
         code, _, err = self.run_app("--self-test")
         self.assertEqual(code, 1)
         self.assertIn("does not match", err)
+
+    def test_patches_a_gen5_dump_without_an_arm9_footer(self):
+        # Black 2 and White 2 compress ARM9 with no Nitro footer after it; the app expands it
+        # from the player's dump, as create did, and writes the exact target.
+        retail_code = (hashlib.sha512(b"gen5 arm9").digest() * 2)[:81] + bytes(40)
+        base = with_arm9(rom(0, "black2", code="IREO"), arm9(retail_code, 40), footer=False)
+        target = with_arm9(rom(0, "black2-wt", code="IREO"),
+                           arm9(b"wt.dswt.games:443" + PINS[0] + PINS[1] + bytes(40), 40), footer=False)
+        self.catalog["variants"].append(
+            {"id": "black2-us", "game": "Pokémon Black 2", "name": "USA, Europe", "game_code": "IREO", "revision": 0,
+             "size": len(base), "sha256": hashlib.sha256(base).hexdigest(), "pristine_verified": True,
+             "planned_patch": "dswt-black2-us.bps"})
+        bundle_dir = self.root / "game/gen5"
+        self.create(pairs=[(self.write("b2.nds", base), self.write("b2-wt.nds", target))], output=bundle_dir)
+        source = self.write("Black 2.nds", base)
+        output = self.root / "Black 2 (Wonder Trade).nds"
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = dswt_patcher.main(["--bundle", str(bundle_dir), "--input", str(source), "--output", str(output)])
+        self.assertEqual((code, err.getvalue()), (0, ""))
+        self.assertIn("Patched Pokémon Black 2 USA, Europe", out.getvalue())
+        self.assertEqual(output.read_bytes(), target)
+        self.assertEqual(source.read_bytes(), base)
 
     def test_output_needs_input_and_missing_bundle_is_reported(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

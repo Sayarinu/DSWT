@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 import patcher
-from support import BASES, PINS, PROFILE, TARGETS, assemble, blz, rom, source_read, target_read, with_overlay
+from support import (BASES, PINS, PROFILE, TARGETS, arm9, assemble, blz, rom, source_read, target_read, with_arm9,
+                     with_overlay)
 
 RECORD = {key: key for key in ("tool", "version", "revision", "archive", "license", "notices", "build", "binary")}
 SCALAR = bytes([0x11] * 32)
@@ -222,6 +223,33 @@ class CreateTests(Fixture):
                 with self.assertRaisesRegex(patcher.PatchError, message):
                     self.create(pairs=pairs(), output=self.root / "game/other")
                 self.assertFalse((self.root / "game/other").exists())
+
+    def test_checks_search_footerless_arm9(self):
+        # Like Black, White, Black 2 and White 2: a compressed ARM9 with no Nitro footer.
+        retail_code = (hashlib.sha512(b"retail arm9").digest() * 2)[:81] + bytes(40)
+        base = with_arm9(rom(1, "gen5-base"), arm9(retail_code, 40), footer=False)
+        self.catalog["variants"].append(dict(self.catalog["variants"][1], id="gen5", planned_patch="dswt-g.bps",
+                                             sha256=hashlib.sha256(base).hexdigest()))
+        base_path = self.write("gen5-base.nds", base)
+        profile = b"wt.dswt.games:443" + PINS[0] + PINS[1]
+
+        def pairs(binary, payload=b""):
+            # The header keeps the ARM9 size, so every target's binary is as long as the base's.
+            self.assertEqual(len(binary), len(arm9(retail_code, 40)))
+            return [(base_path, self.write("gen5.nds", with_arm9(rom(1, "gen5", payload=payload), binary, footer=False)))]
+        # Black 2 and White 2: Wonder Trade, and so the profile, only inside the compressed ARM9.
+        self.assertNotIn(PINS[0], pairs(arm9(profile + bytes(40), 40))[0][1].read_bytes())
+        manifest = self.create(pairs=pairs(arm9(profile + bytes(40), 40)))
+        self.assertEqual([entry["variant"] for entry in manifest["entries"]], ["gen5"])
+        expanded = base + arm9(retail_code, 40)[:0x24] + retail_code
+        self.assertEqual(bps.apply(expanded, (self.root / "game/bundle/dswt-g.bps").read_bytes()),
+                         (self.inputs / "gen5.nds").read_bytes())
+        # Black and White: the port stores ARM9 uncompressed, so retail ARM9 code in it must come from the base.
+        (self.inputs / "gen5.nds").unlink()
+        stored = retail_code[:48].ljust(len(blz(retail_code, 40)), b"\2")
+        with self.assertRaisesRegex(patcher.PatchError, "retail ROM content"):
+            self.create(pairs=pairs(arm9(stored, 0, compressed=False), payload=profile), output=self.root / "game/other")
+        self.assertFalse((self.root / "game/other").exists())
 
     def test_explicit_keys_replace_the_default_and_must_be_pem(self):
         other = self.inputs / "elsewhere.pem"

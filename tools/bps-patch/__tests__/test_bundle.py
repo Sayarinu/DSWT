@@ -8,7 +8,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle
-from support import BASES, TARGETS, USED, assemble, blz, literal_patch, rom, target_copy, with_overlay
+from support import (BASES, TARGETS, USED, arm9, assemble, blz, literal_patch, rom, target_copy, with_arm9,
+                     with_overlay)
 from test_patcher import Fixture
 
 
@@ -58,6 +59,31 @@ class BundleTests(Fixture):
         damaged[end - 8:end - 4] = (0x08FFFFFF).to_bytes(4, "little")
         with self.assertRaisesRegex(bundle.BundleError, "malformed compressed code"):
             bundle.source_view(bytes(damaged))
+
+    def test_footerless_arm9_expands_like_the_footer_layout(self):
+        # Gen IV ends the ARM9 binary with a footer naming its module parameters; the
+        # DSi-enhanced Gen V cartridges have none, so the parameters are found by their magic.
+        code = bytes(range(64)) + bytes(40)
+        binary = arm9(code, 40)
+        expanded = binary[:0x24] + code
+        for footer in (True, False):
+            with self.subTest(footer=footer):
+                base = with_arm9(rom(1, "arm9"), binary, footer)
+                self.assertEqual(bundle.compressed_code(base, "ROM"), [("ARM9", binary, expanded)])
+                self.assertEqual(bundle.source_view(base), base + expanded)
+        # Stored uncompressed (as the Black and White ports write it), or without parameters: nothing to expand.
+        self.assertEqual(bundle.compressed_code(with_arm9(rom(1, "arm9"), arm9(code, 40, compressed=False), False), "ROM"), [])
+        self.assertEqual(bundle.compressed_code(with_arm9(rom(1, "arm9"), bytes(128), False), "ROM"), [])
+
+    def test_footerless_arm9_needs_one_aligned_magic(self):
+        binary = arm9(bytes(range(64)) + bytes(40), 40)
+        binary += bytes(-len(binary) % 4)
+        magic = bundle.NITRO_PARAMS_MAGIC
+        unaligned = with_arm9(rom(1, "arm9"), binary + bytes(0x1D) + magic + bytes(3), False)
+        self.assertEqual([name for name, _, _ in bundle.compressed_code(unaligned, "ROM")], ["ARM9"])
+        twice = with_arm9(rom(1, "arm9"), binary + bytes(0x1C) + magic, False)
+        with self.assertRaisesRegex(bundle.BundleError, "malformed compressed code"):
+            bundle.compressed_code(twice, "ROM")
 
     def test_default_output_is_beside_the_input(self):
         source = self.write("Platinum.nds", BASES["us-rev0"])
