@@ -113,23 +113,23 @@
     },
     {
       "id": "WonderTrade_Text_ConnectionError",
-      "en_US": "Could not connect to Wi-Fi.\nCheck your WFC settings,\nthen retry.",
-      "fr_FR": "Connexion impossible. Vérifiez vos\nparamètres de la CWF Nintendo, puis\nréessayez.",
-      "de_DE": "Keine Verbindung. Überprüfe die\nEinstellungen der Nintendo WFC und\nversuche es noch einmal.",
-      "it_IT": "Connessione non riuscita. Controlla le\nimpostazioni della Nintendo WFC e\nriprova.",
-      "es_ES": "No se ha podido conectar. Comprueba la\nconfiguración de la CWF de Nintendo y\nvuelve a intentarlo.",
-      "ja_JP": "せつぞく　できませんでした\nWi-Fiコネクションの　せっていを\nかくにんしてください",
-      "ko_KR": "접속할 수 없었습니다\nWi-Fi 커넥션 설정을\n확인해 주십시오"
+      "en_US": "Couldn’t connect to the internet.\nCheck your Nintendo WFC settings\nand that your access point is\nin range, then try again.",
+      "fr_FR": "Impossible de se connecter à Internet.\nVérifiez vos paramètres de la CWF\nNintendo et la portée de votre point\nd’accès, puis réessayez.",
+      "de_DE": "Keine Verbindung zum Internet.\nÜberprüfe die Einstellungen der Nintendo\nWFC und ob dein Zugangspunkt in\nReichweite ist, und versuche es dann\nnoch einmal.",
+      "it_IT": "Impossibile connettersi a Internet.\nControlla le impostazioni della Nintendo\nWFC e che il punto di accesso sia nel\nraggio d’azione, poi riprova.",
+      "es_ES": "No se ha podido conectar a Internet.\nComprueba la configuración de la CWF de\nNintendo y que el punto de acceso esté\ncerca, y vuelve a intentarlo.",
+      "ja_JP": "インタ－ネットに\nせつぞく　できませんでした\nニンテンド－Wi-Fiコネクションの\nせっていを　かくにんして\nもういちど　ためしてください",
+      "ko_KR": "인터넷에 접속할 수 없었습니다\n닌텐도 Wi-Fi 커넥션 설정을\n확인하고 다시 시도해 주십시오"
     },
     {
       "id": "WonderTrade_Text_PingError",
-      "en_US": "Could not verify the server\nor saved connection state.\nCheck the connection code.",
-      "fr_FR": "Impossible de vérifier le serveur ou la\nconnexion sauvegardée. Vérifiez le code\nde connexion.",
-      "de_DE": "Server oder gespeicherte Verbindung\nkonnten nicht geprüft werden. Prüfe den\nVerbindungscode.",
-      "it_IT": "Impossibile verificare il server o la\nconnessione salvata. Controlla il codice\ndi connessione.",
-      "es_ES": "No se ha podido verificar el servidor ni\nla conexión guardada. Comprueba el\ncódigo de conexión.",
-      "ja_JP": "サ－バ－か　せつぞくの　きろくを\nかくにん　できませんでした\nせつぞくコ－ドを　みてください",
-      "ko_KR": "서버나 접속 기록을\n확인할 수 없었습니다\n접속 코드를 확인해 주십시오"
+      "en_US": "Something went wrong while\ncontacting Wonder Trade.\nPlease try again. If it keeps\nhappening, note the code below.",
+      "fr_FR": "Erreur de communication avec l’Echange\nMiracle. Veuillez réessayer. Si l’erreur\nse répète, notez le code ci-dessous.",
+      "de_DE": "Verbindungsfehler beim Wundertausch.\nBitte versuche es noch einmal. Tritt der\nFehler erneut auf, notiere den Code\nunten.",
+      "it_IT": "Errore di comunicazione con lo Scambio\nProdigioso. Riprova. Se l’errore si\nripete, annota il codice qui sotto.",
+      "es_ES": "Error de conexión con el Intercambio\nProdigioso. Vuelve a intentarlo. Si se\nrepite, anota el código de abajo.",
+      "ja_JP": "つうしんエラ－が　はっせい　しました\nもういちど　ためしてください\nなんども　おきるときは\nしたの　コ－ドを　ひかえてください",
+      "ko_KR": "통신 에러가 발생했습니다\n다시 시도해 주십시오\n계속 발생하면\n아래 코드를 적어 두십시오"
     },
     {
       "id": "WonderTrade_Text_Ineligible",
@@ -173,13 +173,13 @@
     },
     {
       "id": "WonderTrade_Text_ErrorCode",
-      "en_US": "Connection code",
-      "fr_FR": "Code de connexion",
-      "de_DE": "Verbindungscode",
-      "it_IT": "Codice connessione",
-      "es_ES": "Código de conexión",
-      "ja_JP": "せつぞくコ－ド",
-      "ko_KR": "접속 코드"
+      "en_US": "Support code",
+      "fr_FR": "Code d’assistance",
+      "de_DE": "Support-Code",
+      "it_IT": "Codice assistenza",
+      "es_ES": "Código de asistencia",
+      "ja_JP": "サポ－トコ－ド",
+      "ko_KR": "지원 코드"
     },
     {
       "id": "WonderTrade_Text_ConnectMs",
