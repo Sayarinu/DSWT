@@ -43,7 +43,7 @@ def main(argv=None):
     parser.add_argument("game", choices=sorted(bw.TARGETS))
     parser.add_argument("rom", type=Path, help="your own dump of that game")
     parser.add_argument("output", type=Path, help="new ROM file to write")
-    parser.add_argument("--workspace", type=Path, default=ROOT / "game/aletheia")
+    parser.add_argument("--workspace", type=Path, default=ROOT / "game/aletheia-pristine")
     parser.add_argument("--profile", type=Path, required=True, help="connection header (configure-connection.py)")
     parser.add_argument("--tls", type=Path, required=True, help="Mbed TLS source tree (prepare-tls.py)")
     parser.add_argument("--msl", type=Path, required=True, help="CodeWarrior MSL C headers: the directory holding MSL_C/")

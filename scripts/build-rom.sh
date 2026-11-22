@@ -57,15 +57,12 @@ case "$game" in
         ;;
     black|white)
         # Project-Holon/aletheia builds the USA/Europe cartridge of each
-        # version from the player's own dump. It has no Wonder Trade
-        # integration yet.
+        # version from the player's own dump. Wonder Trade is added to that
+        # dump with aletheia's link as the map (scripts/port-bw.py), so a
+        # modified build first runs the pristine one.
         revision="${ROM_REVISION:-0}"
         if [[ "$revision" != 0 ]]; then
             echo "ROM_REVISION must be 0 for Black and White" >&2
-            exit 2
-        fi
-        if [[ "$build_mode" != pristine ]]; then
-            echo "Black and White build only with --pristine for now" >&2
             exit 2
         fi
         if [[ ! -f "${DSWT_BW_ROM:-}" ]]; then
@@ -127,6 +124,10 @@ if [[ "$build_mode" == modified ]]; then
     tls_workspace="$("$python" "$repo_root/scripts/prepare-tls.py")"
     "$python" "$repo_root/scripts/configure-connection.py" "$WONDER_TRADE_PROFILE" "$workspace/.git/dswt-connection.h"
     docker_args+=(-v "$tls_workspace:/tls:ro")
+    if [[ "$game" == black || "$game" == white ]]; then
+        # The port tool and the client sources, read-only.
+        docker_args+=(-v "$repo_root:/dswt:ro")
+    fi
 fi
 docker build --platform linux/amd64 -f "$builder/Dockerfile" -t "$image" "$builder"
 
@@ -147,15 +148,27 @@ exec docker run "${docker_args[@]}" "$image" bash -c '
         # White keeps aletheia'"'"'s older paths (docs/ROMS.md). romlink.py checks
         # the rebuilt ROM'"'"'s SHA-1.
         extract=extract; [[ "$ROM_GAME" == white ]] && extract=extract_white
-        python3 tools/ndsrom.py extract "$ROM_GAME.nds" -o "$extract"
-        python3 tools/delink.py -e "$extract" -l "build/$ROM_GAME/layout"
-        # The data-mode links take their companions from the disassembly, which
-        # recounts a tracked layout file; put it back so the workspace stays clean.
-        cp layout/units_arm9.json "$WINEPREFIX/units_arm9.json"
-        python3 tools/disasm.py arm9 --split
-        python3 tools/disasm.py overlay --all
-        python3 tools/romlink.py --target "$ROM_GAME" --relink
-        cp "$WINEPREFIX/units_arm9.json" layout/units_arm9.json
+        report=build/rom/report.json; [[ "$ROM_GAME" == white ]] && report=build/rom/report_white.json
+        # A modified build reuses a finished pristine link of the same game.
+        if [[ "$DSWT_BUILD_MODE" == pristine ]] || ! grep -q "\"identical\": true" "$report" 2>/dev/null; then
+            python3 tools/ndsrom.py extract "$ROM_GAME.nds" -o "$extract"
+            python3 tools/delink.py -e "$extract" -l "build/$ROM_GAME/layout"
+            # The data-mode links take their companions from the disassembly, which
+            # recounts a tracked layout file; put it back so the workspace stays clean.
+            cp layout/units_arm9.json "$WINEPREFIX/units_arm9.json"
+            python3 tools/disasm.py arm9 --split
+            python3 tools/disasm.py overlay --all
+            python3 tools/romlink.py --target "$ROM_GAME" --relink
+            cp "$WINEPREFIX/units_arm9.json" layout/units_arm9.json
+        fi
+        if [[ "$DSWT_BUILD_MODE" == modified ]]; then
+            # Wonder Trade goes into the dump; the port checks it against the aletheia link.
+            mkdir -p build/dswt
+            rm -f "build/dswt/$ROM_GAME.nds"
+            python3 /dswt/scripts/port-bw.py "$ROM_GAME" "$ROM_GAME.nds" "build/dswt/$ROM_GAME.nds" \
+                --workspace /workspace --profile /workspace/.git/dswt-connection.h --tls /tls \
+                --msl /opt/aletheia/msl --work "build/dswt/port-$ROM_GAME"
+        fi
         exit
     fi
     if [[ "$ROM_GAME" == black2 || "$ROM_GAME" == white2 ]]; then

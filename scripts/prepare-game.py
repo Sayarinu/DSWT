@@ -66,8 +66,9 @@ GAMES = {
     },
     # Project-Holon/aletheia builds Black and White from one tree with its own
     # Python tools and CodeWarrior under Wine. Its targets table
-    # (tools/targets.py) lists each cartridge's SHA-1. It has no Wonder Trade
-    # integration yet, so only its pristine workspace is prepared.
+    # (tools/targets.py) lists each cartridge's SHA-1. Wonder Trade is added to
+    # the player's dump with aletheia's link as the map (scripts/port-bw.py),
+    # so its only workspace is the pristine one.
     "bw": {
         "pin": "client/upstream-aletheia.json",
         "patch": None,
@@ -209,8 +210,9 @@ def configure(root, workspace, pin, pristine, game=GAMES["platinum"]):
 def prepare(root, pristine=False, name="platinum"):
     root = root.resolve()
     game = GAMES[name]
-    if not pristine and game["patch"] is None:
-        raise RuntimeError(f"{game['workspace']} has no Wonder Trade integration yet; prepare it with --pristine")
+    if game["patch"] is None:
+        # Wonder Trade is not built in this workspace: the port reads its pristine build.
+        pristine = True
     pin = json.loads((root / game["pin"]).read_text())
     if (root / "game").is_symlink():
         raise RuntimeError("Game workspace directory must not be a symlink")
@@ -235,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--pristine", action="store_true", help="prepare a separate unmodified workspace")
     parser.add_argument("--game", choices=sorted(GAMES), default="platinum",
                         help="upstream to prepare: platinum, hgss for HeartGold and SoulSilver, "
-                             "dp for Diamond and Pearl, bw2 for Black 2 and White 2, or bw for Black and White (--pristine only)")
+                             "dp for Diamond and Pearl, bw2 for Black 2 and White 2, or bw for Black and White (always pristine)")
     args = parser.parse_args()
     try:
         print(prepare(Path(__file__).resolve().parent.parent, args.pristine, args.game))

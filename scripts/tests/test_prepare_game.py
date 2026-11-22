@@ -321,10 +321,10 @@ class PrepareGameTests(unittest.TestCase):
             "--- a/src/game/main.c\n+++ b/src/game/main.c\n"
             "@@ -1 +1 @@\n-original\n+linked through wine\n"
         )
-        with self.assertRaisesRegex(RuntimeError, "--pristine"):
-            prepare_game.prepare(self.root, name="bw")
-        bw = prepare_game.prepare(self.root, pristine=True, name="bw")
+        # Wonder Trade is ported into the dump, so a modified build reads the pristine workspace.
+        bw = prepare_game.prepare(self.root, name="bw")
         self.assertEqual(bw, self.root / "game/aletheia-pristine")
+        self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)
         self.assertEqual((bw / "src/game/main.c").read_text(), "linked through wine\n")
         (bw / "black.nds").write_bytes(b"dump")
         self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)

@@ -20,6 +20,8 @@ RUN dpkg --add-architecture i386 \
     && apt-get -o APT::Update::Error-Mode=any update \
     && apt-get install --yes --no-install-recommends \
         binutils-arm-none-eabi \
+        git \
+        patch \
         python3 \
         unzip \
         wine \
@@ -44,6 +46,21 @@ RUN cd /opt/aletheia \
     && rm mwccarm.zip \
     && cp -R tools/mwccarm/1.2/base/. tools/mwccarm/1.2/ \
     && chmod -R a+rX /opt/aletheia
+
+# Wonder Trade's core and Mbed TLS compile against CodeWarrior's MSL C headers,
+# which aletheia's partial C library lacks, from the Metroskrew release
+# pokeplatinum pins (as tools/rom-builder-bw2). Only the headers are kept,
+# inside this local image.
+ADD --checksum=sha256:2fec5ba308690a25157afc532ed87411a413501d43d85892ae4bfb9eb3975790 https://github.com/mid-kid/metroskrew/releases/download/0.1.3/metroskrew-linux.tar.xz /opt/aletheia/metroskrew.tar.xz
+RUN apt-get -o APT::Update::Error-Mode=any update \
+    && apt-get install --yes --no-install-recommends xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && cd /opt/aletheia \
+    && tar xJf metroskrew.tar.xz --strip-components=7 \
+        metroskrew/lib/metroskrew/sdk/ds/2.0/sp1/msl/MSL_C/MSL_Common/Include \
+        metroskrew/lib/metroskrew/sdk/ds/2.0/sp1/msl/MSL_C/MSL_ARM/Include \
+    && rm metroskrew.tar.xz \
+    && chmod -R a+rX /opt/aletheia/msl
 
 # Builds run as the invoking host user, who creates a Wine prefix per run.
 ENV WINEDEBUG=-all WINEDLLOVERRIDES=mscoree,mshtml= HOME=/tmp
