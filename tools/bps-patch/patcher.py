@@ -471,9 +471,11 @@ def marker_counts(views, root):
     return {marker: sum(view.count(marker.encode()) for view in views) for marker in markers(root)}
 
 
-def shares_run(data, retail, at):
+def shares_run(data, retail, at, allowed=None):
     """True if data holds retail[at:at + VERBATIM_WINDOW] inside a common run of at least
-    VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes, extended both ways in both."""
+    VERBATIM_WINDOW + VERBATIM_STRIDE - 1 bytes, extended both ways in both.
+
+    A run for which allowed(start, length) is true, as a slice of data, does not count."""
     block, limit = retail[at:at + VERBATIM_WINDOW], VERBATIM_WINDOW + VERBATIM_STRIDE - 1
     found = data.find(block)
     while found >= 0:
@@ -483,10 +485,24 @@ def shares_run(data, retail, at):
         after, end, retail_end = 0, found + VERBATIM_WINDOW, at + VERBATIM_WINDOW
         while end + after < len(data) and retail_end + after < len(retail) and data[end + after] == retail[retail_end + after]:
             after += 1
-        if VERBATIM_WINDOW + before + after >= limit:
+        length = VERBATIM_WINDOW + before + after
+        if length >= limit and not (allowed and allowed(found - before, length)):
             return True
         found = data.find(block, found + 1)
     return False
+
+
+ARM9_RAM = range(0x02000000, 0x02400000)
+
+
+def addresses_only(offset, run):
+    """True if every whole aligned word of a run written at target offset is an ARM9 RAM address.
+
+    A rebuilt game's tables of code addresses can match another game's table by chance,
+    without copying any of that game's code or data."""
+    first = -offset % 4
+    words = [int.from_bytes(run[k:k + 4], "little") for k in range(first, len(run) - 3, 4)]
+    return bool(words) and all(word in ARM9_RAM for word in words)
 
 
 def digest_tables(rom):
@@ -526,6 +542,7 @@ class Checked:
 
     def __init__(self, variant, patch, report, base, target):
         self.variant, self.literals, self.modules = variant, [], []
+        self.base = variant["sha256"]
         tables = digest_tables(target)
         for item in report["literals"]["items"]:
             if item["length"] >= VERBATIM_WINDOW + VERBATIM_STRIDE - 1:
@@ -543,11 +560,17 @@ class Checked:
         yield from (data for _, data in self.literals)
         yield from (data for _, data in self.modules)
 
-    def note(self, retail, at):
+    def note(self, retail, at, base=None):
         """Record a literal or recompressed module sharing a run of VERBATIM_WINDOW +
-        VERBATIM_STRIDE - 1 bytes with retail around retail[at:at + VERBATIM_WINDOW]."""
+        VERBATIM_STRIDE - 1 bytes with retail around retail[at:at + VERBATIM_WINDOW].
+
+        retail belongs to the cartridge whose SHA-256 is base. A literal may match another
+        cartridge with a run of code addresses only (addresses_only)."""
+        foreign = base is not None and base != self.base
         for offset, data in self.literals:
-            if offset not in self.copied and shares_run(data, retail, at):
+            allowed = (lambda start, length, offset=offset, data=data:
+                       addresses_only(offset + start, data[start:start + length])) if foreign else None
+            if offset not in self.copied and shares_run(data, retail, at, allowed):
                 self.copied.add(offset)
         for name, data in self.modules:
             if name not in self.recompressed and shares_run(data, retail, at):
@@ -582,15 +605,15 @@ class RetailIndex:
                 self.hashes.update(hash(bytes(view[k:k + VERBATIM_WINDOW]))
                                    for k in range(len(piece) - VERBATIM_WINDOW + 1))
 
-    def search(self, retail):
-        """Note every checked patch holding a block of this retail view."""
+    def search(self, retail, base=None):
+        """Note every checked patch holding a block of this retail view of cartridge base."""
         if not self.hashes:
             return
         view, hashes = memoryview(retail), self.hashes
         for k in range(0, len(retail) - VERBATIM_WINDOW + 1, VERBATIM_STRIDE):
             if hash(bytes(view[k:k + VERBATIM_WINDOW])) in hashes:
                 for item in self.checked:
-                    item.note(retail, k)
+                    item.note(retail, k, base)
 
     def check(self):
         """Raise for the first patch, in input order, that copies retail content."""
@@ -742,8 +765,9 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
         index = RetailIndex(checked)
         for base_path, _ in pairs:
             base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
+            digest = sha256(base)
             for view in code_views(base, "Base ROM"):
-                index.search(view)
+                index.search(view, digest)
             del base
         index.check()
         entries.sort(key=lambda entry: entry["variant"])

@@ -511,5 +511,37 @@ class DigestTableTests(unittest.TestCase):
                     self.assertIn(expected, item.problem())
 
 
+class AddressTableTests(unittest.TestCase):
+    """A literal may match another cartridge only with a run of ARM9 code addresses."""
+
+    table = b"".join((0x0205F445 + 8 * k).to_bytes(4, "little") for k in range(16))
+
+    def check(self, literal, retail, base, offset=0x100):
+        item = RetailIndexTests.Item(literal)
+        item.base, item.literals = "own", [(offset, literal)]
+        index = patcher.RetailIndex([item])
+        index.search(retail, base)
+        return item.problem()
+
+    def test_an_address_table_may_match_another_cartridge(self):
+        retail = RetailIndexTests.noise(b"r", 1000) + self.table + RetailIndexTests.noise(b"s", 1000)
+        literal = RetailIndexTests.noise(b"a", 9) + self.table[1:] + RetailIndexTests.noise(b"b", 9)
+        self.assertIsNone(self.check(literal, retail, "other", offset=0x100 - 9 + 1 - 4))
+        self.assertIn("retail ROM content", self.check(literal, retail, "own", offset=0x100 - 9 + 1 - 4))
+
+    def test_other_runs_still_fail_against_another_cartridge(self):
+        retail = RetailIndexTests.noise(b"r", 4096)
+        literal = RetailIndexTests.noise(b"a", 5) + retail[100:160] + RetailIndexTests.noise(b"b", 5)
+        self.assertIn("retail ROM content", self.check(literal, retail, "other"))
+        mixed = self.table[:24] + retail[100:140]
+        self.assertIn("retail ROM content", self.check(mixed, self.table[:24] + retail[100:140] + bytes(8), "other"))
+
+    def test_addresses_only_reads_aligned_words(self):
+        self.assertTrue(patcher.addresses_only(0x1000, self.table))
+        self.assertTrue(patcher.addresses_only(0x1003, self.table[3:]))
+        self.assertFalse(patcher.addresses_only(0x1000, self.table[2:]))
+        self.assertFalse(patcher.addresses_only(0x1000, b"\x00\x00\x00\x03" + self.table))
+
+
 if __name__ == "__main__":
     unittest.main()
