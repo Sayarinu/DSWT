@@ -143,10 +143,17 @@ class ArchiveTests(AppFixture):
             build_app.read_archive(self.archive, "0.2.0")
 
 
+UPSTREAMS = {"upstream.json": {"repository": "https://github.com/pret/pokeplatinum.git", "revision": "c" * 40},
+             "upstream-aletheia.json": {"repository": "https://github.com/Project-Holon/aletheia.git",
+                                        "revision": "d" * 40}}
+
+
 class FakeGitHub:
-    def __init__(self, draft=True, assets=("dswt-0.1.0.zip",), archive=None, releases=(), merges="", body=""):
+    def __init__(self, draft=True, assets=("dswt-0.1.0.zip",), archive=None, releases=(), merges="", body="",
+                 upstreams=None):
         self.draft, self.assets, self.archive, self.calls = draft, list(assets), archive, []
         self.releases, self.merges, self.body = list(releases), merges, body
+        self.upstreams = dict(upstreams if upstreams is not None else UPSTREAMS)
 
     def __call__(self, *arguments, capture=True):
         self.calls.append(arguments)
@@ -157,6 +164,10 @@ class FakeGitHub:
             return json.dumps([{"tagName": tag} for tag in self.releases])
         if arguments[0] == "api" and "/compare/" in arguments[1]:
             return self.merges
+        if arguments[0] == "api" and "/contents/client?ref=" in arguments[1]:
+            return json.dumps([{"name": name} for name in [*self.upstreams, "README.md", "upstream-notes.txt"]])
+        if arguments[0] == "api" and "/contents/client/" in arguments[1]:
+            return json.dumps(self.upstreams[arguments[1].split("/contents/client/")[1].split("?")[0]])
         if arguments[:2] == ("release", "download"):
             directory = Path(arguments[arguments.index("--dir") + 1])
             (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())
@@ -201,6 +212,10 @@ class ReleaseTests(AppFixture):
         self.assertIn("`dswt-patcher-0.1.0-windows.zip`", notes)
         self.assertIn("apply only through DSWT Patcher", notes)
         self.assertNotIn("any\nBPS patcher", notes)
+        self.assertIn("SoulSilver, and the USA/Europe versions of Black, White, Black 2 and White 2. Black, White,\n"
+                      "Black 2 and White 2 run in DS mode only.", notes)
+        self.assertIn(f"Source: {'a' * 40}. Upstreams: aletheia ddddddd, pokeplatinum ccccccc.\n", notes)
+        self.assertIn(("api", "repos/owner/repo/contents/client?ref=" + "a" * 40), github.calls)
         renamed = self.root / "game/other.zip"
         renamed.write_bytes(self.archive.read_bytes())
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "Name the archive"):
@@ -215,7 +230,7 @@ class ReleaseTests(AppFixture):
         self.assertEqual(previous, "v0.1.1")
         self.assertIn(("api", "repos/owner/repo/compare/v0.1.1..." + "b" * 40), [call[:2] for call in github.calls])
         self.assertEqual(titles, ["Fix trade recovery (#7)", "Bump actions/checkout (#8)"])
-        manifest = {"version": "0.2.0", "source": {"commit": "b" * 40}, "upstream": {"revision": "c" * 40}}
+        manifest = {"version": "0.2.0", "source": {"commit": "b" * 40}}
         notes = release.notes(manifest, previous, titles)
         self.assertIn("## Changes since v0.1.1\n\n- Fix trade recovery (#7)\n- Bump actions/checkout (#8)\n", notes)
         self.assertIn("No changes to the game patches.", release.notes(manifest, previous, []))
@@ -226,17 +241,24 @@ class ReleaseTests(AppFixture):
             self.assertEqual(release.previous_release("0.1.1-rc.1", "owner/repo"), "v0.1.0")
 
     def test_notes_rewrites_a_published_release(self):
-        source = f"Source: {'b' * 40}, upstream {'c' * 40}."
-        github = FakeGitHub(draft=False, releases=["v0.1.0"], merges="LUNE-3 - Add a thing (#9)",
-                            body=f"| table |\n\n{source}\n")
-        with patch.object(release, "gh", github):
-            result = release.rewrite("0.1.1", "owner/repo")
-        edit = github.calls[-1]
-        self.assertEqual(edit[:5], ("release", "edit", "v0.1.1", "--repo", "owner/repo"))
-        self.assertEqual(edit[-1], result["notes"])
-        self.assertIn("- Add a thing (#9)", result["notes"])
-        self.assertIn(source, result["notes"])
-        self.assertNotIn("| table |", result["notes"])
+        # Older notes name one upstream; the rewrite lists every upstream the source commit pins.
+        rewritten = f"Source: {'b' * 40}. Upstreams: aletheia ddddddd, pokeplatinum ccccccc."
+        for source in (f"Source: {'b' * 40}, upstream {'c' * 40}.", rewritten):
+            with self.subTest(source=source):
+                github = FakeGitHub(draft=False, releases=["v0.1.0"], merges="LUNE-3 - Add a thing (#9)",
+                                    body=f"| table |\n\n{source}\n")
+                with patch.object(release, "gh", github):
+                    result = release.rewrite("0.1.1", "owner/repo")
+                edit = github.calls[-1]
+                self.assertEqual(edit[:5], ("release", "edit", "v0.1.1", "--repo", "owner/repo"))
+                self.assertEqual(edit[-1], result["notes"])
+                self.assertIn("- Add a thing (#9)", result["notes"])
+                self.assertIn(rewritten + "\n", result["notes"])
+                self.assertIn(("api", "repos/owner/repo/contents/client?ref=" + "b" * 40), github.calls)
+                self.assertNotIn("| table |", result["notes"])
+        with patch.object(release, "gh", FakeGitHub(draft=False, releases=["v0.1.0"], body=rewritten, upstreams={})):
+            with self.assertRaisesRegex(ValueError, "pins no upstream"):
+                release.rewrite("0.1.1", "owner/repo")
         with patch.object(release, "gh", FakeGitHub(body="no source")), self.assertRaisesRegex(ValueError, "no source line"):
             release.rewrite("0.1.1", "owner/repo")
 
