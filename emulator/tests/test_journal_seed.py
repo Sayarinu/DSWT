@@ -270,11 +270,12 @@ class JournalSeedTests(unittest.TestCase):
     def test_a_kill_during_the_first_journal_write_leaves_unused_banks(self):
         self.first_write_survives_every_kill(retail_save(b"\xff" * 4096), BANKS, self.fixture)
 
-    def test_a_kill_during_the_first_generation_v_journal_write_leaves_unused_banks(self):
-        for family in GEN_V:
-            with self.subTest(family=family):
-                self.first_write_survives_every_kill(gen_v_save(family, b"\xff" * 4096), GEN_V[family]["banks"],
-                                                     self.fixtures[family])
+    def test_a_kill_during_the_first_black_journal_write_leaves_unused_banks(self):
+        self.first_write_survives_every_kill(gen_v_save("bw", b"\xff" * 4096), GEN_V["bw"]["banks"], self.fixtures["bw"])
+
+    def test_a_kill_during_the_first_black2_journal_write_leaves_unused_banks(self):
+        self.first_write_survives_every_kill(gen_v_save("b2w2", b"\xff" * 4096), GEN_V["b2w2"]["banks"],
+                                             self.fixtures["b2w2"])
 
     def first_write_survives_every_kill(self, blank, banks, fixture):
         """The game's first journal write as the durable melonDS logs it, one
