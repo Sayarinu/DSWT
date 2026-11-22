@@ -102,10 +102,17 @@ compilers its README lists (`tools/mwccarm/mwccarm/`, with `1.2` the 1.2 base
 release) and Wine, and builds each cartridge from the player's dump:
 
 ```sh
-python3 tools/ndsrom.py extract black.nds -o extract
-python3 tools/delink.py -e extract -l build/black/layout
-python3 tools/romlink.py --target black --relink
+ROM_GAME=black DSWT_BW_ROM=/path/to/black.nds ./scripts/build-rom.sh --pristine
+ROM_GAME=white DSWT_BW_ROM=/path/to/white.nds ./scripts/build-rom.sh --pristine
 ```
+
+The script extracts the dump, disassembles it for the data links and relinks
+every region with `tools/romlink.py`, which writes `build/rom/aletheia.nds`
+(Black) or `build/rom/white.nds` (White) and checks its SHA-1. White keeps its
+extract in `extract_white/`. `client/aletheia-build.patch` runs the linker and
+the generated data includes through Wine off Windows, and leaves out the
+DSi-only data when no DSi key is given, so the ROM keeps the dump's DSi block.
+A full relink takes one to two hours.
 
 Upstream notices stay in the local workspace. Its source, SDKs, toolchain and
 ROM output are excluded from this repository and require their own rights review.
