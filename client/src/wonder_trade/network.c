@@ -290,7 +290,7 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
     int result = -1;
     int prepared = WonderTradeNetwork_PrepareJournal(transport, journal);
     if (prepared == WT_JOURNAL_NEEDS_SEED) {
-        /* Only fresh proof of two blank banks reaches this local wait state. */
+        /* Only fresh proof of two unused banks reaches this local wait state. */
         transport->needsEntropy = TRUE; transport->canLeave = TRUE;
         return 0;
     }

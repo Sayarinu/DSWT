@@ -16,7 +16,7 @@ target_compile_options(dswt_journal PRIVATE -Wall -Wextra -Werror)
 # (journal_bw.h, journal_b2w2.h).
 foreach(family BW B2W2)
     set(DSWT_JOURNAL_${family} WT_GAME_FAMILY=WT_FAMILY_${family})
-    foreach(name Encode Decode Open OpenEmpty Initialize Read Repair Commit Close)
+    foreach(name Encode Decode Open OpenEmpty Unused Initialize Read Repair Commit Close)
         list(APPEND DSWT_JOURNAL_${family} WtJournal_${name}=WtJournal${family}_${name})
     endforeach()
     string(TOLOWER ${family} suffix)
@@ -53,8 +53,8 @@ if(BUILD_TESTING)
     set_tests_properties(persistence PROPERTIES TIMEOUT 60)
     add_test(NAME journal_seed COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_journal_seed.py"
         $<TARGET_FILE:dswt-save-store> $<TARGET_FILE:journal-fixture> $<TARGET_FILE:journal-fixture-bw>
-        $<TARGET_FILE:journal-fixture-b2w2> $<TARGET_FILE:persistence-faults>)
-    set_tests_properties(journal_seed PROPERTIES TIMEOUT 180)
+        $<TARGET_FILE:journal-fixture-b2w2> $<TARGET_FILE:persistence-faults> $<TARGET_FILE:persistence-probe>)
+    set_tests_properties(journal_seed PROPERTIES TIMEOUT 360)
     add_test(NAME persistence_page COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_persistence_page.py"
         $<TARGET_FILE:persistence-page>)
     set_tests_properties(persistence_page PROPERTIES TIMEOUT 30)

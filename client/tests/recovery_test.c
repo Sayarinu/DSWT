@@ -79,6 +79,20 @@ int main(void)
         memcpy(banks[1], banks[0], 4096);
         WtRecovery_Block(); Check(0);
     }
+    /* A first write cut at any byte, over either blank: nothing was committed. */
+    for (i = 0; i <= 4096; i += 7) {
+        for (first = 0; first < 2; first++) {
+            memset(banks[0], first ? 255 : 0, 4096); memset(banks[1], first ? 255 : 0, 4096);
+            memset(banks[0] + 4092, 0, 4); memcpy(banks[0], empty, i < 4092 ? i : 4092);
+            Check(1);
+            memcpy(banks[1], banks[0], 4096); memcpy(banks[0], empty, 4096); Check(1);
+            /* Beside an active record the same bytes stay a torn write to recover. */
+            assert(WtTest_JournalEntry(WT_JOURNAL_IDLE, Hash, &entry) == 0);
+            assert(WtJournal_Encode(&entry, Hash, banks[0]) == 0); Check(0);
+        }
+    }
+    memset(&entry, 0, sizeof(entry)); entry.generation = 1; memset(entry.seed, 4, 32);
+    memset(banks[0], 255, 4096); memcpy(banks[0], "DSWJ", 4); memset(banks[1], 255, 4096); Check(1);
     memcpy(banks[0], empty, 4096);
     for (i = 0; i < sizeof(malformed) / sizeof(malformed[0]); i++) {
         memcpy(banks[1], empty, 4096); banks[1][malformed[i]] ^= 128;

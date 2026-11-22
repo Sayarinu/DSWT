@@ -432,8 +432,9 @@ static void WonderTrade_Draw(WonderTradeApp *app)
         Window_DrawStandardFrame(&app->body, TRUE, WT_FRAME_TILE, WT_FRAME_PALETTE);
         WonderTrade_Print(app, &app->body, app->statusMessage, 4, 0, TEXT_COLOR(1, 2, 15));
         if (app->state == WT_APP_ERROR) {
-            WonderTrade_Print(app, &app->body, WonderTrade_Text_ErrorCode, 4, 80, TEXT_COLOR(1, 2, 15));
-            WonderTrade_PrintNumber(&app->body, app->network.error, 96);
+            /* Under up to five lines of explanation, as in Diamond/Pearl. */
+            WonderTrade_Print(app, &app->body, WonderTrade_Text_ErrorCode, 4, 112, TEXT_COLOR(1, 2, 15));
+            WonderTrade_PrintNumber(&app->body, app->network.error, 112);
         } else if (app->statusMessage == WonderTrade_Text_Diagnostics) {
             const int names[] = { WonderTrade_Text_ConnectMs, WonderTrade_Text_TlsBytes, WonderTrade_Text_StackBytes, WonderTrade_Text_FrameMs };
             const u32 values[] = { app->network.handshakeMs, app->network.tlsPeakBytes, app->network.stackBytes, app->network.maxFrameMs };
