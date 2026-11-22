@@ -1,5 +1,5 @@
 diff --git a/configure.py b/configure.py
-index 90a0ae59c..40ce79c01 100644
+index 90a0ae59c..ab87c86a3 100644
 --- a/configure.py
 +++ b/configure.py
 @@ -640,6 +640,58 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
@@ -114,6 +114,21 @@ index 90a0ae59c..40ce79c01 100644
             "Generating linker script for $config")
      # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
      n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
+@@ -996,8 +1065,13 @@ def main():
+            "Linking the files of $output")
+     # dsd points the ROM at the extracted files, and the build's own file system replaces them. BSD sed, as on macOS,
+     # needs a backup suffix after -i, which GNU sed also takes
++    # DSWT: a Wonder Trade build stores ARM9 and every overlay uncompressed, so a patch copies the code it keeps from
++    # the player's expanded retail code instead of carrying it recompressed
++    uncompressed = ("&& perl -pi -e 's/^( *)compressed: true$$/$$1compressed: false/' "
++                    "$$(dirname $out)/arm9.yaml $$(dirname $out)/arm9_overlays.yaml" if WONDER_TRADE else "")
+     n.rule("rom_config", "$dsd rom config --elf $in --config $config && sed -i.bak "
+-           "'s|^files_dir: .*|files_dir: ../files|' $out && rm $out.bak", "Configuring ROM for $config")
++           f"'s|^files_dir: .*|files_dir: ../files|' $out && rm $out.bak {uncompressed}",
++           "Configuring ROM for $config")
+     n.rule("rom_build", "$dsd rom build --config $in --rom $out", "Building $out")
+     n.rule("check_modules", "$dsd check modules --config-path $config --fail && touch $out", "Checking modules")
+     n.rule("sha1", "sha1sum --quiet -c $in && touch $out", "Checking $rom")
 diff --git a/include/field/field_menu.h b/include/field/field_menu.h
 index e5c8587b8..c29d75457 100644
 --- a/include/field/field_menu.h
