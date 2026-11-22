@@ -1,8 +1,11 @@
 #ifndef WONDER_TRADE_BW2_TEXT_H
 #define WONDER_TRADE_BW2_TEXT_H
 
-/* Wonder Trade's English text for Black 2 and White 2, from the Platinum
- * messages (client/res/text/wonder_trade.json); \n starts a new line. */
+/* Wonder Trade's English text for Black 2 and White 2, from the Generation
+ * IV messages (client/files/msgdata/msg/msg_0829.json); \n starts a new line.
+ * The compiler reads source bytes, so wide literals hold ASCII only and write
+ * other characters as escapes (\x00e9 for e acute). The apostrophe is ASCII,
+ * as in the game's own English text. */
 enum WtText {
     WT_TEXT_TITLE,
     WT_TEXT_TRADE,
