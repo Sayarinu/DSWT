@@ -93,6 +93,18 @@ class IconTests(unittest.TestCase):
         icon = bw.icon_tiles(bw.ICON_PNG.read_bytes())
         self.assertEqual(len(icon), 0x400)
 
+    def test_each_frame_takes_its_own_colors(self):
+        self.assertEqual(bw.recolor(bytes([0x21, 0x03, 0x21, 0x03]), ((0, 14, 1, 3), (0, 13, 1, 3))),
+                         bytes([0x1E, 0x03, 0x1D, 0x03]))
+
+    def test_a_color_without_a_mapping_is_refused(self):
+        with self.assertRaises(bw.PortError):
+            bw.recolor(bytes([0x04]), ((0, 14, 1, 3),))
+
+    def test_the_icon_uses_only_mapped_colors(self):
+        icon = bw.recolor(bw.icon_tiles(bw.ICON_PNG.read_bytes()), bw.ICON_COLORS)
+        self.assertEqual(len(icon), 0x400)
+
 
 class VeneerTests(unittest.TestCase):
     def test_arm_veneer_loads_the_target(self):
