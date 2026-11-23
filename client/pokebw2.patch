@@ -1,5 +1,5 @@
 diff --git a/configure.py b/configure.py
-index 90a0ae59c..ab87c86a3 100644
+index 90a0ae59c..51010e2b9 100644
 --- a/configure.py
 +++ b/configure.py
 @@ -640,6 +640,58 @@ def get_dsd(tools_dir: Path, from_source: bool) -> Path:
@@ -76,7 +76,17 @@ index 90a0ae59c..ab87c86a3 100644
      link_lcf = lcf_file
      if shift:
          # Padding in the linker script moves the code and data after it, see tools/build/shift_lcf.py
-@@ -779,7 +836,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+@@ -769,7 +826,8 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
+                          "source_object": dsprot_object, "veneer_object": veneer_object,
+                          "response": veneer_response, "scratch": veneer_dir / "prelink",
+                          "section": section, "count": count}
+-        n.build([veneer_object, veneer_response], "dsprot_veneers", objects,
++        # DSWT: the prelink links the object list that link.py extends with the Wonder Trade objects
++        n.build([veneer_object, veneer_response], "dsprot_veneers", [*objects, *wt_objects],
+                 implicit=[link_lcf, link_response, *veneer_implicit, "tools/build/restore_dsprot_veneers.py",
+                           ROOT / "tools/mwccarm" / MWLD_VERSION / "mwldarm.exe"],
+                 variables={key: shlex.quote(str(value)).replace("$", "$$")
+@@ -779,7 +837,7 @@ def add_version(n: Writer, version: str, dsd: Path, bugfix: bool, shift: int) ->
          link_objects = [str(veneer_object) if obj == dsprot_object else obj for obj in link_objects]
  
      arm9_o = build_dir / "arm9.o"
@@ -85,7 +95,7 @@ index 90a0ae59c..ab87c86a3 100644
              variables={"objects": link_response, "lcf": link_lcf})
  
      # The ROM's file system is the extracted one, with the archives built from source in place of the extracted ones.
-@@ -907,7 +964,14 @@ def main():
+@@ -907,7 +965,14 @@ def main():
                               "code sizes; the ROMs no longer match. A multiple of 32, such as 0x100")
      parser.add_argument("--bugfix", action="store_true",
                          help="fix the game's bugs that are marked with BUGFIX in the source; the ROMs no longer match")
@@ -100,7 +110,7 @@ index 90a0ae59c..ab87c86a3 100644
  
      versions = args.versions or [v for v in VERSIONS if (ROOT / "orig" / f"baserom_{v}.nds").exists()]
      if not versions:
-@@ -945,7 +1009,12 @@ def main():
+@@ -945,7 +1010,12 @@ def main():
      n.rule("check_baserom", "echo '$sha1  $in' | sha1sum --quiet -c - && touch $out", "Checking base ROM $in")
      n.rule("extract", "$dsd rom extract --rom $in --output-path $extract_dir", "Extracting $in")
      n.rule("delink", "$dsd delink --config-path $config", "Delinking $config")
@@ -114,7 +124,7 @@ index 90a0ae59c..ab87c86a3 100644
             "Generating linker script for $config")
      # mwccarm writes the dependency file next to the object, with Windows paths that fix_depfile.py converts
      n.rule("mwcc", f"mkdir -p $$(dirname $out) && $wine $sjiswrap {shlex.quote(str(mwcc))} $flags "
-@@ -996,8 +1065,13 @@ def main():
+@@ -996,8 +1066,13 @@ def main():
             "Linking the files of $output")
      # dsd points the ROM at the extracted files, and the build's own file system replaces them. BSD sed, as on macOS,
      # needs a backup suffix after -i, which GNU sed also takes

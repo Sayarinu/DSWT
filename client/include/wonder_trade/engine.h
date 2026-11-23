@@ -48,6 +48,11 @@ typedef struct WtEngine {
     /* Set when the last reply was a Collect whose Pokémon this game cannot
      * hold: nothing was recorded and the trade stays QUEUED for a later Collect. */
     int refused;
+    /* Set with blocked when an authenticated reply proves another copy of this
+     * save moved the server past it: an older copy was restored. Nothing was
+     * written, so the journal is as safe to play on as before the visit, but
+     * this copy can never trade again. */
+    int rolledBack;
 } WtEngine;
 
 /* Open repairs supported mirrors. Unknown evidence and generation exhaustion

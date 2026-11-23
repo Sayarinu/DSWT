@@ -694,7 +694,72 @@ static void SupersededSubmit(void)
             assert(WtWire_Decode(fixture.engine.frame, fixture.engine.frameSize, packet, size, Hash, &wire) == 0);
         }
         assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.removed);
+        assert(fixture.engine.rolledBack && fixture.engine.entry.phase == WT_JOURNAL_IDLE);
     }
+}
+
+/* One reconcile page event for a trade this save's journal never made. */
+static size_t ForeignPage(Fixture *fixture, unsigned char packet[902], uint64_t counter, uint64_t sequence)
+{
+    unsigned char *event = packet + 54;
+    size_t size = Header(fixture, packet, WT_RESULT_OK, counter, sequence, 116);
+    packet[44] = 1; Put(packet + 46, sequence, 8); Put(event, sequence, 8);
+    event[8] = WT_EVENT_SUBMITTED; event[105] = WT_TRADE_QUEUED;
+    memset(event + 9, 0x77, 16); memset(event + 25, 0x55, 16); memset(event + 41, 0x22, 16); memset(event + 57, 0x33, 32);
+    return size;
+}
+
+/* An older copy of a save, restored after a newer copy traded: the server's
+ * authenticated answer shows history this journal never made. It blocks, says
+ * why, and writes nothing, so the copy may leave but never trade again. */
+static void RolledBackCopy(void)
+{
+    Fixture fixture;
+    unsigned char packet[902], old[2][4096];
+    size_t size;
+    /* An idle copy saved before the newer copy's offer used counter 1. */
+    Init(&fixture, 1, 25); Enroll(&fixture);
+    memcpy(old, fixture.banks, sizeof(old));
+    Submit(&fixture);
+    memcpy(fixture.banks, old, sizeof(old)); fixture.removed = 0;
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.engine.frame[5] == WT_OP_RECONCILE);
+    size = ForeignPage(&fixture, packet, 2, 2);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && fixture.engine.rolledBack);
+    assert(memcmp(old, fixture.banks, sizeof(old)) == 0 && !fixture.removed);
+    assert(WtEngine_Deposit(&fixture.engine, 0) != 0 && WtEngine_Request(&fixture.engine, 0) != 0);
+    /* Every later visit finds the same history: the copy stays fenced. */
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(!fixture.engine.rolledBack && WtEngine_Request(&fixture.engine, 0) == 0);
+    size = ForeignPage(&fixture, packet, 2, 2);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.rolledBack);
+
+    /* A queued copy whose Cancel finds the server past every counter it could use. */
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    memcpy(old, fixture.banks, sizeof(old));
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_COUNTER_MISMATCH, 4, 4, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && fixture.engine.rolledBack);
+    Mirrored(&fixture, WT_JOURNAL_QUEUED);
+    /* At its own Cancel's counter the server is not provably ahead: an ordinary block. */
+    memcpy(fixture.banks, old, sizeof(old)); WtEngine_Close(&fixture.engine); Open(&fixture);
+    fixture.engine.synchronized = 1;
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_COUNTER_MISMATCH, 3, 3, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.engine.rolledBack);
+
+    /* A failed local write is never read as a rolled-back copy. */
+    Init(&fixture, 1, 25); Enroll(&fixture);
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == 0);
+    size = Header(&fixture, packet, WT_RESULT_OK, 1, 1, 10); Put(packet + 46, 1, 8);
+    fixture.failWrite = fixture.writes + 1;
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.engine.rolledBack);
+    /* Nor is a server behind this save. */
+    Init(&fixture, 1, 25); Enroll(&fixture); Submit(&fixture);
+    assert(WtEngine_Request(&fixture.engine, WT_OP_CANCEL) == 0);
+    size = Header(&fixture, packet, WT_RESULT_COUNTER_MISMATCH, 1, 1, 0);
+    assert(WtEngine_Reply(&fixture.engine, packet, size) != 0 && fixture.engine.blocked && !fixture.engine.rolledBack);
 }
 
 /* Rejected Submit for a deposited offer: an ILLEGAL reply, then the
@@ -771,7 +836,7 @@ int main(void)
 {
     PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); ServerReturn(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
-    DeliveryKindBinding(); LocalSettlement();
-    puts("Recoverable engine: paired delivery, match-cancel race, return, server return, refused delivery, rejection, retries, full-storage restart, stale context, failed persistence and boot settlement passed");
+    DeliveryKindBinding(); LocalSettlement(); RolledBackCopy();
+    puts("Recoverable engine: paired delivery, match-cancel race, return, server return, refused delivery, rejection, retries, full-storage restart, stale context, failed persistence, boot settlement and rolled-back copies passed");
     return 0;
 }
