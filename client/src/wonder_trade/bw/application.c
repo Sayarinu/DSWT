@@ -5,25 +5,34 @@
 #include "wonder_trade/bw/application.h"
 #include "wonder_trade/bw/game.h"
 #include "wonder_trade/bw/game_save.h"
+#include "wonder_trade/gen5_screen.h"
 #include "wonder_trade/network.h"
 #include "wonder_trade/recovery.h"
 #include "../bw2/text.h"
 
 /* Wonder Trade's screen for Black and White. It runs as a process with the
  * field closed, as the Global Trade Station does, from its own child heap of
- * heap 1, and at boot when the save needs recovery. The screen is the window
- * the game shows when it must stop (APP_POWER_ShowShutdownScreen,
- * arm9/app_power.c) with the text drawn into it: a title, the status and a
- * short list of actions, chosen with the +Control Pad and A, B to go back. A
- * received Pokémon is shown with the game's own trade animation first. */
+ * heap 1, and at boot when the save needs recovery. It is laid out as the
+ * station's title menu (ov135/worldtrade_title.c; wonder_trade/gen5_screen.h):
+ * on the upper screen the station's title bar with the title, over its grid,
+ * and a message window in the game's frame holding the status; on the lower
+ * screen the actions as the game's task menu buttons (arm9/app_taskmenu.c),
+ * with its cursor and sounds, picked with the +Control Pad and A or by touch,
+ * B to go back. The Pokémon to offer is picked on the game's own party screen,
+ * and a received Pokémon is shown with the game's own trade animation first. */
 
 typedef char WtWideCharCheck[sizeof(L"a"[0]) == 2 ? 1 : -1];
 
 /* Heap IDs end at 0xAC (GFL_HEAP_Init in GFL_USE_InitSystem); the game uses none above 0x96. */
 #define WT_HEAPID 0xAC
 #define WT_HEAP_SIZE 0x70000
+/* The screen's own heap, freed while the trade animation runs. */
+#define WT_SCREEN_HEAPID 0xAB
+#define WT_SCREEN_HEAP_SIZE 0x20000
 /* The boot check's message needs only the screen. */
 #define WT_CHECKING_HEAP_SIZE 0x10000
+/* The party screen's heap, which it makes in heap 1 (POKELIST_Init). */
+#define WT_PARTY_LIST_HEAP_SIZE 0x30000
 /* The trade animation's work heap, which it makes in heap 1 (POKETRADE_PROC_AllocTradeWork). */
 #define WT_TRADE_HEAP_SIZE 0x96000
 #define WT_FADE_FRAMES 16
@@ -31,17 +40,37 @@ typedef char WtWideCharCheck[sizeof(L"a"[0]) == 2 ? 1 : -1];
 /* The overlays the Global Trade Station keeps loaded around the animation (ov135/worldtrade.c). */
 #define WT_TRADE_OVERLAY_A 67
 #define WT_TRADE_OVERLAY_B 114
-#define REG_POWCNT1 (*(vu16 *)0x04000304)
-/* The shutdown window's text area (APP_POWER_DrawShutdownScreen): tiles from 0x20, 30x16 tiles at (1, 4). */
-#define TILE_SIZE 0x20
-#define FIRST_TEXT_TILE 0x20
-#define TEXT_LEFT 1
-#define TEXT_TOP 4
-#define TEXT_WIDTH 30
-#define TEXT_HEIGHT 16
-#define TEXT_BACKGROUND 7
-#define LINE_HEIGHT 16
-#define MAX_ACTIONS 6
+#define MAX_ACTIONS 3
+/* The BGs: on the upper screen the windows, the station's title bar and its
+ * grid; on the lower screen the buttons and the grid. */
+#define BG_TEXT 0
+#define BG_BAR 1
+#define BG_GRID 2
+#define BG_BUTTONS 4
+#define BG_BUTTONS_GRID 5
+/* The station's archive and its graphics, with its palettes 0 to 2, as its
+ * title menu loads them (WORLDTRADE_TITLE_LoadBgGraphics): the title is in palette 1. */
+#define ARC_WORLDTRADE 0x60
+#define GTS_PALETTE_FILE 3
+#define GTS_CHAR_FILE 13
+#define GTS_GRID_SCREEN 31
+#define GTS_BAR_SCREEN 32
+#define GTS_PALETTES_SIZE 0x60
+#define GTS_SCREEN_SIZE 0x600
+#define TITLE_PALETTE 1
+#define TITLE_COLOR WT_PRINT_COLOR(13, 14, 10)
+#define TITLE_BACKGROUND 10
+/* The message window, in the font's palette, and the game's window frame. */
+#define ARC_FONT 0x17
+#define FONT_PALETTE_FILE 5
+#define FONT_PALETTE 13
+#define FRAME_PALETTE 14
+#define FRAME_CHAR 1
+#define TEXT_COLOR WT_PRINT_COLOR(1, 2, 15)
+#define TEXT_BACKGROUND 15
+/* The buttons' two palettes and text color, as the station's own choices (WORLDTRADE_OpenTaskMenuList). */
+#define BUTTON_PALETTE 10
+#define BUTTON_COLOR WT_PRINT_COLOR(14, 15, 3)
 
 /* The trade animation's request (ov119/pokemontrade_types.h struct TradeRequest),
  * as the Global Trade Station fills it (ov135/worldtrade_types.h WorldtradeReq). */
@@ -59,6 +88,7 @@ enum WtAppState {
     WT_APP_CONNECTING,
     WT_APP_PINGING,
     WT_APP_MENU,
+    WT_APP_PICKER_FADE,
     WT_APP_PICKER,
     WT_APP_CONFIRM,
     WT_APP_COLLECT_CONFIRM,
@@ -78,37 +108,34 @@ enum WtAppState {
 struct WtApp {
     WonderTradeNetwork network;
     WtGame game;
-    struct Bmp *bitmap;
+    /* The screen, from WT_SCREEN_HEAPID; font is NULL while it is closed. */
     struct GfFont *font;
     struct Strbuf *line;
-    int state, message, cursor, selectedSlot, fade;
+    struct PrintQueue *queue;
+    struct BmpWin *titleWindow, *messageWindow;
+    struct TaskMenuRes *buttonRes;
+    struct TaskMenuWork *buttons;
+    int state, message, selectedSlot, fade;
     BOOL boot, started;
     /* For the trade animation; gameData is NULL at boot, which shows none. */
     struct GameData *gameData;
+    /* The party screen's or the trade animation's process system. */
     struct ProcSys *procs;
+    WtPartyListArg partyList;
     struct MyStatus *partner;
-    u16 swap;
     WtPartyPokemon pkm[2];
     WtTradeRequest request;
 };
 
 typedef char WtTradeImageCheck[sizeof(WtPartyPokemon) <= WT_GAME_IMAGE_SIZE ? 1 : -1];
+typedef char WtButtonsCheck[WT_GEN5_MAX_BUTTONS <= WT_TASKMENU_MAX_ITEMS && MAX_ACTIONS <= WT_GEN5_MAX_BUTTONS ? 1 : -1];
 
-/* The registers APP_POWER_ShowShutdownScreen sets up as the SDK's GX calls do. */
-#define REG_DISPCNT (*(vu32 *)0x04000000)
-#define REG_BG1CNT (*(vu16 *)0x0400000A)
-#define REG_BG1HOFS (*(vu32 *)0x04000014)
+#define REG_POWCNT1 (*(vu16 *)0x04000304)
 #define REG_BLDCNT (*(vu16 *)0x04000050)
 #define REG_MASTER_BRIGHT (*(vu16 *)0x0400006C)
 #define REG_DB_DISPCNT (*(vu32 *)0x04001000)
+#define REG_DB_BLDCNT (*(vu16 *)0x04001050)
 #define REG_DB_MASTER_BRIGHT (*(vu16 *)0x0400106C)
-#define HW_BG_PLTT 0x05000000
-#define HW_DB_BG_PLTT 0x05000400
-#define GX_VRAM_BG_128_C 4
-/* The shutdown window's graphics (palette, characters, screen) and the font. */
-#define ARC_SHUTDOWN_WINDOW 0x16
-#define ARC_FONT 0x17
-#define RGB(r, g, b) ((r) | ((g) << 5) | ((b) << 10))
 
 static void Brightness(int level)
 {
@@ -116,80 +143,136 @@ static void Brightness(int level)
     GXx_SetMasterBrightness_(&REG_DB_MASTER_BRIGHT, level);
 }
 
+static void Screen_CreateBG(u8 layer, u8 screenBase, u8 charBase, u8 priority)
+{
+    WtBgTemplate bg = { 0, 0, 0x800, 0, WT_BG_SCREEN_256, 0, 0, 0, 0x8000, 0, 0, 0, 0, 0 };
+    bg.screenBase = screenBase;
+    bg.charBase = charBase;
+    bg.priority = priority;
+    BG_SYS_InitBgLayer(layer, &bg, 0);
+    BG_SYS_ClearSlot(layer);
+}
+
+/* A window shown at once. */
+static void Screen_Transfer(struct BmpWin *window, u8 layer)
+{
+    BMP_WIN_TransferChars(window);
+    BMP_WIN_MakeScreen(window);
+    BG_SYS_PushTile(layer);
+}
+
+/* Opens the screen, dark, in a heap of its own, as the station's
+ * (WORLDTRADE_ClearAndShowPlanes, WORLDTRADE_TITLE_SetupBgPlanes): the main
+ * engine on the upper screen; Create has checked heap 1 has room. */
 static void Screen_Init(WtApp *app)
 {
-    void *file;
-    WtG2dCharacter *chars;
-    WtG2dScreen *screen;
-    WtG2dPalette *palette;
-    u16 *map;
-    int x, y;
-    u16 tile = FIRST_TEXT_TILE;
+    static const WtDispVram vram = { WT_GX_VRAM_A, 0, WT_GX_VRAM_C, 0, 0, 0, 0, 0, 0, 0, WT_GX_OBJ_1D_32K,
+                                     WT_GX_OBJ_1D_32K };
+    WtDispConfig mode = { 1, 0, 0, 0 };
+    void *arc;
     Brightness(-16);
-    GX_ResetBankForBG();
-    GX_ResetBankForSubBG();
-    GX_SetBankForBG(GX_VRAM_BG_128_C);
-    GX_SetGraphicsMode(1, 0, 0);
-    REG_DISPCNT = (REG_DISPCNT & 0xFFFFE0FF) | 0x200; /* BG1 only */
-    REG_DISPCNT = REG_DISPCNT & 0xFFFF1FFF;           /* no windows */
-    REG_BG1CNT = (REG_BG1CNT & 0x43) | 4;            /* 256x256, 16 colors, characters at 0x4000 */
-    REG_BG1CNT = REG_BG1CNT & 0xFFBF;                 /* no mosaic */
-    REG_BG1HOFS = 0;
-    REG_BLDCNT = 0;
+    GFL_HEAP_CreateChildHeapImpl(WT_HEAP_APP, WT_SCREEN_HEAPID, WT_SCREEN_HEAP_SIZE);
+    BG_SYS_SetMainVisiblePlanes(0);
     BG_SYS_SetSubVisiblePlanes(0);
+    REG_BLDCNT = 0;
+    REG_DB_BLDCNT = 0;
+    REG_POWCNT1 |= 0x8000;
+    BG_SYS_SetVramBanks(&vram);
+    BG_SYS_Create(WT_SCREEN_HEAPID);
+    BMP_WIN_Init(WT_SCREEN_HEAPID);
+    BG_SYS_SetGraphicsMode(&mode);
     REG_DB_DISPCNT |= 0x10000;
-    *(vu16 *)HW_DB_BG_PLTT = RGB(10, 23, 31);
-    MIi_CpuClear32(0, G2_GetBG1CharPtr(), 0x4000);
-    file = ARC_UTIL_LoadMember(ARC_SHUTDOWN_WINDOW, 1, 0, WT_HEAPID);
-    if (NNS_G2dGetUnpackedCharacterDataEx(file, (void **)&chars)) {
-        DC_FlushRange(chars->raw, chars->size);
-        MI_CpuCopy16(chars->raw, G2_GetBG1CharPtr(), chars->size);
-    }
-    GFL_HEAP_Free(file);
-    file = ARC_UTIL_LoadMember(ARC_SHUTDOWN_WINDOW, 2, 0, WT_HEAPID);
-    if (NNS_G2dGetUnpackedScreenData(file, (void **)&screen)) {
-        DC_FlushRange(screen->raw, screen->size);
-        MI_CpuCopy16(screen->raw, G2_GetBG1ScrPtr(), screen->size);
-    }
-    GFL_HEAP_Free(file);
-    file = ARC_UTIL_LoadMember(ARC_SHUTDOWN_WINDOW, 0, 0, WT_HEAPID);
-    if (NNS_G2dGetUnpackedPaletteData(file, (void **)&palette)) {
-        DC_FlushRange(palette->raw, 0x20);
-        MI_CpuCopy16(palette->raw, (void *)HW_BG_PLTT, 0x20);
-    }
-    GFL_HEAP_Free(file);
-    map = G2_GetBG1ScrPtr();
-    for (y = TEXT_TOP; y < TEXT_TOP + TEXT_HEIGHT; y++) {
-        for (x = TEXT_LEFT; x < TEXT_LEFT + TEXT_WIDTH; x++) map[y * 32 + x] = tile++;
-    }
-    app->bitmap = BMP_CreateFromVram((u8 *)G2_GetBG1CharPtr() + FIRST_TEXT_TILE * TILE_SIZE, TEXT_WIDTH, TEXT_HEIGHT,
-        TILE_SIZE, WT_HEAPID);
-    app->font = GF_FONT_Create(ARC_FONT, 0, 0, 0, WT_HEAPID);
-    app->line = STRBUF_Create(64, WT_HEAPID);
-    Brightness(0);
+    Screen_CreateBG(BG_TEXT, 0x1f, 0, 0);
+    Screen_CreateBG(BG_BAR, 0x1e, 2, 1);
+    Screen_CreateBG(BG_GRID, 0x1d, 2, 2);
+    Screen_CreateBG(BG_BUTTONS, 0x1f, 0, 0);
+    Screen_CreateBG(BG_BUTTONS_GRID, 0x1e, 2, 1);
+    BG_SYS_InitRun(BG_TEXT, 0x20, 0, WT_SCREEN_HEAPID);
+    BG_SYS_InitRun(BG_BUTTONS, 0x20, 0, WT_SCREEN_HEAPID);
+    /* The station's grid on both screens, and its title menu's first rows, the title bar, on the upper one. */
+    arc = ARC_TOOL_CreateHandle(ARC_WORLDTRADE, WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadPaletteFromHandleWhole(arc, GTS_PALETTE_FILE, WT_PALETTE_MAIN_BG, 0, GTS_PALETTES_SIZE,
+                                          WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadPaletteFromHandleWhole(arc, GTS_PALETTE_FILE, WT_PALETTE_SUB_BG, 0, GTS_PALETTES_SIZE,
+                                          WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadBgCharFromHandle(arc, GTS_CHAR_FILE, BG_BAR, 0, 0, TRUE, WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadBgCharFromHandle(arc, GTS_CHAR_FILE, BG_BUTTONS_GRID, 0, 0, TRUE, WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadBgPaletteFromHandle(arc, GTS_BAR_SCREEN, BG_BAR, 0, WT_GEN5_BAR_ROWS * 32 * sizeof(u16), TRUE,
+                                       WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadBgPaletteFromHandle(arc, GTS_GRID_SCREEN, BG_GRID, 0, GTS_SCREEN_SIZE, TRUE, WT_SCREEN_HEAPID);
+    ARC_UTIL_UploadBgPaletteFromHandle(arc, GTS_GRID_SCREEN, BG_BUTTONS_GRID, 0, GTS_SCREEN_SIZE, TRUE,
+                                       WT_SCREEN_HEAPID);
+    ARC_TOOL_DeleteHandle(arc);
+    ARC_UTIL_UploadPaletteFromArchiveWhole(ARC_FONT, FONT_PALETTE_FILE, WT_PALETTE_MAIN_BG, FONT_PALETTE * 0x20, 0x20,
+                                           WT_SCREEN_HEAPID);
+    BMP_MENUWORK_LoadCharAndPltt(BG_TEXT, FRAME_CHAR, FRAME_PALETTE, 0, WT_SCREEN_HEAPID);
+    app->font = GF_FONT_Create(ARC_FONT, 0, 0, 0, WT_SCREEN_HEAPID);
+    app->line = STRBUF_Create(64, WT_SCREEN_HEAPID);
+    app->queue = PRINTSYS_QUE_Create(WT_SCREEN_HEAPID);
+    app->buttonRes = APP_TASKMENU_RES_Create(BG_BUTTONS, BUTTON_PALETTE, app->font, app->queue, WT_SCREEN_HEAPID);
+    app->titleWindow = BMP_WIN_Create(BG_TEXT, WT_GEN5_TITLE_X, WT_GEN5_TITLE_Y, WT_GEN5_TITLE_WIDTH,
+                                      WT_GEN5_TITLE_HEIGHT, TITLE_PALETTE, TRUE);
+    app->messageWindow = BMP_WIN_Create(BG_TEXT, WT_GEN5_MESSAGE_X, WT_GEN5_MESSAGE_Y, WT_GEN5_MESSAGE_WIDTH,
+                                        WT_GEN5_MESSAGE_HEIGHT, FONT_PALETTE, TRUE);
+    BMP_Clear(BMP_WIN_GetBmp(app->messageWindow), TEXT_BACKGROUND);
+    BMP_MENUWORK_DrawWindow(app->messageWindow, 0, FRAME_CHAR, FRAME_PALETTE);
+    Screen_Transfer(app->messageWindow, BG_TEXT);
+    BG_SYS_SetPlaneVisible(BG_TEXT, TRUE);
+    BG_SYS_SetPlaneVisible(BG_BAR, TRUE);
+    BG_SYS_SetPlaneVisible(BG_GRID, TRUE);
+    BG_SYS_SetPlaneVisible(BG_BUTTONS, TRUE);
+    BG_SYS_SetPlaneVisible(BG_BUTTONS_GRID, TRUE);
+}
+
+/* The party screen and the trade animation leave their banks and engine
+ * layout; the screen takes the banks it needs. */
+static void ResetBanks(void)
+{
+    GX_ResetBankForOBJ(); GX_ResetBankForBGExtPltt(); GX_ResetBankForOBJExtPltt(); GX_ResetBankForTex();
+    GX_ResetBankForTexPltt(); GX_ResetBankForClearImage(); GX_ResetBankForSubOBJ(); GX_ResetBankForSubBGExtPltt();
+    GX_ResetBankForSubOBJExtPltt();
 }
 
 static void Screen_Free(WtApp *app)
 {
-    if (app->line) STRBUF_Delete(app->line);
-    if (app->font) GF_FONT_Delete(app->font);
-    if (app->bitmap) BMP_Delete(app->bitmap);
-    app->line = NULL; app->font = NULL; app->bitmap = NULL;
+    if (!app->font) return;
     Brightness(-16);
+    if (app->buttons) APP_TASKMENU_CloseMenu(app->buttons);
+    APP_TASKMENU_RES_Delete(app->buttonRes);
+    BMP_WIN_Delete(app->messageWindow);
+    BMP_WIN_Delete(app->titleWindow);
+    PRINTSYS_QUE_Clear(app->queue);
+    PRINTSYS_QUE_Delete(app->queue);
+    STRBUF_Delete(app->line);
+    GF_FONT_Delete(app->font);
+    BG_SYS_SetMainVisiblePlanes(0);
+    BG_SYS_SetSubVisiblePlanes(0);
+    BMP_WIN_Exit();
+    BG_SYS_Delete();
+    GFL_HEAP_DeleteChecked(WT_SCREEN_HEAPID);
+    app->font = NULL; app->line = NULL; app->queue = NULL;
+    app->titleWindow = NULL; app->messageWindow = NULL; app->buttonRes = NULL; app->buttons = NULL;
 }
 
-/* Prints text from chars up to the end, a line break or count characters. */
+/* Loads a line of text from chars, up to the end, a line break or count
+ * characters, into the screen's line; returns the characters taken. */
+static int Screen_Line(WtApp *app, const u16 *chars, int count)
+{
+    u16 copy[65];
+    int length = 0;
+    while (length < count && length < 64 && chars[length] != 0 && chars[length] != '\n' && chars[length] != 0xffff)
+        length++;
+    memcpy(copy, chars, length * sizeof(u16));
+    copy[length] = 0xffff;
+    STRBUF_SetString(app->line, copy);
+    return length;
+}
+
+/* Prints a line of text from chars into the message window. */
 static int Screen_Print(WtApp *app, const u16 *chars, int count, int x, int y)
 {
-    int length = 0;
-    while (length < count && chars[length] != 0 && chars[length] != '\n' && chars[length] != 0xffff) length++;
-    if (length) {
-        u16 copy[65];
-        memcpy(copy, chars, length * sizeof(u16));
-        copy[length] = 0xffff;
-        STRBUF_SetString(app->line, copy);
-        PRINTSYS_PrintColor(app->bitmap, (u32)x, (s16)y, app->line, app->font, WT_PRINT_COLOR(4, 11, TEXT_BACKGROUND));
-    }
+    int length = Screen_Line(app, chars, count);
+    if (length) PRINTSYS_PrintColor(BMP_WIN_GetBmp(app->messageWindow), (u32)x, (s16)y, app->line, app->font, TEXT_COLOR);
     return length;
 }
 
@@ -198,7 +281,7 @@ static int Screen_Text(WtApp *app, const u16 *text, int x, int y)
 {
     while (*text) {
         text += Screen_Print(app, text, 64, x, y);
-        y += LINE_HEIGHT;
+        y += WT_GEN5_LINE_HEIGHT;
         if (*text == '\n') text++;
     }
     return y;
@@ -250,61 +333,90 @@ static WtParty *Party(const WtApp *app)
     return POKEPARTY_GetSaveData(app->game.save);
 }
 
+static int PartyCount(const WtApp *app)
+{
+    int count = Party(app)->count;
+    return count < WT_PARTY_SIZE ? count : WT_PARTY_SIZE;
+}
+
+/* A button's text. */
+static struct Strbuf *Label(int text)
+{
+    u16 chars[24];
+    const u16 *from;
+    struct Strbuf *str = STRBUF_Create(24, WT_SCREEN_HEAPID);
+    int length = 0;
+    for (from = gWtText[text]; *from && length < 23; ) chars[length++] = *from++;
+    chars[length] = 0xffff;
+    STRBUF_SetString(str, chars);
+    return str;
+}
+
+/* The lower screen's buttons: the actions. */
+static void Buttons(WtApp *app)
+{
+    WtTaskMenuItem items[WT_GEN5_MAX_BUTTONS];
+    WtTaskMenuInit init;
+    int labels[MAX_ACTIONS], count, i;
+    if (app->buttons) APP_TASKMENU_CloseMenu(app->buttons);
+    app->buttons = NULL;
+    count = Actions(app, labels);
+    if (count <= 0) return;
+    for (i = 0; i < count; ++i) {
+        items[i].str = Label(labels[i]);
+        items[i].color = BUTTON_COLOR;
+        /* A button that leaves has the return arrow and the cancel sound, as B does. */
+        items[i].type = labels[i] == WT_TEXT_BACK || labels[i] == WT_TEXT_EXIT || labels[i] == WT_TEXT_CANCEL
+                            ? WT_TASKMENU_ITEM_RETURN : 0;
+    }
+    MI_CpuFill8(&init, 0, sizeof(init));
+    init.heapId = WT_SCREEN_HEAPID;
+    init.count = (u8)count;
+    init.items = items;
+    init.x = WT_GEN5_BUTTON_X;
+    init.y = (u8)WtGen5_ButtonTop(count);
+    init.width = WT_GEN5_BUTTON_WIDTH;
+    init.height = WT_GEN5_BUTTON_HEIGHT;
+    app->buttons = APP_TASKMENU_OpenMenu(&init, app->buttonRes);
+    for (i = 0; i < count; ++i) STRBUF_Delete(items[i].str);
+}
+
 static void Draw(WtApp *app)
 {
-    static const u16 cursor[] = { '>', 0 }, level[] = { 'L', 'v', '.', 0 };
-    int labels[MAX_ACTIONS], count, i, y;
-    u16 name[16], digits[12];
-    if (!app->bitmap) return;
-    MIi_CpuClear16(TEXT_BACKGROUND * 0x1111, (u8 *)G2_GetBG1CharPtr() + FIRST_TEXT_TILE * TILE_SIZE,
-                   TEXT_WIDTH * TEXT_HEIGHT * TILE_SIZE);
-    if (app->state == WT_APP_PICKER) {
-        /* Two lines of prompt and six Pokémon fill the window's eight lines: no title here. */
-        WtParty *party = Party(app);
-        y = Screen_Text(app, gWtText[WT_TEXT_PICK], 0, 0);
-        for (i = 0; i < party->count && i < WT_PARTY_SIZE; ++i) {
-            if (i == app->cursor) Screen_Print(app, cursor, 2, 0, y);
-            memset(name, 0xff, sizeof(name));
-            POKE_TOOL_GetPartyValue(&party->members[i], WT_PARAM_NICKNAME_RAW, (u32)name);
-            name[11] = 0xffff;
-            Screen_Print(app, name, 11, 12, y);
-            Screen_Print(app, level, 3, 140, y);
-            Number(digits, POKE_TOOL_GetPartyValue(&party->members[i], WT_PARAM_LEVEL, 0));
-            Screen_Print(app, digits, 10, 164, y);
-            y += LINE_HEIGHT;
-        }
-        return;
-    }
-    Screen_Text(app, gWtText[WT_TEXT_TITLE], 0, 0);
-    y = Screen_Text(app, gWtText[app->message], 0, LINE_HEIGHT);
+    struct Bmp *title;
+    u16 digits[12];
+    int y;
+    if (!app->font) return;
+    title = BMP_WIN_GetBmp(app->titleWindow);
+    BMP_Clear(title, TITLE_BACKGROUND);
+    Screen_Line(app, gWtText[WT_TEXT_TITLE], 64);
+    PRINTSYS_PrintColor(title,
+        (u32)((WT_GEN5_TITLE_WIDTH * 8 - (int)PRINTSYS_MeasureWidestLine(app->line, app->font, 0)) / 2), 0, app->line,
+        app->font, TITLE_COLOR);
+    Screen_Transfer(app->titleWindow, BG_TEXT);
+    BMP_Clear(BMP_WIN_GetBmp(app->messageWindow), TEXT_BACKGROUND);
+    y = Screen_Text(app, gWtText[app->message], 0, 0);
     if (app->state == WT_APP_RECEIVED && app->network.hasReceived) {
         Screen_Print(app, gWtText[WT_TEXT_RECEIVED], 32, 0, y);
         Screen_Print(app, app->network.received.nickname, WT_GAME_NAME_LENGTH, 100, y);
-        y += LINE_HEIGHT;
+        y += WT_GEN5_LINE_HEIGHT;
         Screen_Print(app, gWtText[WT_TEXT_ORIGINAL_TRAINER], 32, 0, y);
         Screen_Print(app, app->network.received.originalTrainer, WT_GAME_TRAINER_NAME_LENGTH, 100, y);
-        y += LINE_HEIGHT;
     }
-    if (app->state == WT_APP_ERROR) {
+    if (app->state == WT_APP_ERROR || app->message == WT_TEXT_PING_ERROR) {
         Screen_Print(app, gWtText[WT_TEXT_ERROR_CODE], 32, 0, y);
         Number(digits, (unsigned)(app->network.error < 0 ? -app->network.error : app->network.error));
         if (app->network.error < 0) { memmove(digits + 1, digits, sizeof(digits) - sizeof(u16)); digits[0] = '-'; }
         Screen_Print(app, digits, 11, 140, y);
-        y += LINE_HEIGHT;
     }
-    count = Actions(app, labels);
-    y = (TEXT_HEIGHT * 8) - count * LINE_HEIGHT;
-    for (i = 0; i < count; ++i, y += LINE_HEIGHT) {
-        if (i == app->cursor) Screen_Print(app, cursor, 2, 0, y);
-        Screen_Text(app, gWtText[labels[i]], 12, y);
-    }
+    Screen_Transfer(app->messageWindow, BG_TEXT);
+    Buttons(app);
 }
 
 static void Show(WtApp *app, int state, int message)
 {
     app->state = state;
     app->message = message;
-    app->cursor = 0;
     Draw(app);
 }
 
@@ -320,8 +432,13 @@ static int RefusalText(unsigned refusal, int fallback)
     }
 }
 
+/* Leaves the screen: before connecting at once, after once the connection is closed. */
 static void Close(WtApp *app)
 {
+    if (!app->started) {
+        app->state = WT_APP_DONE;
+        return;
+    }
     if (!app->network.canLeave) return;
     WonderTradeNetwork_Close(&app->network);
     Show(app, WT_APP_CLOSING, WT_TEXT_DISCONNECTING);
@@ -336,13 +453,13 @@ static void Connect(WtApp *app)
 
 static void Back(WtApp *app)
 {
-    if (app->state == WT_APP_CONFIRM || app->state == WT_APP_PICKER) {
+    if (app->state == WT_APP_CONFIRM) {
         app->selectedSlot = -1;
         Show(app, WT_APP_MENU, WT_TEXT_CHOOSE);
     } else if (app->state == WT_APP_COLLECT_CONFIRM || app->state == WT_APP_CANCEL_CONFIRM) {
         Show(app, WT_APP_MENU, WT_TEXT_QUEUED);
     } else if ((app->state == WT_APP_MESSAGE || app->state == WT_APP_RECEIVED) && !app->network.needsEntropy
-               && !app->boot) {
+               && !app->boot && app->started) {
         Show(app, WT_APP_MENU, app->network.tradePhase == WT_JOURNAL_IDLE ? WT_TEXT_CHOOSE : WT_TEXT_QUEUED);
     } else {
         Close(app);
@@ -361,6 +478,60 @@ static void Pick(WtApp *app, int slot)
     }
 }
 
+/* The game's own party screen picks the Pokémon (overlay 91, ov091/pokelist.c),
+ * set up as the field's "choose a Pokémon" sets it up
+ * (ov010/event_poke_status.c, EVENT_POKE_STATUS_CreatePokeSelectEvent): the
+ * party, in mode 3, which takes the Pokémon chosen at once, with no menu, and
+ * leaves its slot, or 6 or more for Back. It runs from a process system of its
+ * own, as the mail box pushes it (ov136/mb_seq.c, MB_SEQ_PushPartyList), which
+ * loads overlay 91; that shares no memory with the Wi-Fi overlays 9 and 13. It
+ * makes its own heap in heap 1, fades itself in and out, and puts the main
+ * engine on the lower screen. The screen fades out and is freed first, as for
+ * the trade animation. */
+static const WtProcData sPartyListProc = { POKELIST_Init, POKELIST_Main, POKELIST_Exit };
+
+static void Picker_Start(WtApp *app)
+{
+    app->selectedSlot = -1;
+    app->state = WT_APP_PICKER_FADE;
+    app->fade = 0;
+    Buttons(app);
+}
+
+static void Picker_Update(WtApp *app)
+{
+    int slot;
+    if (app->state == WT_APP_PICKER_FADE) {
+        if (++app->fade < WT_FADE_FRAMES) {
+            Brightness(-app->fade);
+            return;
+        }
+        Screen_Free(app);
+        if (GFL_HEAP_GetAllocatableSize(WT_HEAP_APP) >= WT_PARTY_LIST_HEAP_SIZE + 0x1000) {
+            memset(&app->partyList, 0, sizeof(app->partyList));
+            app->partyList.party = Party(app);
+            app->partyList.mode = WT_PARTY_LIST_SELECT;
+            app->procs = PROCSYS_Create(WT_HEAPID);
+            PROCSYS_Push(app->procs, WT_PARTY_LIST_OVERLAY, &sPartyListProc, &app->partyList);
+            app->state = WT_APP_PICKER;
+            return;
+        }
+        slot = -1;
+    } else if (PROCSYS_Main(app->procs) != 0) {
+        return;
+    } else {
+        PROCSYS_Delete(app->procs);
+        app->procs = NULL;
+        ResetBanks();
+        slot = app->partyList.selectedIndex;
+    }
+    /* The screen puts the main engine back on the upper screen. */
+    Screen_Init(app);
+    app->fade = WT_FADE_FRAMES;
+    if (slot >= 0 && slot < PartyCount(app)) Pick(app, slot);
+    else Show(app, WT_APP_MENU, WT_TEXT_CHOOSE);
+}
+
 static void Activate(WtApp *app, int choice)
 {
     switch (app->state) {
@@ -369,9 +540,6 @@ static void Activate(WtApp *app, int choice)
         break;
     case WT_APP_CONNECTING: case WT_APP_PINGING:
         Close(app);
-        break;
-    case WT_APP_PICKER:
-        Pick(app, choice);
         break;
     case WT_APP_CONFIRM: case WT_APP_COLLECT_CONFIRM: case WT_APP_CANCEL_CONFIRM:
         if (choice == 1) {
@@ -393,7 +561,7 @@ static void Activate(WtApp *app, int choice)
         break;
     case WT_APP_MENU:
         if (choice == 0) {
-            if (app->network.tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_PICKER, WT_TEXT_PICK);
+            if (app->network.tradePhase == WT_JOURNAL_IDLE) Picker_Start(app);
             else Show(app, WT_APP_COLLECT_CONFIRM, WT_TEXT_CONFIRM_COLLECT);
         } else if (choice == 1) {
             if (app->network.tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_MESSAGE, WT_TEXT_EXPLANATION);
@@ -403,22 +571,25 @@ static void Activate(WtApp *app, int choice)
     }
 }
 
+/* The buttons read the +Control Pad, A and the touch screen themselves, and a
+ * picked button flashes before it acts. B and X go back from every screen but
+ * the recovery screen, as before, whether or not a button leaves. */
 static void Input(WtApp *app)
 {
-    int labels[MAX_ACTIONS];
-    int count = app->state == WT_APP_PICKER ? Party(app)->count : Actions(app, labels);
     u32 keys = KEY_GetTrg();
-    if (app->state != WT_APP_RECOVERY && (keys & (PAD_BUTTON_B | PAD_BUTTON_X))) {
+    if (app->buttons && APP_TASKMENU_IsDecide(app->buttons)) {
+        APP_TASKMENU_UpdateMenu(app->buttons);
+        if (APP_TASKMENU_IsFinish(app->buttons)) Activate(app, APP_TASKMENU_GetCursorPos(app->buttons));
+        return;
+    }
+    if (keys & (PAD_BUTTON_B | PAD_BUTTON_X)) {
+        /* The buttons would take B as picking the last one, the recovery screen's only button. */
+        if (app->state == WT_APP_RECOVERY) return;
+        if (app->buttons) GFL_USE_PlaySeDefaultVolume(WT_SE_CANCEL);
         Back(app);
         return;
     }
-    if (count <= 0) return;
-    if (keys & (PAD_KEY_UP | PAD_KEY_DOWN)) {
-        app->cursor = (app->cursor + ((keys & PAD_KEY_UP) ? count - 1 : 1)) % count;
-        Draw(app);
-    } else if (keys & PAD_BUTTON_A) {
-        Activate(app, app->cursor);
-    }
+    if (app->buttons) APP_TASKMENU_UpdateMenu(app->buttons);
 }
 
 /* The Global Trade Station's trade animation (ov119's POKETRADE_PROC_StartRequest8,
@@ -470,13 +641,12 @@ static void Trade_End(WtApp *app)
     GF_OVERLAY_Unload(WT_TRADE_OVERLAY_A);
     GFL_HEAP_Free(app->partner);
     app->partner = NULL;
-    /* The animation leaves its banks and engine layout; the screen takes the banks it needs. */
-    GX_ResetBankForOBJ(); GX_ResetBankForBGExtPltt(); GX_ResetBankForOBJExtPltt(); GX_ResetBankForTex();
-    GX_ResetBankForTexPltt(); GX_ResetBankForClearImage(); GX_ResetBankForSubOBJ(); GX_ResetBankForSubBGExtPltt();
-    GX_ResetBankForSubOBJExtPltt();
+    ResetBanks();
 }
 
-/* The received Pokémon: fade out, play the animation, then fade the result in. */
+/* The received Pokémon: fade out, play the animation, then fade the result
+ * in. The screen puts the main engine back on the upper screen, which the
+ * animation swaps (BG_SYS_SetLcdSwap). */
 static void Trade_Update(WtApp *app)
 {
     if (app->state == WT_APP_TRADE_FADE) {
@@ -484,7 +654,6 @@ static void Trade_Update(WtApp *app)
             Brightness(-app->fade);
             return;
         }
-        app->swap = REG_POWCNT1 & 0x8000;
         Screen_Free(app);
         if (Trade_Begin(app)) return;
     } else if (PROCSYS_Main(app->procs) != 0) {
@@ -492,13 +661,10 @@ static void Trade_Update(WtApp *app)
     } else {
         Trade_End(app);
     }
-    /* The animation swaps the screens (BG_SYS_SetLcdSwap): put them back. */
-    REG_POWCNT1 = (u16)((REG_POWCNT1 & ~0x8000) | app->swap);
     mbedtls_platform_zeroize(app->pkm, sizeof(app->pkm));
     mbedtls_platform_zeroize(app->network.received.sent, sizeof(app->network.received.sent));
     mbedtls_platform_zeroize(app->network.received.image, sizeof(app->network.received.image));
     Screen_Init(app);
-    Brightness(-WT_FADE_FRAMES);
     Show(app, WT_APP_RECEIVED, WT_TEXT_COMPLETED);
     app->fade = WT_FADE_FRAMES;
 }
@@ -513,6 +679,8 @@ static void Responded(WtApp *app)
     else if (net->completed) {
         app->state = WT_APP_TRADE_FADE;
         app->fade = 0;
+        /* The response can let the screen leave, which drew a Cancel button; the fade has none. */
+        Buttons(app);
     }
     else if (net->rejected) Show(app, WT_APP_MESSAGE, RefusalText(net->refusal, WT_TEXT_REJECTED));
     else if (net->superseded && net->tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_MESSAGE, WT_TEXT_SUPERSEDED);
@@ -527,7 +695,7 @@ static void Responded(WtApp *app)
 static WtApp *Create(BOOL boot, u32 heapSize)
 {
     WtApp *app;
-    if (GFL_HEAP_GetAllocatableSize(WT_HEAP_APP) < heapSize + 0x1000
+    if (GFL_HEAP_GetAllocatableSize(WT_HEAP_APP) < heapSize + WT_SCREEN_HEAP_SIZE + 0x2000
         || !GFL_HEAP_CreateChildHeapImpl(WT_HEAP_APP, WT_HEAPID, heapSize)) return NULL;
     app = GFL_HEAP_AllocMemory(WT_HEAPID, sizeof(*app));
     if (!app) {
@@ -540,6 +708,7 @@ static WtApp *Create(BOOL boot, u32 heapSize)
     app->game.heapId = WT_HEAPID;
     app->selectedSlot = -1;
     Screen_Init(app);
+    app->fade = WT_FADE_FRAMES;
     return app;
 }
 
@@ -547,7 +716,11 @@ static WtApp *Create(BOOL boot, u32 heapSize)
 WtApp *WtApp_CreateChecking(void)
 {
     WtApp *app = Create(TRUE, WT_CHECKING_HEAP_SIZE);
-    if (app) Show(app, WT_APP_CHECKING, WT_TEXT_CHECKING_SAVE);
+    if (app) {
+        Show(app, WT_APP_CHECKING, WT_TEXT_CHECKING_SAVE);
+        app->fade = 0;
+        Brightness(0);
+    }
     return app;
 }
 
@@ -557,8 +730,8 @@ WtApp *WtApp_Create(BOOL boot)
     if (!app) return NULL;
     if (boot) {
         Show(app, WT_APP_RECOVERY, WT_TEXT_RECOVERY_REQUIRED);
-    } else if (WtGameSave_ReleaseMusicalArea(&app->game) != 0) {
-        /* The journal may never be written while the game could read its area. */
+    } else if ((app->network.error = WtGameSave_ReleaseMusicalArea(&app->game)) != 0) {
+        /* The journal may never be written while the game could read its area. The message shows the code. */
         Show(app, WT_APP_MESSAGE, WT_TEXT_PING_ERROR);
     } else {
         Connect(app);
@@ -571,17 +744,15 @@ BOOL WtApp_Update(WtApp *app)
 {
     BOOL couldLeave = app->network.canLeave;
     if (app->state == WT_APP_DONE) return TRUE;
-    if (app->state != WT_APP_TRADE_FADE && app->state != WT_APP_TRADE && app->fade > 0) {
+    if (app->font) PRINTSYS_QUE_Main(app->queue);
+    if (app->state != WT_APP_TRADE_FADE && app->state != WT_APP_TRADE && app->state != WT_APP_PICKER_FADE
+        && app->state != WT_APP_PICKER && app->fade > 0) {
         --app->fade;
         Brightness(-app->fade);
     }
     if (!app->started) {
         Input(app);
-        if (app->state == WT_APP_CLOSING || (app->state == WT_APP_MESSAGE && KEY_GetTrg() & PAD_BUTTON_A)) {
-            app->state = WT_APP_DONE;
-            return TRUE;
-        }
-        return FALSE;
+        return app->state == WT_APP_DONE;
     }
     WonderTradeNetwork_Update(&app->network);
     if (couldLeave != app->network.canLeave) Draw(app);
@@ -596,6 +767,10 @@ BOOL WtApp_Update(WtApp *app)
     }
     if (app->state == WT_APP_TRADE_FADE || app->state == WT_APP_TRADE) {
         Trade_Update(app);
+        return FALSE;
+    }
+    if (app->state == WT_APP_PICKER_FADE || app->state == WT_APP_PICKER) {
+        Picker_Update(app);
         return FALSE;
     }
     if (app->state == WT_APP_CONNECTING || app->state == WT_APP_PINGING) {
