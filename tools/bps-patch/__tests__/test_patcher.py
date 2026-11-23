@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -54,6 +56,9 @@ class FakeFlips:
         stage.write(target, self.output if self.output is not None else result)
         if self.during_apply:
             self.during_apply(stage)
+
+    def stop(self):
+        self.calls.append("stop")
 
 
 class Fixture(unittest.TestCase):
@@ -102,7 +107,7 @@ class CreateTests(Fixture):
         flips = FakeFlips()
         manifest = self.create(flips=flips)
         bundle = self.root / "game/bundle"
-        self.assertEqual(flips.calls, ["create", "create", "apply"] * 2)
+        self.assertEqual(sorted(flips.calls), ["apply"] * 2 + ["create"] * 4)
         self.assertEqual((manifest["schema_version"], manifest["kind"]), (3, "dswt-bps-bundle"))
         self.assertNotIn("publication_permitted", manifest)
         self.assertEqual(manifest["release_checks"]["private_keys_checked"], 0)
@@ -121,6 +126,42 @@ class CreateTests(Fixture):
         self.create(output=self.root / "game/again")
         for name in ("manifest.json", "dswt-us-rev1.bps"):
             self.assertEqual((bundle / name).read_bytes(), (self.root / "game/again" / name).read_bytes())
+
+    def test_parallel_and_serial_runs_make_the_same_bundle(self):
+        pairs = self.pairs + [(base, self.write(f"{key}-wt.nds", target)) for key, base, target in self.ports()]
+        lines = []
+        self.create(pairs=pairs, jobs=1, output=self.root / "game/serial")
+        self.create(pairs=pairs, jobs=4, output=self.root / "game/parallel", progress=lines.append)
+        serial, parallel = self.root / "game/serial", self.root / "game/parallel"
+        names = sorted(str(path.relative_to(serial)) for path in serial.rglob("*") if path.is_file())
+        self.assertEqual(names, sorted(str(path.relative_to(parallel)) for path in parallel.rglob("*") if path.is_file()))
+        for name in names:
+            self.assertEqual((serial / name).read_bytes(), (parallel / name).read_bytes(), name)
+        self.assertEqual(sorted(line.split(":")[0] for line in lines[:-1]), sorted([*BASES, "port-0", "port-1", "port-2"]))
+        self.assertTrue(all(line.endswith(f"/{len(pairs)})") for line in lines[:-1]), lines)
+        self.assertEqual(lines[-1], f"Checking the patches against {len(pairs)} retail cartridges")
+
+    def ports(self):
+        """More catalogued cartridges, so several are patched at once."""
+        for index in range(3):
+            key, base = f"port-{index}", rom(2 + index, f"port-{index}")
+            path = self.write(f"{key}.nds", base)
+            self.catalog["variants"].append(dict(self.catalog["variants"][0], id=key, revision=2 + index,
+                                                 planned_patch=f"dswt-{key}.bps", sha256=hashlib.sha256(base).hexdigest()))
+            yield key, path, rom(2 + index, f"target-{key}", payload=b"wt.dswt.games:443" + PINS[0] + PINS[1])
+
+    def test_a_failure_stops_the_other_cartridges(self):
+        class Failing(FakeFlips):
+            def create(inner, stage, source, *arguments):
+                if source.startswith("us-rev0."):
+                    raise patcher.PatchError("boom")
+                super().create(stage, source, *arguments)
+        flips = Failing()
+        with self.assertRaisesRegex(patcher.PatchError, "boom"):
+            self.create(flips=flips)
+        self.assertIn("stop", flips.calls)
+        self.assertFalse((self.root / "game/bundle").exists())
+        self.assertEqual(self.leftovers(self.root / "game"), [])
 
     def test_rejections_publish_nothing(self):
         europe = self.write("europe.nds", rom(0, "europe", "CPUP"))
@@ -277,8 +318,11 @@ class CreateTests(Fixture):
         class Racer(FakeFlips):
             def apply(inner, stage, *arguments):
                 super().apply(stage, *arguments)
-                if stage.path.name.startswith(".bundle.partial") and not existing.exists():
-                    existing.mkdir()
+                if stage.path.name.startswith(".bundle.partial"):
+                    try:  # the cartridges' applies may race here
+                        existing.mkdir()
+                    except FileExistsError:
+                        return
                     (existing / "other").write_bytes(b"other writer")
         with self.assertRaisesRegex(patcher.PatchError, "appeared"):
             self.create(flips=Racer())
@@ -432,6 +476,42 @@ class PinnedFlipsTests(Fixture):
         self.assertEqual(patcher.apply(self.root / "game/bundle/manifest.json", self.pairs[0][0], out)["variant"], "us-rev0")
         self.assertEqual(out.read_bytes(), TARGETS["us-rev0"])
         self.assertEqual(manifest["tool"]["binary"], flips.record["binary"])
+
+class BudgetTests(unittest.TestCase):
+    def run_all(self, budget, costs):
+        """Hold each cost in turn on its own thread; return the costs held at once, as each starts."""
+        held, seen, lock = [], [], threading.Lock()
+        release = threading.Event()
+
+        def work(cost):
+            with budget.hold(cost):
+                with lock:
+                    held.append(cost)
+                    seen.append(list(held))
+                release.wait(5)
+                with lock:
+                    held.remove(cost)
+        threads = []
+        for cost in costs:
+            threads.append(threading.Thread(target=work, args=(cost,)))
+            threads[-1].start()
+            time.sleep(0.05)  # arrive in order
+        release.set()
+        for thread in threads:
+            thread.join(5)
+        return seen
+
+    def test_work_starts_in_arrival_order_while_it_fits(self):
+        # 6 and 3 fit together; 2 must wait behind 5 rather than pass it.
+        seen = self.run_all(patcher.Budget(10), [6, 3, 5, 2])
+        self.assertEqual(seen[:2], [[6], [6, 3]])
+        self.assertEqual([starting[-1] for starting in seen], [6, 3, 5, 2])
+
+    def test_work_larger_than_the_budget_runs_alone(self):
+        seen = self.run_all(patcher.Budget(10), [4, 25, 4])
+        self.assertIn([25], seen)
+        self.assertNotIn(25, [cost for starting in seen if len(starting) > 1 for cost in starting])
+
 
 class RetailIndexTests(unittest.TestCase):
     """The bundle-wide retail check: one pass over each cartridge, the same 47-byte limit."""
