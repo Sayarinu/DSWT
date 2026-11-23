@@ -189,19 +189,23 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  #define FIELD_MENU_BUTTON_PLAYER 4 /* the trainer name button */
  #define FIELD_MENU_BUTTON_EMPTY 7  /* slot without a button */
  
-@@ -214,6 +217,11 @@ typedef struct FieldMenu {
+@@ -214,6 +217,15 @@ typedef struct FieldMenu {
      void *printQue;
      void *colorTask;
      u32 colorPhase;
-+    /* DSWT: the page shown, of wtPageCount, and its label */
++    /* DSWT: the page shown, of wtPageCount, and its indicator on the bottom bar:
++     * arrows around the page number */
 +    u8 wtPage;
 +    u8 wtPageCount;
 +    u8 reserved13A[2];
-+    void *wtPageWin;
++    struct ClactActor *wtPageArrows[2];
++    struct BmpOamSys *wtPageOam;
++    struct Bmp *wtPageBmp;
++    struct BmpOam *wtPageNumber;
  } FieldMenu;
  
  /* Values of FieldMenu.state */
-@@ -228,6 +236,8 @@ typedef struct FieldMenu {
+@@ -228,6 +240,8 @@ typedef struct FieldMenu {
  #define FIELD_MENU_STATE_NOTIFY_SELECT 8
  #define FIELD_MENU_STATE_SLIDE_OUT 9
  #define FIELD_MENU_STATE_DONE 10
@@ -210,7 +214,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
  /* Mode numbers the menu hands to its parent when it ends. */
  #define FIELD_MENU_NEXT_SELECT 3
-@@ -260,6 +270,18 @@ typedef struct FieldMenu {
+@@ -260,6 +274,30 @@ typedef struct FieldMenu {
  #define FIELD_MENU_PAD_UP 0x0040
  #define FIELD_MENU_PAD_DOWN 0x0080
  #define FIELD_MENU_PAD_X 0x0400
@@ -223,30 +227,50 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
 +/* Wonder Trade's icon: its own characters, the member the port adds to the archive
 + * (scripts/retail_port/bw.py), with the Pokemon button's cells and animation */
 +#define FIELD_MENU_WT_CHARS 39
-+/* Wonder Trade's name, the page labels and the page label's touch rectangle (wonder_trade/bw/text.c) */
++/* Wonder Trade's name and the page numbers (wonder_trade/bw/menu_text.c) */
 +extern const u16 gWtFieldMenuLabel[];
-+extern const u16 gWtFieldMenuPage[2][8];
++extern const u16 gWtFieldMenuPage[2][4];
++/* The page indicator, placed as the Hall of Fame PC's on the bottom bar: the
++ * bar's left and right arrows (the back button's resources), the page number
++ * centred between them, and the touch area of the three. The number prints in
++ * the bar's second palette, white with a grey shadow. */
++#define FIELD_MENU_WT_ARROW_SEQ 4
++#define FIELD_MENU_WT_LEFT_X 8
++#define FIELD_MENU_WT_RIGHT_X 88
++#define FIELD_MENU_WT_PAGE_Y 0xA8
++#define FIELD_MENU_WT_NUMBER_X 44
++#define FIELD_MENU_WT_NUMBER_Y 0xAC
++#define FIELD_MENU_WT_NUMBER_WIDTH 32
++#define FIELD_MENU_WT_PAGE_COLOR ((6 << 10) | (8 << 5) | 0)
  
  /* Position on the sub screen, in pixels. */
  
-@@ -419,6 +441,10 @@ extern u8 gFieldMenuSlotRow[];
+@@ -402,6 +440,7 @@ struct BmpWin;
+ struct Bmp;
+ typedef short s16_p07;
+ #include "../arm9/bmp.h"
++#include "../arm9/bmp_oam.h"
+ 
+ extern const struct BgTemplate gFieldMenuBgTemplate5;
+ extern const struct BgTemplate gFieldMenuBgTemplate6;
+@@ -419,6 +458,11 @@ extern u8 gFieldMenuSlotRow[];
  extern FieldMenuTouchTable gFieldMenuTouchTable;
  extern char gFieldMenuFileName[];
  
 +void FIELD_MENU_WtCreateItems(FieldMenu *menu, void *arcHandle, int layoutType, u8 first, u8 last);
++void FIELD_MENU_WtCreatePageIndicator(FieldMenu *menu);
 +void FIELD_MENU_WtPrintPage(FieldMenu *menu);
 +void FIELD_MENU_WtTurnPage(FieldMenu *menu);
 +
  FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fieldMap, int slideIn);
  void FIELD_MENU_NotifyParentOnExit(FieldMenu *menu);
  void FIELD_MENU_Delete(FieldMenu *menu);
-@@ -481,9 +507,21 @@ FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fiel
+@@ -481,9 +525,19 @@ FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fiel
      arcHandle = ARC_TOOL_CreateHandle(0x47, menu->subHeapId);
      layoutType = FIELD_MENU_GetLayoutType(gameData, menu->eventWork, menu->zoneId);
      menu->layoutType = layoutType;
 +    menu->wtPageCount = layoutType == FIELD_MENU_LAYOUT_NORMAL ? 2 : 1;
 +    menu->wtPage = menu->wtPageCount > 1 && GAME_DATA_GetFieldMenuCursor(gameData) == FIELD_MENU_BUTTON_WONDER_TRADE;
-+    menu->wtPageWin = 0;
      FIELD_MENU_LoadGraphics(menu, arcHandle, layoutType, menu->mapInfo);
 +    if (menu->wtPage == 1) {
 +        ARC_UTIL_UploadBgPaletteFromHandle(arcHandle, FIELD_MENU_SCREEN_FOUR, 5, 0, 0, 0, menu->subHeapId);
@@ -255,34 +279,39 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      FIELD_MENU_CreateItems(menu, arcHandle, layoutType);
      ARC_TOOL_DeleteHandle(arcHandle);
 +    if (menu->wtPageCount > 1) {
-+        menu->wtPageWin = BMP_WIN_Create(6, 12, 1, 8, 2, 0xD, 1);
-+        BMP_WIN_MakeScreen(menu->wtPageWin);
++        FIELD_MENU_WtCreatePageIndicator(menu);
 +        FIELD_MENU_WtPrintPage(menu);
 +    }
      BG_SYS_SetPlaneVisible(1, 1);
      if (slideIn == 1) {
          menu->cursorCol = 0;
-@@ -519,6 +557,9 @@ void FIELD_MENU_Delete(FieldMenu *menu)
+@@ -519,6 +573,13 @@ void FIELD_MENU_Delete(FieldMenu *menu)
      for (i = 0; i < FIELD_MENU_ITEM_MAX; i++) {
          FIELD_MENU_DeleteItem(menu, &menu->items[i]);
      }
-+    if (menu->wtPageWin != 0) {
-+        BMP_WIN_Delete(menu->wtPageWin);
++    if (menu->wtPageCount > 1) {
++        BMP_OAM_Delete(menu->wtPageNumber);
++        BMP_Delete(menu->wtPageBmp);
++        BMP_OAM_DeleteSys(menu->wtPageOam);
++        CLACT_DeleteActor(menu->wtPageArrows[0]);
++        CLACT_DeleteActor(menu->wtPageArrows[1]);
 +    }
      FIELD_MENU_NotifyParentOnExit(menu);
      TCB_DeleteTask(menu->colorTask);
      CLACT_DeleteActor(menu->backActor);
-@@ -564,6 +605,9 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
-             for (i = 0; i < FIELD_MENU_ITEM_MAX; i++) {
-                 FIELD_MENU_ShowItemWindow(menu, &menu->items[i]);
-             }
-+            if (menu->wtPageWin != 0) {
-+                BMP_WIN_TransferChars(menu->wtPageWin);
+@@ -615,6 +676,11 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
+             BG_SYS_SetPlaneVisible(6, 1);
+             BG_SYS_SetPlaneVisible(7, 1);
+             CLACT_SetActorDrawEnable(menu->backActor, 0);
++            if (menu->wtPageCount > 1) {
++                CLACT_SetActorDrawEnable(menu->wtPageArrows[0], 0);
++                CLACT_SetActorDrawEnable(menu->wtPageArrows[1], 0);
++                BMP_OAM_SetEnabled(menu->wtPageNumber, 0);
 +            }
-             if (menu->scrollY != 0) {
-                 GFL_USE_PlaySeDefaultVolume(SE_FIELD_MENU_SLIDE_IN);
-                 menu->state = FIELD_MENU_STATE_SLIDE_IN;
-@@ -653,6 +697,17 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
+         } else {
+             item = menu->selectedItem;
+             if (item->actor != 0) {
+@@ -653,6 +719,16 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
          }
          menu->scrollDirty = 1;
          break;
@@ -291,7 +320,6 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
 +            for (i = 0; i < FIELD_MENU_ITEM_BACK; i++) {
 +                FIELD_MENU_ShowItemWindow(menu, &menu->items[i]);
 +            }
-+            BMP_WIN_TransferChars(menu->wtPageWin);
 +            BG_SYS_PushTile(5);
 +            BG_SYS_PushTile(6);
 +            menu->state = FIELD_MENU_STATE_IDLE;
@@ -300,7 +328,17 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      }
      return PRINTSYS_QUE_Main(menu->printQue);
  }
-@@ -808,8 +863,24 @@ int FIELD_MENU_CountLayoutButtons(int layoutType)
+@@ -735,7 +811,8 @@ void FIELD_MENU_LoadGraphics(FieldMenu *menu, void *arcHandle, int layoutType, v
+     menu->cellResB = CLACT_RegisterCellAnim(commonArc, cellId, APP_ICON_GetStatusPaletteFileId(0), menu->heapId);
+     ARC_TOOL_DeleteHandle(commonArc);
+     BG_SYS_PushTile(5);
+-    menu->clactUnit = CLACT_CreateUnit(8, 0, menu->heapId);
++    /* DSWT: and the page indicator's arrows and number */
++    menu->clactUnit = CLACT_CreateUnit(8 + 3, 0, menu->heapId);
+     surfaceRect = gFieldMenuSurfaceRect;
+     menu->clactSurface = CLACT_CreateRenderer((struct SurfaceInit *)(&surfaceRect), 1, menu->heapId);
+     CLACT_SetUnitRenderer(menu->clactUnit, menu->clactSurface);
+@@ -808,8 +885,24 @@ int FIELD_MENU_CountLayoutButtons(int layoutType)
  /* Builds the seven slots of the layout from the button table and the message bank. */
  void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
  {
@@ -326,7 +364,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      u8 j;
      int buttonId;
      const int *layoutRow;
-@@ -818,15 +889,15 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -818,15 +911,15 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
      FieldMenuName defaultName;
  
      msgBank = MSGDATA_CreateFromArchive(0, 2, PM_LANG_JA(0x22, 0x23), menu->subHeapId);
@@ -349,7 +387,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
              init.text = STRBUF_Create(0x10, menu->subHeapId);
              if (MYSTATUS_IsNameEmpty(menu->myStatus) == 0) {
                  STRBUF_SetString(init.text, (u16 *)(MYSTATUS_GetName(menu->myStatus)));
-@@ -847,6 +918,11 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -847,6 +940,11 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
              init.charId = gFieldMenuIconRes[buttonId].charId;
              init.cellId = gFieldMenuIconRes[buttonId].cellId;
              init.animId = gFieldMenuIconRes[buttonId].animId;
@@ -361,23 +399,59 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
              if (buttonId == 3 && MYSTATUS_GetSex(menu->myStatus) == 1) {
                  init.charId = 7;
                  init.cellId = 0x16;
-@@ -875,6 +951,49 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -875,6 +973,85 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
      MSGDATA_Delete(msgBank);
  }
  
-+/* DSWT: prints the page label */
++/* DSWT: creates the page indicator: the arrows, and a sprite for the page number */
++void FIELD_MENU_WtCreatePageIndicator(FieldMenu *menu)
++{
++    struct ActorInitParam pos;
++    struct BmpOamParam number;
++    u8 i;
++
++    pos.y = FIELD_MENU_WT_PAGE_Y;
++    pos.draw_priority = 0;
++    pos.bg_priority = 0;
++    for (i = 0; i < 2; i++) {
++        pos.x = i == 0 ? FIELD_MENU_WT_LEFT_X : FIELD_MENU_WT_RIGHT_X;
++        pos.anim_seq = FIELD_MENU_WT_ARROW_SEQ + i;
++        menu->wtPageArrows[i] = CLACT_CreateActor(menu->clactUnit, menu->charResB, menu->palResB, menu->cellResB,
++                                                  &pos, 0, menu->heapId);
++        CLACT_SetActorDrawEnable(menu->wtPageArrows[i], 1);
++    }
++    menu->wtPageOam = BMP_OAM_CreateSys(menu->heapId, menu->clactUnit);
++    menu->wtPageBmp = BMP_Create(FIELD_MENU_WT_NUMBER_WIDTH / 8, 2, 0x20, menu->heapId);
++    number.bmp = menu->wtPageBmp;
++    number.x = FIELD_MENU_WT_NUMBER_X;
++    number.y = FIELD_MENU_WT_NUMBER_Y;
++    /* The palette resource, and the palette within it */
++    number.animResId = menu->palResB;
++    number.palette = 1;
++    number.drawPriority = 0;
++    number.bgPriority = 0;
++    number.space = 0;
++    number.engine = 1;
++    menu->wtPageNumber = BMP_OAM_Create(menu->wtPageOam, &number);
++    BMP_OAM_SetEnabled(menu->wtPageNumber, 1);
++}
++
++/* DSWT: prints the page number, centred between the arrows */
 +void FIELD_MENU_WtPrintPage(FieldMenu *menu)
 +{
++    struct GfFont *font = (struct GfFont *)FIELD_MSGBG_GetFont(FIELDMAP_GetMsgBg(menu->fieldMap));
 +    void *label = STRBUF_Create(0x10, menu->subHeapId);
++    u32 width = PRINTSYS_MeasureTextWidth((u16 *)gWtFieldMenuPage[menu->wtPage], font, 0, 0);
 +
 +    STRBUF_SetString(label, gWtFieldMenuPage[menu->wtPage]);
-+    BMP_Clear(BMP_WIN_GetBmp(menu->wtPageWin), 0);
-+    PRINTSYS_PrintQueColor(menu->printQue, BMP_WIN_GetBmp(menu->wtPageWin), 2, PM_LANG_JA(1, 2), label,
-+                           (struct GfFont *)FIELD_MSGBG_GetFont(FIELDMAP_GetMsgBg(menu->fieldMap)), 0x440);
++    BMP_Clear(menu->wtPageBmp, 0);
++    PRINTSYS_PrintColor(menu->wtPageBmp, (FIELD_MENU_WT_NUMBER_WIDTH - width) / 2, 0, label, font,
++                        FIELD_MENU_WT_PAGE_COLOR);
++    BMP_OAM_UploadChars(menu->wtPageNumber);
 +    STRBUF_Delete(label);
 +}
 +
-+/* DSWT: shows the other page, its screen, buttons and label, with the cursor on its first button */
++/* DSWT: shows the other page, its screen, buttons and number, with the cursor on its first button */
 +void FIELD_MENU_WtTurnPage(FieldMenu *menu)
 +{
 +    void *arcHandle;
@@ -411,7 +485,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  /* Task proc: cycles two palette colors of the menu with a sine of the phase counter. */
  void FIELD_MENU_ColorTask(struct TcbTask *taskHandle, void *work)
  {
-@@ -943,7 +1062,28 @@ int FIELD_MENU_GetSlotIndex(u32 col, u32 row)
+@@ -943,7 +1120,28 @@ int FIELD_MENU_GetSlotIndex(u32 col, u32 row)
  u32 FIELD_MENU_MoveCursor(FieldMenu *menu, u32 dir)
  {
      u32 index = FIELD_MENU_GetSlotIndex(menu->cursorCol, menu->cursorRow);
@@ -441,7 +515,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
      if (index != target) {
          if (target == 0xFF) {
-@@ -983,6 +1123,10 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
+@@ -983,6 +1181,10 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
          CLACT_SetActorDrawEnable(menu->cursorActor, 1);
          return;
      }
@@ -452,20 +526,20 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      if (repeated & FIELD_MENU_PAD_UP) {
          if (FIELD_MENU_MoveCursor(menu, 0) != 0) {
              menu->cursorDirty = 1;
-@@ -1017,8 +1161,21 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
+@@ -1017,8 +1219,21 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
  void FIELD_MENU_HandleTouch(FieldMenu *menu)
  {
      FieldMenuTouchTable touchTable = gFieldMenuTouchTable;
 -    int hitSlot = TOUCHPANEL_HitTrg(touchTable.rects);
 +    int hitSlot;
      u32 zero;
-+    /* DSWT: the page label */
++    /* DSWT: the page indicator */
 +    TouchHitTable pageRect[2];
 +
-+    pageRect[0].rect.top = 0x00;
-+    pageRect[0].rect.bottom = 0x17;
-+    pageRect[0].rect.left = 0x58;
-+    pageRect[0].rect.right = 0xA8;
++    pageRect[0].rect.top = FIELD_MENU_WT_PAGE_Y;
++    pageRect[0].rect.bottom = 0xBF;
++    pageRect[0].rect.left = FIELD_MENU_WT_LEFT_X;
++    pageRect[0].rect.right = FIELD_MENU_WT_RIGHT_X + 0x17;
 +    pageRect[1].rect.top = 0xFF;
 +    if (menu->wtPageCount > 1 && TOUCHPANEL_HitTrg(pageRect) == 0) {
 +        FIELD_MENU_WtTurnPage(menu);
@@ -475,7 +549,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
      if (hitSlot != -1 && menu->items[hitSlot].buttonId != FIELD_MENU_BUTTON_EMPTY) {
          menu->cursorCol = hitSlot % 2;
-@@ -1092,7 +1249,8 @@ void FIELD_MENU_CreateItem(FieldMenu *menu, FieldMenuItem *item, const FieldMenu
+@@ -1092,7 +1307,8 @@ void FIELD_MENU_CreateItem(FieldMenu *menu, FieldMenuItem *item, const FieldMenu
      item->buttonId = init->buttonId;
      item->cursorX = init->cursorX;
      item->cursorY = init->cursorY;

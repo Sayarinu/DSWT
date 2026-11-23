@@ -76,6 +76,12 @@ TWL_ALIGN = 0x80000
 # field menu's graphics archive in the format of the Pokémon button's characters.
 ICON_ARCHIVE, ICON_TEMPLATE, ICON_MEMBER = "a/0/7/1", 8, 39
 ICON_PNG = ROOT / "client/res-bw2/graphics/field_menu/43.png"
+# The icon's colours 1 to 3 are Black 2/White 2's near black, brown and orange
+# (their Pokémon button's palette). Black/White's Pokémon cells draw the first
+# frame with palette 6 and the second with 7, whose colours 1 to 3 are brown and
+# two oranges, so each frame takes the nearest colours those palettes hold:
+# black 14 (palette 7 has grey there, so near black 13), brown 1 and orange 3.
+ICON_COLORS = ((0, 14, 1, 3), (0, 13, 1, 3))
 
 
 class PortError(ValueError):
@@ -492,7 +498,7 @@ class Target:
         require(template[:4] == b"RGCN" and template[0x10:0x14] == b"RAHC" and nds.u32(template, 0x1C) == 3,
                 f"{ICON_ARCHIVE} member {ICON_TEMPLATE} is not 4-bit characters")
         size = nds.u32(template, 0x28)
-        tiles = icon_tiles(ICON_PNG.read_bytes())
+        tiles = recolor(icon_tiles(ICON_PNG.read_bytes()), ICON_COLORS)
         require(len(tiles) == size and 0x30 + size == len(template), f"{ICON_PNG.name} does not fit the character data")
         self.icons = nds.narc_join([*members, template[:0x30] + tiles], names)
         self.log(f"Wonder Trade's icon is member {ICON_MEMBER} of {ICON_ARCHIVE}")
@@ -628,6 +634,20 @@ def icon_tiles(png):
             for y in range(ty, ty + 8):
                 for x in range(tx, tx + 8, 2):
                     out.append(rows[y][x] | rows[y][x + 1] << 4)
+    return bytes(out)
+
+
+def recolor(tiles, frames):
+    """4-bit characters with each pixel's colour mapped, the characters split evenly into
+    frames, each with its own map from the colours the icon uses."""
+    require(len(tiles) % len(frames) == 0, "the characters do not split into the frames")
+    size = len(tiles) // len(frames)
+    out = bytearray()
+    for at, byte in enumerate(tiles):
+        colors = frames[at // size]
+        low, high = byte & 0xF, byte >> 4
+        require(low < len(colors) and high < len(colors), "the icon uses a colour without a mapping")
+        out.append(colors[low] | colors[high] << 4)
     return bytes(out)
 
 
