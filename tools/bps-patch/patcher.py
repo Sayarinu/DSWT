@@ -3,6 +3,8 @@
 
 import argparse
 import base64
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+import contextlib
 import ctypes
 import errno
 import hashlib
@@ -22,6 +24,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import urllib.request
 import zipfile
 
@@ -40,6 +44,13 @@ RESERVED_SUFFIXES = ("localhost", "local", "test", "example", "invalid", "intern
 # Release files copied into the player archive beside the manifest and patches.
 RELEASE_DOCUMENTS = {"INSTALL.md": "patches/INSTALL.md", "LICENSE": "LICENSE", "NOTICE": "NOTICE"}
 FLIPS_TIMEOUT = 30 * 60
+# Flips --bps-delta holds about 9 bytes per source and target byte, plus both files.
+FLIPS_DELTA_BYTES = 10
+# Memory Docker keeps for itself, outside the Flips runs.
+DOCKER_RESERVE = 512 * 1024 * 1024
+# ROM data the cartridges being patched at once may hold here; each holds about two
+# copies of its base and target.
+HOST_MEMORY = 1536 * 1024 * 1024
 MAX_MANIFEST = 1024 * 1024
 MAX_PROFILE = 64 * 1024
 OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -227,36 +238,94 @@ class Stage:
         self.close(quiet=kind is not None)
 
 
-class Flips:
-    """Runs the pinned image without network access, against one private staging directory."""
+class Budget:
+    """Admits work, in arrival order, while its memory cost fits in what is free.
 
-    def __init__(self, record):
-        self.record = record
+    Work that costs more than the whole budget runs alone."""
 
-    def run(self, stage, *arguments):
-        stage.check()
-        name = "dswt-flips-" + secrets.token_hex(8)
-        command = ["docker", "run", "--rm", "--name", name, "--network", "none", "--read-only",
-                   "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "16",
-                   "--memory", "8g", "--user", f"{os.getuid()}:{os.getgid()}",
-                   "--mount", f"type=bind,source={stage.path},target=/work", "--workdir", "/work",
-                   self.record["image_id"], *arguments]
+    def __init__(self, capacity):
+        self.capacity, self.used, self.next, self.serving = capacity, 0, 0, 0
+        self.condition = threading.Condition()
+
+    @contextlib.contextmanager
+    def hold(self, cost):
+        cost = min(cost, self.capacity)
+        with self.condition:
+            ticket, self.next = self.next, self.next + 1
+            self.condition.wait_for(lambda: ticket == self.serving and self.used + cost <= self.capacity)
+            self.used += cost
+            self.serving += 1
+            self.condition.notify_all()
         try:
-            result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=FLIPS_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            raise PatchError("Pinned Flips timed out") from None
+            yield
         finally:
+            with self.condition:
+                self.used -= cost
+                self.condition.notify_all()
+
+
+def _size(name, dir_fd=None):
+    return os.stat(name, dir_fd=dir_fd).st_size
+
+
+class Flips:
+    """Runs the pinned image without network access, against one private staging directory.
+
+    Runs may overlap while their memory fits in Docker's (memory, in bytes; by default
+    what Docker reports)."""
+
+    def __init__(self, record, memory=None):
+        self.record, self.memory, self.budget = record, memory, None
+        self.lock, self.running, self.stopped = threading.Lock(), set(), False
+
+    def _budget(self):
+        with self.lock:
+            if self.budget is None:
+                memory = self.memory or int(_docker("info", "--format", "{{.MemTotal}}")) - DOCKER_RESERVE
+                self.budget = Budget(max(memory, 1))
+            return self.budget
+
+    def stop(self):
+        """Start no more runs and end the running ones."""
+        with self.lock:
+            self.stopped, names = True, list(self.running)
+        for name in names:
             subprocess.run(["docker", "rm", "--force", name], stdin=subprocess.DEVNULL, capture_output=True)
+
+    def run(self, stage, cost, *arguments):
+        with self._budget().hold(cost):
+            stage.check()
+            name = "dswt-flips-" + secrets.token_hex(8)
+            with self.lock:
+                if self.stopped:
+                    raise PatchError("Pinned Flips was stopped")
+                self.running.add(name)
+            command = ["docker", "run", "--rm", "--name", name, "--network", "none", "--read-only",
+                       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "16",
+                       "--memory", "8g", "--user", f"{os.getuid()}:{os.getgid()}",
+                       "--mount", f"type=bind,source={stage.path},target=/work", "--workdir", "/work",
+                       self.record["image_id"], *arguments]
+            try:
+                result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                        timeout=FLIPS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                raise PatchError("Pinned Flips timed out") from None
+            finally:
+                subprocess.run(["docker", "rm", "--force", name], stdin=subprocess.DEVNULL, capture_output=True)
+                with self.lock:
+                    self.running.discard(name)
         stage.check()
         if result.returncode:
             detail = (result.stdout + result.stderr).strip().splitlines()
             raise PatchError("Pinned Flips failed" + (f": {detail[-1]}" if detail else ""))
 
     def create(self, stage, source, target, patch):
-        self.run(stage, "--create", "--bps-delta", "--exact", f"/work/{source}", f"/work/{target}", f"/work/{patch}")
+        cost = FLIPS_DELTA_BYTES * (_size(source, stage.fd) + _size(target, stage.fd))
+        self.run(stage, cost, "--create", "--bps-delta", "--exact", f"/work/{source}", f"/work/{target}", f"/work/{patch}")
 
     def apply(self, stage, patch, source, target):
-        self.run(stage, "--apply", "--exact", f"/work/{patch}", f"/work/{source}", f"/work/{target}")
+        cost = _size(patch, stage.fd) + 2 * _size(source, stage.fd)
+        self.run(stage, cost, "--apply", "--exact", f"/work/{patch}", f"/work/{source}", f"/work/{target}")
 
 
 def _docker(*arguments):
@@ -680,10 +749,13 @@ def _generate(stage, flips, variant, base, target):
     prefix = variant["id"]
     stage.write(f"{prefix}.source", base)
     stage.write(f"{prefix}.target", target)
-    patches = []
-    for attempt in ("a", "b"):
-        flips.create(stage, f"{prefix}.source", f"{prefix}.target", f"{prefix}.{attempt}.bps")
-        patches.append(stage.read(f"{prefix}.{attempt}.bps", bps.MAX_PATCH))
+    # The two independent runs overlap when memory allows.
+    with ThreadPoolExecutor(2) as pool:
+        runs = [pool.submit(flips.create, stage, f"{prefix}.source", f"{prefix}.target", f"{prefix}.{attempt}.bps")
+                for attempt in ("a", "b")]
+        for run in runs:
+            run.result()
+    patches = [stage.read(f"{prefix}.{attempt}.bps", bps.MAX_PATCH) for attempt in ("a", "b")]
     if patches[0] != patches[1]:
         raise PatchError(f"Pinned Flips produced different patches for {prefix}")
     report = walk(patches[0], f"Generated patch for {prefix}")
@@ -701,8 +773,37 @@ def _generate(stage, flips, variant, base, target):
     return patches[0], report
 
 
-def create(pairs, profile_path, output, version, flips, source, catalog=None, root=ROOT, secret_paths=None):
-    """Generate one checked release bundle and publish its directory atomically without replacement."""
+def _in_parallel(work, order, jobs, stop):
+    """Call work(index) for each index in order, at most jobs at once. After the first
+    failure start no more, call stop(), wait for the rest and raise that failure."""
+    failures = []
+
+    def run(index):
+        try:
+            work(index)
+        except BaseException as error:
+            failures.append(error)
+            raise
+
+    pool = ThreadPoolExecutor(jobs)
+    try:
+        wait([pool.submit(run, index) for index in order], return_when=FIRST_EXCEPTION)
+        if failures:
+            raise failures[0]
+    except BaseException:
+        stop()
+        pool.shutdown(cancel_futures=True)
+        raise
+    pool.shutdown()
+
+
+def create(pairs, profile_path, output, version, flips, source, catalog=None, root=ROOT, secret_paths=None,
+           jobs=None, progress=None):
+    """Generate one checked release bundle and publish its directory atomically without replacement.
+
+    Up to jobs cartridges (default: one per CPU) are patched at once, largest first, while
+    their ROM data fits in HOST_MEMORY; the bundle is the same for any jobs. progress, if
+    given, is called with a line as each cartridge finishes."""
     if not VERSION.fullmatch(version):
         raise PatchError("Version must be 1-64 characters of [0-9A-Za-z.+-]")
     if source.get("dirty") is not False or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", "")):
@@ -717,32 +818,34 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
         secret_paths = sorted(Path(profile_path).resolve().parent.glob("*.key"))
     secrets_found = forbidden_secrets(secret_paths)
     parent, name = _new_output(output, root)
-    entries, files, seen, checked, deferred = [], {}, set(), [], []
-    base_markers = {marker: 0 for marker in markers(root)}
-    with Stage(parent, f"{name}.partial") as stage:
-        # One cartridge at a time: only its base and target are in memory. What the
+    seen, lock, results = set(), threading.Lock(), [None] * len(pairs)
+    host, stopping = Budget(HOST_MEMORY), threading.Event()
+
+    def stop():
+        stopping.set()
+        flips.stop()
+
+    def patch_cartridge(index):
+        # Only the cartridges in progress have their base and target in memory. What the
         # cross-cartridge checks need is kept small (markers, Checked) and checked below.
-        for base_path, target_path in pairs:
+        base_path, target_path = pairs[index]
+        with host.hold(2 * (_size(base_path) + _size(target_path))):
+            if stopping.is_set():  # another cartridge failed
+                return
+            started = time.monotonic()
             base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
             variant = _match(catalog, base)
-            if variant["id"] in seen:
-                raise PatchError(f"{variant['id']} was supplied more than once")
-            seen.add(variant["id"])
+            with lock:
+                if variant["id"] in seen:
+                    raise PatchError(f"{variant['id']} was supplied more than once")
+                seen.add(variant["id"])
             target = read_private(target_path, bps.MAX_FILE, "Target ROM")[0]
             base_views, target_views = _check_target(variant, base, target, authority, pins)
-            for marker, count in marker_counts(base_views, root).items():
-                base_markers[marker] = max(base_markers[marker], count)
             patch, report = _generate(stage, flips, variant, source_view(base), target)
-            # Only small results wait for the other cartridges; the ROMs go after this pass.
-            deferred.append((variant, key_problems(patch, secrets_found, target_views), marker_counts(target_views, root)))
-            checked.append(Checked(variant, patch, report, base, target))
             literals = literal_bytes(patch, report)
             prefix, filename = variant["id"], variant["planned_patch"]
             cartridge = bundle.cartridge(base)
-            files[filename] = (patch, 0o644)
-            files[f"audit/{prefix}.json"] = (to_json(report), 0o600)
-            files[f"audit/{prefix}.literals.bin"] = (literals, 0o600)
-            entries.append({
+            entry = {
                 "variant": prefix, "name": variant["name"],
                 "game_code": cartridge["game_code"], "revision": cartridge["revision"], "language": cartridge["language"],
                 "input": {"size": len(base), "sha256": variant["sha256"], "crc32": crc32_hex(base)},
@@ -751,17 +854,38 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
                 "actions": report["actions"],
                 "literals": {"count": report["literals"]["count"], "bytes": report["literals"]["bytes"],
                              "sha256": sha256(literals)},
-            })
+            }
             try:  # the player's applier must reproduce the target from the plain ROM
-                if bundle.patch_rom(entries[-1], base, patch) != target:
+                if bundle.patch_rom(entry, base, patch) != target:
                     raise PatchError(f"Bundle entry for {prefix} did not reproduce the target")
             except bundle.BundleError as error:
                 raise PatchError(f"Bundle entry for {prefix} failed: {error}") from None
-            del base, target, base_views, target_views
-        for variant, problems, target_markers in deferred:
-            release_check(variant, problems, target_markers, base_markers)
-        deferred.clear()
+            results[index] = {
+                "variant": variant, "entry": entry, "checked": Checked(variant, patch, report, base, target),
+                "files": {filename: (patch, 0o644), f"audit/{prefix}.json": (to_json(report), 0o600),
+                          f"audit/{prefix}.literals.bin": (literals, 0o600)},
+                "problems": key_problems(patch, secrets_found, target_views),
+                "base_markers": marker_counts(base_views, root), "target_markers": marker_counts(target_views, root),
+            }
+        if progress:
+            done = sum(result is not None for result in results)
+            progress(f"{prefix}: patched in {time.monotonic() - started:.0f}s ({done}/{len(pairs)})")
+
+    with Stage(parent, f"{name}.partial") as stage:
+        # Largest first, so the longest Flips runs do not finish last.
+        order = sorted(range(len(pairs)), key=lambda index: -sum(_size(path) for path in pairs[index]))
+        _in_parallel(patch_cartridge, order, jobs or os.cpu_count() or 1, stop)
+        base_markers = {marker: max((result["base_markers"][marker] for result in results), default=0)
+                        for marker in markers(root)}
+        for result in results:
+            release_check(result["variant"], result["problems"], result["target_markers"], base_markers)
+        entries = [result["entry"] for result in results]
+        checked = [result["checked"] for result in results]
+        files = {path: data for result in results for path, data in result["files"].items()}
+        results.clear()
         # Retail code counts expanded too: no patch may copy it from any supplied base.
+        if progress:
+            progress(f"Checking the patches against {len(pairs)} retail cartridges")
         index = RetailIndex(checked)
         for base_path, _ in pairs:
             base = read_private(base_path, bps.MAX_FILE, "Base ROM")[0]
@@ -885,6 +1009,7 @@ def main(argv=None):
     create_parser.add_argument("--version", required=True)
     create_parser.add_argument("--forbid-key", action="append", type=Path, dest="keys",
                                help="private key that must not appear (default: every *.key beside the profile)")
+    create_parser.add_argument("--jobs", type=int, help="cartridges to patch at once (default: one per CPU)")
     package_parser = commands.add_parser("package", help="write the player archive for a bundle under game/")
     package_parser.add_argument("bundle", type=Path)
     package_parser.add_argument("--output", required=True, type=Path)
@@ -903,8 +1028,11 @@ def main(argv=None):
         elif args.command == "audit":
             result = audit(args.patch, args.evidence)
         elif args.command == "create":
+            if args.jobs is not None and args.jobs < 1:
+                raise PatchError("--jobs must be at least 1")
             manifest = create(args.pair, args.profile, args.output, args.version, Flips(installed_flips()),
-                              source_state(), secret_paths=args.keys)
+                              source_state(), secret_paths=args.keys, jobs=args.jobs,
+                              progress=lambda line: print(line, file=sys.stderr, flush=True))
             result = {"output": str(args.output), "entries": manifest["entries"]}
         elif args.command == "package":
             result = package(args.bundle, args.output)
