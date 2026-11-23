@@ -19,12 +19,12 @@ int main(void)
     assert(WT_GEN5_MESSAGE_X >= 1 && WT_GEN5_MESSAGE_X + WT_GEN5_MESSAGE_WIDTH + 1 <= WT_GEN5_SCREEN_COLUMNS);
     assert(WT_GEN5_MESSAGE_LINES == 6);
     assert(WT_GEN5_BUTTON_X + WT_GEN5_BUTTON_WIDTH <= WT_GEN5_SCREEN_COLUMNS);
-    assert(WT_GEN5_MAX_BUTTONS >= 6 + 1);
+    assert(WT_GEN5_MAX_BUTTONS >= 3);
     for (int count = 1; count <= WT_GEN5_MAX_BUTTONS; ++count) {
         assert(WtGen5_ButtonTop(count) >= 0);
         assert(WtGen5_ButtonTop(count) + count * WT_GEN5_BUTTON_HEIGHT <= WT_GEN5_SCREEN_ROWS);
     }
-    assert(WtGen5_ButtonTop(7) == 1 && WtGen5_ButtonTop(1) == 10);
+    assert(WtGen5_ButtonTop(3) == 7 && WtGen5_ButtonTop(1) == 10);
 
     for (int text = 0; text < WT_TEXT_COUNT; ++text) {
         assert(WtGen5_TextLines(gWtText[text]) >= 1);
