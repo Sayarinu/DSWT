@@ -67,48 +67,117 @@ void GFL_USE_CancelChangeAndPlayBgm(u32 bgmNo, u32 trackMask);
 void GFL_USE_FadeInBgmFull(u32 frames);
 void GFL_USE_FadeOutBgm(u32 frames);
 
-/* Text and bitmaps (arm9/strbuf.h, arm9/gf_font.h, arm9/printsys.h, arm9/bmp.h). */
+/* Text (arm9/strbuf.h, arm9/gf_font.h, arm9/printsys.h). */
 struct Strbuf *STRBUF_Create(u32 capacity, u32 heapId);
 void STRBUF_Delete(struct Strbuf *buffer);
 void STRBUF_SetString(struct Strbuf *buffer, const u16 *text);
 struct GfFont *GF_FONT_Create(int archiveId, int fileId, int format, int isFixedWidth, u32 heapId);
 u32 GF_FONT_Delete(struct GfFont *font);
 void PRINTSYS_PrintColor(struct Bmp *bmp, u32 x, s16 y, struct Strbuf *text, struct GfFont *font, u16 color);
-struct Bmp *BMP_CreateFromVram(void *pixels, u32 widthTiles, u32 heightTiles, u32 tileBytes, u16 heapId);
-void BMP_Delete(struct Bmp *bmp);
 #define WT_PRINT_COLOR(letter, shadow, background) ((((letter) & 0x1f) << 10) | (((shadow) & 0x1f) << 5) | ((background) & 0x1f))
 
-/* Graphics (arm9/arc_util.h, arm9/bg_sys.h, the SDK's GX and NitroSystem's G2D). */
-void *ARC_UTIL_LoadMember(int archive, int member, int decompress, s32 heapId);
-void BG_SYS_SetSubVisiblePlanes(u32 planes);
-void GX_ResetBankForBG(void);
-void GX_ResetBankForSubBG(void);
-void GX_SetBankForBG(int bank);
-void GX_SetGraphicsMode(int dispMode, int bgMode, int bg0_2d3d);
+/* The master brightness (the SDK's GX). */
 void GXx_SetMasterBrightness_(volatile u16 *reg, int brightness);
-void *G2_GetBG1CharPtr(void);
-void *G2_GetBG1ScrPtr(void);
-/* NitroSystem's unpacked character, screen and palette data. */
-typedef struct WtG2dCharacter {
-    u16 height, width;
-    int pixelFormat, mapping;
-    u32 characterFormat, size;
-    void *raw;
-} WtG2dCharacter;
-typedef struct WtG2dScreen {
-    u16 width, height, colorMode, format;
-    u32 size;
-    u32 raw[1];
-} WtG2dScreen;
-typedef struct WtG2dPalette {
-    int format;
-    BOOL extended;
-    u32 size;
-    void *raw;
-} WtG2dPalette;
-s32 NNS_G2dGetUnpackedCharacterDataEx(void *file, void **data);
-s32 NNS_G2dGetUnpackedScreenData(void *file, void **data);
-s32 NNS_G2dGetUnpackedPaletteData(void *file, void **data);
+
+/* The screen as the Global Trade Station builds its own (ov135/worldtrade.c,
+ * ov135/worldtrade_title.c): the BG system and its layers 0 to 3 on the main
+ * engine and 4 to 7 on the sub engine (arm9/bg_sys.h, arm9/bg_sys_types.h),
+ * windows in them (arm9/bmp_win.h, arm9/bmp_menuwork.h for the game's window
+ * frame), graphics from archives (arm9/arc_tool.h, arm9/arc_util.h), a print
+ * queue (arm9/printsys.h) and the task menu buttons (arm9/app_taskmenu.h).
+ * The system's VBlank task runs BG_SYS_Update whenever the BG system exists
+ * (GFL_USE_RunMainTasks). */
+struct BmpWin;
+struct PrintQueue;
+struct TaskMenuRes;
+struct TaskMenuWork;
+typedef struct WtDispConfig {
+    u32 dispMode, bgMode, subBgMode, bg0As;
+} WtDispConfig;
+typedef struct WtDispVram {
+    u32 mainBg, mainBgExtPltt, subBg, subBgExtPltt, mainObj, mainObjExtPltt, subObj, subObjExtPltt, texImage,
+        texPltt, mainObjMapping, subObjMapping;
+} WtDispVram;
+typedef struct WtBgTemplate {
+    u32 scrollX, scrollY, bufSize, baseTile;
+    u8 screenSize, colorMode, screenBase, charBase;
+    u32 tileDataSize;
+    u8 extPltt, priority, areaOver, pad;
+    u32 mosaic;
+} WtBgTemplate;
+typedef char WtBgTemplateCheck[sizeof(WtBgTemplate) == 0x20 && sizeof(WtDispVram) == 0x30 ? 1 : -1];
+#define WT_BG_SCREEN_256 1
+#define WT_GX_VRAM_A 0x01
+#define WT_GX_VRAM_C 0x04
+#define WT_GX_OBJ_1D_32K 0x10
+/* Palette kinds of ARC_UTIL_UploadPalette: the main and sub engines' BG palettes. */
+#define WT_PALETTE_MAIN_BG 0
+#define WT_PALETTE_SUB_BG 4
+void BG_SYS_Create(u16 heapId);
+void BG_SYS_Delete(void);
+void BG_SYS_SetVramBanks(const WtDispVram *banks);
+void BG_SYS_SetGraphicsMode(WtDispConfig *config);
+void BG_SYS_InitBgLayer(u32 layer, const WtBgTemplate *bg, u32 type);
+void BG_SYS_ClearSlot(u8 layer);
+void BG_SYS_InitRun(u8 layer, u32 size, u32 offset, u32 heapId);
+void BG_SYS_SetPlaneVisible(u8 layer, u8 visible);
+void BG_SYS_SetMainVisiblePlanes(u32 planes);
+void BG_SYS_SetSubVisiblePlanes(u32 planes);
+void BG_SYS_PushTile(u32 layer);
+void BG_SYS_MarkTileDirty(u32 layer);
+void BMP_WIN_Init(u32 heapId);
+void BMP_WIN_Exit(void);
+struct BmpWin *BMP_WIN_Create(u32 layer, u32 x, u32 y, u8 width, u8 height, u8 palette, u8 allocDir);
+u32 BMP_WIN_Delete(struct BmpWin *win);
+void BMP_WIN_TransferChars(struct BmpWin *win);
+void BMP_WIN_MakeScreen(struct BmpWin *win);
+struct Bmp *BMP_WIN_GetBmp(struct BmpWin *win);
+void BMP_Clear(struct Bmp *bmp, u8 value);
+/* The window frame: its characters and palette, and drawn around a window (0 transfers the screen at once). */
+void BMP_MENUWORK_LoadCharAndPltt(u32 layer, u32 tileOffset, u32 palette, u32 frameId, u16 heapId);
+void BMP_MENUWORK_DrawWindow(struct BmpWin *win, int commitMode, u16 tileBase, u32 palette);
+void *ARC_TOOL_CreateHandle(u32 archive, unsigned int heapId);
+void ARC_TOOL_DeleteHandle(void *handle);
+u32 ARC_UTIL_UploadBgCharFromHandle(void *handle, u32 member, u32 layer, u32 tileOffset, u32 size, u32 compressed,
+                                    u16 heapId);
+/* Despite aletheia's name, this loads a screen (NNS_G2dGetUnpackedScreenData) into a layer and transfers it. */
+void ARC_UTIL_UploadBgPaletteFromHandle(void *handle, u32 member, u32 layer, u32 offset, u32 size, u32 compressed,
+                                        u16 heapId);
+void ARC_UTIL_UploadPaletteFromHandleWhole(void *handle, u32 member, int kind, u32 dest, int size, u16 heapId);
+void ARC_UTIL_UploadPaletteFromArchiveWhole(u32 archive, u32 member, u32 kind, u32 dest, u32 size, u16 heapId);
+struct PrintQueue *PRINTSYS_QUE_Create(u32 heapId);
+void PRINTSYS_QUE_Delete(struct PrintQueue *queue);
+u32 PRINTSYS_QUE_Main(struct PrintQueue *queue);
+void PRINTSYS_QUE_Clear(struct PrintQueue *queue);
+u32 PRINTSYS_MeasureWidestLine(struct Strbuf *text, struct GfFont *font, u32 spacing);
+/* A task menu: one button per item, stacked from (x, y) in characters. */
+typedef struct WtTaskMenuItem {
+    struct Strbuf *str;
+    u16 color;
+    u32 type;
+} WtTaskMenuItem;
+typedef struct WtTaskMenuInit {
+    u32 heapId;
+    u8 count, pad[3];
+    const WtTaskMenuItem *items;
+    u32 posType;
+    u8 x, y, width, height;
+} WtTaskMenuInit;
+typedef char WtTaskMenuCheck[sizeof(WtTaskMenuItem) == 0xC && sizeof(WtTaskMenuInit) == 0x14 ? 1 : -1];
+/* The item that goes back: the return arrow, and the cancel sound. */
+#define WT_TASKMENU_ITEM_RETURN 1
+#define WT_TASKMENU_MAX_ITEMS 8
+#define WT_SE_CANCEL 0x551
+struct TaskMenuRes *APP_TASKMENU_RES_Create(u16 layer, u16 palette, struct GfFont *font, struct PrintQueue *queue,
+                                            u16 heapId);
+void APP_TASKMENU_RES_Delete(struct TaskMenuRes *res);
+struct TaskMenuWork *APP_TASKMENU_OpenMenu(WtTaskMenuInit *init, struct TaskMenuRes *res);
+void APP_TASKMENU_CloseMenu(struct TaskMenuWork *menu);
+void APP_TASKMENU_UpdateMenu(struct TaskMenuWork *menu);
+u32 APP_TASKMENU_IsDecide(struct TaskMenuWork *menu);
+u32 APP_TASKMENU_IsFinish(struct TaskMenuWork *menu);
+u8 APP_TASKMENU_GetCursorPos(const struct TaskMenuWork *menu);
+void GFL_USE_PlaySeDefaultVolume(u32 seqNo);
 
 /* Events, processes and the field (arm9/game_event.h, arm9/gamesystem.h, arm9/game_comm.h,
  * arm9/field_status.h; the fades are in overlay 21, which the field loads). */
