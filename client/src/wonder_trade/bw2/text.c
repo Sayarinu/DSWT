@@ -37,12 +37,10 @@ const unsigned short *const gWtText[WT_TEXT_COUNT] = {
     L"Confirm",
     L"Connect and retry",
     L"This game cannot hold the\nPok\x00e9mon you received. It\nstays pending on the server.",
-    L"Lv.",
     L"Eggs can't be traded online.\nYour Pok\x00e9mon is back.",
     L"Remove its Mail to trade it.\nYour Pok\x00e9mon is back.",
     L"No other game can hold it yet.\nYour Pok\x00e9mon is back.",
     L"It failed the legality check.\nYour Pok\x00e9mon is back.",
     L"Its name can't be traded.\nYour Pok\x00e9mon is back.",
     L"Support code",
-    L"Choose a Pok\x00e9mon to offer.\nB: back",
 };
