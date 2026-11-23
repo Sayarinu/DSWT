@@ -634,6 +634,8 @@ static void Responded(WtApp *app)
     else if (net->completed) {
         app->state = WT_APP_TRADE_FADE;
         app->fade = 0;
+        /* The response can let the screen leave, which drew a Cancel button; the fade has none. */
+        Buttons(app);
     }
     else if (net->rejected) Show(app, WT_APP_MESSAGE, RefusalText(net->refusal, WT_TEXT_REJECTED));
     else if (net->superseded && net->tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_MESSAGE, WT_TEXT_SUPERSEDED);
