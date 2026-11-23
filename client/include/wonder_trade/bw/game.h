@@ -250,7 +250,6 @@ typedef char WtPartySizeCheck[sizeof(WtParty) == 0x534 && sizeof(WtPartyPokemon)
 #define WT_PARAM_IS_NICKNAMED 0x75
 #define WT_PARAM_OT_NAME_RAW 0x8E
 #define WT_PARAM_OT_GENDER 0x9A
-#define WT_PARAM_LEVEL 0x9E
 #define WT_PARAM_HP 0xA0
 #define WT_PARAM_EGG_OR_BAD_EGG 0xAA
 #define WT_PERSONAL_FRIENDSHIP 22
@@ -273,6 +272,26 @@ u32 SHINKA_CHECK_CheckEvolution(WtParty *party, WtPartyPokemon *pokemon, u32 mod
 u16 ZUKAN_SAVE_GetFormCount(u32 species);
 void ZUKAN_SAVE_RegisterCaught(void *zukan, void *pokemon);
 WtParty *POKEPARTY_GetSaveData(struct SaveControl *save);
+
+/* The party screen (overlay 91, ov091/pokelist.c) and the part of its
+ * parameters (ov091/pokelist_types.h PokelistArg) a caller that picks one
+ * Pokémon fills and reads: the party, the mode, and the slot picked. */
+typedef struct WtPartyListArg {
+    WtParty *party;
+    u8 unused04[0x30];
+    u32 mode;
+    u32 unused38;
+    s32 selectedIndex;
+    u32 exitCode;
+    u8 unused44[0x54];
+} WtPartyListArg;
+typedef char WtPartyListArgCheck[sizeof(WtPartyListArg) == 0x98 ? 1 : -1];
+/* Takes the Pokémon chosen at once, with no menu (POKELIST_ApplySelection). */
+#define WT_PARTY_LIST_SELECT 3
+#define WT_PARTY_LIST_OVERLAY 91
+u32 POKELIST_Init(void *proc, u32 *seq, void *procWork, void *work);
+u32 POKELIST_Main(void *proc, u32 *seq, void *procWork, void *work);
+u32 POKELIST_Exit(void *proc, u32 *seq, void *procWork, void *work);
 
 /* The trade animation (overlay 119, ov119/pokemontrade_proc.c) as the Global
  * Trade Station plays it (ov135/worldtrade_demo.c), from a process system of
