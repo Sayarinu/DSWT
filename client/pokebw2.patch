@@ -221,7 +221,7 @@ index 2f91cd757..d20530175 100644
  
  static u32 FieldMenu_GetAppId(u32 index) {
 diff --git a/src/field/field_menu.c b/src/field/field_menu.c
-index 441b9d2c3..30b1b6e81 100644
+index 441b9d2c3..ad670b0fc 100644
 --- a/src/field/field_menu.c
 +++ b/src/field/field_menu.c
 @@ -36,6 +36,7 @@
@@ -232,16 +232,17 @@ index 441b9d2c3..30b1b6e81 100644
  #include "system/game_data.h"
  #include "system/game_system.h"
  #include "system/printsys.h"
-@@ -67,6 +68,8 @@ enum {
+@@ -67,6 +68,9 @@ enum {
      FIELD_MENU_STATE_SELECTED,
      FIELD_MENU_STATE_SCROLL_OUT,
      FIELD_MENU_STATE_DONE,
-+    // DSWT: a page's names are printing
++    // DSWT: the old page is hidden, and the next one loads; then its names print
++    FIELD_MENU_STATE_PAGE_LOAD,
 +    FIELD_MENU_STATE_PAGE,
  };
  
  // An item of the menu
-@@ -119,6 +122,13 @@ struct FieldMenu {
+@@ -119,6 +123,13 @@ struct FieldMenu {
      PrintQueue *printQueue;
      TCB *vblankTcb;
      u32 cursorFadeFrame;
@@ -255,7 +256,7 @@ index 441b9d2c3..30b1b6e81 100644
  };
  
  // What FieldMenu_CreateItem makes an item from
-@@ -189,10 +199,12 @@ static const u16 FIELD_MENU_NAME_MESSAGES[FIELD_MENU_ITEM_MAX] = { FieldMenu_Tex
+@@ -189,10 +200,12 @@ static const u16 FIELD_MENU_NAME_MESSAGES[FIELD_MENU_ITEM_MAX] = { FieldMenu_Tex
                                                                     FieldMenu_Text_Pokedex, FieldMenu_Text_Bag,
                                                                     FieldMenu_Text_Empty_2, FieldMenu_Text_Save,
                                                                     FieldMenu_Text_Options, FieldMenu_Text_Empty_5,
@@ -270,7 +271,7 @@ index 441b9d2c3..30b1b6e81 100644
  
  // The cursor's colors 0 and 1, each pulsing between a start and an end endpoint
  static const FieldMenuCursorColor sCursorColorEndpoints[2][2] = {
-@@ -241,11 +253,11 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+@@ -241,11 +254,11 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
      },
      [FIELD_MENU_TYPE_NO_POKEDEX] = {
          FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD, FIELD_MENU_ITEM_SAVE,
@@ -284,7 +285,7 @@ index 441b9d2c3..30b1b6e81 100644
      },
      [FIELD_MENU_TYPE_ROYAL_UNOVA] = {
          FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_POKEDEX, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD,
-@@ -262,6 +274,33 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+@@ -262,6 +275,34 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
  };
  // clang-format on
  
@@ -314,11 +315,12 @@ index 441b9d2c3..30b1b6e81 100644
 +static void FieldMenu_CreateItems(FieldMenu *menu, ArcTool *arc, u8 first, u8 last);
 +static void FieldMenu_CreatePageIndicator(FieldMenu *menu);
 +static void FieldMenu_PrintPage(FieldMenu *menu);
++static void FieldMenu_LoadPage(FieldMenu *menu);
 +
  FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *subscreen, Field *field, BOOL open) {
      FieldMenu *menu = GFL_HeapAllocate(heapId, sizeof(FieldMenu), FALSE, "field_menu.c", 323);
      GameSystem *gsys = Field_GetGameSystem(field);
-@@ -289,9 +328,15 @@ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *sub
+@@ -289,9 +330,15 @@ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *sub
      arc = GFL_ArcSysCreateFileHandle(ARCID_FIELD_MENU, menu->tmpHeapId);
      menuType = FieldMenu_GetMenuType(gameData, menu->eventWork, menu->zoneId);
      menu->menuType = menuType;
@@ -334,7 +336,7 @@ index 441b9d2c3..30b1b6e81 100644
      GFL_BGSysSetBGEnabled(1, TRUE);
      if (open == TRUE) {
          menu->cursorX = 0;
-@@ -324,6 +369,13 @@ void FieldMenu_Free(FieldMenu *menu) {
+@@ -324,6 +371,13 @@ void FieldMenu_Free(FieldMenu *menu) {
      for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
          FieldMenu_FreeItem(menu, &menu->items[i]);
      }
@@ -348,7 +350,7 @@ index 441b9d2c3..30b1b6e81 100644
      FieldMenu_RestoreSubscreenOnCancel(menu);
      GFL_TCBRemove(menu->vblankTcb);
      ClActor_Delete(menu->returnButton);
-@@ -412,6 +464,11 @@ void FieldMenu_Update(FieldMenu *menu) {
+@@ -412,6 +466,11 @@ void FieldMenu_Update(FieldMenu *menu) {
              GFL_BGSysSetBGEnabled(6, TRUE);
              GFL_BGSysSetBGEnabled(7, TRUE);
              ClActor_SetVisible(menu->returnButton, FALSE);
@@ -360,26 +362,37 @@ index 441b9d2c3..30b1b6e81 100644
          } else if (menu->curItem->icon != NULL) {
              menu->decideFrames = 0;
              FieldMenu_SetCursorPosition(menu, menu->curItem->cursorX, menu->curItem->cursorY);
-@@ -437,6 +494,18 @@ void FieldMenu_Update(FieldMenu *menu) {
+@@ -437,6 +496,29 @@ void FieldMenu_Update(FieldMenu *menu) {
          FieldSubscreen_SaveReturnSubscreen(menu->subscreen, FIELD_MENU_RESULT_SELECTED);
          menu->state = FIELD_MENU_STATE_DONE;
          break;
++    case FIELD_MENU_STATE_PAGE_LOAD:
++        FieldMenu_LoadPage(menu);
++        break;
 +    case FIELD_MENU_STATE_PAGE:
 +        if (PrintQueue_IsEmpty(menu->printQueue) == TRUE) {
 +            u8 i;
 +
++            // The names' map, the icons and the page number reach the screen in the same VBlank. The number,
++            // hidden since the turn began, prints now so that it never changes before the page does
 +            for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
 +                FieldMenu_FlushItem(menu, &menu->items[i]);
++                if (menu->items[i].itemId != FIELD_MENU_ITEM_NONE) {
++                    ClActor_SetVisible(menu->items[i].icon, TRUE);
++                }
 +            }
-+            GFL_BGSysLoadScr(5);
-+            GFL_BGSysLoadScr(6);
++            FieldMenu_PrintPage(menu);
++            BmpOam_ActorSetDrawEnable(menu->pageNumber, TRUE);
++            GFL_BGSysQueueScrLoad(6);
++            ClActor_SetVisible(menu->cursor, menu->keyMode);
++            FieldMenu_UpdateCursor(menu);
 +            menu->state = FIELD_MENU_STATE_INPUT;
 +        }
 +        break;
      case FIELD_MENU_STATE_SCROLL_OUT:
          if (menu->scrollY + 0x40 > 0xc0) {
              menu->scrollY = 0xc0;
-@@ -529,7 +598,8 @@ static void FieldMenu_LoadResources(FieldMenu *menu, ArcTool *arc, u8 menuType,
+@@ -529,7 +611,8 @@ static void FieldMenu_LoadResources(FieldMenu *menu, ArcTool *arc, u8 menuType,
                                                     AppMenuCommon_GetTouchBarAnimFile(0), menu->heapId);
      GFL_ArcToolFree(common);
      GFL_BGSysLoadScr(5);
@@ -389,7 +402,7 @@ index 441b9d2c3..30b1b6e81 100644
      {
          ClActSurfaceSetup surface = { 0, 0, 0x100, 0xbf, 1, 0 };
  
-@@ -596,16 +666,94 @@ static int FieldMenu_CountItems(u8 menuType) {
+@@ -596,16 +679,110 @@ static int FieldMenu_CountItems(u8 menuType) {
  }
  
  static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
@@ -452,26 +465,42 @@ index 441b9d2c3..30b1b6e81 100644
 +    GFL_MsgDataFree(msgData);
 +}
 +
-+// DSWT: shows the other page, its buttons, items and number, with the cursor on its first item
++// DSWT: turns the page without a frame that mixes two: hides the page's names, icons, number and cursor in one VBlank,
++// loads the other page once they are hidden, and shows it whole once its names have printed (FIELD_MENU_STATE_PAGE)
 +static void FieldMenu_TurnPage(FieldMenu *menu) {
-+    ArcTool *arc;
 +    u8 i;
 +
 +    GFL_SndSEPlay(SEQ_SE_SELECT1);
 +    for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
 +        if (menu->items[i].active == TRUE) {
 +            BmpWin_ClearScreen(menu->items[i].win);
++            ClActor_SetVisible(menu->items[i].icon, FALSE);
 +        }
++    }
++    GFL_BGSysQueueScrLoad(6);
++    BmpOam_ActorSetDrawEnable(menu->pageNumber, FALSE);
++    ClActor_SetVisible(menu->cursor, FALSE);
++    menu->state = FIELD_MENU_STATE_PAGE_LOAD;
++}
++
++// DSWT: loads the other page's buttons and items, its icons hidden, with the cursor on its first item
++static void FieldMenu_LoadPage(FieldMenu *menu) {
++    ArcTool *arc;
++    u8 i;
++
++    for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
 +        FieldMenu_FreeItem(menu, &menu->items[i]);
 +        menu->items[i].active = FALSE;
 +    }
 +    menu->page ^= 1;
 +    arc = GFL_ArcSysCreateFileHandle(ARCID_FIELD_MENU, menu->tmpHeapId);
-+    loadBGScrToVramByFileNoReserveNegAlign(arc, menu->page == 1 ? FIELD_MENU_SCREEN_FOUR :
-+                                           FIELD_MENU_SCREEN_FILES[menu->menuType], 5, 0, 0, FALSE, menu->tmpHeapId);
++    GFL_G2DIOLoadNSCRAsync(arc, menu->page == 1 ? FIELD_MENU_SCREEN_FOUR : FIELD_MENU_SCREEN_FILES[menu->menuType], 5,
++                           0, 0, 0, FALSE, HEAPID_TAIL(menu->tmpHeapId));
 +    FieldMenu_CreateItems(menu, arc, 0, FIELD_MENU_SLOT_BOTTOM);
 +    GFL_ArcToolFree(arc);
-+    FieldMenu_PrintPage(menu);
++    for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
++        ClActor_SetVisible(menu->items[i].icon, FALSE);
++    }
 +    menu->cursorX = 0;
 +    menu->cursorY = 0;
 +    menu->curItem = NULL;
@@ -489,7 +518,7 @@ index 441b9d2c3..30b1b6e81 100644
          u32 itemId = items[i];
  
          if (itemId == FIELD_MENU_ITEM_TRAINER_CARD) {
-@@ -646,6 +794,11 @@ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
+@@ -646,6 +823,11 @@ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
                  setup.cellFile = 0x1b;
                  setup.animFile = 0x26;
              }
@@ -501,7 +530,7 @@ index 441b9d2c3..30b1b6e81 100644
          } else {
              setup.x = 0x80;
              setup.y = 0xb4;
-@@ -720,7 +873,28 @@ static int FieldMenu_GetSlot(u8 x, u8 y) {
+@@ -720,7 +902,28 @@ static int FieldMenu_GetSlot(u8 x, u8 y) {
  // Moves the cursor in the direction, and returns whether it moved
  static BOOL FieldMenu_MoveCursor(FieldMenu *menu, u32 dir) {
      int slot = FieldMenu_GetSlot(menu->cursorX, menu->cursorY);
@@ -531,7 +560,7 @@ index 441b9d2c3..30b1b6e81 100644
  
      if (slot != next) {
          if (next == FIELD_MENU_MOVE_TO_ROW_2) {
-@@ -756,6 +930,10 @@ static void FieldMenu_UpdateKeys(FieldMenu *menu) {
+@@ -756,6 +959,10 @@ static void FieldMenu_UpdateKeys(FieldMenu *menu) {
          ClActor_SetVisible(menu->cursor, TRUE);
          return;
      }
@@ -542,7 +571,7 @@ index 441b9d2c3..30b1b6e81 100644
      if (repeat & PAD_KEY_UP) {
          if (FieldMenu_MoveCursor(menu, DIR_UP)) {
              menu->cursorDirty = TRUE;
-@@ -801,8 +979,18 @@ static void FieldMenu_UpdateTouch(FieldMenu *menu) {
+@@ -801,8 +1008,18 @@ static void FieldMenu_UpdateTouch(FieldMenu *menu) {
          { 0x18, 0x40, 0x08, 0x78 }, { 0x18, 0x40, 0x88, 0xf8 }, { 0x48, 0x70, 0x08, 0x78 }, { 0x48, 0x70, 0x88, 0xf8 },
          { 0x78, 0xa0, 0x08, 0x78 }, { 0x78, 0xa0, 0x88, 0xf8 }, { 0xa8, 0xbf, 0xe0, 0xf8 }, { TOUCH_RECT_END, 0, 0, 0 },
      };
@@ -562,7 +591,7 @@ index 441b9d2c3..30b1b6e81 100644
      if (slot != TOUCH_RECT_NONE && menu->items[slot].itemId != FIELD_MENU_ITEM_NONE) {
          menu->cursorX = slot % 2;
          menu->cursorY = slot / 2;
-@@ -866,7 +1054,8 @@ static void FieldMenu_CreateItem(FieldMenu *menu, FieldMenuItem *item, const Fie
+@@ -866,7 +1083,8 @@ static void FieldMenu_CreateItem(FieldMenu *menu, FieldMenuItem *item, const Fie
      item->itemId = setup->itemId;
      item->cursorX = setup->x;
      item->cursorY = setup->y;
