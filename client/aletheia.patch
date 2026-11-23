@@ -205,16 +205,17 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  } FieldMenu;
  
  /* Values of FieldMenu.state */
-@@ -228,6 +240,8 @@ typedef struct FieldMenu {
+@@ -228,6 +240,9 @@ typedef struct FieldMenu {
  #define FIELD_MENU_STATE_NOTIFY_SELECT 8
  #define FIELD_MENU_STATE_SLIDE_OUT 9
  #define FIELD_MENU_STATE_DONE 10
-+/* DSWT: a turned page's names are printing */
++/* DSWT: a turned page's names are printing; before that, the old page is hidden and the next one loads */
 +#define FIELD_MENU_STATE_WT_PAGE 11
++#define FIELD_MENU_STATE_WT_LOAD 12
  
  /* Mode numbers the menu hands to its parent when it ends. */
  #define FIELD_MENU_NEXT_SELECT 3
-@@ -260,6 +274,30 @@ typedef struct FieldMenu {
+@@ -260,6 +275,30 @@ typedef struct FieldMenu {
  #define FIELD_MENU_PAD_UP 0x0040
  #define FIELD_MENU_PAD_DOWN 0x0080
  #define FIELD_MENU_PAD_X 0x0400
@@ -245,7 +246,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
  /* Position on the sub screen, in pixels. */
  
-@@ -402,6 +440,7 @@ struct BmpWin;
+@@ -402,6 +441,7 @@ struct BmpWin;
  struct Bmp;
  typedef short s16_p07;
  #include "../arm9/bmp.h"
@@ -253,7 +254,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
  extern const struct BgTemplate gFieldMenuBgTemplate5;
  extern const struct BgTemplate gFieldMenuBgTemplate6;
-@@ -419,6 +458,11 @@ extern u8 gFieldMenuSlotRow[];
+@@ -419,6 +459,12 @@ extern u8 gFieldMenuSlotRow[];
  extern FieldMenuTouchTable gFieldMenuTouchTable;
  extern char gFieldMenuFileName[];
  
@@ -261,11 +262,12 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
 +void FIELD_MENU_WtCreatePageIndicator(FieldMenu *menu);
 +void FIELD_MENU_WtPrintPage(FieldMenu *menu);
 +void FIELD_MENU_WtTurnPage(FieldMenu *menu);
++void FIELD_MENU_WtLoadPage(FieldMenu *menu);
 +
  FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fieldMap, int slideIn);
  void FIELD_MENU_NotifyParentOnExit(FieldMenu *menu);
  void FIELD_MENU_Delete(FieldMenu *menu);
-@@ -481,9 +525,19 @@ FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fiel
+@@ -481,9 +527,19 @@ FieldMenu *FIELD_MENU_Create(u16 heapId, u16 subHeapId, void *parent, void *fiel
      arcHandle = ARC_TOOL_CreateHandle(0x47, menu->subHeapId);
      layoutType = FIELD_MENU_GetLayoutType(gameData, menu->eventWork, menu->zoneId);
      menu->layoutType = layoutType;
@@ -285,7 +287,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      BG_SYS_SetPlaneVisible(1, 1);
      if (slideIn == 1) {
          menu->cursorCol = 0;
-@@ -519,6 +573,13 @@ void FIELD_MENU_Delete(FieldMenu *menu)
+@@ -519,6 +575,13 @@ void FIELD_MENU_Delete(FieldMenu *menu)
      for (i = 0; i < FIELD_MENU_ITEM_MAX; i++) {
          FIELD_MENU_DeleteItem(menu, &menu->items[i]);
      }
@@ -299,7 +301,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      FIELD_MENU_NotifyParentOnExit(menu);
      TCB_DeleteTask(menu->colorTask);
      CLACT_DeleteActor(menu->backActor);
-@@ -615,6 +676,11 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
+@@ -615,6 +678,11 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
              BG_SYS_SetPlaneVisible(6, 1);
              BG_SYS_SetPlaneVisible(7, 1);
              CLACT_SetActorDrawEnable(menu->backActor, 0);
@@ -311,24 +313,35 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
          } else {
              item = menu->selectedItem;
              if (item->actor != 0) {
-@@ -653,6 +719,16 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
+@@ -653,6 +721,27 @@ u32 FIELD_MENU_Update(FieldMenu *menu)
          }
          menu->scrollDirty = 1;
          break;
++    case FIELD_MENU_STATE_WT_LOAD:
++        FIELD_MENU_WtLoadPage(menu);
++        break;
 +    case FIELD_MENU_STATE_WT_PAGE:
 +        if (PRINTSYS_QUE_IsFinished(menu->printQue) == 1) {
++            /* The names' map, the icons and the page number reach the screen in the same VBlank. The number,
++             * hidden since the turn began, prints now so that it never changes before the page does */
 +            for (i = 0; i < FIELD_MENU_ITEM_BACK; i++) {
 +                FIELD_MENU_ShowItemWindow(menu, &menu->items[i]);
++                if (menu->items[i].actor != 0 && menu->items[i].buttonId != FIELD_MENU_BUTTON_EMPTY) {
++                    CLACT_SetActorDrawEnable(menu->items[i].actor, 1);
++                }
 +            }
-+            BG_SYS_PushTile(5);
-+            BG_SYS_PushTile(6);
++            FIELD_MENU_WtPrintPage(menu);
++            BMP_OAM_SetEnabled(menu->wtPageNumber, 1);
++            BG_SYS_MarkTileDirty(6);
++            CLACT_SetActorDrawEnable(menu->cursorActor, menu->keyCursorActive);
++            FIELD_MENU_UpdateSelection(menu);
 +            menu->state = FIELD_MENU_STATE_IDLE;
 +        }
 +        break;
      }
      return PRINTSYS_QUE_Main(menu->printQue);
  }
-@@ -735,7 +811,8 @@ void FIELD_MENU_LoadGraphics(FieldMenu *menu, void *arcHandle, int layoutType, v
+@@ -735,7 +824,8 @@ void FIELD_MENU_LoadGraphics(FieldMenu *menu, void *arcHandle, int layoutType, v
      menu->cellResB = CLACT_RegisterCellAnim(commonArc, cellId, APP_ICON_GetStatusPaletteFileId(0), menu->heapId);
      ARC_TOOL_DeleteHandle(commonArc);
      BG_SYS_PushTile(5);
@@ -338,7 +351,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      surfaceRect = gFieldMenuSurfaceRect;
      menu->clactSurface = CLACT_CreateRenderer((struct SurfaceInit *)(&surfaceRect), 1, menu->heapId);
      CLACT_SetUnitRenderer(menu->clactUnit, menu->clactSurface);
-@@ -808,8 +885,24 @@ int FIELD_MENU_CountLayoutButtons(int layoutType)
+@@ -808,8 +898,24 @@ int FIELD_MENU_CountLayoutButtons(int layoutType)
  /* Builds the seven slots of the layout from the button table and the message bank. */
  void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
  {
@@ -364,7 +377,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      u8 j;
      int buttonId;
      const int *layoutRow;
-@@ -818,15 +911,15 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -818,15 +924,15 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
      FieldMenuName defaultName;
  
      msgBank = MSGDATA_CreateFromArchive(0, 2, PM_LANG_JA(0x22, 0x23), menu->subHeapId);
@@ -387,7 +400,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
              init.text = STRBUF_Create(0x10, menu->subHeapId);
              if (MYSTATUS_IsNameEmpty(menu->myStatus) == 0) {
                  STRBUF_SetString(init.text, (u16 *)(MYSTATUS_GetName(menu->myStatus)));
-@@ -847,6 +940,11 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -847,6 +953,11 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
              init.charId = gFieldMenuIconRes[buttonId].charId;
              init.cellId = gFieldMenuIconRes[buttonId].cellId;
              init.animId = gFieldMenuIconRes[buttonId].animId;
@@ -399,7 +412,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
              if (buttonId == 3 && MYSTATUS_GetSex(menu->myStatus) == 1) {
                  init.charId = 7;
                  init.cellId = 0x16;
-@@ -875,6 +973,85 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
+@@ -875,6 +986,107 @@ void FIELD_MENU_CreateItems(FieldMenu *menu, void *arcHandle, int layoutType)
      MSGDATA_Delete(msgBank);
  }
  
@@ -451,10 +464,10 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
 +    STRBUF_Delete(label);
 +}
 +
-+/* DSWT: shows the other page, its screen, buttons and number, with the cursor on its first button */
++/* DSWT: turns the page without a frame that mixes two: hides the page's names, icons, number and cursor in one VBlank,
++ * loads the other page once they are hidden, and shows it whole once its names have printed (FIELD_MENU_STATE_WT_PAGE) */
 +void FIELD_MENU_WtTurnPage(FieldMenu *menu)
 +{
-+    void *arcHandle;
 +    u8 i;
 +
 +    GFL_USE_PlaySeDefaultVolume(SE_FIELD_MENU_MOVE);
@@ -465,17 +478,39 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
 +    for (i = 0; i < FIELD_MENU_ITEM_BACK; i++) {
 +        if (menu->items[i].inUse == 1) {
 +            BMP_WIN_ClearScreen(menu->items[i].bmpWin);
++            if (menu->items[i].actor != 0) {
++                CLACT_SetActorDrawEnable(menu->items[i].actor, 0);
++            }
 +        }
++    }
++    BG_SYS_MarkTileDirty(6);
++    BMP_OAM_SetEnabled(menu->wtPageNumber, 0);
++    CLACT_SetActorDrawEnable(menu->cursorActor, 0);
++    menu->state = FIELD_MENU_STATE_WT_LOAD;
++}
++
++/* DSWT: loads the other page's screen and buttons, its icons hidden, with the cursor on its first button */
++void FIELD_MENU_WtLoadPage(FieldMenu *menu)
++{
++    void *arcHandle;
++    u8 i;
++
++    for (i = 0; i < FIELD_MENU_ITEM_BACK; i++) {
 +        FIELD_MENU_DeleteItem(menu, &menu->items[i]);
 +        menu->items[i].inUse = 0;
 +    }
 +    menu->wtPage ^= 1;
 +    arcHandle = ARC_TOOL_CreateHandle(0x47, menu->subHeapId);
-+    ARC_UTIL_UploadBgPaletteFromHandle(arcHandle, menu->wtPage == 1 ? FIELD_MENU_SCREEN_FOUR :
-+                                       gFieldMenuScreenIds[menu->layoutType], 5, 0, 0, 0, menu->subHeapId);
++    ARC_UTIL_UploadBgPaletteAddFromHandleExt(arcHandle, menu->wtPage == 1 ? FIELD_MENU_SCREEN_FOUR :
++                                             gFieldMenuScreenIds[menu->layoutType], 5, 0, 0, 0, 0,
++                                             (u16)(menu->subHeapId | 0x8000));
 +    FIELD_MENU_WtCreateItems(menu, arcHandle, menu->layoutType, 0, FIELD_MENU_ITEM_BACK);
 +    ARC_TOOL_DeleteHandle(arcHandle);
-+    FIELD_MENU_WtPrintPage(menu);
++    for (i = 0; i < FIELD_MENU_ITEM_BACK; i++) {
++        if (menu->items[i].actor != 0) {
++            CLACT_SetActorDrawEnable(menu->items[i].actor, 0);
++        }
++    }
 +    menu->cursorCol = 0;
 +    menu->cursorRow = 0;
 +    menu->cursorDirty = 1;
@@ -485,7 +520,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  /* Task proc: cycles two palette colors of the menu with a sine of the phase counter. */
  void FIELD_MENU_ColorTask(struct TcbTask *taskHandle, void *work)
  {
-@@ -943,7 +1120,28 @@ int FIELD_MENU_GetSlotIndex(u32 col, u32 row)
+@@ -943,7 +1155,28 @@ int FIELD_MENU_GetSlotIndex(u32 col, u32 row)
  u32 FIELD_MENU_MoveCursor(FieldMenu *menu, u32 dir)
  {
      u32 index = FIELD_MENU_GetSlotIndex(menu->cursorCol, menu->cursorRow);
@@ -515,7 +550,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
      if (index != target) {
          if (target == 0xFF) {
-@@ -983,6 +1181,10 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
+@@ -983,6 +1216,10 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
          CLACT_SetActorDrawEnable(menu->cursorActor, 1);
          return;
      }
@@ -526,7 +561,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
      if (repeated & FIELD_MENU_PAD_UP) {
          if (FIELD_MENU_MoveCursor(menu, 0) != 0) {
              menu->cursorDirty = 1;
-@@ -1017,8 +1219,21 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
+@@ -1017,8 +1254,21 @@ void FIELD_MENU_HandleKeys(FieldMenu *menu)
  void FIELD_MENU_HandleTouch(FieldMenu *menu)
  {
      FieldMenuTouchTable touchTable = gFieldMenuTouchTable;
@@ -549,7 +584,7 @@ diff --git a/src/game/ov021/field_menu.c b/src/game/ov021/field_menu.c
  
      if (hitSlot != -1 && menu->items[hitSlot].buttonId != FIELD_MENU_BUTTON_EMPTY) {
          menu->cursorCol = hitSlot % 2;
-@@ -1092,7 +1307,8 @@ void FIELD_MENU_CreateItem(FieldMenu *menu, FieldMenuItem *item, const FieldMenu
+@@ -1092,7 +1342,8 @@ void FIELD_MENU_CreateItem(FieldMenu *menu, FieldMenuItem *item, const FieldMenu
      item->buttonId = init->buttonId;
      item->cursorX = init->cursorX;
      item->cursorY = init->cursorY;
