@@ -2,6 +2,7 @@
 #include <string.h>
 #include <mbedtls/platform_util.h>
 
+#include "app/pokelist.h"
 #include "communication/pokemon_trade.h"
 #include "constants/arc.h"
 #include "constants/pokemon.h"
@@ -45,10 +46,10 @@
  * station's title menu (worldtrade_title.c; wonder_trade/gen5_screen.h): on
  * the upper screen the station's title bar with the title, over its grid, and
  * a message window in the game's frame holding the status; on the lower
- * screen the actions, or the party while picking, as the game's task menu
- * buttons (app_taskmenu.c), with its cursor and sounds, picked with the
- * +Control Pad and A or by touch, B to go back. A received Pokémon is shown
- * with the game's own trade animation first. */
+ * screen the actions as the game's task menu buttons (app_taskmenu.c), with
+ * its cursor and sounds, picked with the +Control Pad and A or by touch, B to
+ * go back. The game's own party list picks the Pokémon to offer, and a
+ * received Pokémon is shown with the game's own trade animation first. */
 
 typedef char WtWideCharCheck[sizeof(L"a"[0]) == 2 ? 1 : -1];
 
@@ -62,6 +63,8 @@ typedef char WtWideCharCheck[sizeof(L"a"[0]) == 2 ? 1 : -1];
 #define WT_CHECKING_HEAP_SIZE 0x10000
 /* The trade animation's work heap, which it makes in heap 1 (pokemontrade_proc.c). */
 #define WT_TRADE_HEAP_SIZE 0x96000
+/* The party list's, which it makes in heap 1 too (PokeListProc_Init in pokelist.c). */
+#define WT_POKELIST_HEAP_SIZE 0x30000
 #define WT_FADE_FRAMES 16
 #define MAX_ACTIONS 3
 /* The BGs: on the upper screen the windows, the station's title bar and its
@@ -96,6 +99,7 @@ enum WtAppState {
     WT_APP_CONNECTING,
     WT_APP_PINGING,
     WT_APP_MENU,
+    WT_APP_PICKER_FADE,
     WT_APP_PICKER,
     WT_APP_CONFIRM,
     WT_APP_COLLECT_CONFIRM,
@@ -125,17 +129,18 @@ struct WtApp {
     AppTaskMenu *buttons;
     int state, message, selectedSlot, fade;
     BOOL boot, started;
-    /* For the trade animation; gameData is NULL at boot, which shows none. */
+    /* For the party list and the trade animation; gameData is NULL at boot, which shows neither. */
     GameData *gameData;
     GameProcManager *procs;
+    PokeParty party;
+    PokeListParam list;
     PlayerInfo *partner;
     PartyPkm pkm[2];
     PokemonTradeDemoParam demo;
 };
 
 typedef char WtTradeImageCheck[sizeof(PartyPkm) <= WT_GAME_IMAGE_SIZE ? 1 : -1];
-typedef char WtButtonsCheck[WT_GEN5_MAX_BUTTONS <= APP_TASKMENU_ITEM_MAX && PARTY_SIZE + 1 <= WT_GEN5_MAX_BUTTONS
-                            && MAX_ACTIONS <= WT_GEN5_MAX_BUTTONS ? 1 : -1];
+typedef char WtButtonsCheck[MAX_ACTIONS <= APP_TASKMENU_ITEM_MAX && MAX_ACTIONS <= WT_GEN5_MAX_BUTTONS ? 1 : -1];
 
 static void Screen_VBlank(TCB *task, void *work)
 {
@@ -326,58 +331,30 @@ static PokeParty *Party(const WtApp *app)
     return SaveControl_GetPokePartySave(app->game.save);
 }
 
-static int PartyCount(const WtApp *app)
+/* A button's text. */
+static StrBuf *Label(WtApp *app, int text)
 {
-    int count = Party(app)->count;
-    return count < PARTY_SIZE ? count : PARTY_SIZE;
-}
-
-/* A button's text: the name and level of the party Pokémon in slot, or, for a negative slot, a text. */
-static StrBuf *Label(WtApp *app, int slot, int text)
-{
-    u16 chars[24], digits[12];
-    const u16 *from;
     StrBuf *str = GFL_StrBufCreate(24, WT_SCREEN_HEAPID);
-    int length = 0;
-    if (slot < 0) {
-        Screen_Line(app, gWtText[text], 23);
-        GFL_StrBufCopy(str, app->line);
-        return str;
-    }
-    memset(chars, 0xff, sizeof(chars));
-    PokeParty_GetParam(&Party(app)->pkms[slot], PKM_PARAM_NICKNAME_RAW, chars);
-    while (length < 11 && chars[length] != 0xffff) length++;
-    chars[length++] = ' ';
-    chars[length++] = ' ';
-    for (from = gWtText[WT_TEXT_LEVEL]; *from && length < 18; ) chars[length++] = *from++;
-    Number(digits, PokeParty_GetParam(&Party(app)->pkms[slot], PKM_PARAM_LEVEL, NULL));
-    for (from = digits; *from && length < 23; ) chars[length++] = *from++;
-    chars[length] = 0xffff;
-    GFL_StrBufLoadString(str, chars);
+    Screen_Line(app, gWtText[text], 23);
+    GFL_StrBufCopy(str, app->line);
     return str;
 }
 
-/* The lower screen's buttons: the party and Back while picking, otherwise the actions. */
+/* The lower screen's buttons: the actions. */
 static void Buttons(WtApp *app)
 {
-    AppTaskMenuItem items[WT_GEN5_MAX_BUTTONS];
+    AppTaskMenuItem items[MAX_ACTIONS];
     AppTaskMenuInit init;
-    int labels[MAX_ACTIONS], count, i, party = 0;
+    int labels[MAX_ACTIONS], count, i;
     if (app->buttons) AppTaskMenu_Free(app->buttons);
     app->buttons = NULL;
-    if (app->state == WT_APP_PICKER) {
-        party = PartyCount(app);
-        count = party + 1;
-    } else {
-        count = Actions(app, labels);
-    }
+    count = Actions(app, labels);
     if (count <= 0) return;
     for (i = 0; i < count; ++i) {
-        int text = app->state == WT_APP_PICKER ? WT_TEXT_BACK : labels[i];
-        items[i].str = Label(app, i < party ? i : -1, text);
+        items[i].str = Label(app, labels[i]);
         items[i].color = BUTTON_COLOR;
         /* A button that leaves has the return arrow and the cancel sound, as B does. */
-        items[i].type = i >= party && (text == WT_TEXT_BACK || text == WT_TEXT_EXIT || text == WT_TEXT_CANCEL)
+        items[i].type = labels[i] == WT_TEXT_BACK || labels[i] == WT_TEXT_EXIT || labels[i] == WT_TEXT_CANCEL
                             ? APP_TASKMENU_ITEM_RETURN : 0;
     }
     MI_CpuFill8(&init, 0, sizeof(init));
@@ -407,7 +384,7 @@ static void Draw(WtApp *app)
         app->font, TITLE_COLOR);
     BmpWin_Transfer(app->titleWindow);
     GFL_BitmapFill(BmpWin_GetBitmap(app->messageWindow), TEXT_BACKGROUND);
-    y = Screen_Text(app, gWtText[app->state == WT_APP_PICKER ? WT_TEXT_PICK : app->message], 0, 0);
+    y = Screen_Text(app, gWtText[app->message], 0, 0);
     if (app->state == WT_APP_RECEIVED && app->network.hasReceived) {
         Screen_Print(app, gWtText[WT_TEXT_RECEIVED], 32, 0, y);
         Screen_Print(app, app->network.received.nickname, WT_GAME_NAME_LENGTH, 100, y);
@@ -465,7 +442,7 @@ static void Connect(WtApp *app)
 
 static void Back(WtApp *app)
 {
-    if (app->state == WT_APP_CONFIRM || app->state == WT_APP_PICKER) {
+    if (app->state == WT_APP_CONFIRM) {
         app->selectedSlot = -1;
         Show(app, WT_APP_MENU, WT_TEXT_CHOOSE);
     } else if (app->state == WT_APP_COLLECT_CONFIRM || app->state == WT_APP_CANCEL_CONFIRM) {
@@ -490,6 +467,14 @@ static void Pick(WtApp *app, int slot)
     }
 }
 
+/* Fades the screen out for the party list. */
+static void Picker_Start(WtApp *app)
+{
+    app->selectedSlot = -1;
+    app->state = WT_APP_PICKER_FADE;
+    app->fade = 0;
+}
+
 static void Activate(WtApp *app, int choice)
 {
     switch (app->state) {
@@ -498,10 +483,6 @@ static void Activate(WtApp *app, int choice)
         break;
     case WT_APP_CONNECTING: case WT_APP_PINGING:
         Close(app);
-        break;
-    case WT_APP_PICKER:
-        if (choice < PartyCount(app)) Pick(app, choice);
-        else Back(app);
         break;
     case WT_APP_CONFIRM: case WT_APP_COLLECT_CONFIRM: case WT_APP_CANCEL_CONFIRM:
         if (choice == 1) {
@@ -523,7 +504,7 @@ static void Activate(WtApp *app, int choice)
         break;
     case WT_APP_MENU:
         if (choice == 0) {
-            if (app->network.tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_PICKER, WT_TEXT_PICK);
+            if (app->network.tradePhase == WT_JOURNAL_IDLE && app->gameData) Picker_Start(app);
             else Show(app, WT_APP_COLLECT_CONFIRM, WT_TEXT_CONFIRM_COLLECT);
         } else if (choice == 1) {
             if (app->network.tradePhase == WT_JOURNAL_IDLE) Show(app, WT_APP_MESSAGE, WT_TEXT_EXPLANATION);
@@ -550,6 +531,66 @@ static void Input(WtApp *app)
         return;
     }
     if (app->buttons) AppTaskMenu_Update(app->buttons);
+}
+
+/* A process that ran with the screen closed leaves its banks and engine
+ * layout; the screen takes the banks it needs. */
+static void Screen_ResetBanks(void)
+{
+    GX_ResetBankForOBJ(); GX_ResetBankForBGExtPltt(); GX_ResetBankForOBJExtPltt(); GX_ResetBankForTex();
+    GX_ResetBankForTexPltt(); GX_ResetBankForClearImage(); GX_ResetBankForSubOBJ(); GX_ResetBankForSubBGExtPltt();
+    GX_ResetBankForSubOBJExtPltt();
+}
+
+/* The game's own party list (POKELIST_PROC_FUNCTIONS, overlay 165) picks the
+ * Pokémon, set up as the script command that has the player choose a party
+ * Pokémon sets it up (Scrcmd_PokemonMisc_CallPokeSelect, EventPokeSelect_Create):
+ * select mode, which prompts with the game's own text, fades itself in and
+ * out, and ends at the first Pokémon picked with its slot in index, or with
+ * index past the party's slots for Back. It runs from a process manager of
+ * the screen's own, as the trade animation does, with the screen closed for
+ * the heap it makes, and on a copy of the party, so nothing it does reaches
+ * the save. Overlays 11 and 29 stay loaded under it: select mode reaches none
+ * of overlays 12, 164 and 210, which its other modes call. FALSE if there is
+ * no room for it. */
+static BOOL Picker_Begin(WtApp *app)
+{
+    if (GFL_HeapGetHighestAllocatableSize(HEAPID_USER) < WT_POKELIST_HEAP_SIZE + 0x1000) return FALSE;
+    PokeParty_Copy(Party(app), &app->party);
+    PokeListParam_Setup(&app->list, app->gameData, POKELIST_MODE_SELECT, &app->party);
+    app->procs = CreateGameProcManager(WT_HEAPID);
+    QueueGameProc(app->procs, OVERLAY_ID(165), &POKELIST_PROC_FUNCTIONS, &app->list);
+    app->state = WT_APP_PICKER;
+    return TRUE;
+}
+
+/* Fade out, run the party list, then open the screen again on the Pokémon
+ * picked, which the eligibility checks see first, or on the menu. */
+static void Picker_Update(WtApp *app)
+{
+    s32 slot = -1;
+    if (app->state == WT_APP_PICKER_FADE) {
+        if (++app->fade < WT_FADE_FRAMES) {
+            GX_SetMasterBrightness(-app->fade);
+            GXS_SetMasterBrightness(-app->fade);
+            return;
+        }
+        Screen_Free(app);
+        if (Picker_Begin(app)) return;
+    } else if (GFL_ProcMgrUpdate(app->procs) != PROCMGR_DONE) {
+        return;
+    } else {
+        FreeGameProcManager(app->procs);
+        app->procs = NULL;
+        Screen_ResetBanks();
+        if ((s32)app->list.index < app->party.count) slot = (s32)app->list.index;
+        mbedtls_platform_zeroize(&app->party, sizeof(app->party));
+        mbedtls_platform_zeroize(&app->list, sizeof(app->list));
+    }
+    Screen_Init(app);
+    app->fade = WT_FADE_FRAMES;
+    if (slot >= 0) Pick(app, slot);
+    else Show(app, WT_APP_MENU, WT_TEXT_CHOOSE);
 }
 
 /* The Global Trade Station's trade animation (POKEMONTRADE_GTS_TRADE_PROC_FUNCTIONS),
@@ -600,10 +641,7 @@ static void Trade_End(WtApp *app)
     GFL_OvlUnload(OVERLAY_ID(139));
     GFL_HeapFree(app->partner);
     app->partner = NULL;
-    /* The animation leaves its banks and engine layout; the screen takes the banks it needs. */
-    GX_ResetBankForOBJ(); GX_ResetBankForBGExtPltt(); GX_ResetBankForOBJExtPltt(); GX_ResetBankForTex();
-    GX_ResetBankForTexPltt(); GX_ResetBankForClearImage(); GX_ResetBankForSubOBJ(); GX_ResetBankForSubBGExtPltt();
-    GX_ResetBankForSubOBJExtPltt();
+    Screen_ResetBanks();
 }
 
 /* The received Pokémon: fade out, play the animation, then fade the result in. */
@@ -708,7 +746,8 @@ BOOL WtApp_Update(WtApp *app)
     BOOL couldLeave = app->network.canLeave;
     if (app->state == WT_APP_DONE) return TRUE;
     if (app->font) PrintQueue_Main(app->queue);
-    if (app->state != WT_APP_TRADE_FADE && app->state != WT_APP_TRADE && app->fade > 0) {
+    if (app->state != WT_APP_TRADE_FADE && app->state != WT_APP_TRADE && app->state != WT_APP_PICKER_FADE
+        && app->state != WT_APP_PICKER && app->fade > 0) {
         --app->fade;
         GX_SetMasterBrightness(-app->fade);
         GXS_SetMasterBrightness(-app->fade);
@@ -730,6 +769,10 @@ BOOL WtApp_Update(WtApp *app)
     }
     if (app->state == WT_APP_TRADE_FADE || app->state == WT_APP_TRADE) {
         Trade_Update(app);
+        return FALSE;
+    }
+    if (app->state == WT_APP_PICKER_FADE || app->state == WT_APP_PICKER) {
+        Picker_Update(app);
         return FALSE;
     }
     if (app->state == WT_APP_CONNECTING || app->state == WT_APP_PINGING) {
