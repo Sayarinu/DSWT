@@ -20,6 +20,10 @@ enum WonderTradeNetworkState {
     WT_NET_CLOSED,
 };
 
+/* Support code for an older copy of a save that another copy has traded past
+ * (WtEngine.rolledBack). Outside the seed and journal codes, -30 to -40. */
+#define WT_NET_ERROR_ROLLED_BACK (-41)
+
 typedef struct WonderTradeNetwork {
     int state;
     int error;

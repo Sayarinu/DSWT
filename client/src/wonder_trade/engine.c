@@ -317,6 +317,10 @@ static int ContextMatches(WtEngine *engine, const WtWireReply *reply, int finali
     return reply->nextCounter == counter && reply->highwater >= engine->entry.eventCursor;
 }
 
+/* Reconcile's answer when the page holds an event for a trade this journal
+ * never made: only another copy of this save could have made it. */
+#define WT_RECONCILE_FOREIGN (-2)
+
 static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
 {
     unsigned i;
@@ -351,7 +355,9 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
             && event->kind == WT_EVENT_REJECTED && !rejected && Zero(event->digest, 32)
             && memcmp(event->operation, next->operation, 16) == 0 && memcmp(event->trade, next->trade, 16) == 0
             && (event->state == WT_TRADE_MATCHED || event->state == WT_TRADE_RETURN_READY)) { rejected = REJECTED_CANCEL; continue; }
-        if (next->phase != WT_JOURNAL_QUEUED || memcmp(event->trade, next->trade, 16) != 0) return -1;
+        if (next->phase == WT_JOURNAL_IDLE
+            || (next->phase == WT_JOURNAL_QUEUED && memcmp(event->trade, next->trade, 16) != 0)) return WT_RECONCILE_FOREIGN;
+        if (next->phase != WT_JOURNAL_QUEUED) return -1;
         if (event->kind == WT_EVENT_SUBMITTED) {
             if (memcmp(event->operation, next->lastOperation, 16) != 0 || memcmp(event->digest, outgoingDigest, 32) != 0) return -1;
         } else if (event->kind == WT_EVENT_MATCHED || event->kind == WT_EVENT_CANCELLED) {
@@ -383,6 +389,16 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     return 0;
 }
 
+/* The server counted an operation this journal never sent: a newer copy of
+ * this save has traded since this one was saved. */
+static int Ahead(const WtEngine *engine, const WtWireReply *reply)
+{
+    const WtJournalEntry *entry = &engine->entry;
+    uint64_t own = entry->nextCounter;
+    if (entry->requestLength && entry->operationCounter == own && own != UINT64_MAX) ++own;
+    return reply->nextCounter > own;
+}
+
 static int DeliveryMatches(const WtJournalEntry *entry, const WtWireSnapshot *snapshot)
 {
     return (Zero(entry->receipt, 16) || memcmp(entry->receipt, snapshot->receipt, 16) == 0)
@@ -396,7 +412,7 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
     WtJournalEntry next;
     unsigned char outgoingDigest[32];
     unsigned operation;
-    int result = -1;
+    int result = -1, foreign = 0;
     if (Refresh(engine) != 0 || !engine->frameSize) return -1;
     operation = engine->frame[5];
     if (WtWire_Decode(engine->frame, engine->frameSize, packet, size, engine->journal.io.hash, &reply) != 0) return Block(engine);
@@ -427,7 +443,9 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         result = Commit(engine, &next); goto done;
     }
     if (operation == WT_OP_RECONCILE) {
-        if (Reconcile(engine, &reply, &next) != 0) goto blocked;
+        result = Reconcile(engine, &reply, &next);
+        foreign = result == WT_RECONCILE_FOREIGN;
+        if (result != 0) goto blocked;
         result = Resume(engine); goto done;
     }
     if (operation == WT_OP_SUBMIT || operation == WT_OP_CANCEL || operation == WT_OP_ACKNOWLEDGE) {
@@ -476,6 +494,9 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         result = Resume(engine); goto done;
     }
 blocked:
+    /* Only an answer this journal cannot follow, with nothing failed or written
+     * here, proves an older copy; a local failure stays an ordinary block. */
+    if (!engine->blocked && (foreign || Ahead(engine, &reply))) engine->rolledBack = 1;
     result = Block(engine);
 done:
     Clear(&reply, sizeof(reply)); Clear(&next, sizeof(next)); Clear(outgoingDigest, sizeof(outgoingDigest));
