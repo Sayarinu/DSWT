@@ -143,7 +143,7 @@ index e5c8587b8..c29d75457 100644
  };
  
 diff --git a/res/text/system/field_menu.txt b/res/text/system/field_menu.txt
-index 82ef6fae3..c8c76628b 100644
+index 82ef6fae3..283e7f193 100644
 --- a/res/text/system/field_menu.txt
 +++ b/res/text/system/field_menu.txt
 @@ -18,4 +18,7 @@ FieldMenu_Text_Empty_11 =               \x{ffff}
@@ -151,8 +151,8 @@ index 82ef6fae3..c8c76628b 100644
  FieldMenu_Text_Empty_13 =                       \x{ffff}
  FieldMenu_Text_Empty_14 =                     \x{ffff}
 +FieldMenu_Text_WonderTrade = WONDER TRADE
-+FieldMenu_Text_Page1 = < 1/2 >
-+FieldMenu_Text_Page2 = < 2/2 >
++FieldMenu_Text_Page1 = 1/2
++FieldMenu_Text_Page2 = 2/2
  \pad{42}
 diff --git a/src/field/event/event_field_menu.c b/src/field/event/event_field_menu.c
 index 2f91cd757..d20530175 100644
@@ -221,10 +221,18 @@ index 2f91cd757..d20530175 100644
  
  static u32 FieldMenu_GetAppId(u32 index) {
 diff --git a/src/field/field_menu.c b/src/field/field_menu.c
-index 441b9d2c3..5443d30f9 100644
+index 441b9d2c3..30b1b6e81 100644
 --- a/src/field/field_menu.c
 +++ b/src/field/field_menu.c
-@@ -67,6 +67,8 @@ enum {
+@@ -36,6 +36,7 @@
+ #include "save/event_work.h"
+ #include "save/player_info.h"
+ #include "system/app_menu_common.h"
++#include "system/bmp_oam.h"
+ #include "system/game_data.h"
+ #include "system/game_system.h"
+ #include "system/printsys.h"
+@@ -67,6 +68,8 @@ enum {
      FIELD_MENU_STATE_SELECTED,
      FIELD_MENU_STATE_SCROLL_OUT,
      FIELD_MENU_STATE_DONE,
@@ -233,18 +241,21 @@ index 441b9d2c3..5443d30f9 100644
  };
  
  // An item of the menu
-@@ -119,6 +121,10 @@ struct FieldMenu {
+@@ -119,6 +122,13 @@ struct FieldMenu {
      PrintQueue *printQueue;
      TCB *vblankTcb;
      u32 cursorFadeFrame;
-+    // DSWT: the page shown, of pageCount, and its label
++    // DSWT: the page shown, of pageCount, and its indicator on the bottom bar: arrows around the page number
 +    u8 page;
 +    u8 pageCount;
-+    BmpWin *pageWin;
++    ClActor *pageArrows[2];
++    BmpOamSys *pageOam;
++    GFLBitmap *pageBitmap;
++    BmpOamActor *pageNumber;
  };
  
  // What FieldMenu_CreateItem makes an item from
-@@ -189,10 +195,12 @@ static const u16 FIELD_MENU_NAME_MESSAGES[FIELD_MENU_ITEM_MAX] = { FieldMenu_Tex
+@@ -189,10 +199,12 @@ static const u16 FIELD_MENU_NAME_MESSAGES[FIELD_MENU_ITEM_MAX] = { FieldMenu_Tex
                                                                     FieldMenu_Text_Pokedex, FieldMenu_Text_Bag,
                                                                     FieldMenu_Text_Empty_2, FieldMenu_Text_Save,
                                                                     FieldMenu_Text_Options, FieldMenu_Text_Empty_5,
@@ -259,7 +270,7 @@ index 441b9d2c3..5443d30f9 100644
  
  // The cursor's colors 0 and 1, each pulsing between a start and an end endpoint
  static const FieldMenuCursorColor sCursorColorEndpoints[2][2] = {
-@@ -241,11 +249,11 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+@@ -241,11 +253,11 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
      },
      [FIELD_MENU_TYPE_NO_POKEDEX] = {
          FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD, FIELD_MENU_ITEM_SAVE,
@@ -273,7 +284,7 @@ index 441b9d2c3..5443d30f9 100644
      },
      [FIELD_MENU_TYPE_ROYAL_UNOVA] = {
          FIELD_MENU_ITEM_POKEMON, FIELD_MENU_ITEM_POKEDEX, FIELD_MENU_ITEM_BAG, FIELD_MENU_ITEM_TRAINER_CARD,
-@@ -262,6 +270,21 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
+@@ -262,6 +274,33 @@ static const u32 FIELD_MENU_ITEMS[FIELD_MENU_TYPE_MAX][FIELD_MENU_SLOT_COUNT] =
  };
  // clang-format on
  
@@ -284,56 +295,72 @@ index 441b9d2c3..5443d30f9 100644
 +};
 +// Wonder Trade's icon: its own characters (res/graphics/field_menu/43.png) with the Pokemon item's cells
 +#define FIELD_MENU_WONDER_TRADE_CHARS 0x2b
++// The page indicator, placed as the Hall of Fame PC's on the bottom bar: the bar's left and right arrows, the page
++// number centred between them, and the touch area of the three. The number prints in the bar's second palette,
++// white with a grey shadow, as the Hall of Fame PC's does
++#define FIELD_MENU_PAGE_ARROW_SEQUENCE 4
++#define FIELD_MENU_PAGE_LEFT_X 8
++#define FIELD_MENU_PAGE_RIGHT_X 88
++#define FIELD_MENU_PAGE_Y 0xa8
++#define FIELD_MENU_PAGE_NUMBER_X 44
++#define FIELD_MENU_PAGE_NUMBER_Y 0xac
++#define FIELD_MENU_PAGE_NUMBER_WIDTH 32
++#define FIELD_MENU_PAGE_COLOR PRINT_COLOR(6, 8, 0)
 +
 +static const u32 *FieldMenu_PageItems(FieldMenu *menu) {
 +    return menu->page == 1 ? FIELD_MENU_WONDER_TRADE_PAGE : FIELD_MENU_ITEMS[menu->menuType];
 +}
 +
 +static void FieldMenu_CreateItems(FieldMenu *menu, ArcTool *arc, u8 first, u8 last);
++static void FieldMenu_CreatePageIndicator(FieldMenu *menu);
 +static void FieldMenu_PrintPage(FieldMenu *menu);
 +
  FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *subscreen, Field *field, BOOL open) {
      FieldMenu *menu = GFL_HeapAllocate(heapId, sizeof(FieldMenu), FALSE, "field_menu.c", 323);
      GameSystem *gsys = Field_GetGameSystem(field);
-@@ -289,9 +312,17 @@ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *sub
+@@ -289,9 +328,15 @@ FieldMenu *FieldMenu_Create(HeapID heapId, HeapID tmpHeapId, FieldSubscreen *sub
      arc = GFL_ArcSysCreateFileHandle(ARCID_FIELD_MENU, menu->tmpHeapId);
      menuType = FieldMenu_GetMenuType(gameData, menu->eventWork, menu->zoneId);
      menu->menuType = menuType;
 +    menu->page = 0;
 +    menu->pageCount = menuType == FIELD_MENU_TYPE_NORMAL ? 2 : 1;
-+    menu->pageWin = NULL;
      FieldMenu_LoadResources(menu, arc, menuType, menu->msgBGSys);
      LoadFieldMenuTexts(menu, arc, menuType);
      GFL_ArcToolFree(arc);
 +    if (menu->pageCount > 1) {
-+        menu->pageWin = BmpWin_CreateDynamic(6, 12, 1, 8, 2, 13, TRUE);
-+        BmpWin_FlushMap(menu->pageWin);
++        FieldMenu_CreatePageIndicator(menu);
 +        FieldMenu_PrintPage(menu);
 +    }
      GFL_BGSysSetBGEnabled(1, TRUE);
      if (open == TRUE) {
          menu->cursorX = 0;
-@@ -324,6 +355,9 @@ void FieldMenu_Free(FieldMenu *menu) {
+@@ -324,6 +369,13 @@ void FieldMenu_Free(FieldMenu *menu) {
      for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
          FieldMenu_FreeItem(menu, &menu->items[i]);
      }
-+    if (menu->pageWin != NULL) {
-+        BmpWin_Free(menu->pageWin);
++    if (menu->pageCount > 1) {
++        BmpOam_ActorDel(menu->pageNumber);
++        GFL_BitmapFree(menu->pageBitmap);
++        BmpOam_Exit(menu->pageOam);
++        ClActor_Delete(menu->pageArrows[0]);
++        ClActor_Delete(menu->pageArrows[1]);
 +    }
      FieldMenu_RestoreSubscreenOnCancel(menu);
      GFL_TCBRemove(menu->vblankTcb);
      ClActor_Delete(menu->returnButton);
-@@ -363,6 +397,9 @@ void FieldMenu_Update(FieldMenu *menu) {
-             for (i = 0; i < FIELD_MENU_SLOT_COUNT; i++) {
-                 FieldMenu_FlushItem(menu, &menu->items[i]);
-             }
-+            if (menu->pageWin != NULL) {
-+                BmpWin_FlushChar(menu->pageWin);
+@@ -412,6 +464,11 @@ void FieldMenu_Update(FieldMenu *menu) {
+             GFL_BGSysSetBGEnabled(6, TRUE);
+             GFL_BGSysSetBGEnabled(7, TRUE);
+             ClActor_SetVisible(menu->returnButton, FALSE);
++            if (menu->pageCount > 1) {
++                ClActor_SetVisible(menu->pageArrows[0], FALSE);
++                ClActor_SetVisible(menu->pageArrows[1], FALSE);
++                BmpOam_ActorSetDrawEnable(menu->pageNumber, FALSE);
 +            }
-             if (menu->scrollY != 0) {
-                 GFL_SndSEPlay(SEQ_SE_OPEN1);
-                 menu->state = FIELD_MENU_STATE_SCROLL_IN;
-@@ -437,6 +474,19 @@ void FieldMenu_Update(FieldMenu *menu) {
+         } else if (menu->curItem->icon != NULL) {
+             menu->decideFrames = 0;
+             FieldMenu_SetCursorPosition(menu, menu->curItem->cursorX, menu->curItem->cursorY);
+@@ -437,6 +494,18 @@ void FieldMenu_Update(FieldMenu *menu) {
          FieldSubscreen_SaveReturnSubscreen(menu->subscreen, FIELD_MENU_RESULT_SELECTED);
          menu->state = FIELD_MENU_STATE_DONE;
          break;
@@ -344,7 +371,6 @@ index 441b9d2c3..5443d30f9 100644
 +            for (i = 0; i < FIELD_MENU_SLOT_BOTTOM; i++) {
 +                FieldMenu_FlushItem(menu, &menu->items[i]);
 +            }
-+            BmpWin_FlushChar(menu->pageWin);
 +            GFL_BGSysLoadScr(5);
 +            GFL_BGSysLoadScr(6);
 +            menu->state = FIELD_MENU_STATE_INPUT;
@@ -353,7 +379,17 @@ index 441b9d2c3..5443d30f9 100644
      case FIELD_MENU_STATE_SCROLL_OUT:
          if (menu->scrollY + 0x40 > 0xc0) {
              menu->scrollY = 0xc0;
-@@ -596,16 +646,60 @@ static int FieldMenu_CountItems(u8 menuType) {
+@@ -529,7 +598,8 @@ static void FieldMenu_LoadResources(FieldMenu *menu, ArcTool *arc, u8 menuType,
+                                                    AppMenuCommon_GetTouchBarAnimFile(0), menu->heapId);
+     GFL_ArcToolFree(common);
+     GFL_BGSysLoadScr(5);
+-    menu->actUnit = ClActUnit_Create(8, 0, menu->heapId);
++    // DSWT: and the page indicator's arrows and number
++    menu->actUnit = ClActUnit_Create(8 + 3, 0, menu->heapId);
+     {
+         ClActSurfaceSetup surface = { 0, 0, 0x100, 0xbf, 1, 0 };
+ 
+@@ -596,16 +666,94 @@ static int FieldMenu_CountItems(u8 menuType) {
  }
  
  static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
@@ -370,19 +406,53 @@ index 441b9d2c3..5443d30f9 100644
 +    FieldMenu_CreateItems(menu, arc, 0, FIELD_MENU_SLOT_COUNT);
 +}
 +
-+// DSWT: prints the page label
++// DSWT: creates the page indicator: the arrows, and a sprite for the page number
++static void FieldMenu_CreatePageIndicator(FieldMenu *menu) {
++    ClActorSetup setup;
++    BmpOamActorSetup number;
++    u8 i;
++
++    setup.y = FIELD_MENU_PAGE_Y;
++    setup.priority = 0;
++    setup.bgPriority = 0;
++    for (i = 0; i < 2; i++) {
++        setup.x = i == 0 ? FIELD_MENU_PAGE_LEFT_X : FIELD_MENU_PAGE_RIGHT_X;
++        setup.sequence = FIELD_MENU_PAGE_ARROW_SEQUENCE + i;
++        menu->pageArrows[i] = ClActor_Create(menu->actUnit, menu->commonChars, menu->commonPalette,
++                                             menu->commonCellAnims, &setup, 0, menu->heapId);
++        ClActor_SetVisible(menu->pageArrows[i], TRUE);
++    }
++    menu->pageOam = BmpOam_Init(menu->heapId, menu->actUnit);
++    menu->pageBitmap = GFL_BitmapCreate(FIELD_MENU_PAGE_NUMBER_WIDTH / 8, 2, 0x20, menu->heapId);
++    number.bitmap = menu->pageBitmap;
++    number.x = FIELD_MENU_PAGE_NUMBER_X;
++    number.y = FIELD_MENU_PAGE_NUMBER_Y;
++    number.palette = menu->commonPalette;
++    number.paletteOffset = 1;
++    number.priority = 0;
++    number.bgPriority = 0;
++    number.surface = 0;
++    number.vramType = CLACT_VRAM_SUB;
++    menu->pageNumber = BmpOam_ActorAdd(menu->pageOam, &number);
++    BmpOam_ActorSetDrawEnable(menu->pageNumber, TRUE);
++}
++
++// DSWT: prints the page number, centred between the arrows
 +static void FieldMenu_PrintPage(FieldMenu *menu) {
 +    MsgData *msgData = GFL_MsgSysLoadData(FALSE, ARCID_SYSTEM_MESSAGE, TEXT_BANK_FIELD_MENU, menu->tmpHeapId);
 +    StrBuf *label = GFL_MsgDataLoadStrbufNew(msgData, menu->page == 0 ? FieldMenu_Text_Page1 : FieldMenu_Text_Page2);
 +    Font *font = MsgBGPrinter_GetFont(Field_GetMsgBGSys(menu->field));
++    u32 width = GFL_FontGetBlockWidth(label, font, 0);
 +
-+    GFL_BitmapFill(BmpWin_GetBitmap(menu->pageWin), 0);
-+    PrintQueue_PrintColor(menu->printQueue, BmpWin_GetBitmap(menu->pageWin), 2, 1, label, font, 0x440);
++    GFL_BitmapFill(menu->pageBitmap, 0);
++    GFL_TextRendererDrawToBitmapEx(menu->pageBitmap, (FIELD_MENU_PAGE_NUMBER_WIDTH - width) / 2, 0, label, font,
++                                   FIELD_MENU_PAGE_COLOR);
++    BmpOam_ActorBmpTrans(menu->pageNumber);
 +    GFL_StrBufFree(label);
 +    GFL_MsgDataFree(msgData);
 +}
 +
-+// DSWT: shows the other page, its buttons, items and label, with the cursor on its first item
++// DSWT: shows the other page, its buttons, items and number, with the cursor on its first item
 +static void FieldMenu_TurnPage(FieldMenu *menu) {
 +    ArcTool *arc;
 +    u8 i;
@@ -419,7 +489,7 @@ index 441b9d2c3..5443d30f9 100644
          u32 itemId = items[i];
  
          if (itemId == FIELD_MENU_ITEM_TRAINER_CARD) {
-@@ -646,6 +740,11 @@ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
+@@ -646,6 +794,11 @@ static void LoadFieldMenuTexts(FieldMenu *menu, ArcTool *arc, u8 menuType) {
                  setup.cellFile = 0x1b;
                  setup.animFile = 0x26;
              }
@@ -431,7 +501,7 @@ index 441b9d2c3..5443d30f9 100644
          } else {
              setup.x = 0x80;
              setup.y = 0xb4;
-@@ -720,7 +819,28 @@ static int FieldMenu_GetSlot(u8 x, u8 y) {
+@@ -720,7 +873,28 @@ static int FieldMenu_GetSlot(u8 x, u8 y) {
  // Moves the cursor in the direction, and returns whether it moved
  static BOOL FieldMenu_MoveCursor(FieldMenu *menu, u32 dir) {
      int slot = FieldMenu_GetSlot(menu->cursorX, menu->cursorY);
@@ -461,7 +531,7 @@ index 441b9d2c3..5443d30f9 100644
  
      if (slot != next) {
          if (next == FIELD_MENU_MOVE_TO_ROW_2) {
-@@ -756,6 +876,10 @@ static void FieldMenu_UpdateKeys(FieldMenu *menu) {
+@@ -756,6 +930,10 @@ static void FieldMenu_UpdateKeys(FieldMenu *menu) {
          ClActor_SetVisible(menu->cursor, TRUE);
          return;
      }
@@ -472,13 +542,16 @@ index 441b9d2c3..5443d30f9 100644
      if (repeat & PAD_KEY_UP) {
          if (FieldMenu_MoveCursor(menu, DIR_UP)) {
              menu->cursorDirty = TRUE;
-@@ -801,8 +925,15 @@ static void FieldMenu_UpdateTouch(FieldMenu *menu) {
+@@ -801,8 +979,18 @@ static void FieldMenu_UpdateTouch(FieldMenu *menu) {
          { 0x18, 0x40, 0x08, 0x78 }, { 0x18, 0x40, 0x88, 0xf8 }, { 0x48, 0x70, 0x08, 0x78 }, { 0x48, 0x70, 0x88, 0xf8 },
          { 0x78, 0xa0, 0x08, 0x78 }, { 0x78, 0xa0, 0x88, 0xf8 }, { 0xa8, 0xbf, 0xe0, 0xf8 }, { TOUCH_RECT_END, 0, 0, 0 },
      };
 -    int slot = GFL_HIDGetTouchPressedRect(rects);
-+    // DSWT: the page label
-+    static const TouchRect pageRect[2] = { { 0x00, 0x17, 0x58, 0xa8 }, { TOUCH_RECT_END, 0, 0, 0 } };
++    // DSWT: the page indicator
++    static const TouchRect pageRect[2] = {
++        { FIELD_MENU_PAGE_Y, 0xbf, FIELD_MENU_PAGE_LEFT_X, FIELD_MENU_PAGE_RIGHT_X + 0x17 },
++        { TOUCH_RECT_END, 0, 0, 0 },
++    };
 +    int slot;
  
 +    if (menu->pageCount > 1 && GFL_HIDGetTouchPressedRect(pageRect) == 0) {
@@ -489,7 +562,7 @@ index 441b9d2c3..5443d30f9 100644
      if (slot != TOUCH_RECT_NONE && menu->items[slot].itemId != FIELD_MENU_ITEM_NONE) {
          menu->cursorX = slot % 2;
          menu->cursorY = slot / 2;
-@@ -866,7 +997,8 @@ static void FieldMenu_CreateItem(FieldMenu *menu, FieldMenuItem *item, const Fie
+@@ -866,7 +1054,8 @@ static void FieldMenu_CreateItem(FieldMenu *menu, FieldMenuItem *item, const Fie
      item->itemId = setup->itemId;
      item->cursorX = setup->x;
      item->cursorY = setup->y;
