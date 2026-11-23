@@ -403,7 +403,7 @@ static void Draw(WtApp *app)
         Screen_Print(app, gWtText[WT_TEXT_ORIGINAL_TRAINER], 32, 0, y);
         Screen_Print(app, app->network.received.originalTrainer, WT_GAME_TRAINER_NAME_LENGTH, 100, y);
     }
-    if (app->state == WT_APP_ERROR) {
+    if (app->state == WT_APP_ERROR || app->message == WT_TEXT_PING_ERROR) {
         Screen_Print(app, gWtText[WT_TEXT_ERROR_CODE], 32, 0, y);
         Number(digits, (unsigned)(app->network.error < 0 ? -app->network.error : app->network.error));
         if (app->network.error < 0) { memmove(digits + 1, digits, sizeof(digits) - sizeof(u16)); digits[0] = '-'; }
@@ -730,8 +730,8 @@ WtApp *WtApp_Create(BOOL boot)
     if (!app) return NULL;
     if (boot) {
         Show(app, WT_APP_RECOVERY, WT_TEXT_RECOVERY_REQUIRED);
-    } else if (WtGameSave_ReleaseMusicalArea(&app->game) != 0) {
-        /* The journal may never be written while the game could read its area. */
+    } else if ((app->network.error = WtGameSave_ReleaseMusicalArea(&app->game)) != 0) {
+        /* The journal may never be written while the game could read its area. The message shows the code. */
         Show(app, WT_APP_MESSAGE, WT_TEXT_PING_ERROR);
     } else {
         Connect(app);
