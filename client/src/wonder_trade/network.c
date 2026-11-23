@@ -374,9 +374,13 @@ static int WonderTradeNetwork_RunTrade(WonderTradeTransport *transport)
         if (operation == WT_OP_STATUS) { result = 0; break; }
     }
     if (count == 24) result = -33;
+    /* An older copy of this save: the server has history this journal never
+     * made, so it may never trade again. Nothing was written, so it may leave
+     * on the same proof as an ordinary visit. */
+    if (engine->rolledBack) result = WT_NET_ERROR_ROLLED_BACK;
     transport->tradePhase = engine->entry.phase;
     transport->phase = WT_TRANSPORT_SAVING;
-    transport->canLeave = !engine->blocked && WtGame_CanLeave(transport->game, &engine->entry);
+    transport->canLeave = (!engine->blocked || engine->rolledBack) && WtGame_CanLeave(transport->game, &engine->entry);
     /* The main thread also checks the worker stack before opening gameplay. */
     WtRecovery_Block();
     return result;
