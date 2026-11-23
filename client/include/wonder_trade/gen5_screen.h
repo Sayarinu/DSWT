@@ -24,13 +24,13 @@
 #define WT_GEN5_LINE_HEIGHT 16
 #define WT_GEN5_MESSAGE_LINES (WT_GEN5_MESSAGE_HEIGHT * 8 / WT_GEN5_LINE_HEIGHT)
 
-/* The buttons, centered on the lower screen: up to six party Pokémon and Back. */
+/* The buttons, centered on the lower screen: up to three actions; the game's own party screen picks the Pokémon. */
 #define WT_GEN5_SCREEN_ROWS 24
 #define WT_GEN5_SCREEN_COLUMNS 32
 #define WT_GEN5_BUTTON_X 4
 #define WT_GEN5_BUTTON_WIDTH 24
 #define WT_GEN5_BUTTON_HEIGHT 3
-#define WT_GEN5_MAX_BUTTONS 7
+#define WT_GEN5_MAX_BUTTONS 3
 
 /* The row of the first of count buttons. */
 static inline int WtGen5_ButtonTop(int count)
