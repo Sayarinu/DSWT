@@ -525,7 +525,9 @@ static void Input(WtApp *app)
         if (AppTaskMenu_IsFlashFinished(app->buttons)) Activate(app, AppTaskMenu_GetCursorPos(app->buttons));
         return;
     }
-    if (app->state != WT_APP_RECOVERY && (keys & (PAD_BUTTON_B | PAD_BUTTON_X))) {
+    if (keys & (PAD_BUTTON_B | PAD_BUTTON_X)) {
+        /* The buttons would take B as picking the last one, the recovery screen's only button. */
+        if (app->state == WT_APP_RECOVERY) return;
         if (app->buttons) GFL_SndSEPlay(SEQ_SE_CANCEL1);
         Back(app);
         return;
