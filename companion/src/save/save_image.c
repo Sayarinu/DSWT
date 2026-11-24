@@ -189,11 +189,12 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
             footer[16] = (unsigned char)block;
             footer[18] = (unsigned char)crc;
             footer[19] = (unsigned char)(crc >> 8);
+            /* Retail publishes the CRC and counters together in the full footer. */
             if (file->writeAt(file->context, address, body, bodySize) != 0
                 || file->sync(file->context) != 0
-                || file->writeAt(file->context, address + bodySize + 8, footer + 8, 12) != 0
+                || file->writeAt(file->context, address + bodySize + 8, footer + 8, 8) != 0
                 || file->sync(file->context) != 0
-                || file->writeAt(file->context, address + bodySize, footer, 8) != 0
+                || file->writeAt(file->context, address + bodySize, footer, sizeof(footer)) != 0
                 || file->sync(file->context) != 0) {
                 image->loaded = 0;
                 return CP_SAVE_IO_ERROR;

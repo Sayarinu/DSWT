@@ -299,9 +299,9 @@ static void CommitLayout(uint32_t global, uint32_t general, uint32_t boxes, int 
         unsigned bodySize = sizes[block] - 20;
         assert(memory.events[event].offset == start && memory.events[event].size == bodySize);
         assert(memory.events[event + 1].size == 0);
-        assert(memory.events[event + 2].offset == start + bodySize + 8 && memory.events[event + 2].size == 12);
+        assert(memory.events[event + 2].offset == start + bodySize + 8 && memory.events[event + 2].size == 8);
         assert(memory.events[event + 3].size == 0);
-        assert(memory.events[event + 4].offset == start + bodySize && memory.events[event + 4].size == 8);
+        assert(memory.events[event + 4].offset == start + bodySize && memory.events[event + 4].size == 20);
         assert(memory.events[event + 5].size == 0);
         event += 6;
     }
@@ -367,19 +367,76 @@ static void VerifyFailures(void)
     puts("PASS verify: both halves, all footer fields, body/CRC/hash changes and read failures");
 }
 
+static int RetailCompare(uint32_t a, uint32_t b)
+{
+    if (a == UINT32_MAX && b == 0) return -1;
+    if (a == 0 && b == UINT32_MAX) return 1;
+    return (a > b) - (a < b);
+}
+
+/* Model Platinum's CompareSectors and LoadCheck, including the pair selected
+ * for LOAD_RESULT_CORRUPT: the game still loads those blocks. */
+static int RetailLoad(unsigned selected[2])
+{
+    unsigned block, half, valid[2] = { 0, 0 };
+    uint32_t globals[2][2], counters[2][2];
+    for (block = 0; block < 2; ++block) {
+        for (half = 0; half < 2; ++half) {
+            const unsigned char *footer = Footer(half, block);
+            unsigned crc = footer[18] | ((unsigned)footer[19] << 8);
+            globals[block][half] = Read32(footer);
+            counters[block][half] = Read32(footer + 4);
+            if (Read32(footer + 8) == sizes[block]
+                && Read32(footer + 12) == CP_SAVE_MAGIC_INTERNATIONAL
+                && footer[16] == block && crc == Crc(Body(half, block), sizes[block] - 20))
+                valid[block] |= 1u << half;
+        }
+        if (!valid[block]) return 0;
+        if (valid[block] == 3) {
+            int global = RetailCompare(globals[block][0], globals[block][1]);
+            int counter = RetailCompare(counters[block][0], counters[block][1]);
+            selected[block] = (global ? global : counter) < 0;
+        } else selected[block] = valid[block] == 2;
+    }
+    if (globals[0][selected[0]] == globals[1][selected[1]]) return 1;
+    if (valid[0] == 3) {
+        /* Both VALID/VALID and VALID/PARTIAL use the stale general block. */
+        selected[0] ^= 1;
+        return 1;
+    }
+    if (valid[1] == 3) {
+        selected[1] ^= 1;
+        return globals[0][selected[0]] == globals[1][selected[1]];
+    }
+    /* Two partial blocks retain their selected halves on the corrupt path. */
+    return 1;
+}
+
 static void InterruptedCommits(void)
 {
-    unsigned fail, partial, split;
-    for (split = 0; split < 2; ++split)
+    unsigned fail, partial, fixture;
+    for (fixture = 0; fixture < 6; ++fixture)
     for (partial = 0; partial < 2; ++partial) for (fail = 1; fail <= 24; ++fail) {
         unsigned char digest[32];
-        CpSaveResult result;
+        unsigned initial[2], selected[2], block, changed[2];
         Fixture();
-        if (split) {
+        if (fixture == 1) {
             Seal(0, 0, 41, 72, CP_SAVE_MAGIC_INTERNATIONAL);
             Seal(1, 0, 41, 71, CP_SAVE_MAGIC_INTERNATIONAL);
+        } else if (fixture >= 2) {
+            unsigned half = fixture % 2;
+            /* First full save, then general-only saves without touching PC.
+             * Also cover a first full save with BOTH other footers erased. */
+            memset(Footer(1 - half, 1), 0xff, 20);
+            Seal(half, 1, 1, 1, CP_SAVE_MAGIC_INTERNATIONAL);
+            Seal(half, 0, 1, fixture < 4 ? 3 : 1, CP_SAVE_MAGIC_INTERNATIONAL);
+            if (fixture < 4) Seal(1 - half, 0, 1, 2, CP_SAVE_MAGIC_INTERNATIONAL);
+            else memset(Footer(1 - half, 0), 0xff, 20);
         }
         assert(Load() == CP_SAVE_OK);
+        for (block = 0; block < 2; ++block) initial[block] = image.currentHalf[block];
+        assert(RetailLoad(selected));
+        assert(selected[0] == initial[0] && selected[1] == initial[1]);
         CpSaveImage_Block(&image, 0)[20] ^= 1;
         CpSaveImage_Block(&image, 1)[20] ^= 1;
         assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK);
@@ -390,16 +447,20 @@ static void InterruptedCommits(void)
         assert(memory.count == fail && !image.loaded);
         assert(CpSaveImage_CommitBoth(&image, &file, digest) == CP_SAVE_INVALID);
         CheckUntouched();
-        /* Each stopped prefix retains a usable retail copy or explicitly
-         * requests game recovery, never silently exposes a mixed checkpoint. */
-        result = Load();
-        assert(result == CP_SAVE_OK || result == CP_SAVE_NEEDS_GAME_SAVE);
-        if (result == CP_SAVE_OK) {
-            unsigned char a = CpSaveImage_Block(&image, 0)[20];
-            unsigned char b = CpSaveImage_Block(&image, 1)[20];
-            assert((a == before[20] && b == before[offsets[1] + 20])
-                   || (a == (unsigned char)(before[20] ^ 1) && b == (unsigned char)(before[offsets[1] + 20] ^ 1)));
+        /* Check the actual game-selected bodies, even on recovery paths. */
+        assert(RetailLoad(selected));
+        for (block = 0; block < 2; ++block) {
+            const unsigned char *old = before + initial[block] * CP_SAVE_HALF_SIZE + offsets[block];
+            const unsigned char *body = Body(selected[block], block);
+            assert(memcmp(body, old, 20) == 0);
+            assert(memcmp(body + 21, old + 21, sizes[block] - 20 - 21) == 0);
+            assert(body[20] == old[20] || body[20] == (unsigned char)(old[20] ^ 1));
+            changed[block] = body[20] != old[20];
         }
+        if (changed[0] != changed[1])
+            fprintf(stderr, "mixed retail checkpoint: fixture=%u partial=%u event=%u halves=%u/%u changed=%u/%u\n",
+                    fixture, partial, fail, selected[0], selected[1], changed[0], changed[1]);
+        assert(changed[0] == changed[1]);
     }
     /* Failure during the final re-read also invalidates the image. */
     Fixture(); assert(Load() == CP_SAVE_OK);
@@ -410,7 +471,7 @@ static void InterruptedCommits(void)
         assert(CpSaveImage_CommitBoth(&image, &file, digest) == CP_SAVE_IO_ERROR);
         assert(!image.loaded && memory.count == 24);
     }
-    puts("PASS interruptions: 96 stopped prefixes across 24 write/sync boundaries, partial writes, split halves and final read failure");
+    puts("PASS interruptions: 288 stopped prefixes across 24 write/sync boundaries, partial writes, split halves, erased box/both footers in either half; retail always selects complete old/new bodies; final read failure");
 }
 
 static void ExportFixture(const char *path)
