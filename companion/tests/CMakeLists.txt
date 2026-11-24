@@ -65,3 +65,24 @@ target_include_directories(game_data_test PRIVATE "${COMPANION_SRC}")
 target_compile_options(game_data_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_options(game_data_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+# LUNE-870: save journal detection/provisioning and backup lifecycle.
+add_library(companion_journal STATIC
+    "${COMPANION_SAVE}/journal_save.c"
+    "${COMPANION_SAVE}/journal_host_io.c"
+    "${COMPANION_SAVE}/backup_save.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/platform/journal_io.c"
+    "${CLIENT}/src/wonder_trade/journal.c")
+target_include_directories(companion_journal PUBLIC "${CLIENT}/include")
+target_compile_definitions(companion_journal PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
+target_compile_options(companion_journal PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+target_link_libraries(companion_journal PUBLIC companion_save)
+foreach(cp_journal_test journal_save_test backup_save_test)
+    add_executable(${cp_journal_test} "journal/${cp_journal_test}.c")
+    target_link_libraries(${cp_journal_test} PRIVATE companion_journal)
+    target_compile_options(${cp_journal_test} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+    add_test(NAME ${cp_journal_test} COMMAND ${cp_journal_test})
+endforeach()
+add_test(NAME cp_journal_integration_test
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/journal/journal_integration_test.py"
+        "$<TARGET_FILE:save_image_test>" "$<TARGET_FILE:journal_save_test>")
