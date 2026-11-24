@@ -20,6 +20,7 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | Path | Contents |
 | --- | --- |
 | `client/` | Game-independent client core, the Platinum, HeartGold/SoulSilver and Diamond/Pearl adapters (`platinum/`, `hgss/` and `dp/`, behind `game_adapter.h`), their integration patches and native client tests |
+| `companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build-companion.sh` on the client core, with host tests in `companion/tests/` |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
@@ -27,7 +28,7 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
 | `patches/` | Supported cartridges and the install guide shipped in each release |
 | `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
-| `tools/` | Local stack, BPS patcher and release tooling, image audit |
+| `tools/` | Local stack, BPS patcher and release tooling, image audit, ROM and companion builder images |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
 
 ## Platform
