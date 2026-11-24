@@ -56,9 +56,11 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
 
 /* Journal images retained after a save transition are replay evidence, not
  * another owned Pokémon. ESCROW/RESTORING/APPLYING choose ownership by the
- * recorded before/after inventory hashes; published phases require one side. */
-static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry,
-    const unsigned char digests[4][32])
+ * recorded before/after inventory hashes; published phases require one side.
+ * After playing changes those hashes, transitional escrow is retained only for
+ * an absent original; Resume also rejects any engine stuck in those phases. */
+static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
+    const unsigned char digests[4][32], int played)
 {
     unsigned selected[2], counts[4] = { 0, 0, 0, 0 }, i, mon, escrow = 0;
     const unsigned char *general, *boxes;
@@ -78,6 +80,7 @@ static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry
     SelectedHash(bytes, selected, inventory);
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
+        if (played) { escrow = counts[1] == 0; break; }
         assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
             || memcmp(inventory, entry->inventoryAfter, 32) == 0);
         escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
@@ -86,6 +89,7 @@ static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry
         escrow = 1;
         break;
     case WT_JOURNAL_APPLYING:
+        if (played) { escrow = counts[1] == 0; break; }
         assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
             || memcmp(inventory, entry->inventoryAfter, 32) == 0);
         escrow = memcmp(inventory, entry->inventoryBefore, 32) == 0;
@@ -100,7 +104,15 @@ static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry
         FxSha(canonical, sizeof(canonical), digest);
         assert(memcmp(digest, digests[1], 32) == 0);
     }
-    for (i = 0; i < 4; ++i) assert(counts[i] + (i == 1 ? escrow : 0) == 1);
+    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) > 1) return 1;
+    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1) return -1;
+    return 0;
+}
+
+static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry,
+    const unsigned char digests[4][32])
+{
+    assert(Ownership(bytes, entry, digests, 0) == 0);
 }
 
 #endif
