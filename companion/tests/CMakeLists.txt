@@ -134,3 +134,17 @@ foreach(adapter_test platinum_adapter_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
+
+# --- Session model (LUNE-895): saves, ROMs, adapter and visits together ----
+# A synchronous fake worker, files in a temporary folder and the in-memory
+# server; boot.c and recovery.c see a stub Mbed TLS header.
+add_executable(app_model_test app/model_test.c posix_reader.c
+    "${COMPANION_SRC}/app/model.c" "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/wire.c"
+    "${CLIENT}/src/wonder_trade/session.c" "${CLIENT}/src/wonder_trade/boot.c"
+    "${CLIENT}/src/wonder_trade/recovery.c")
+target_include_directories(app_model_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/app/stub" "${CLIENT}/tests")
+set_target_properties(app_model_test PROPERTIES C_STANDARD 11)
+target_compile_options(app_model_test PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
+target_link_libraries(app_model_test PRIVATE companion_adapter companion_journal companion_ui)
+add_test(NAME app_model_test COMMAND app_model_test)

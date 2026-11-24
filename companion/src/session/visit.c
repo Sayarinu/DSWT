@@ -21,6 +21,7 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
     memset(visit, 0, sizeof(*visit));
     if (!engine || !game || !transport || !transport->post) return visit->result = CP_VISIT_ERROR_JOURNAL;
     for (count = 0; count < MAX_EXCHANGES && !Cancelled(transport); ++count) {
+        if (transport->prepare && transport->prepare(transport->arg) != 0) { result = CP_VISIT_ERROR_CRYPTO; break; }
         if (WtJournal_Read(&engine->journal, &engine->entry) != 0) { result = CP_VISIT_ERROR_JOURNAL; break; }
         if (engine->entry.phase == WT_JOURNAL_EMPTY && WtEngine_Enroll(engine, build) != 0) {
             result = CP_VISIT_ERROR_JOURNAL; break;

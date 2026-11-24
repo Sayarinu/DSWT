@@ -1,0 +1,704 @@
+/* The session model (app/model.c) end to end on the host: saves and ROMs in a
+ * temporary folder laid out like a TWiLight Menu++ SD card, a synchronous
+ * worker, the in-memory server (session/fake_server.h) and a fake PSA that,
+ * like the DS's, is freed after every exchange and must be started again
+ * before the next one. Every save, ROM and Pokémon here is synthetic. */
+#define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE
+#define _DEFAULT_SOURCE
+#include "../posix_reader.h"
+#include "../session/fake_server.h"
+#include "../synthetic_rom.h"
+
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "app/model.h"
+#include "platform/wifi_status.h"
+#include "ui/ui.h"
+#include "wonder_trade/entropy.h"
+
+/* ---- What the core expects from the platform ------------------------------ */
+
+void mbedtls_platform_zeroize(void *buffer, size_t size)
+{
+    volatile unsigned char *p = buffer;
+    while (size--) *p++ = 0;
+}
+
+void *WtGame_Alloc(WtGame *game, size_t size) { (void)game; return malloc(size); }
+void WtGame_Free(WtGame *game, void *pointer) { (void)game; free(pointer); }
+
+/* ---- The fake console ------------------------------------------------------ */
+
+typedef struct Fake {
+    char root[256];
+    /* The worker runs a job when the model first asks whether it finished. */
+    CpAppJob job;
+    void *jobArg;
+    int jobResult, pending;
+    WtSeed *journal;
+    volatile int cancel;
+    /* Wi-Fi: polls before it answers, and whether it connects. */
+    int wifiFails, wifiPolls, wifiConnected;
+    /* PSA: freed by every exchange, as WtTls_Close does on the DS. */
+    int cryptoReady, randomFailures;
+    unsigned prepares, seedWrites, posts;
+    int seedWait;
+    uint64_t freeSpace;
+    int saveFd;
+    PosixReader roms[CP_APP_ROM_SLOTS];
+    int romOpen[CP_APP_ROM_SLOTS];
+    unsigned logLines;
+} Fake;
+
+static Fake fake;
+static CpAppPlatform platform;
+static CpApp app;
+
+static int List(void *arg, const char *path, CpAppListEntry entry, void *context)
+{
+    DIR *directory = opendir(path);
+    struct dirent *item;
+    (void)arg;
+    if (!directory) return -1;
+    while ((item = readdir(directory))) {
+        char full[600];
+        struct stat info;
+        snprintf(full, sizeof(full), "%s%s", path, item->d_name);
+        if (stat(full, &info) != 0) continue;
+        entry(context, item->d_name, S_ISDIR(info.st_mode), (uint32_t)info.st_size);
+    }
+    closedir(directory);
+    return 0;
+}
+
+static int SaveRead(void *arg, uint32_t offset, void *bytes, size_t size)
+{
+    (void)arg;
+    return offset + size <= CP_SAVE_SIZE && pread(fake.saveFd, bytes, size, offset) == (ssize_t)size ? 0 : -1;
+}
+
+static int SaveWrite(void *arg, uint32_t offset, const void *bytes, size_t size)
+{
+    (void)arg;
+    return offset + size <= CP_SAVE_SIZE && pwrite(fake.saveFd, bytes, size, offset) == (ssize_t)size ? 0 : -1;
+}
+
+static int SaveSync(void *arg) { (void)arg; return fsync(fake.saveFd) == 0 ? 0 : -1; }
+
+static int SaveSize(void *arg, uint32_t *size)
+{
+    struct stat info;
+    (void)arg;
+    if (fstat(fake.saveFd, &info) != 0) return -1;
+    *size = (uint32_t)info.st_size;
+    return 0;
+}
+
+static int OpenSave(void *arg, const char *path, CpPlatformFile *out)
+{
+    (void)arg;
+    assert(fake.saveFd < 0);
+    fake.saveFd = open(path, O_RDWR);
+    if (fake.saveFd < 0) return -1;
+    out->arg = &fake;
+    out->readAt = SaveRead; out->writeAt = SaveWrite; out->sync = SaveSync; out->size = SaveSize;
+    out->readDurable = SaveRead;
+    return 0;
+}
+
+static void CloseSave(void *arg)
+{
+    (void)arg;
+    assert(fake.saveFd >= 0);
+    close(fake.saveFd);
+    fake.saveFd = -1;
+}
+
+static int OpenRom(void *arg, int slot, const char *path, CpReader *out)
+{
+    (void)arg;
+    assert(!fake.romOpen[slot]);
+    if (PosixReader_Open(&fake.roms[slot], path) != 0) return -1;
+    fake.romOpen[slot] = 1;
+    *out = fake.roms[slot].reader;
+    return 0;
+}
+
+static void CloseRom(void *arg, int slot)
+{
+    (void)arg;
+    assert(fake.romOpen[slot]);
+    PosixReader_Close(&fake.roms[slot]);
+    fake.romOpen[slot] = 0;
+}
+
+static int Start(void *arg, CpAppJob job, void *jobArg, WtSeed *journal)
+{
+    (void)arg;
+    if (fake.pending) return -1;
+    fake.job = job; fake.jobArg = jobArg; fake.journal = journal;
+    fake.pending = 1; fake.cancel = 0;
+    /* A job starts with PSA down, as the worker leaves it. */
+    fake.cryptoReady = 0;
+    return 0;
+}
+
+static int Finished(void *arg, int *result)
+{
+    (void)arg;
+    if (!fake.pending) return 0;
+    fake.jobResult = fake.job(fake.jobArg);
+    fake.pending = 0; fake.journal = NULL;
+    *result = fake.jobResult;
+    return 1;
+}
+
+static void Cancel(void *arg) { (void)arg; fake.cancel = 1; }
+
+static int WifiConnect(void *arg) { (void)arg; fake.wifiPolls = 2; return 0; }
+
+static int WifiStatus(void *arg)
+{
+    (void)arg;
+    if (fake.wifiConnected) return CP_WIFI_CONNECTED;
+    if (fake.wifiPolls && --fake.wifiPolls) return CP_WIFI_CONNECTING;
+    if (fake.wifiFails) return CP_WIFI_FAILED;
+    fake.wifiConnected = 1;
+    return CP_WIFI_CONNECTED;
+}
+
+/* psa_crypto_init on the DS: reads the NV seed from the open engine journal
+ * and writes the next one back through the same handle. */
+static int Prepare(void *arg)
+{
+    WtJournalEntry entry;
+    (void)arg;
+    ++fake.prepares;
+    if (fake.cryptoReady) return 0;
+    assert(fake.journal);
+    if (WtJournal_Read(fake.journal, &entry) != 0) return -1;
+    entry.generation++;
+    entry.seed[0] ^= 0x5A; entry.seed[1]++;
+    if (WtJournal_Commit(fake.journal, &entry) != 0) return -1;
+    ++fake.seedWrites;
+    fake.cryptoReady = 1;
+    return 0;
+}
+
+static int Post(void *arg, const unsigned char *request, size_t size,
+    unsigned char reply[WT_WIRE_REPLY_MAX], size_t *replySize)
+{
+    int result = FsPost(arg, request, size, reply, replySize);
+    ++fake.posts;
+    fake.cryptoReady = 0; /* WtTls_Close frees PSA */
+    return result;
+}
+
+static int FakeRandom(void *arg, unsigned char *bytes, size_t size)
+{
+    static unsigned counter;
+    unsigned char input[4], digest[32];
+    (void)arg;
+    if (!fake.cryptoReady) { ++fake.randomFailures; return -1; }
+    FxPut32(input, ++counter); FxSha(input, 4, digest);
+    memcpy(bytes, digest, size);
+    return 0;
+}
+
+static int Seed(void *arg, unsigned char out[32])
+{
+    (void)arg;
+    if (fake.seedWait) { memset(out, 0, 32); return WT_ENTROPY_WAIT; }
+    memset(out, 0xA5, 32);
+    return 0;
+}
+
+static int FreeSpace(void *context, const char *path, uint64_t *available)
+{
+    (void)context; (void)path;
+    *available = fake.freeSpace;
+    return 0;
+}
+
+static void LogLine(void *arg, const char *line)
+{
+    (void)arg;
+    ++fake.logLines;
+    if (getenv("MODEL_TEST_LOG")) fputs(line, stdout);
+}
+
+/* ---- Files ------------------------------------------------------------------ */
+
+static FxFile saveBytes;
+static char backupRoot[300];
+
+static void Path(char *out, size_t size, const char *relative)
+{
+    snprintf(out, size, "%s%s", fake.root, relative);
+}
+
+static void MakeDirectories(const char *relative)
+{
+    char path[512], *p;
+    Path(path, sizeof(path), relative);
+    for (p = path + strlen(fake.root); *p; ++p) {
+        if (*p != '/') continue;
+        *p = 0; mkdir(path, 0700); *p = '/';
+    }
+    mkdir(path, 0700);
+}
+
+static void WriteFile(const char *relative, const void *bytes, size_t size)
+{
+    char path[512];
+    FILE *file;
+    Path(path, sizeof(path), relative);
+    file = fopen(path, "wb");
+    assert(file && fwrite(bytes, 1, size, file) == size && fclose(file) == 0);
+}
+
+static void ReadFile(const char *relative, void *bytes, size_t size)
+{
+    char path[512];
+    FILE *file;
+    Path(path, sizeof(path), relative);
+    file = fopen(path, "rb");
+    assert(file && fread(bytes, 1, size, file) == size);
+    fclose(file);
+}
+
+static unsigned CountBackups(const char *name)
+{
+    char path[512];
+    DIR *directory;
+    struct dirent *item;
+    unsigned count = 0;
+    snprintf(path, sizeof(path), "%s/%s", backupRoot, name);
+    directory = opendir(path);
+    if (!directory) return 0;
+    while ((item = readdir(directory))) if (strstr(item->d_name, ".sav") && !strstr(item->d_name, ".tmp")) ++count;
+    closedir(directory);
+    return count;
+}
+
+static void RemoveBackups(const char *name)
+{
+    char path[512], file[700];
+    DIR *directory;
+    struct dirent *item;
+    snprintf(path, sizeof(path), "%s/%s", backupRoot, name);
+    directory = opendir(path);
+    if (!directory) return;
+    while ((item = readdir(directory))) {
+        if (item->d_name[0] == '.') continue;
+        snprintf(file, sizeof(file), "%s/%s", path, item->d_name);
+        assert(unlink(file) == 0);
+    }
+    closedir(directory);
+}
+
+static void WriteRom(const char *relative, const char code[4], uint8_t revision)
+{
+    Bytes rom = SyntheticPlatinum(code, revision);
+    WriteFile(relative, rom.data, rom.size);
+    free(rom.data);
+}
+
+/* A Platinum save with `count` party Pokémon; the journal banks are blank. */
+static void WriteSave(const char *relative, unsigned count)
+{
+    FxSpec specs[6];
+    unsigned i;
+    for (i = 0; i < count; ++i) specs[i] = FxDefault(i);
+    FxBuild(&saveBytes, specs, count);
+    WriteFile(relative, saveBytes.bytes, sizeof(saveBytes.bytes));
+}
+
+/* The retail blocks of both halves: what the game reads. */
+static void Retail(const char *relative, unsigned char *out)
+{
+    static unsigned char bytes[CP_SAVE_FILE_SIZE];
+    ReadFile(relative, bytes, sizeof(bytes));
+    memcpy(out, bytes, 0x20000);
+    memcpy(out + 0x20000, bytes + CP_SAVE_HALF_SIZE, 0x20000);
+}
+
+static void Setup(void)
+{
+    char template[] = "/tmp/dswt-model-XXXXXX", *made = mkdtemp(template);
+    static const unsigned char small[100] = { 0 };
+    static unsigned char blank[CP_SAVE_FILE_SIZE];
+    assert(made);
+    snprintf(fake.root, sizeof(fake.root), "%s/", made);
+    snprintf(backupRoot, sizeof(backupRoot), "%s_nds/dswt/backups", fake.root);
+    fake.saveFd = -1;
+    fake.freeSpace = UINT64_C(1) << 30;
+    MakeDirectories("roms/nds/saves");
+    MakeDirectories("roms/nds/pt");
+    MakeDirectories("_nds/dswt");
+    /* TWiLight's saves folder, a ROM beside its save one folder down, a save
+     * without a ROM, a game the companion does not trade for, a save the game
+     * never wrote, and files that are not saves. */
+    WriteRom("roms/nds/Platinum.nds", "CPUE", 1);
+    WriteSave("roms/nds/saves/Platinum.sav", 4);
+    WriteRom("roms/nds/pt/Second.nds", "CPUE", 1);
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    WriteSave("roms/nds/saves/Lonely.sav", 2);
+    WriteRom("roms/nds/Diamond.nds", "ADAE", 5);
+    WriteSave("roms/nds/saves/Diamond.sav", 2);
+    WriteRom("roms/nds/Blank.nds", "CPUE", 1);
+    memset(blank, 0xFF, sizeof(blank));
+    WriteFile("roms/nds/saves/Blank.sav", blank, sizeof(blank));
+    WriteFile("roms/nds/saves/Short.sav", small, sizeof(small));
+    WriteFile("roms/nds/saves/notes.txt", small, sizeof(small));
+
+    platform.arg = &fake;
+    platform.root = fake.root;
+    platform.list = List;
+    platform.openSave = OpenSave; platform.closeSave = CloseSave;
+    platform.openRom = OpenRom; platform.closeRom = CloseRom;
+    platform.start = Start; platform.finished = Finished; platform.cancel = Cancel;
+    platform.wifiConnect = WifiConnect; platform.wifiStatus = WifiStatus;
+    platform.transport.arg = NULL;
+    platform.transport.post = Post;
+    platform.transport.cancel = &fake.cancel;
+    platform.transport.prepare = Prepare;
+    platform.random = FakeRandom;
+    platform.seed = Seed;
+    platform.backup.root = backupRoot;
+    platform.backup.freeSpace = FreeSpace;
+    platform.log = LogLine;
+}
+
+/* ---- Driving the model ------------------------------------------------------- */
+
+static CpUiModel *model = &app.model;
+
+static void Pump(void)
+{
+    unsigned frames;
+    for (frames = 0; frames < 16; ++frames) {
+        model->ops->update(model->context);
+        if (!model->busy && model->net != CP_UI_NET_BUSY) return;
+    }
+    assert(!"the model never settled");
+}
+
+static int FindSave(const char *name)
+{
+    unsigned i;
+    for (i = 0; i < model->saveCount; ++i) if (!strcmp(model->saves[i].name, name)) return (int)i;
+    return -1;
+}
+
+static void LoadByName(const char *name)
+{
+    int index = FindSave(name);
+    assert(index >= 0);
+    model->ops->load(model->context, (unsigned)index);
+    Pump();
+}
+
+static void Connect(void)
+{
+    model->ops->connect(model->context);
+    Pump();
+    assert(model->net == CP_UI_NET_READY);
+}
+
+static void Visit(int slot, int collect, int cancel)
+{
+    if (collect) model->ops->collect(model->context, cancel);
+    else model->ops->trade(model->context, slot);
+    assert(model->net == CP_UI_NET_BUSY && !model->canLeave);
+    Pump();
+}
+
+static void CloseSession(void)
+{
+    model->ops->close(model->context);
+    Pump();
+    assert(model->net == CP_UI_NET_CLOSED);
+    model->ops->unload(model->context);
+}
+
+static int NameIs(const uint16_t *text, const uint16_t *expected)
+{
+    unsigned i;
+    for (i = 0;; ++i) {
+        if (text[i] != expected[i]) return 0;
+        if (expected[i] == CP_CHAR_EOS) return 1;
+    }
+}
+
+/* ---- Tests ------------------------------------------------------------------- */
+
+static void ScanFindsSavesAndTheirRoms(void)
+{
+    int platinum, second, lonely, diamond, blank;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    model->ops->scan(model->context);
+    assert(model->busy);
+    Pump();
+    assert(model->saveCount == 5);
+    platinum = FindSave("Platinum.sav"); second = FindSave("Second.sav"); lonely = FindSave("Lonely.sav");
+    diamond = FindSave("Diamond.sav"); blank = FindSave("Blank.sav");
+    assert(platinum >= 0 && second >= 0 && lonely >= 0 && diamond >= 0 && blank >= 0);
+    assert(model->saves[platinum].status == CP_UI_SAVE_READY && model->saves[platinum].version == CP_VERSION_PLATINUM
+        && model->saves[platinum].language == CP_LANGUAGE_ENGLISH);
+    assert(model->saves[second].status == CP_UI_SAVE_READY);
+    assert(model->saves[lonely].status == CP_UI_SAVE_NO_ROM);
+    assert(model->saves[diamond].status == CP_UI_SAVE_UNSUPPORTED && model->saves[diamond].version == CP_VERSION_DIAMOND);
+    assert(!strcmp(app.saves[second].rom + strlen(fake.root), "roms/nds/pt/Second.nds"));
+    assert(!fake.romOpen[CP_APP_ROM_SCAN]);
+    puts("PASS model: scan pairs saves in saves/, beside ROMs and one folder down; skips non-saves");
+}
+
+static void LoadRefusals(void)
+{
+    LoadByName("Lonely.sav");
+    assert(model->loadMessage == Companion_Text_MatchingRomMissing && !model->busy);
+    model->ops->unload(model->context);
+    LoadByName("Diamond.sav");
+    assert(model->loadMessage == Companion_Text_SaveUnsupported);
+    model->ops->unload(model->context);
+    LoadByName("Blank.sav");
+    assert(model->loadMessage == Companion_Text_SaveInGameFirst);
+    assert(fake.saveFd < 0 && !fake.romOpen[CP_APP_ROM_GAME]);
+    model->ops->unload(model->context);
+    puts("PASS model: no ROM, an unsupported game and a never-saved file are refused with their messages");
+}
+
+static unsigned char before[0x40000], after[0x40000], original[FX_MON];
+
+static void OfferStatusCancelCollect(void)
+{
+    unsigned char backup[CP_SAVE_FILE_SIZE], live[CP_SAVE_FILE_SIZE];
+    char name[64];
+    DIR *directory;
+    struct dirent *item;
+    unsigned party;
+    memset(&server, 0, sizeof(server));
+    Retail("roms/nds/saves/Platinum.sav", before);
+    LoadByName("Platinum.sav");
+    assert(model->loadMessage == -1 && !model->recovery && model->font);
+    assert(model->gameVersion == CP_VERSION_PLATINUM && model->gameLanguage == CP_LANGUAGE_ENGLISH);
+    assert(model->partyCount == 4 && model->tradePhase == WT_JOURNAL_EMPTY);
+    assert(model->party[0].species == 25 && NameIs(model->party[0].speciesName, kWesternName));
+    assert(model->party[0].level == 5 && !model->party[0].isEgg && model->party[0].ineligible == CP_UI_ELIGIBLE);
+    assert(app.needsProvision && CountBackups("Platinum") == 0);
+    memcpy(original, FxImageParty(&gCpAppImage, 1), FX_MON);
+
+    /* Connect, then the UI resumes: provision, enroll, back up, reconcile. */
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0 && model->tradePhase == WT_JOURNAL_IDLE);
+    assert(model->canLeave && !model->completed);
+    assert(server.requests[WT_OP_ENROLL] == 1 && !server.requests[WT_OP_SUBMIT]);
+    /* The backup holds the save as it was: enrolled, retail untouched. */
+    assert(CountBackups("Platinum") == 1);
+    Retail("roms/nds/saves/Platinum.sav", after);
+    assert(memcmp(before, after, sizeof(before)) == 0);
+    snprintf(name, sizeof(name), "%s/Platinum", backupRoot);
+    directory = opendir(name);
+    assert(directory);
+    while ((item = readdir(directory)) && !strstr(item->d_name, ".sav")) {}
+    assert(item);
+    snprintf(name, sizeof(name), "_nds/dswt/backups/Platinum/%s", item->d_name);
+    closedir(directory);
+    ReadFile(name, backup, sizeof(backup));
+    ReadFile("roms/nds/saves/Platinum.sav", live, sizeof(live));
+    assert(memcmp(backup, live, sizeof(live)) == 0);
+    puts("PASS model: first visit provisions, enrolls and backs up before any edit; retail unchanged");
+
+    /* Offer slot 1: deposited, submitted, queued; the party shows it gone. */
+    Visit(1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && model->canLeave && !model->waiting);
+    assert(model->partyCount == 3 && server.requests[WT_OP_SUBMIT] == 1);
+    assert(CountBackups("Platinum") == 1);
+    puts("PASS model: an offer leaves the party and waits queued");
+
+    /* Collect while unmatched: no partner yet. */
+    Visit(-1, 1, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->waiting && model->tradePhase == WT_JOURNAL_QUEUED);
+    puts("PASS model: collecting an unmatched offer reports waiting");
+
+    /* Cancel: the server returns it, the visit collects and acknowledges it. */
+    Visit(-1, 1, 1);
+    assert(model->net == CP_UI_NET_RESPONSE && model->completed && model->returned);
+    assert(model->tradePhase == WT_JOURNAL_IDLE && model->canLeave);
+    party = model->partyCount;
+    assert(party == 4 && memcmp(FxImageParty(&gCpAppImage, 3), original, FX_MON) == 0);
+    assert(server.requests[WT_OP_ACKNOWLEDGE] == 1);
+    /* Several visits and many exchanges in one session: PSA started again
+     * before each, the NV seed advanced through the engine's own journal, and
+     * the engine never lacked random numbers. */
+    printf("  exchanges %u, PSA starts %u, random failures %u\n", fake.posts, fake.seedWrites, fake.randomFailures);
+    assert(fake.randomFailures == 0 && fake.seedWrites >= fake.posts && fake.posts >= 8);
+    printf("PASS model: cancel collects the return; %u exchanges, %u seed updates, no random failures\n",
+        fake.posts, fake.seedWrites);
+    CloseSession();
+    assert(fake.saveFd < 0 && !fake.romOpen[CP_APP_ROM_GAME]);
+}
+
+static void ReloadEnrolledSave(void)
+{
+    /* An enrolled save: the load checks for a backup of this enrollment
+     * before the boot check; the first one still counts. */
+    LoadByName("Platinum.sav");
+    assert(model->loadMessage == -1 && !model->recovery && model->tradePhase == WT_JOURNAL_IDLE);
+    assert(model->partyCount == 4 && CountBackups("Platinum") == 1);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->tradePhase == WT_JOURNAL_IDLE);
+    CloseSession();
+    puts("PASS model: an enrolled save with a backup of its enrollment loads and resumes");
+}
+
+static void MatchedDeliveryIsLeftPending(void)
+{
+    unsigned char canonical[136];
+    FxSpec spec = FxDefault(5);
+    unsigned acknowledged;
+    LoadByName("Platinum.sav");
+    Connect();
+    Visit(-1, 0, 0);
+    Visit(0, 0, 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3);
+    Retail("roms/nds/saves/Platinum.sav", before);
+    spec.species = 151;
+    FxCanonical(&spec, canonical);
+    FsMatch(canonical);
+    acknowledged = server.requests[WT_OP_ACKNOWLEDGE];
+    Visit(-1, 1, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->refused && !model->completed);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3 && model->canLeave);
+    Retail("roms/nds/saves/Platinum.sav", after);
+    assert(memcmp(before, after, sizeof(before)) == 0 && server.requests[WT_OP_ACKNOWLEDGE] == acknowledged);
+    CloseSession();
+    puts("PASS model: a matched delivery stays pending on the server; the save is untouched (LUNE-873)");
+}
+
+static void RestoredRetailNeedsRecovery(void)
+{
+    static unsigned char queued[CP_SAVE_FILE_SIZE], older[CP_SAVE_FILE_SIZE];
+    /* The journal says the offer left, but the retail blocks are an older copy
+     * that still holds it: the boot check refuses, recovery is required. */
+    ReadFile("roms/nds/saves/Platinum.sav", queued, sizeof(queued));
+    ReadFile("roms/nds/pt/Second.sav", older, sizeof(older));
+    memcpy(older + 0x30000, queued + 0x30000, 0x10000);
+    memcpy(older + 0x70000, queued + 0x70000, 0x10000);
+    WriteFile("roms/nds/pt/Second.sav", older, sizeof(older));
+    LoadByName("Second.sav");
+    assert(model->loadMessage == -1 && model->recovery);
+    model->ops->unload(model->context);
+    puts("PASS model: a journal that the retail copy cannot prove needs recovery");
+}
+
+static void BackupFailureStopsBeforeAnyEdit(void)
+{
+    unsigned submits;
+    RemoveBackups("Second");
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    memset(&server, 0, sizeof(server));
+    fake.freeSpace = 1000;
+    Retail("roms/nds/pt/Second.sav", before);
+    LoadByName("Second.sav");
+    assert(model->loadMessage == -1 && model->partyCount == 3);
+    Connect();
+    Visit(-1, 0, 0);
+    /* Enrolled, but the backup failed: the visit stops with its code. */
+    assert(model->net == CP_UI_NET_ERROR && model->error == CP_APP_ERROR_BACKUP && model->canLeave);
+    assert(model->tradePhase == WT_JOURNAL_IDLE && CountBackups("Second") == 0);
+    submits = server.requests[WT_OP_SUBMIT];
+    /* Retry with an offer: still no backup, so no deposit and no submit. */
+    Visit(0, 0, 0);
+    assert(model->net == CP_UI_NET_ERROR && model->error == CP_APP_ERROR_BACKUP);
+    assert(server.requests[WT_OP_SUBMIT] == submits && model->partyCount == 3);
+    Retail("roms/nds/pt/Second.sav", after);
+    assert(memcmp(before, after, sizeof(before)) == 0);
+    CloseSession();
+    /* Loading an enrolled save also backs up first, and stops when it cannot. */
+    LoadByName("Second.sav");
+    assert(model->loadMessage == Companion_Text_BackupFailed);
+    model->ops->unload(model->context);
+    fake.freeSpace = UINT64_C(1) << 30;
+    puts("PASS model: when the backup fails nothing is edited, at load or before an offer");
+}
+
+static void NeedsEntropyAndWifiFailure(void)
+{
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    LoadByName("Second.sav");
+    assert(app.needsProvision);
+    fake.seedWait = 1;
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->needsEntropy && model->canLeave);
+    assert(app.needsProvision);
+    fake.seedWait = 0;
+    CloseSession();
+
+    fake.wifiConnected = 0; fake.wifiFails = 1;
+    LoadByName("Second.sav");
+    model->ops->connect(model->context);
+    Pump();
+    assert(model->net == CP_UI_NET_ERROR && model->error == CP_APP_ERROR_WIFI);
+    model->ops->close(model->context);
+    assert(model->net == CP_UI_NET_CLOSED);
+    model->ops->unload(model->context);
+    fake.wifiFails = 0;
+    puts("PASS model: too little entropy asks for more play; no working Wi-Fi is a clear error");
+}
+
+/* The screens on the real model: choose a save, confirm the game, connect
+ * and reach the menu, as a player would. */
+static void ScreensDriveTheModel(void)
+{
+    CpUi ui;
+    CpUiInput input;
+    unsigned frame;
+    int target;
+    RemoveBackups("Second");
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    memset(&server, 0, sizeof(server));
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    CpUi_Start(&ui, model);
+    memset(&input, 0, sizeof(input));
+    for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 5);
+    target = FindSave("Second.sav");
+    ui.listCursor = target;
+    input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;
+    for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_GAME_CONFIRM);
+    input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;
+    for (frame = 0; frame < 8; ++frame) CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_MENU && model->tradePhase == WT_JOURNAL_IDLE);
+    puts("PASS model: the screens pick a save, confirm it, connect and reach the menu");
+}
+
+int main(void)
+{
+    Setup();
+    ScanFindsSavesAndTheirRoms();
+    LoadRefusals();
+    OfferStatusCancelCollect();
+    ReloadEnrolledSave();
+    MatchedDeliveryIsLeftPending();
+    RestoredRetailNeedsRecovery();
+    BackupFailureStopsBeforeAnyEdit();
+    NeedsEntropyAndWifiFailure();
+    ScreensDriveTheModel();
+    assert(fake.logLines > 0);
+    puts("PASS session model");
+    return 0;
+}

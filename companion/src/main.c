@@ -1,5 +1,7 @@
 #include <nds.h>
 
+#include "platform/nds/app_platform.h"
+#include "platform/nds/entropy_nds.h"
 #include "platform/nds/screens.h"
 #include "ui/app.h"
 #include "ui/demo.h"
@@ -23,11 +25,18 @@ int main(void)
     RunDemo(CP_UI_DEMO == 2);
     return 0;
 #endif
-    /* Until the session driver (LUNE-871) supplies the real model, the
-     * platform diagnostic stays the default; diag.txt's ui-demo opens the
-     * screens instead. */
-    CompanionScreens_Init(&screens);
-    demo = CpDiagnostic_Run(&screens);
-    if (demo) RunDemo(demo == CP_DIAGNOSTIC_UI_TOUR);
+    /* The SD card's mount time is one of the entropy pool's boot samples. */
+    CpNdsEntropy_Start();
+    CpNdsEntropy_Jitter();
+    CpNdsCard_Mount();
+    if (CpNdsApp_DiagnosticRequested()) {
+        /* sd:/dswt-companion/diag.txt opens the platform diagnostic, and its
+         * ui-demo switch the screens with made-up data. */
+        CompanionScreens_Init(&screens);
+        demo = CpDiagnostic_Run(&screens);
+        if (demo) RunDemo(demo == CP_DIAGNOSTIC_UI_TOUR);
+        return 0;
+    }
+    CpNdsApp_Run();
     return 0;
 }

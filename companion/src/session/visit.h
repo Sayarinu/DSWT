@@ -21,10 +21,18 @@ typedef struct CpTransport {
     void (*wait)(void *arg, unsigned milliseconds);
     /* Polled between requests; nonzero stops the visit. May be NULL. */
     const volatile int *cancel;
+    /* Called before every exchange, ahead of its journal read and request:
+     * nonzero stops the visit with CP_VISIT_ERROR_CRYPTO. On the DS this
+     * starts PSA crypto again (psa_crypto_init), as the game's RunTrade does:
+     * closing TLS frees it, and starting it reads and advances the NV seed
+     * through the open engine journal, which must happen before the entry is
+     * read for the next request. May be NULL. */
+    int (*prepare)(void *arg);
 } CpTransport;
 
 enum CpVisitError {
     CP_VISIT_ERROR_JOURNAL = -30,     /* the engine blocked or the journal failed */
+    CP_VISIT_ERROR_CRYPTO = -31,      /* prepare failed: no random numbers */
     CP_VISIT_ERROR_DEPOSIT = -32,     /* the offer could not be escrowed */
     CP_VISIT_ERROR_LOOP = -33,        /* too many exchanges in one visit */
     CP_VISIT_ERROR_TRANSPORT = -34,

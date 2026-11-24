@@ -11,8 +11,10 @@
 #include "platform/entropy_pool.h"
 #include "wonder_trade/tls.h"
 
-/* The game's network worker uses the same stack size. */
-#define CP_WORKER_STACK_SIZE 0x8000
+/* Twice the game's network worker: besides a visit (the game's whole
+ * worker), jobs here detect and provision journals (save/journal_save.h asks
+ * for 32 KiB of its own), make backups and run the boot check. */
+#define CP_WORKER_STACK_SIZE 0x10000
 
 static struct {
     cothread_t thread;
