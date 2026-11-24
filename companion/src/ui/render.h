@@ -1,6 +1,7 @@
 #ifndef COMPANION_UI_RENDER_H
 #define COMPANION_UI_RENDER_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "ui/canvas.h"
@@ -54,6 +55,14 @@ typedef struct CpScreen {
     CpCanvas text;
     uint16_t map[CP_MAP_SIZE]; /* layer 1: tile | flip bits | palette << 12 */
 } CpScreen;
+
+/* The current message with its {game}, {language} and {name} filled in. */
+#define CP_RENDER_MESSAGE_MAX 512
+void CpRender_Message(const CpUi *, const CpUiModel *, char *out, size_t size);
+/* How many lines `text` takes wrapped to the message box's width, and the
+ * widest of them (optional). Up to three fit the box; more move it to the
+ * full text window. */
+int CpRender_MessageLines(const char *text, int *width);
 
 /* Draw both screens for the UI's current state. */
 void CpRender_Draw(const CpUi *, const CpUiModel *, CpScreen *top, CpScreen *bottom);

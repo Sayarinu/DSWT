@@ -425,30 +425,30 @@ static void TestPicker(void)
     Press(CP_UI_KEY_A);
     Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
     ExpectActions(0, 0, 0, 0);
-    assert(sUi.listCursor == 0 && CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_PARTY);
+    assert(sUi.partyCursor == 0 && CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_PARTY);
     Press(CP_UI_KEY_RIGHT);
-    assert(sUi.listCursor == 1);
+    assert(sUi.partyCursor == 1);
     Press(CP_UI_KEY_DOWN);
-    assert(sUi.listCursor == 3);
+    assert(sUi.partyCursor == 3);
     Press(CP_UI_KEY_DOWN);
-    assert(sUi.listCursor == 5);
+    assert(sUi.partyCursor == 5);
     Press(CP_UI_KEY_DOWN);
-    assert(sUi.listCursor == CP_UI_PICKER_BACK);
+    assert(sUi.partyCursor == CP_UI_PICKER_BACK);
     assert(CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_NONE);
     Press(CP_UI_KEY_RIGHT);
-    assert(sUi.listCursor == 0);
+    assert(sUi.partyCursor == 0);
     Press(CP_UI_KEY_LEFT);
-    assert(sUi.listCursor == CP_UI_PICKER_BACK);
+    assert(sUi.partyCursor == CP_UI_PICKER_BACK);
     Press(CP_UI_KEY_UP);
-    assert(sUi.listCursor == 5);
+    assert(sUi.partyCursor == 5);
     /* An Egg cannot be offered; neither can a duplicate. */
-    sUi.listCursor = 2;
+    sUi.partyCursor = 2;
     Press(CP_UI_KEY_A);
     Expect(CP_UI_MESSAGE, WonderTrade_Text_Ineligible);
     Press(CP_UI_KEY_B);
     Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
-    assert(sUi.listCursor == 2);
-    sUi.listCursor = 4;
+    assert(sUi.partyCursor == 2);
+    sUi.partyCursor = 4;
     Press(CP_UI_KEY_A);
     Expect(CP_UI_MESSAGE, WonderTrade_Text_Duplicate);
     Press(CP_UI_KEY_A);
@@ -461,7 +461,7 @@ static void TestPicker(void)
     Press(CP_UI_KEY_B);
     Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
     assert(sUi.selectedSlot == -1);
-    sUi.listCursor = 5;
+    sUi.partyCursor = 5;
     Press(CP_UI_KEY_A);
     Expect(CP_UI_CONFIRM, WonderTrade_Text_Confirm);
     Press(CP_UI_KEY_A);
@@ -506,8 +506,65 @@ static void TestTextIds(void)
     assert(CpUi_GameLanguage(6, Companion_Language_fr_FR) == Companion_Language_fr_FR);
 }
 
+/* The highlighted save is always one of the visible rows and a real save. */
+static void ExpectVisibleSave(void)
+{
+    assert(sUi.listCursor >= 0 && sUi.listCursor < (int)sFake.model.saveCount);
+    assert(sUi.listTop >= 0 && sUi.listTop <= sUi.listCursor && sUi.listCursor < sUi.listTop + CP_UI_SAVE_ROWS);
+}
+
+static void TestSaveCursorSurvivesThePicker(void)
+{
+    CpUiModel *model = Reset();
+    CpUi_Start(&sUi, model);
+    AddSaves(7);
+    AddParty();
+    Frame();
+    Press(CP_UI_KEY_A);
+    Frame();
+    Press(CP_UI_KEY_A);
+    model->net = CP_UI_NET_READY;
+    Frame();
+    model->net = CP_UI_NET_RESPONSE;
+    Frame();
+    Expect(CP_UI_MENU, WonderTrade_Text_Choose);
+    model->net = CP_UI_NET_BUSY;
+    /* In the party list, Up from the first slot reaches Back (cursor 6). */
+    Press(CP_UI_KEY_A);
+    Press(CP_UI_KEY_UP);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_MENU, WonderTrade_Text_Choose);
+    Press(CP_UI_KEY_UP);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_CLOSING, WonderTrade_Text_Disconnecting);
+    model->net = CP_UI_NET_CLOSED;
+    Frame();
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    ExpectVisibleSave();
+    assert(sUi.listCursor == 0);
+    Press(CP_UI_KEY_A);
+    assert(sFake.lastLoad == 0);
+
+    /* A list that shrinks while a save is open keeps the cursor on it. */
+    model->busy = 0;
+    model->loadMessage = Companion_Text_SaveInGameFirst;
+    Frame();
+    Press(CP_UI_KEY_B);
+    Press(CP_UI_KEY_UP);
+    Press(CP_UI_KEY_UP);
+    assert(sUi.listCursor == 5 && sUi.listTop == 2);
+    Press(CP_UI_KEY_A);
+    Frame();
+    Expect(CP_UI_MESSAGE, Companion_Text_SaveInGameFirst);
+    model->saveCount = 4;
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    ExpectVisibleSave();
+}
+
 int main(void)
 {
+    TestSaveCursorSurvivesThePicker();
     TestBootAndSaves();
     TestTouchExitFromList();
     TestRecovery();

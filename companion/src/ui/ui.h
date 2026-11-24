@@ -69,9 +69,10 @@ typedef struct CpUi {
     int message;
     /* The highlighted bottom-screen button. */
     int cursor;
-    /* The highlighted save (SAVE_PICKER) or party slot (PICKER), and the
-     * first save row shown. */
+    /* The highlighted save and the first save row shown (SAVE_PICKER). */
     int listCursor, listTop;
+    /* The highlighted party slot, or CP_UI_PICKER_BACK (PICKER). */
+    int partyCursor;
     /* The party slot being offered (CONFIRM), or -1. */
     int selectedSlot;
     /* Where MESSAGE's Back goes. */
@@ -106,7 +107,7 @@ CompanionLanguage CpUi_GameLanguage(unsigned cpLanguage, CompanionLanguage fallb
 /* What the top screen shows besides its message. */
 enum CpUiCard {
     CP_UI_CARD_NONE,     /* the message box alone, higher up */
-    CP_UI_CARD_PARTY,    /* the card of party[listCursor] or party[selectedSlot] */
+    CP_UI_CARD_PARTY,    /* the card of party[partyCursor] or party[selectedSlot] */
     CP_UI_CARD_RECEIVED, /* the received Pokémon's card */
     CP_UI_CARD_SAVES,    /* the save list */
     CP_UI_CARD_FULL_TEXT /* one framed body of text (errors, recovery, Info) */

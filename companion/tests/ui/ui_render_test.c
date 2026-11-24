@@ -10,7 +10,7 @@
 #include "ui/render.h"
 
 static uint8_t sTopText[CP_CANVAS_BYTES], sBottomText[CP_CANVAS_BYTES];
-static CpScreen sTop = { { sTopText }, { 0 } }, sBottom = { { sBottomText }, { 0 } };
+static CpScreen sTop = { .text = { .tiles = sTopText } }, sBottom = { .text = { .tiles = sBottomText } };
 
 static const char *kNames[CP_UI_STATE_COUNT] = {
     "BOOT", "SAVE_PICKER", "GAME_CONFIRM", "RECOVERY", "CONNECTING", "MENU", "PICKER", "CONFIRM",

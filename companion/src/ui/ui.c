@@ -34,10 +34,25 @@ static int MenuMessage(const CpUiModel *model)
     return Pending(model) ? WonderTrade_Text_Queued : WonderTrade_Text_Choose;
 }
 
+/* Keep the highlighted save a real one and on a visible row, whatever the
+ * list's length; returns nonzero when that moved it. */
+static int ClampSaves(CpUi *ui, const CpUiModel *model)
+{
+    int count = (int)model->saveCount, cursor = ui->listCursor, top = ui->listTop;
+    if (cursor >= count) cursor = count - 1;
+    if (cursor < 0) cursor = 0;
+    if (top > cursor) top = cursor;
+    if (cursor >= top + CP_UI_SAVE_ROWS) top = cursor - CP_UI_SAVE_ROWS + 1;
+    if (top < 0) top = 0;
+    if (cursor == ui->listCursor && top == ui->listTop) return 0;
+    ui->listCursor = cursor;
+    ui->listTop = top;
+    return 1;
+}
+
 static void ShowSaves(CpUi *ui, CpUiModel *model)
 {
-    if (ui->listCursor >= (int)model->saveCount) ui->listCursor = 0;
-    if (ui->listTop > ui->listCursor) ui->listTop = ui->listCursor;
+    ClampSaves(ui, model);
     Show(ui, CP_UI_SAVE_PICKER, model->saveCount ? Companion_Text_SavePickerHint : Companion_Text_NoSaves);
 }
 
@@ -124,7 +139,7 @@ enum CpUiCard CpUi_Card(const CpUi *ui, const CpUiModel *model)
     case CP_UI_SAVE_PICKER:
         return model->saveCount ? CP_UI_CARD_SAVES : CP_UI_CARD_NONE;
     case CP_UI_PICKER:
-        return ui->listCursor < (int)model->partyCount ? CP_UI_CARD_PARTY : CP_UI_CARD_NONE;
+        return ui->partyCursor < (int)model->partyCount ? CP_UI_CARD_PARTY : CP_UI_CARD_NONE;
     case CP_UI_CONFIRM:
         return ui->selectedSlot >= 0 && ui->selectedSlot < (int)model->partyCount ? CP_UI_CARD_PARTY : CP_UI_CARD_NONE;
     case CP_UI_RECEIVED:
@@ -314,7 +329,7 @@ static void Activate(CpUi *ui, CpUiModel *model, int choice)
     case CP_UI_MENU:
         if (choice == 0) {
             if (!Pending(model)) {
-                ui->listCursor = 0;
+                ui->partyCursor = 0;
                 Show(ui, CP_UI_PICKER, WonderTrade_Text_Choose);
             } else {
                 Show(ui, CP_UI_COLLECT_CONFIRM, WonderTrade_Text_ConfirmCollect);
@@ -369,7 +384,7 @@ static void PickerInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     else if (!ui->touchBlocked && input->touchPressed) touched = CpUi_PickerTouch(input->touchX, input->touchY, model->partyCount);
     if (touched >= 0) {
         ui->sounds++;
-        ui->listCursor = touched;
+        ui->partyCursor = touched;
         Pick(ui, model, touched);
         return;
     }
@@ -379,7 +394,7 @@ static void PickerInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     }
     if (input->pressed & CP_UI_KEY_A) {
         ui->sounds++;
-        Pick(ui, model, ui->listCursor);
+        Pick(ui, model, ui->partyCursor);
         return;
     }
     if (input->pressed & CP_UI_KEY_LEFT) step = -1;
@@ -388,10 +403,10 @@ static void PickerInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     else if (input->pressed & CP_UI_KEY_DOWN) step = 2;
     if (!step) return;
     /* The party slots and Back, in reading order. */
-    if (ui->listCursor == CP_UI_PICKER_BACK) ui->listCursor = step < 0 ? count - 1 : 0;
-    else if (ui->listCursor + step >= count || ui->listCursor + step < 0) ui->listCursor = CP_UI_PICKER_BACK;
-    else ui->listCursor += step;
-    if (ui->listCursor < 0) ui->listCursor = CP_UI_PICKER_BACK;
+    if (ui->partyCursor == CP_UI_PICKER_BACK) ui->partyCursor = step < 0 ? count - 1 : 0;
+    else if (ui->partyCursor + step >= count || ui->partyCursor + step < 0) ui->partyCursor = CP_UI_PICKER_BACK;
+    else ui->partyCursor += step;
+    if (ui->partyCursor < 0) ui->partyCursor = CP_UI_PICKER_BACK;
     ui->sounds++;
     ui->dirty = 1;
 }
@@ -453,6 +468,9 @@ void CpUi_Frame(CpUi *ui, CpUiModel *model, const CpUiInput *input)
         return;
     case CP_UI_EXIT:
         return;
+    case CP_UI_SAVE_PICKER:
+        if (ClampSaves(ui, model)) ui->dirty = 1;
+        break;
     case CP_UI_CLOSING:
         if (model->net == CP_UI_NET_CLOSED) {
             model->ops->unload(model->context);

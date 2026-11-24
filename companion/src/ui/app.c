@@ -25,8 +25,8 @@ typedef struct Engine {
 static Engine sMain, sSub;
 static uint8_t sTopText[CP_CANVAS_BYTES] __attribute__((aligned(32)));
 static uint8_t sBottomText[CP_CANVAS_BYTES] __attribute__((aligned(32)));
-static CpScreen sTop = { { sTopText }, { 0 } };
-static CpScreen sBottom = { { sBottomText }, { 0 } };
+static CpScreen sTop = { .text = { .tiles = sTopText } };
+static CpScreen sBottom = { .text = { .tiles = sBottomText } };
 
 static volatile unsigned sTick;
 static volatile int sSpinning;

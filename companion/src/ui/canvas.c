@@ -64,13 +64,34 @@ static const CompanionFontGlyph *Glyph(uint32_t codepoint)
     return codepoint == '?' ? NULL : Glyph('?');
 }
 
+void CpCanvas_Clip(CpCanvas *canvas, int x, int y, int width, int height)
+{
+    canvas->clipX = x;
+    canvas->clipY = y;
+    canvas->clipWidth = width;
+    canvas->clipHeight = height;
+}
+
+void CpCanvas_Unclip(CpCanvas *canvas)
+{
+    canvas->clipWidth = 0;
+}
+
+/* A pixel of text, dropped outside the clip rectangle. */
+static void Ink(CpCanvas *canvas, int x, int y, uint8_t colour)
+{
+    if (canvas->clipWidth && (x < canvas->clipX || y < canvas->clipY || x >= canvas->clipX + canvas->clipWidth
+        || y >= canvas->clipY + canvas->clipHeight)) return;
+    CpCanvas_Pixel(canvas, x, y, colour);
+}
+
 static void DrawBits(CpCanvas *canvas, const CompanionFontGlyph *glyph, int left, int top, uint8_t colour)
 {
     int stride = (glyph->width + 7) / 8, x, y;
     const uint8_t *bits = Companion_FontBitmap + glyph->offset;
     for (y = 0; y < glyph->height; y++)
         for (x = 0; x < glyph->width; x++)
-            if (bits[y * stride + x / 8] & (0x80 >> (x % 8))) CpCanvas_Pixel(canvas, left + x, top + y, colour);
+            if (bits[y * stride + x / 8] & (0x80 >> (x % 8))) Ink(canvas, left + x, top + y, colour);
 }
 
 /* One glyph with its baseline at `baseline`; returns its advance. */
@@ -124,6 +145,94 @@ int CpText_Width(const char *text)
 {
     CpInk none = { 0, 0 };
     return Draw(NULL, 0, 0, text, none);
+}
+
+static int Advance(uint32_t codepoint)
+{
+    const CompanionFontGlyph *glyph = Glyph(codepoint);
+    return glyph ? glyph->advance : 0;
+}
+
+static int IsSpace(uint32_t codepoint)
+{
+    return codepoint == ' ' || codepoint == 0x3000;
+}
+
+/* Append one scalar as UTF-8 if it fits with the terminator. */
+static void Put(char *out, size_t size, size_t *used, uint32_t c)
+{
+    char bytes[4];
+    size_t n, i;
+    if (c < 0x80) { bytes[0] = (char)c; n = 1; }
+    else if (c < 0x800) { bytes[0] = (char)(0xC0 | c >> 6); bytes[1] = (char)(0x80 | (c & 0x3F)); n = 2; }
+    else if (c < 0x10000) {
+        bytes[0] = (char)(0xE0 | c >> 12); bytes[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+        bytes[2] = (char)(0x80 | (c & 0x3F)); n = 3;
+    } else {
+        bytes[0] = (char)(0xF0 | c >> 18); bytes[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+        bytes[2] = (char)(0x80 | ((c >> 6) & 0x3F)); bytes[3] = (char)(0x80 | (c & 0x3F)); n = 4;
+    }
+    if (*used + n >= size) return;
+    for (i = 0; i < n; i++) out[(*used)++] = bytes[i];
+    out[*used] = 0;
+}
+
+/* End the line: drop the spaces it ends with, then break. */
+static void Break(char *out, size_t size, size_t *used, int *lines)
+{
+    while (*used && out[*used - 1] == ' ') out[--*used] = 0;
+    while (*used >= 3 && (unsigned char)out[*used - 3] == 0xE3 && (unsigned char)out[*used - 2] == 0x80
+        && (unsigned char)out[*used - 1] == 0x80) { *used -= 3; out[*used] = 0; }
+    Put(out, size, used, '\n');
+    ++*lines;
+}
+
+int CpText_Wrap(char *out, size_t size, const char *text, int width)
+{
+    size_t used = 0;
+    int lines = 1, line = 0;
+    if (!size) return 0;
+    out[0] = 0;
+    while (*text) {
+        const char *word = text, *end;
+        uint32_t c = NextCodepoint(&word);
+        int wordWidth = 0;
+        if (c == '\n') {
+            Put(out, size, &used, c);
+            lines++;
+            line = 0;
+            text = word;
+            continue;
+        }
+        if (IsSpace(c)) {
+            int advance = Advance(c);
+            /* A space that would end a line breaks it instead. */
+            if (line && line + advance > width) { Break(out, size, &used, &lines); line = 0; }
+            else if (line) { Put(out, size, &used, c); line += advance; }
+            text = word;
+            continue;
+        }
+        /* Measure the word up to the next space or line break. */
+        end = text;
+        for (;;) {
+            const char *next = end;
+            uint32_t d;
+            if (!*next) break;
+            d = NextCodepoint(&next);
+            if (d == '\n' || IsSpace(d)) break;
+            wordWidth += Advance(d);
+            end = next;
+        }
+        if (line && line + wordWidth > width) { Break(out, size, &used, &lines); line = 0; }
+        while (text < end) {
+            uint32_t d = NextCodepoint(&text);
+            int advance = Advance(d);
+            if (line && line + advance > width) { Break(out, size, &used, &lines); line = 0; }
+            Put(out, size, &used, d);
+            line += advance;
+        }
+    }
+    return lines;
 }
 
 void CpText_Replace(char *out, size_t size, const char *text, const char *token, const char *value)
@@ -193,8 +302,8 @@ int CpCanvas_GameText(CpCanvas *canvas, int x, int y, const uint16_t *text, size
         for (gy = 0; gy < glyph.tilesHigh * 8u; gy++)
             for (gx = 0; gx < glyph.tilesWide * 8u; gx++) {
                 uint8_t pixel = CpGlyph_Pixel(&glyph, gx, gy);
-                if (pixel == 1) CpCanvas_Pixel(canvas, pen + (int)gx, y + (int)gy, ink.fg);
-                else if (pixel == 2 && ink.shadow) CpCanvas_Pixel(canvas, pen + (int)gx, y + (int)gy, ink.shadow);
+                if (pixel == 1) Ink(canvas, pen + (int)gx, y + (int)gy, ink.fg);
+                else if (pixel == 2 && ink.shadow) Ink(canvas, pen + (int)gx, y + (int)gy, ink.shadow);
             }
         pen += glyph.width;
     }

@@ -18,6 +18,8 @@
 
 typedef struct CpCanvas {
     uint8_t *tiles; /* CP_CANVAS_BYTES */
+    /* Text draws only inside this rectangle while clipWidth is nonzero. */
+    int clipX, clipY, clipWidth, clipHeight;
 } CpCanvas;
 
 /* Two colours of text: the letters and their shadow (0 for none). */
@@ -30,12 +32,21 @@ void CpCanvas_Fill(CpCanvas *, int x, int y, int width, int height, uint8_t colo
 void CpCanvas_Pixel(CpCanvas *, int x, int y, uint8_t colour);
 uint8_t CpCanvas_Get(const CpCanvas *, int x, int y);
 
+/* Keep text inside a rectangle (a window), or anywhere again. */
+void CpCanvas_Clip(CpCanvas *, int x, int y, int width, int height);
+void CpCanvas_Unclip(CpCanvas *);
+
 /* Companion-font text (UTF-8, '\n' starts a line), drawn from the top-left
  * corner of its first line. Characters the font lacks draw as '?'. Returns the
  * width of the widest line. */
 int CpCanvas_Text(CpCanvas *, int x, int y, const char *text, CpInk);
 /* The same measurement without drawing. */
 int CpText_Width(const char *text);
+/* Copy `text` into `out` with line breaks so no line is wider than `width`
+ * pixels: at spaces (or ideographic spaces) where it can, and between
+ * characters for a word, such as a file name, wider than a line. Existing
+ * line breaks stay. Returns the number of lines. */
+int CpText_Wrap(char *out, size_t size, const char *text, int width);
 /* Copy `text` into `out` replacing one {token} with `value`. */
 void CpText_Replace(char *out, size_t size, const char *text, const char *token, const char *value);
 

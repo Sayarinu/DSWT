@@ -156,8 +156,7 @@ static void SaveStem(char *out, size_t size, const char *name)
     out[length] = 0;
 }
 
-/* The state's message with its {tokens} filled in. */
-static void MessageText(const CpUi *ui, const CpUiModel *model, char *out, size_t size)
+void CpRender_Message(const CpUi *ui, const CpUiModel *model, char *out, size_t size)
 {
     char game[512], language[512], stem[CP_UI_SAVE_NAME_MAX];
     int gameName = GameName(model->gameVersion), languageName = LanguageName(model->gameLanguage);
@@ -192,10 +191,34 @@ static void Number(char *out, size_t size, int value)
     snprintf(out, size, "%d", value);
 }
 
+/* Text wrapped to a window's width and kept inside it. */
+static void WindowText(CpScreen *screen, int x, int y, int w, int h, int inset, const char *text)
+{
+    char wrapped[CP_RENDER_MESSAGE_MAX];
+    CpText_Wrap(wrapped, sizeof(wrapped), text, w * 8 - 2 * inset);
+    CpCanvas_Clip(&screen->text, x * 8, y * 8, w * 8, h * 8);
+    CpCanvas_Text(&screen->text, x * 8 + inset, y * 8, wrapped, kDark);
+    CpCanvas_Unclip(&screen->text);
+}
+
 static void DrawMessage(CpScreen *top, const char *text, int y)
 {
     Window(top, MESSAGE_X, y, MESSAGE_W, MESSAGE_H);
-    CpCanvas_Text(&top->text, MESSAGE_X * 8, y * 8, text, kDark);
+    WindowText(top, MESSAGE_X, y, MESSAGE_W, MESSAGE_H, 0, text);
+}
+
+static void DrawBody(CpScreen *top, const char *text)
+{
+    Window(top, BODY_X, BODY_Y, BODY_W, BODY_H);
+    WindowText(top, BODY_X, BODY_Y, BODY_W, BODY_H, 4, text);
+}
+
+int CpRender_MessageLines(const char *text, int *width)
+{
+    char wrapped[CP_RENDER_MESSAGE_MAX];
+    int lines = CpText_Wrap(wrapped, sizeof(wrapped), text, MESSAGE_W * 8);
+    if (width) *width = CpText_Width(wrapped);
+    return lines;
 }
 
 /* A small right-pointing marker for the highlighted row of a list. */
@@ -229,7 +252,7 @@ static void DrawPokemonCard(const CpUi *ui, const CpUiModel *model, CpScreen *to
     char number[12];
     Card(top);
     if (card == CP_UI_CARD_PARTY) {
-        int slot = ui->state == CP_UI_CONFIRM ? ui->selectedSlot : ui->listCursor;
+        int slot = ui->state == CP_UI_CONFIRM ? ui->selectedSlot : ui->partyCursor;
         const CpUiPokemon *mon = &model->party[slot];
         int width = CpCanvas_GameText(text, ox, oy + 16, mon->speciesName, CP_UI_NAME_MAX, model->font, kLight);
         GenderIcon(top, (ox + width) / 8 + 1, DETAILS_Y + 2, mon->isEgg ? CP_UI_GENDERLESS : mon->gender);
@@ -260,6 +283,7 @@ static void DrawSaves(const CpUi *ui, const CpUiModel *model, CpScreen *top)
 {
     int row, ox = LIST_X * 8, oy = LIST_Y * 8 + 4, right = (LIST_X + LIST_W) * 8 - 4;
     Window(top, LIST_X, LIST_Y, LIST_W, LIST_H);
+    CpCanvas_Clip(&top->text, LIST_X * 8, LIST_Y * 8, LIST_W * 8, LIST_H * 8);
     for (row = 0; row < CP_UI_SAVE_ROWS; row++) {
         int index = ui->listTop + row, detail;
         const CpUiSave *save;
@@ -282,18 +306,21 @@ static void DrawSaves(const CpUi *ui, const CpUiModel *model, CpScreen *top)
         Fit(name, sizeof(name), save->name, right - width - (ox + 8) - 8);
         CpCanvas_Text(&top->text, ox + 8, oy + row * 16, name, ink);
     }
+    CpCanvas_Unclip(&top->text);
 }
 
 static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
 {
     enum CpUiCard card = CpUi_Card(ui, model);
-    char message[512];
+    char message[CP_RENDER_MESSAGE_MAX];
     Clear(top);
-    MessageText(ui, model, message, sizeof(message));
+    CpRender_Message(ui, model, message, sizeof(message));
+    /* A message alone that needs more than its box's three lines, such as one
+     * naming a long file, takes the full text window instead. */
+    if (card == CP_UI_CARD_NONE && CpRender_MessageLines(message, NULL) > MESSAGE_H * 8 / 16) card = CP_UI_CARD_FULL_TEXT;
     switch (card) {
     case CP_UI_CARD_FULL_TEXT:
-        Window(top, BODY_X, BODY_Y, BODY_W, BODY_H);
-        CpCanvas_Text(&top->text, BODY_X * 8 + 4, BODY_Y * 8, message, kDark);
+        DrawBody(top, message);
         if (ui->state == CP_UI_ERROR) {
             char number[12];
             int right = (BODY_X + BODY_W) * 8 - 8;
@@ -339,7 +366,7 @@ static void DrawParty(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
             Box(bottom, CP_TILE_BUTTON, tx, ty, CP_UI_PANEL_WIDTH / 8, CP_UI_PANEL_HEIGHT / 8, CP_PAL_DISABLED);
             continue;
         }
-        palette = slot == ui->listCursor ? CP_PAL_SELECTED : mon->ineligible ? CP_PAL_DISABLED : CP_PAL_BUTTON;
+        palette = slot == ui->partyCursor ? CP_PAL_SELECTED : mon->ineligible ? CP_PAL_DISABLED : CP_PAL_BUTTON;
         ink = mon->ineligible ? kGrey : kDark;
         Box(bottom, CP_TILE_BUTTON, tx, ty, CP_UI_PANEL_WIDTH / 8, CP_UI_PANEL_HEIGHT / 8, palette);
         CpCanvas_GameText(&bottom->text, x + 8, y + 3, mon->nickname, CP_UI_NAME_MAX, model->font, ink);
@@ -355,7 +382,7 @@ static void DrawParty(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
         }
     }
     DrawButton(bottom, CP_UI_PICKER_BACK_LEFT, CP_UI_PICKER_BACK_TOP, CP_UI_PICKER_BACK_WIDTH, CP_UI_PICKER_BACK_HEIGHT,
-        T(WonderTrade_Text_Back), ui->listCursor == CP_UI_PICKER_BACK ? CP_PAL_SELECTED : CP_PAL_BUTTON);
+        T(WonderTrade_Text_Back), ui->partyCursor == CP_UI_PICKER_BACK ? CP_PAL_SELECTED : CP_PAL_BUTTON);
 }
 
 static void DrawBottom(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
