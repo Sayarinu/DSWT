@@ -159,3 +159,28 @@ check-inputs: $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
 $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h:
 	@echo "Missing $@; run scripts/build-companion.sh from the repository root, or generate text with: python3 scripts/companion-text.py --output $(abspath $(TEXT_DIR))" >&2
 	@exit 2
+
+# LUNE-872: the screens' project-original 8x8 tiles (res/gfx/*.png, each with
+# its .grit options) become ui_<name>Tiles through grit.
+GRIT                    := $(BLOCKSDS)/tools/grit/grit
+GFX_DIR                 := $(BUILDDIR)/gfx
+GFX_NAMES               := $(basename $(notdir $(wildcard res/gfx/*.png)))
+GFX_OBJS                := $(GFX_NAMES:%=$(GFX_DIR)/%.o)
+GFX_HEADERS             := $(GFX_NAMES:%=$(GFX_DIR)/%.h)
+APP_OBJS                += $(GFX_OBJS)
+BASE_CFLAGS             += -I$(GFX_DIR)
+$(ELF) $(LINK_CHECK): $(GFX_OBJS)
+check-inputs: $(GFX_HEADERS)
+$(GFX_DIR)/%.s $(GFX_DIR)/%.h: res/gfx/%.png res/gfx/%.grit
+	@echo "  GRIT    $<"
+	@mkdir -p $(@D)
+	$(V)$(GRIT) $< -ff res/gfx/$*.grit -fts -o$(GFX_DIR)/$*
+$(GFX_DIR)/%.o: $(GFX_DIR)/%.s
+	@echo "  AS      $<"
+	$(V)$(CC) $(ARCH) -c -o $@ $<
+
+# A build that opens the screens with made-up data: CP_UI_DEMO=1 follows the
+# buttons, CP_UI_DEMO=2 walks through every screen by itself.
+ifdef CP_UI_DEMO
+BASE_CFLAGS             += -DCP_UI_DEMO=$(CP_UI_DEMO)
+endif

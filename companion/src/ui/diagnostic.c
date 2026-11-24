@@ -33,7 +33,7 @@ static unsigned sFrame;
 static struct {
     char sav[CP_SD_PATH_MAX], ssid[40], passphrase[72];
     unsigned attempts;
-    int writeTest;
+    int writeTest, uiDemo;
 } sConfig;
 
 typedef struct Attempt {
@@ -126,6 +126,8 @@ static void LoadConfig(void)
         else if (!strcmp(line, "passphrase")) snprintf(sConfig.passphrase, sizeof(sConfig.passphrase), "%s", value);
         else if (!strcmp(line, "attempts")) sConfig.attempts = (unsigned)strtoul(value, NULL, 10);
         else if (!strcmp(line, "write-test")) sConfig.writeTest = !strcmp(value, "1");
+        else if (!strcmp(line, "ui-demo")) sConfig.uiDemo = !strcmp(value, "tour") ? CP_DIAGNOSTIC_UI_TOUR
+            : !strcmp(value, "1") ? CP_DIAGNOSTIC_UI_DEMO : 0;
     }
     fclose(file);
     if (sConfig.attempts < 1 || sConfig.attempts > MAX_ATTEMPTS) sConfig.attempts = 1;
@@ -341,7 +343,7 @@ static int ConnectWifi(void)
     return 0;
 }
 
-void CpDiagnostic_Run(CompanionScreens *screens)
+int CpDiagnostic_Run(CompanionScreens *screens)
 {
     unsigned bytes = 0, i, ok = 0, number = 0;
     int microphone = 0, fat;
@@ -359,7 +361,13 @@ void CpDiagnostic_Run(CompanionScreens *screens)
     Log("\n=== DSWT Companion diagnostic, %s mode, drive %s\n", isDSiMode() ? "DSi" : "DS", fat ? fatGetDefaultDrive() : "none");
     Log("server %s (%s)\n", WONDER_TRADE_AUTHORITY, inet_ntoa((struct in_addr){ htonl((uint32_t)WONDER_TRADE_IPV4) }));
     Top(2, "Drive: %s", fat ? fatGetDefaultDrive() : "none");
-    if (fat) { LoadConfig(); CheckSave(); }
+    if (fat) LoadConfig();
+    if (sConfig.uiDemo) {
+        Log("ui-demo: showing the screens with made-up data\n");
+        irqSet(IRQ_VBLANK, NULL);
+        return sConfig.uiDemo;
+    }
+    if (fat) CheckSave();
     else { sConfig.attempts = 1; Top(3, "Save: no SD card"); }
 
     Top(5, "Wi-Fi: starting");
@@ -390,4 +398,5 @@ void CpDiagnostic_Run(CompanionScreens *screens)
         if (keysDown() & KEY_START) break;
     }
     CpWifi_Disconnect();
+    return 0;
 }

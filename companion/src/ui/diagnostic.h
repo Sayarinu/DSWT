@@ -17,7 +17,11 @@
  *   passphrase=<key>  instead of the console's saved connections
  *   write-test=1      only for a dummy file named test.sav: write its journal
  *                     banks in place and verify them from the card
- * Everything shown is also appended to <drive>/dswt-companion/diag-log.txt. */
-void CpDiagnostic_Run(CompanionScreens *);
+ *   ui-demo=1         show the screens (ui/) with the made-up demo model
+ *                     instead; ui-demo=tour walks through every screen by itself
+ * Everything shown is also appended to <drive>/dswt-companion/diag-log.txt.
+ * Returns 0, or the CP_DIAGNOSTIC_UI_* that diag.txt asked for. */
+enum { CP_DIAGNOSTIC_UI_DEMO = 1, CP_DIAGNOSTIC_UI_TOUR = 2 };
+int CpDiagnostic_Run(CompanionScreens *);
 
 #endif
