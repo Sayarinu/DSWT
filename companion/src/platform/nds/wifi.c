@@ -90,20 +90,27 @@ static void Scan(void)
 
 enum CpWifiStatus CpWifi_Status(void)
 {
+    CpWifiPoll poll;
+    enum CpWifiStatus result;
     int status;
     if (!sWifi.started) return CP_WIFI_OFF;
     if (sWifi.scanning) Scan();
     if (sWifi.failed) return CP_WIFI_FAILED;
     if (sWifi.scanning) return CP_WIFI_CONNECTING;
     status = Wifi_AssocStatus();
-    if (status == ASSOCSTATUS_ASSOCIATED) { sWifi.pending = 0; return CP_WIFI_CONNECTED; }
-    if (!sWifi.pending) return CP_WIFI_IDLE;
-    if (status == ASSOCSTATUS_CANNOTCONNECT || ElapsedMs() > sWifi.timeoutMs) {
+    poll.pending = sWifi.pending;
+    poll.associated = status == ASSOCSTATUS_ASSOCIATED;
+    poll.cannotConnect = status == ASSOCSTATUS_CANNOTCONNECT;
+    poll.ipv4 = poll.associated ? Wifi_GetIP() : 0;
+    poll.elapsedMs = sWifi.pending ? ElapsedMs() : 0;
+    poll.timeoutMs = sWifi.timeoutMs;
+    result = CpWifi_Decide(&poll);
+    if (result == CP_WIFI_CONNECTED) sWifi.pending = 0;
+    else if (result == CP_WIFI_FAILED) {
         sWifi.pending = 0; sWifi.failed = 1;
         Wifi_DisconnectAP();
-        return CP_WIFI_FAILED;
     }
-    return CP_WIFI_CONNECTING;
+    return result;
 }
 
 void CpWifi_SetTimeout(unsigned ms)
@@ -122,7 +129,10 @@ const char *CpWifi_StatusText(void)
 
 uint32_t CpWifi_Address(void)
 {
-    return sWifi.started && Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED ? Wifi_GetIP() : 0;
+    uint32_t address;
+    if (!sWifi.started || Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) return 0;
+    address = Wifi_GetIP();
+    return CpWifi_UsableIPv4(address) ? address : 0;
 }
 
 void CpWifi_Disconnect(void)

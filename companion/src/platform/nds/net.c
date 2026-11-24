@@ -12,6 +12,7 @@
 
 #include <mbedtls/ssl.h>
 
+#include "platform/nds/wifi.h"
 #include "wonder_trade/tls.h"
 
 /* lwIP's struct linger, which DSWiFi's sys/socket.h does not declare. */
@@ -145,7 +146,8 @@ int CpNet_Post(CpNetExchange *result, const unsigned char *request, size_t size,
     memset(connection, 0, sizeof(*connection));
     connection->fd = -1;
     connection->cancel = cancel;
-    if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) { result->stage = "wifi"; return CP_NET_ERROR_NOT_CONNECTED; }
+    /* Associated alone may mean IPv6 only; these sockets need IPv4. */
+    if (!CpWifi_Address()) { result->stage = "wifi"; return CP_NET_ERROR_NOT_CONNECTED; }
 
     result->stage = "connect";
     start = Now();

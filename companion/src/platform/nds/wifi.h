@@ -8,13 +8,7 @@
  * (WPA2 capable); in DS mode DSWiFi falls back to the DS driver (open and WEP
  * only). No UI: the Wi-Fi setup screen (LUNE-875) drives this. */
 
-enum CpWifiStatus {
-    CP_WIFI_OFF,         /* not initialised, or initialisation failed */
-    CP_WIFI_IDLE,        /* on, not connected or connecting */
-    CP_WIFI_CONNECTING,  /* searching, authenticating, associating or DHCP */
-    CP_WIFI_CONNECTED,   /* associated with an IPv4 address */
-    CP_WIFI_FAILED       /* the last connection attempt failed or timed out */
-};
+#include "platform/wifi_status.h"
 
 /* Start the driver and enable the radio. Zero on success. The caller has
  * already started libnds's systemCounter, which times connections. */
@@ -33,13 +27,14 @@ int CpWifi_AutoConnect(void);
  * up to scanMs milliseconds. */
 int CpWifi_ConnectPassphrase(const char *ssid, const char *passphrase, unsigned scanMs);
 
-/* Poll the connection; a connection that takes longer than the timeout given
- * to CpWifi_SetTimeout (45 s by default) counts as failed. */
+/* Poll the connection (CpWifi_Decide); a connection without an IPv4 address
+ * after the timeout given to CpWifi_SetTimeout (45 s by default) counts as
+ * failed. */
 enum CpWifiStatus CpWifi_Status(void);
 void CpWifi_SetTimeout(unsigned ms);
 /* DSWiFi's association state string, for diagnostics. */
 const char *CpWifi_StatusText(void);
-/* The IPv4 address in network order, 0 while not connected. */
+/* The IPv4 address in network order, 0 while there is no usable one. */
 uint32_t CpWifi_Address(void);
 void CpWifi_Disconnect(void);
 
