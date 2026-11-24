@@ -134,3 +134,6 @@ foreach(adapter_test platinum_adapter_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
+
+# LUNE-874: host-only power-cut matrix over save and journal persistence.
+add_subdirectory(fault)
