@@ -93,10 +93,13 @@ CpSaveResult CpSaveImage_Load(CpSaveImage *image, const CpFile *file, uint32_t m
             image->currentHalf[block] = valid[block] == 2;
         }
     }
-    if (inconsistent
-        || globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]]
-        || (valid[0] != 3 && valid[1] == 3)
-        || (valid[0] != 3 && valid[1] != 3 && image->currentHalf[0] != image->currentHalf[1]))
+    if (inconsistent) return CP_SAVE_NEEDS_GAME_SAVE;
+    if (globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]]) {
+        /* LoadCheck falls back to stale general first, or stale boxes if general is partial. */
+        if (valid[0] == 3) image->currentHalf[0] ^= 1;
+        else if (valid[1] == 3) image->currentHalf[1] ^= 1;
+    }
+    if (globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]])
         return CP_SAVE_NEEDS_GAME_SAVE;
     image->globalCounter = globals[0][image->currentHalf[0]];
     for (block = 0; block < 2; ++block)

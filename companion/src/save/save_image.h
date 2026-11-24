@@ -46,7 +46,8 @@ typedef struct {
 } CpSaveImage;
 
 /* magic comes from the ROM's region; only Platinum international/Korean work.
- * Clean means retail LOAD_OK, with matching selected global counters. */
+ * Uses retail LoadCheck's chosen pair, including recovery fallbacks, when
+ * its selected global counters agree and sector counters do not contradict. */
 CpSaveResult CpSaveImage_Load(CpSaveImage *image, const CpFile *file, uint32_t magic);
 unsigned char *CpSaveImage_Block(CpSaveImage *image, unsigned block);
 CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_SAVE_HASH_SIZE]);
