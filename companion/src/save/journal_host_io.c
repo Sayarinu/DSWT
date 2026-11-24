@@ -33,13 +33,13 @@ WtJournalIO CpJournalHostIO(CpJournalHostStore *store, const CpFile *file)
     store->file = file;
     store->platform.arg = store;
     store->platform.readAt = Read;
-    store->platform.writeAt = file->writeAt ? Write : NULL;
-    store->platform.sync = Sync;
+    store->platform.writeAt = file->writeAt && file->sync ? Write : NULL;
+    store->platform.sync = file->sync ? Sync : NULL;
     store->platform.size = Size;
     store->platform.readDurable = Read;
     store->store.file = &store->platform;
     store->store.hold = NULL;
     store->store.error = 0;
-    return CpJournal_IO(&store->store, CpJournal_Hash);
+    return CpJournal_IO(&store->store, CpSaveJournal_Hash);
 }
 #endif
