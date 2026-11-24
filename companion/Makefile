@@ -136,3 +136,14 @@ clean:
 	rm -rf $(BUILDDIR)
 
 -include $(APP_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(TLS_OBJS:.o=.d)
+
+# LUNE-868: tables/font are prepared by scripts/build-companion.sh on the host.
+# The no-gc link check above verifies every generated symbol even before UI use.
+TEXT_DIR                := $(BUILDDIR)/text
+TEXT_OBJ                := $(TEXT_DIR)/companion_text.o
+APP_OBJS                += $(TEXT_OBJ)
+BASE_CFLAGS             += -I$(TEXT_DIR)
+$(ELF) $(LINK_CHECK): $(TEXT_OBJ)
+$(TEXT_OBJ): $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
+	@echo "  CC      $<"
+	$(V)$(CC) $(BASE_CFLAGS) -Wall -Wextra -Werror -c -o $@ $<

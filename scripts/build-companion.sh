@@ -34,6 +34,9 @@ else
     mv "$output/dswt-connection.h.new" "$output/dswt-connection.h"
 fi
 
+# UTF-8 tables and the checksum-verified pixel font stay in the build directory.
+"$python" "$repo_root/scripts/companion-text.py" --output "$output/build/text"
+
 image="dswt-companion-builder"
 builder="$repo_root/tools/companion-builder"
 docker build -f "$builder/Dockerfile" -t "$image" "$builder"
