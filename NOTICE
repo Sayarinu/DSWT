@@ -118,7 +118,7 @@ glyphs, language coverage and readability before distributing a font subset.
 The pinned source is src/Galmuri11-Condensed.kbitx at
 bdb86ae89466a361eb8df861222736b81ff975ef, SHA-256
 7718e0faef8a9593e8f94307f57c3d77bfeaaeed08bdd381bd2b23a2d85e09b3.
-The DSWT Companion Pixel subset covers all 416 currently required codepoints
+The DSWT Companion Pixel subset covers all 443 currently required codepoints
 at a 16px line height, with original bearings and advances and no fallback.
 The build retains the OFL notice and records the source and selected codepoints
 in its font manifest.
