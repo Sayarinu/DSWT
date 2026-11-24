@@ -5,11 +5,13 @@ import argparse
 import fcntl
 import http.client
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import socket
 import ssl
 import stat
 import subprocess
@@ -40,6 +42,7 @@ def load_module(name, path):
 
 
 wire = load_module("local_stack_wire", ROOT / "protocol/wire.py")
+connection_profile = load_module("local_stack_connection", ROOT / "scripts/configure-connection.py")
 
 
 def workspace_path(value):
@@ -78,6 +81,25 @@ def save_manifest(workspace, manifest):
 
 def valid_port(value):
     return type(value) is int and 1024 <= value <= 65535
+
+
+def listen_ipv4(value):
+    if not isinstance(value, str):
+        raise ValueError("Use a unicast IPv4 listen address")
+    address = ipaddress.IPv4Address(value)
+    if address.is_unspecified or address.is_multicast or int(address) == 0xffffffff:
+        raise ValueError("Use a unicast IPv4 listen address")
+    return str(address)
+
+
+def write_console_profile(workspace, listen, output):
+    profile = json.loads((workspace / "tls/connection.json").read_text())
+    profile["ipv4"] = listen_ipv4(listen)
+    connection_profile.header(profile)
+    with output.open("x") as stream:
+        json.dump(profile, stream, indent=2)
+        stream.write("\n")
+    print("Console connection profile:", output)
 
 
 def valid_ports(port, observability):
@@ -146,6 +168,8 @@ def read_manifest(workspace):
                 and (not isinstance(manifest["database_system_id"], str)
                      or not re.fullmatch(r"[0-9]+", manifest["database_system_id"])))):
         raise ValueError("Unsupported or moved workspace manifest; preserve its state")
+    if "listen" in manifest:
+        listen_ipv4(manifest["listen"])
     for child in ("tls", "control", "control/run"):
         if (workspace / child).is_symlink() or not (workspace / child).is_dir():
             raise ValueError("Workspace directories must not be replaced or linked")
@@ -191,6 +215,7 @@ class Stack:
         self.env.update(DSWT_LOCAL_WORKSPACE=str(workspace), DSWT_LOCAL_PROJECT=manifest["project"],
                         DSWT_LOCAL_UID=str(os.getuid()), DSWT_LOCAL_GID=str(os.getgid()),
                         DSWT_LOCAL_PLATFORM=platforms[architecture], DSWT_LOCAL_HTTPS_PORT=str(https_port(manifest)),
+                        DSWT_LOCAL_LISTEN=listen_ipv4(manifest.get("listen", "127.0.0.1")),
                         # Default attestations give every rebuild a new image ID; evidence binds to stable IDs.
                         BUILDX_NO_DEFAULT_ATTESTATIONS="1")
         self.observability = manifest.get("observability")
@@ -277,22 +302,31 @@ class Stack:
         context.minimum_version = context.maximum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE-ECDSA-CHACHA20-POLY1305")
         request = wire.Request(wire.Operation.STATUS, request_id, b"\x02" * 16, b"\x03" * 32, 0, bytes(16))
-        connection = http.client.HTTPSConnection("localhost", https_port(self.manifest), context=context, timeout=5)
+        connection = http.client.HTTPConnection("localhost", https_port(self.manifest), timeout=5)
         try:
-            connection.request("POST", "/wt/v1", wire.encode_request(request),
-                               {"Content-Type": "application/octet-stream", "Connection": "close"})
-            response = connection.getresponse()
-            packet = response.read(wire.MAX_PACKET + 1)
-            if response.status != 200 or response.getheader("Content-Type") != "application/octet-stream":
-                raise ValueError("HTTPS trading endpoint is not ready")
-            reply = wire.decode_response(packet)
-            if (reply.request_id != request.request_id or reply.operation != request.operation
-                    or reply.result != wire.Result.UNAUTHENTICATED or reply.next_counter or reply.event_highwater):
-                raise ValueError("Unexpected local trading readiness response")
+            with socket.create_connection((self.env["DSWT_LOCAL_LISTEN"], https_port(self.manifest)), timeout=5) as raw:
+                # Connect to the published address while verifying the certificate's localhost identity.
+                connection.sock = context.wrap_socket(raw, server_hostname="localhost")
+                connection.request("POST", "/wt/v1", wire.encode_request(request),
+                                   {"Content-Type": "application/octet-stream", "Connection": "close"})
+                response = connection.getresponse()
+                packet = response.read(wire.MAX_PACKET + 1)
+                if response.status != 200 or response.getheader("Content-Type") != "application/octet-stream":
+                    raise ValueError("HTTPS trading endpoint is not ready")
+                reply = wire.decode_response(packet)
+                if (reply.request_id != request.request_id or reply.operation != request.operation
+                        or reply.result != wire.Result.UNAUTHENTICATED or reply.next_counter or reply.event_highwater):
+                    raise ValueError("Unexpected local trading readiness response")
         finally:
             connection.close()
 
-    def up(self):
+    def up(self, listen="127.0.0.1"):
+        self.env["DSWT_LOCAL_LISTEN"] = listen_ipv4(listen)
+        if listen == "127.0.0.1":
+            self.manifest.pop("listen", None)
+        else:
+            self.manifest["listen"] = listen
+        save_manifest(self.workspace, self.manifest)
         self.volumes(create=True)
         self.compose("build", "gateway", "validator")
         applications = [service for service in self.services if service != "database"]
@@ -320,6 +354,8 @@ class Stack:
             self.manifest["images"][service] = self.run(["inspect", "--format", "{{.Image}}", container], capture=True).stdout.strip()
         save_manifest(self.workspace, self.manifest)
         print("Local stack ready:", self.manifest["host_endpoint"] + "; ROM profile:", self.workspace / self.manifest["profile"])
+        if self.env["DSWT_LOCAL_LISTEN"] != "127.0.0.1":
+            print(f"Console HTTPS listener: {self.env['DSWT_LOCAL_LISTEN']}:{https_port(self.manifest)} (TLS hostname: localhost)")
         if self.observability:
             print(f"Private Grafana: http://127.0.0.1:{self.observability['grafana_port']}/ (admin password in "
                   f"{self.workspace / 'observability/grafana-admin-password'})")
@@ -335,14 +371,24 @@ class Stack:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=ROOT / "game/local-e2e")
-    parser.add_argument("action", choices=("init", "up", "down", "status", "verify"))
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init: host loopback HTTPS port")
+    parser.add_argument("action", choices=("init", "up", "down", "status", "verify", "console-profile"))
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="init: host HTTPS port")
+    parser.add_argument("--listen", help="up: bind HTTPS to this IPv4 (default: 127.0.0.1); console-profile: console-reachable IPv4")
+    parser.add_argument("--output", type=Path, help="console-profile: write a new public connection JSON file")
     parser.add_argument("--observability", nargs=2, type=int, metavar=("GRAFANA_PORT", "LOG_PORT"),
                         help="init: enable the private local observability profile on these loopback ports")
     parser.add_argument("--production", action="store_true",
                         help="init: run the final image and production entrypoints with WAL archiving")
     args = parser.parse_args()
+    if args.listen is not None and args.action not in ("up", "console-profile"):
+        parser.error("--listen is only supported for up and console-profile")
+    if args.output is not None and args.action != "console-profile":
+        parser.error("--output is only supported for console-profile")
+    if args.action == "console-profile" and (args.listen is None or args.output is None):
+        parser.error("console-profile requires --listen and --output")
     try:
+        if args.listen is not None:
+            listen_ipv4(args.listen)
         workspace = workspace_path(args.workspace)
         if args.action == "init":
             initialize(workspace, args.port, args.observability and
@@ -354,9 +400,12 @@ def main():
         try:
             private_file(workspace / ".lock")
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if args.action == "console-profile":
+                write_console_profile(workspace, args.listen, args.output)
+                return 0
             stack = Stack(workspace, read_manifest(workspace))
             if args.action == "up":
-                stack.up()
+                stack.up(args.listen or "127.0.0.1")
             elif args.action == "down":
                 stack.compose("down")
                 print("Stopped local stack; database, keys and workspace retained")
@@ -371,7 +420,7 @@ def main():
         finally:
             os.close(descriptor)
         return 0
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as error:
         print("Local stack failed:", error, file=sys.stderr)
         return 1
 
