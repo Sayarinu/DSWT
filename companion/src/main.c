@@ -1,16 +1,13 @@
 #include <nds.h>
 
 #include "platform/nds/screens.h"
-#include "ui/hello.h"
+#include "ui/diagnostic.h"
 
 int main(void)
 {
     CompanionScreens screens;
+    systemCounterSetup();
     CompanionScreens_Init(&screens);
-    CompanionHello_Show(&screens);
-    for (;;) {
-        swiWaitForVBlank();
-        scanKeys();
-        if (keysDown() & KEY_START) return 0;
-    }
+    CpDiagnostic_Run(&screens);
+    return 0;
 }
