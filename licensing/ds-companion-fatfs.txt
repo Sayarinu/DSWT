@@ -30,7 +30,7 @@ fatfs/source/ff.c
 =================
 
 /*----------------------------------------------------------------------------/
-/  FatFs - Generic FAT Filesystem Module  R0.16 w/patch 1                     /
+/  FatFs - Generic FAT Filesystem Module  R0.16 w/patch 2                     /
 /-----------------------------------------------------------------------------/
 /
 / Copyright (C) 2025, ChaN, all right reserved.

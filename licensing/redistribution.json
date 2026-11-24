@@ -735,52 +735,69 @@
       "name": "DS Companion: BlocksDS startup and ARM7 core",
       "license": "MPL-2.0 (crt0); MPL-2.0 AND FSFAP (linker scripts); Zlib (DSL loader, ARM7 core and version library)",
       "evidence": [
-        "https://github.com/blocksds/sdk/releases/tag/v1.16.0",
-        "https://github.com/blocksds/sdk/tree/fc975d6c5fb652d450ea359cccb10311303bd4a7",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/crts/COPYING.mpl2",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/crts/ds_arm9.ld",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/crts/dsi_arm9.specs",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/crts/COPYING.zlib",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/arm7/main_core/COPYING",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/libs/version/COPYING",
+        "https://github.com/blocksds/sdk/releases/tag/v1.25.0",
+        "https://github.com/blocksds/sdk/tree/da93ad5cda6f3aea01769959b3ef7b3c5dd93673",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/crts/COPYING.mpl2",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/crts/ds_arm9.ld",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/crts/dsi_arm9.specs",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/crts/COPYING.zlib",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/arm7/main_core/COPYING",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/libs/version/COPYING",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/arm7/main_core/Makefile",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/arm7/main_core/Makefile.generic",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/arm7/main_core/source/main.c",
         "licensing/ds-companion-blocksds.txt"
       ],
       "decision": "pinned_dependency_review; covered_source_required_for_binary_distribution; nds_release_not_allowlisted",
-      "requirements": "Pin BlocksDS v1.16.0, the latest non-prerelease SDK release reviewed on 2026-11-24, to the listed commit and its submodule commits below. It is not a single-licence SDK. The default ARM9 and ARM7 crt0 assembly is MPL-2.0: ship licensing/ds-companion-blocksds.txt and inform recipients that its Source Code Form is under MPL-2.0 and where to obtain that form and licence. Make the exact covered source (including any changes) available by reasonable, timely means at no more than distribution cost; supply sys/crts/ plus modifications with the .nds zip, or maintain an accessible matching source download and state its location in the zip. A bare promise of source is insufficient. Preserve notices and FSFAP linker-script notices in source copies. MPL file-level copyleft permits the larger statically linked application under its own compatible terms and does not require disclosure of unrelated files. Zlib requires accurate origin, marked source changes and preserved source notices; no mandatory binary attribution or source offer, but include these notices in the zip. Select an ARM7 core deliberately: the default can also link Maxmod. This review covers dependencies, not an actual .nds or its publication approval."
+      "requirements": "Use the LUNE-862 builder image skylyrac/blocksds:slim-v1.25.0@sha256:c5f19b95d9c2f312e6a68ea244d2ed5120203b4b82af9785937a349096f8e5e4 (multi-architecture index), whose SDK version is v1.25.0, at the listed source commit and nested gitlinks below. It is not a single-licence SDK. The default ARM9 and ARM7 crt0 assembly is MPL-2.0: ship licensing/ds-companion-blocksds.txt and inform recipients that its Source Code Form is under MPL-2.0 and where to obtain that form and licence. Make the exact covered source (including any changes) available by reasonable, timely means at no more than distribution cost; supply sys/crts/ plus modifications with the .nds zip, or maintain an accessible matching source download and state its location in the zip. A bare promise of source is insufficient. Preserve notices and FSFAP linker-script notices in source copies. MPL file-level copyleft permits the larger statically linked application under its own compatible terms and does not require disclosure of unrelated files. Zlib requires accurate origin, marked source changes and preserved source notices; no mandatory binary attribution or source offer, but include these notices in the zip. LUNE-862 explicitly selects sys/arm7/main_core/arm7_minimal.elf: its Makefile.generic defaults USE_DSWIFI, USE_MAXMOD and USE_LIBXM7 to 0, linking libnds7 and libc without Wi-Fi or audio libraries. Its main.c has additional Copyright (C) 2023 Antonio Niño Díaz attribution, retained in the bundled notice. Future Wi-Fi cores require the separate DSWiFi/lwIP/Mbed TLS notices below; audio cores may also require Maxmod. This review covers dependencies, not an actual .nds or its publication approval."
+    },
+    {
+      "name": "DS Companion: BlocksDS rom_arm9 Makefile template",
+      "license": "CC0-1.0",
+      "evidence": [
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/default_makefiles/rom_arm9/Makefile",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/default_makefiles/COPYING",
+        "licensing/ds-companion-cc0.txt"
+      ],
+      "decision": "pinned_template_adaptation; project_changes_under_MIT",
+      "requirements": "The companion/Makefile in LUNE-862 is adapted from the BlocksDS v1.25.0 sys/default_makefiles/rom_arm9 template, marked SPDX-License-Identifier: CC0-1.0 and SPDX-FileContributor: Antonio Niño Díaz, 2023-2026. CC0 dedicates copyright and related rights to the public domain with a fallback licence, without attribution, source-offer or application copyleft requirements. Keep the full upstream CC0 text in licensing/ds-companion-cc0.txt and ship it in the .nds zip as project policy. Original DSWT changes remain under the project MIT licence. This review covers the Makefile template, not example assets or the BlocksDS logo."
     },
     {
       "name": "DS Companion: libnds",
-      "license": "Zlib; bundled FatFs and adapters have separate FatFs terms",
+      "license": "Zlib; dlmalloc: MIT-0 (implementation), CC0-1.0 (header); bundled FatFs and adapters have separate FatFs terms",
       "evidence": [
-        "https://github.com/blocksds/libnds/tree/40f5595a924400bf1b38872dae52ae3cc952059f",
-        "https://github.com/blocksds/libnds/blob/40f5595a924400bf1b38872dae52ae3cc952059f/licenses/LICENSE",
-        "https://github.com/blocksds/libnds/blob/40f5595a924400bf1b38872dae52ae3cc952059f/.gitmodules",
-        "licensing/ds-companion-libnds.txt"
+        "https://github.com/blocksds/libnds/tree/e478cc660a8c7254fbffc54bda3ce0b93ab14c15",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/licenses/LICENSE",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/.gitmodules",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/source/arm9/dlmalloc/dlmalloc_impl.h",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/source/arm9/dlmalloc/dlmalloc.h",
+        "licensing/ds-companion-libnds.txt",
+        "licensing/ds-companion-cc0.txt"
       ],
       "decision": "pinned_dependency_review; nds_release_not_allowlisted",
-      "requirements": "Use the libnds gitlink from BlocksDS v1.16.0, not current libnds master. Static linking is permitted without a source offer or required binary attribution. Preserve the Zlib notice in source distributions, do not misrepresent origin, and plainly mark altered source. Ship licensing/ds-companion-libnds.txt with the .nds zip as project policy. The filesystem component is reviewed separately below. This does not clear example graphics, the built-in console/keyboard font assets, or an externally injected DLDI driver for the UI; review any such added asset or driver separately."
+      "requirements": "Use the libnds gitlink from BlocksDS v1.25.0, not current libnds master. Static linking is permitted without a source offer or required binary attribution. Preserve the Zlib notice in source distributions, do not misrepresent origin, and plainly mark altered source. Ship licensing/ds-companion-libnds.txt with the .nds zip as project policy. This revision adds Doug Lea dlmalloc: the implementation explicitly uses MIT-0 (Copyright 2023 Doug Lea), while its header declares CC0-1.0. These impose no notice retention, source offer or application copyleft; include their declarations and the full CC0 text as project policy. The filesystem component is reviewed separately below. This does not clear example graphics, the built-in console/keyboard font assets, or an externally injected DLDI driver for the UI; review any such added asset or driver separately."
     },
     {
       "name": "DS Companion: DSWiFi and dsiwifi-derived DSi driver",
       "license": "MIT; bundled lwIP and Mbed TLS have separate terms",
       "evidence": [
-        "https://github.com/blocksds/dswifi/tree/7fb7c8653484d8f4de655405ccf72e52dfad5af1",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/COPYING",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/source/arm7/twl/card.twl.c",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/source/arm7/twl/ath/bmi.h",
+        "https://github.com/blocksds/dswifi/tree/84d91e8c517bd7d15d38aff039640beaf359c230",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/COPYING",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/source/arm7/twl/card.twl.c",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/source/arm7/twl/ath/bmi.h",
         "licensing/ds-companion-dswifi.txt"
       ],
       "decision": "pinned_dependency_review; nds_release_not_allowlisted",
-      "requirements": "Use the DSWiFi gitlink from BlocksDS v1.16.0, including its DSi/TWL driver derived from dsiwifi; do not substitute a separately downloaded dsiwifi tree. Its driver files carry MIT identifiers, including Daz Jones (2015-2016), Max Thomas (2021) and Antonio Niño Díaz (2025); COPYING also credits Stephen Stair and Dave Murphy. Preserve all of them, not only the incomplete top-level author list. Include licensing/ds-companion-dswifi.txt with every statically linked .nds zip. No source offer is required by MIT. lwIP on ARM9 and Mbed TLS crypto on ARM7 are distinct bundled components reviewed below; DSWiFi is not MIT-only as a whole. This does not authorize bundling a dumped Wi-Fi firmware image."
+      "requirements": "Use the DSWiFi gitlink from BlocksDS v1.25.0, including its DSi/TWL driver derived from dsiwifi; do not substitute a separately downloaded dsiwifi tree. Its driver files carry MIT identifiers, including Daz Jones (2015-2016), Max Thomas (2021) and Antonio Niño Díaz (2025); COPYING also credits Stephen Stair and Dave Murphy. Preserve all of them, not only the incomplete top-level author list. Include licensing/ds-companion-dswifi.txt with every statically linked .nds zip. No source offer is required by MIT. lwIP on ARM9 and Mbed TLS crypto on ARM7 are distinct bundled components reviewed below; DSWiFi is not MIT-only as a whole. This does not authorize bundling a dumped Wi-Fi firmware image."
     },
     {
       "name": "DS Companion: bundled lwIP 2.2.1",
       "license": "BSD-3-Clause variants; permissive MBSI/Global Election Systems notice in PPP header",
       "evidence": [
-        "https://github.com/blocksds/dswifi/tree/7fb7c8653484d8f4de655405ccf72e52dfad5af1/lwip",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/COPYING.lwip",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/lwip/include/lwip/init.h",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/lwip/include/netif/ppp/ppp_impl.h",
+        "https://github.com/blocksds/dswifi/tree/84d91e8c517bd7d15d38aff039640beaf359c230/lwip",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/COPYING.lwip",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/lwip/include/lwip/init.h",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/lwip/include/netif/ppp/ppp_impl.h",
         "licensing/ds-companion-lwip.txt"
       ],
       "decision": "pinned_dependency_review; nds_release_not_allowlisted",
@@ -790,69 +807,67 @@
       "name": "DS Companion: bundled Mbed TLS 3.6.4",
       "license": "Apache-2.0 OR GPL-2.0-or-later; select Apache-2.0",
       "evidence": [
-        "https://github.com/blocksds/dswifi/tree/7fb7c8653484d8f4de655405ccf72e52dfad5af1/mbedtls",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/COPYING.mbedtls",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/mbedtls/include/mbedtls/build_info.h",
-        "https://github.com/blocksds/dswifi/blob/7fb7c8653484d8f4de655405ccf72e52dfad5af1/mbedtls/library/aes.twl.c",
+        "https://github.com/blocksds/dswifi/tree/84d91e8c517bd7d15d38aff039640beaf359c230/mbedtls",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/COPYING.mbedtls",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/mbedtls/include/mbedtls/build_info.h",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/mbedtls/library/aes.twl.c",
         "licensing/ds-companion-mbedtls.txt"
       ],
       "decision": "pinned_dependency_review; apache_2_0_selected; nds_release_not_allowlisted",
       "requirements": "The DSWiFi ARM7 build includes this crypto subset, distinct from the game client TLS dependency. The bundled version macros identify 3.6.4; pin the DSWiFi subtree, including its TWL changes, rather than substituting stock Mbed TLS. Exercise the Apache-2.0 option, not the GPL option. Include licensing/ds-companion-mbedtls.txt and Copyright The Mbed TLS Contributors in the .nds zip; the copied upstream file preserves both offered licence texts, but distribution selects Apache-2.0. Preserve applicable copyright, patent, trademark and attribution notices in source copies, identify changed files when redistributing modified source, and retain any applicable upstream NOTICE attribution. No NOTICE file is present in this bundled subset. Apache-2.0 requires no source offer or application copyleft for static linking."
     },
     {
-      "name": "DS Companion: FatFs R0.16 patch 1 and libnds adapters",
+      "name": "DS Companion: FatFs R0.16 patch 2 and libnds adapters",
       "license": "FatFs permissive source-notice licence (BSD-style, not standard BSD-1-Clause)",
       "evidence": [
-        "https://github.com/blocksds/wf-fatfs/tree/1cb54bc00235c93b33c76b0de4267bc10015562d",
-        "https://github.com/blocksds/wf-fatfs/blob/1cb54bc00235c93b33c76b0de4267bc10015562d/LICENSE.txt",
-        "https://github.com/blocksds/wf-fatfs/blob/1cb54bc00235c93b33c76b0de4267bc10015562d/source/ff.c",
-        "https://github.com/blocksds/libnds/blob/40f5595a924400bf1b38872dae52ae3cc952059f/source/arm9/libc/fatfs/diskio.c",
-        "https://github.com/blocksds/libnds/blob/40f5595a924400bf1b38872dae52ae3cc952059f/source/arm9/libc/fatfs/ffconf.h",
+        "https://github.com/blocksds/wf-fatfs/tree/2b5c26e2a1eb4cdbbcb57070d49a6ebf7b60c7f9",
+        "https://github.com/blocksds/wf-fatfs/blob/2b5c26e2a1eb4cdbbcb57070d49a6ebf7b60c7f9/LICENSE.txt",
+        "https://github.com/blocksds/wf-fatfs/blob/2b5c26e2a1eb4cdbbcb57070d49a6ebf7b60c7f9/source/ff.c",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/source/arm9/libc/fatfs/diskio.c",
+        "https://github.com/blocksds/libnds/blob/e478cc660a8c7254fbffc54bda3ce0b93ab14c15/source/arm9/libc/fatfs/ffconf.h",
         "licensing/ds-companion-fatfs.txt"
       ],
       "decision": "pinned_dependency_review; nds_release_not_allowlisted",
-      "requirements": "Use the nested fatfs gitlink from the pinned libnds, whose ff.c identifies R0.16 w/patch 1, plus the libnds filesystem adapters at the libnds revision above. FatFs LICENSE.txt uses a placeholder year; the actual files credit ChaN (2025), and the libnds adapter notices also credit ChaN (2019/2022) and Antonio Niño Díaz (2023). Preserve the actual copyright, condition and disclaimer in source copies. Static binary redistribution requires neither attribution nor a source offer under these terms; ship licensing/ds-companion-fatfs.txt anyway as project policy. Do not label the whole filesystem MIT or assume the BSD-1-Clause SPDX text is identical. Other libnds filesystem integration code retains its Zlib notices."
+      "requirements": "Use the nested fatfs gitlink from the pinned libnds, whose ff.c identifies R0.16 w/patch 2, plus the libnds filesystem adapters at the libnds revision above. FatFs LICENSE.txt uses a placeholder year; the actual files credit ChaN (2025), and the libnds adapter notices also credit ChaN (2019/2022) and Antonio Niño Díaz (2023). Preserve the actual copyright, condition and disclaimer in source copies. Static binary redistribution requires neither attribution nor a source offer under these terms; ship licensing/ds-companion-fatfs.txt anyway as project policy. Do not label the whole filesystem MIT or assume the BSD-1-Clause SPDX text is identical. Other libnds filesystem integration code retains its Zlib notices."
     },
     {
       "name": "DS Companion: Wonderful picolibc",
       "license": "BSD/MIT/ISC and other permissive per-file runtime terms; AGPL/GPL build/test files excluded",
       "evidence": [
-        "https://github.com/WonderfulToolchain/wf-picolibc/tree/5a699b4ec67254e9f8739c7bc680d793fcb2b3e0",
-        "https://github.com/WonderfulToolchain/wf-picolibc/blob/5a699b4ec67254e9f8739c7bc680d793fcb2b3e0/COPYING.picolibc",
-        "https://github.com/WonderfulToolchain/wonderful-packages/blob/3ab34655d3afa4cd127733e0e80ae0a51d244642/packages/toolchain-gcc-arm-none-eabi-picolibc-generic/PKGBUILD",
+        "https://codeberg.org/WonderfulToolchain/wf-picolibc/src/commit/770d868896622d726129fa99168d5d20160d0f55/COPYING.picolibc",
+        "https://codeberg.org/WonderfulToolchain/wf-picolibc/src/commit/770d868896622d726129fa99168d5d20160d0f55/meson.build",
+        "https://codeberg.org/WonderfulToolchain/wf-picolibc/src/commit/770d868896622d726129fa99168d5d20160d0f55/scripts/GeneratePicolibcCrossFile.sh",
+        "https://codeberg.org/WonderfulToolchain/wf-picolibc/src/commit/770d868896622d726129fa99168d5d20160d0f55/test/test-stdio/test-printf.c",
         "licensing/ds-companion-picolibc.txt"
       ],
       "decision": "pinned_dependency_review; runtime_only; nds_release_not_allowlisted",
-      "requirements": "Select Wonderful picolibc 1.8.10.r25700.5a699b4ec at the full source commit above; the pinned package recipe records this revision but fetches a moving branch, so a build must enforce the commit rather than trust that branch or an unversioned installed package. This libc/libm supplies the C runtime; libnds supplies DS-specific POSIX glue. Ship the complete COPYING.picolibc as licensing/ds-companion-picolibc.txt with the .nds zip to retain all per-file copyright, permission and disclaimer variants, not just a BSD label. Runtime static linking under the reviewed permissive terms requires no source offer. The inventory also lists scripts/GeneratePicolibcCrossFile.sh (AGPLv3) and test/test-stdio/test-printf-testcases.h plus test-printf.c (GPL-2.0-or-later): these are not linked runtime files, and the package disables tests. Do not bundle those scripts/tests or toolchain source/binaries without their separate copyleft compliance review. Confirm the installed libc revision and selected objects in the final build."
+      "requirements": "The pinned v1.25.0 image installs Wonderful picolibc package 1.8.13.r26367.770d86889-1; its revision resolves to the full Codeberg source commit above. Use the immutable image, not a fresh package-manager update or moving source branch. This libc/libm supplies the C runtime; libnds supplies DS-specific POSIX glue. Ship the complete COPYING.picolibc as licensing/ds-companion-picolibc.txt with the .nds zip to retain all per-file copyright, permission and disclaimer variants, not just a BSD label. Runtime static linking under the reviewed permissive terms requires no source offer. The inventory also lists scripts/GeneratePicolibcCrossFile.sh (AGPLv3) and test/test-stdio/test-printf-testcases.h plus test-printf.c (GPL-2.0-or-later): these are not linked runtime files. Do not bundle those scripts/tests or toolchain source/binaries without their separate copyleft compliance review. The image package database confirms this libc revision on linux/arm64; inspect final linked objects for both processors before release and verify packages on any other build architecture."
     },
     {
       "name": "DS Companion: GCC runtime libraries",
       "license": "GPL-3.0-or-later WITH GCC-exception-3.1 (libgcc; libstdc++ if C++ is linked)",
       "evidence": [
-        "https://github.com/WonderfulToolchain/gcc/tree/20b1ff93e0507c6ebf08fb6ec368686383fff785",
-        "https://github.com/WonderfulToolchain/gcc/blob/20b1ff93e0507c6ebf08fb6ec368686383fff785/COPYING3",
-        "https://github.com/WonderfulToolchain/gcc/blob/20b1ff93e0507c6ebf08fb6ec368686383fff785/COPYING.RUNTIME",
-        "https://github.com/WonderfulToolchain/gcc/blob/20b1ff93e0507c6ebf08fb6ec368686383fff785/libgcc/libgcc2.c",
-        "https://github.com/WonderfulToolchain/gcc/blob/20b1ff93e0507c6ebf08fb6ec368686383fff785/libstdc++-v3/libsupc++/new_op.cc",
-        "https://github.com/WonderfulToolchain/wonderful-packages/blob/3ab34655d3afa4cd127733e0e80ae0a51d244642/packages/toolchain-gcc-arm-none-eabi-gcc/PKGBUILD",
-        "https://github.com/WonderfulToolchain/wonderful-packages/blob/3ab34655d3afa4cd127733e0e80ae0a51d244642/packages/toolchain-gcc-arm-none-eabi-libstdcxx-picolibc/PKGBUILD",
+        "https://codeberg.org/WonderfulToolchain/gcc/src/commit/be93d9d35bfc8ed892b9f25e16ac6cd0cec39731/COPYING3",
+        "https://codeberg.org/WonderfulToolchain/gcc/src/commit/be93d9d35bfc8ed892b9f25e16ac6cd0cec39731/COPYING.RUNTIME",
+        "https://codeberg.org/WonderfulToolchain/gcc/src/commit/be93d9d35bfc8ed892b9f25e16ac6cd0cec39731/libgcc/libgcc2.c",
+        "https://codeberg.org/WonderfulToolchain/gcc/src/commit/be93d9d35bfc8ed892b9f25e16ac6cd0cec39731/libstdc++-v3/libsupc++/new_op.cc",
         "licensing/ds-companion-gpl-3.0.txt",
         "licensing/ds-companion-gcc-exception.txt"
       ],
       "decision": "pinned_dependency_review; eligible_compilation_required; nds_release_not_allowlisted",
-      "requirements": "Select Wonderful GCC 15.2.1.r220547.20b1ff93e05 (package release 1), pinned to the full source commit above. The recipe tracks a moving branch; enforce the revision at build time. libgcc is linked by default even for C; libstdc++ is conditional on C++ usage. They are copyleft libraries with the GCC Runtime Library Exception 3.1, which permits distribution of Target Code combined with Independent Modules under their own terms when all Target Code was generated by Eligible Compilation Processes. Use the normal GPL-compatible GCC toolchain; do not introduce a proprietary pass processing GCC intermediate representations. Under those conditions a statically linked .nds does not need application or runtime source disclosure/offer solely because of these libraries. Ship licensing/ds-companion-gpl-3.0.txt and licensing/ds-companion-gcc-exception.txt and preserve applicable FSF/runtime attribution. Distributing standalone runtime libraries, modified library source, GCC executables or a toolchain image is a separate GPL corresponding-source obligation; the exception is not a blanket waiver. Verify the actual compiler and linked objects at release time."
+      "requirements": "The pinned v1.25.0 image installs Wonderful GCC package 1:16.2.0.r229124.be93d9d35bf-1 (including gcc-libs and matching libstdc++), whose revision resolves to the full Codeberg source commit above. The compiler reports 16.2.0 and the reviewed runtime files credit FSF through 2026. Keep the immutable image rather than updating packages or following source branches. libgcc is linked by default even for C; libstdc++ is conditional on C++ usage. They are copyleft libraries with the GCC Runtime Library Exception 3.1, which permits distribution of Target Code combined with Independent Modules under their own terms when all Target Code was generated by Eligible Compilation Processes. Use the normal GPL-compatible GCC toolchain; do not introduce a proprietary pass processing GCC intermediate representations. Under those conditions a statically linked .nds does not need application or runtime source disclosure/offer solely because of these libraries. Ship licensing/ds-companion-gpl-3.0.txt and licensing/ds-companion-gcc-exception.txt and preserve applicable FSF/runtime attribution. Distributing standalone runtime libraries, modified library source, GCC executables or a toolchain image is a separate GPL corresponding-source obligation; the exception is not a blanket waiver. The image package database and compiler were verified on linux/arm64; inspect final linked objects before release and verify packages on any other build architecture."
     },
     {
       "name": "DS Companion: optional default ARM7 Maxmod",
       "license": "ISC",
       "evidence": [
-        "https://github.com/blocksds/maxmod/tree/5c32fb55ddb535239e0500d05f1bf6f58459cf55",
-        "https://github.com/blocksds/maxmod/blob/5c32fb55ddb535239e0500d05f1bf6f58459cf55/COPYING",
-        "https://github.com/blocksds/sdk/blob/fc975d6c5fb652d450ea359cccb10311303bd4a7/sys/arm7/main_core/Makefile.generic",
+        "https://github.com/blocksds/maxmod/tree/8f7e2faa7db4ef5f7824af3aa601188595a5ebc3",
+        "https://github.com/blocksds/maxmod/blob/8f7e2faa7db4ef5f7824af3aa601188595a5ebc3/COPYING",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/arm7/main_core/Makefile.generic",
         "licensing/ds-companion-maxmod.txt"
       ],
       "decision": "pinned_optional_dependency_review; nds_release_not_allowlisted",
-      "requirements": "The BlocksDS v1.16.0 default ARM7 can include Maxmod even if the application does not play audio. Use the pinned gitlink above and include licensing/ds-companion-maxmod.txt with the .nds zip whenever that core/library is selected, preserving Mukunda Johnson, Antonio Niño Díaz and Lorenzooone attribution and the permission/disclaimer text. No source offer or copyleft is required. An explicitly selected DSWiFi-only ARM7 core can avoid this library; verify the ARM7 image as well as ARM9 in the final build. LibXM7, libteak and other optional libraries are not covered by this review."
+      "requirements": "LUNE-862 selects arm7_minimal.elf, which does not link Maxmod. This is a conditional review for a later audio-enabled core: BlocksDS v1.25.0 arm7_dswifi_maxmod.elf and arm7_maxmod.elf include it even if the application does not play audio. Use the pinned gitlink above and include licensing/ds-companion-maxmod.txt with the .nds zip whenever that core/library is selected, preserving Mukunda Johnson, Antonio Niño Díaz (2021-2026) and Lorenzooone attribution and the permission/disclaimer text. No source offer or copyleft is required. An explicitly selected DSWiFi-only ARM7 core can avoid this library; verify the ARM7 image as well as ARM9 in the final build. LibXM7, libteak and other optional libraries are not covered by this review."
     },
     {
       "name": "DS Companion: Galmuri11 Bold v2.40.4 UI font",

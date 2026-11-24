@@ -437,6 +437,26 @@ the following restrictions:
 
 3. This notice may not be removed or altered from any source distribution.
 
+sdk/sys/arm7/main_core/source/main.c: Zlib attribution
+======================================================
+
+// SPDX-License-Identifier: Zlib
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project.
+//
+// Copyright (C) 2005 Michael Noland (joat)
+// Copyright (C) 2005 Jason Rogers (Dovoto)
+// Copyright (C) 2005-2015 Dave Murphy (WinterMute)
+// Copyright (C) 2023 Antonio Niño Díaz
+
+sdk/sys/crts/dsl.ld: Zlib attribution
+=====================================
+
+/*
+ * SPDX-License-Identifier: Zlib
+ *
+ * Copyright (C) 2025 Antonio Niño Díaz
+ */
+
 sdk/sys/crts/ds_arm9.ld: FSF permissive notice
 ==============================================
 
