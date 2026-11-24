@@ -296,9 +296,9 @@ static const uint16_t kEmpty[] = { CP_CHAR_EOS };
 
 static Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
 {
-    Bytes personal[PERSONAL_COUNT], growth[8], evo[100], items[ITEM_RECORDS], banks[BANKS], fonts[2];
+    Bytes personal[PERSONAL_COUNT], growth[8], evo[100], items[ITEM_RECORDS], banks[BANKS], fonts[2], moves[40];
     const uint16_t *western[30], *asian[30];
-    RomFile files[8];
+    RomFile files[9];
     Bytes rom, font = { 0 };
     uint32_t i, level;
 
@@ -356,6 +356,11 @@ static Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     Put8(&font, 5); Put8(&font, 6); Put8(&font, 7);
     fonts[0] = font;
     fonts[1] = Filled(4, 0);
+    /* Move records of 16 bytes: move n has n PP. */
+    for (i = 0; i < 40; ++i) {
+        moves[i] = Filled(16, 0xEE);
+        moves[i].data[6] = (uint8_t)i;
+    }
 
     files[0] = (RomFile){ "poketool/personal/pl_personal.narc", Narc(personal, PERSONAL_COUNT) };
     files[1] = (RomFile){ "poketool/personal/pl_growtbl.narc", Narc(growth, 8) };
@@ -365,7 +370,8 @@ static Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     files[5] = (RomFile){ "graphic/pl_font.narc", Narc(fonts, 2) };
     files[6] = (RomFile){ "poketool/personal/readme.txt", Filled(3, 'x') };
     files[7] = (RomFile){ "a.bin", Filled(5, 0xAB) };
-    rom = Rom(code, revision, files, 8);
+    files[8] = (RomFile){ "poketool/waza/pl_waza_tbl.narc", Narc(moves, 40) };
+    rom = Rom(code, revision, files, 9);
 
     FreeMembers(personal, PERSONAL_COUNT);
     FreeMembers(growth, 8);
@@ -373,7 +379,8 @@ static Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     FreeMembers(items, ITEM_RECORDS);
     FreeMembers(banks, BANKS);
     FreeMembers(fonts, 2);
-    for (i = 0; i < 8; ++i) free(files[i].data.data);
+    FreeMembers(moves, 40);
+    for (i = 0; i < 9; ++i) free(files[i].data.data);
     return rom;
 }
 
@@ -488,6 +495,7 @@ static void TestPlatinumData(void)
     CpItem item;
     uint32_t table[CP_MAX_LEVEL + 1];
     uint16_t name[8];
+    uint8_t pp;
     size_t length;
 
     MemoryReader_Init(&memory, &rom);
@@ -529,6 +537,9 @@ static void TestPlatinumData(void)
     assert(!item.holdable && item.preventToss);
     assert(CpGame_Item(&game, 467, &item) == CP_OK && item.price == 445 * 10);
     assert(CpGame_Item(&game, 0, &item) == CP_ERR_NOT_FOUND && CpGame_Item(&game, 468, &item) == CP_ERR_NOT_FOUND);
+
+    assert(CpGame_MovePp(&game, 33, &pp) == CP_OK && pp == 33);
+    assert(CpGame_MovePp(&game, 0, &pp) == CP_ERR_NOT_FOUND && CpGame_MovePp(&game, 40, &pp) != CP_OK);
 
     assert(CpGame_SpeciesName(&game, 25, name, 8, &length) == CP_OK && length == 4);
     assert(memcmp(name, kWesternName, sizeof kWesternName) == 0);
