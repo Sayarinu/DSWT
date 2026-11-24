@@ -67,10 +67,10 @@ int CpRom_FromCode(const char gameCode[4], uint8_t revision, CpRomInfo *out)
 int CpRom_Identify(const CpReader *reader, CpRomInfo *out)
 {
     uint8_t header[0x20];
-    CpFile rom;
+    CpRomFile rom;
 
-    CpFile_Whole(reader, &rom);
-    if (CpFile_Read(&rom, 0, header, sizeof header) != CP_OK) return CP_ERR_IO;
+    CpRomFile_Whole(reader, &rom);
+    if (CpRomFile_Read(&rom, 0, header, sizeof header) != CP_OK) return CP_ERR_IO;
     return CpRom_FromCode((const char *)header + 0x0C, header[0x1E], out);
 }
 

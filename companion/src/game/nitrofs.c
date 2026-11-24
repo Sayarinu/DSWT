@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-int CpFile_Read(const CpFile *file, uint32_t offset, void *destination, uint32_t size)
+int CpRomFile_Read(const CpRomFile *file, uint32_t offset, void *destination, uint32_t size)
 {
     if (offset > file->size || size > file->size - offset) return CP_ERR_IO;
     if (size == 0) return CP_OK;
@@ -10,7 +10,7 @@ int CpFile_Read(const CpFile *file, uint32_t offset, void *destination, uint32_t
         ? CP_OK : CP_ERR_IO;
 }
 
-int CpFile_Whole(const CpReader *reader, CpFile *out)
+int CpRomFile_Whole(const CpReader *reader, CpRomFile *out)
 {
     out->reader = reader;
     out->offset = 0;
@@ -19,7 +19,7 @@ int CpFile_Whole(const CpReader *reader, CpFile *out)
 }
 
 /* A sub-range of a range, checked against its end. */
-static int Slice(const CpFile *file, uint32_t offset, uint32_t size, CpFile *out)
+static int Slice(const CpRomFile *file, uint32_t offset, uint32_t size, CpRomFile *out)
 {
     if (offset > file->size || size > file->size - offset) return CP_ERR_FORMAT;
     out->reader = file->reader;
@@ -30,15 +30,15 @@ static int Slice(const CpFile *file, uint32_t offset, uint32_t size, CpFile *out
 
 /* The ROM header's file name table (FNT) and file allocation table (FAT). */
 typedef struct NitroFs {
-    CpFile rom, fnt, fat;
+    CpRomFile rom, fnt, fat;
 } NitroFs;
 
 static int NitroFs_Init(const CpReader *reader, NitroFs *fs)
 {
     uint8_t header[0x10];
 
-    CpFile_Whole(reader, &fs->rom);
-    if (CpFile_Read(&fs->rom, 0x40, header, sizeof header) != CP_OK) return CP_ERR_IO;
+    CpRomFile_Whole(reader, &fs->rom);
+    if (CpRomFile_Read(&fs->rom, 0x40, header, sizeof header) != CP_OK) return CP_ERR_IO;
     if (Slice(&fs->rom, CpLe32(header), CpLe32(header + 4), &fs->fnt) != CP_OK ||
         Slice(&fs->rom, CpLe32(header + 8), CpLe32(header + 12), &fs->fat) != CP_OK)
         return CP_ERR_FORMAT;
@@ -53,27 +53,27 @@ static int NitroFs_Find(const NitroFs *fs, uint16_t directory, const char *name,
     uint32_t at;
     uint16_t file, directories;
 
-    if (CpFile_Read(&fs->fnt, 0, entry, sizeof entry) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(&fs->fnt, 0, entry, sizeof entry) != CP_OK) return CP_ERR_FORMAT;
     directories = CpLe16(entry + 6); /* the root entry's parent field counts directories */
     if ((directory & 0xFFF) >= directories) return CP_ERR_FORMAT;
-    if (CpFile_Read(&fs->fnt, (uint32_t)(directory & 0xFFF) * 8, entry, sizeof entry) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(&fs->fnt, (uint32_t)(directory & 0xFFF) * 8, entry, sizeof entry) != CP_OK) return CP_ERR_FORMAT;
     at = CpLe32(entry);
     file = CpLe16(entry + 4);
     for (;;) {
         uint8_t size;
         int isDirectory;
 
-        if (CpFile_Read(&fs->fnt, at++, &kind, 1) != CP_OK) return CP_ERR_FORMAT;
+        if (CpRomFile_Read(&fs->fnt, at++, &kind, 1) != CP_OK) return CP_ERR_FORMAT;
         if (kind == 0) return CP_ERR_NOT_FOUND;
         if (kind == 0x80) return CP_ERR_FORMAT; /* reserved */
         isDirectory = kind > 0x80;
         size = kind & 0x7F;
-        if (CpFile_Read(&fs->fnt, at, text, size) != CP_OK) return CP_ERR_FORMAT;
+        if (CpRomFile_Read(&fs->fnt, at, text, size) != CP_OK) return CP_ERR_FORMAT;
         at += size;
         if (isDirectory) {
             uint8_t id[2];
 
-            if (CpFile_Read(&fs->fnt, at, id, 2) != CP_OK) return CP_ERR_FORMAT;
+            if (CpRomFile_Read(&fs->fnt, at, id, 2) != CP_OK) return CP_ERR_FORMAT;
             at += 2;
             if (size == length && memcmp(text, name, length) == 0) {
                 *out = CpLe16(id);
@@ -89,7 +89,7 @@ static int NitroFs_Find(const NitroFs *fs, uint16_t directory, const char *name,
     }
 }
 
-int CpNitroFs_Open(const CpReader *reader, const char *path, CpFile *out)
+int CpNitroFs_Open(const CpReader *reader, const char *path, CpRomFile *out)
 {
     NitroFs fs;
     uint16_t node = 0xF000; /* the root directory */
@@ -108,17 +108,17 @@ int CpNitroFs_Open(const CpReader *reader, const char *path, CpFile *out)
         path = slash + 1;
     }
     if (node >= 0xF000) return CP_ERR_NOT_FOUND; /* a directory */
-    if (CpFile_Read(&fs.fat, (uint32_t)node * 8, span, sizeof span) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(&fs.fat, (uint32_t)node * 8, span, sizeof span) != CP_OK) return CP_ERR_FORMAT;
     if (CpLe32(span + 4) < CpLe32(span)) return CP_ERR_FORMAT;
     return Slice(&fs.rom, CpLe32(span), CpLe32(span + 4) - CpLe32(span), out) == CP_OK ? CP_OK : CP_ERR_FORMAT;
 }
 
 /* Find a NARC section by its magic, starting at `at`; `found` is its offset. */
-static int Narc_Section(const CpFile *file, uint32_t at, const char magic[4], uint32_t *found, uint32_t *size)
+static int Narc_Section(const CpRomFile *file, uint32_t at, const char magic[4], uint32_t *found, uint32_t *size)
 {
     uint8_t header[8];
 
-    if (CpFile_Read(file, at, header, sizeof header) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(file, at, header, sizeof header) != CP_OK) return CP_ERR_FORMAT;
     if (memcmp(header, magic, 4) != 0 || CpLe32(header + 4) < 8 || CpLe32(header + 4) > file->size - at)
         return CP_ERR_FORMAT;
     *found = at;
@@ -126,19 +126,19 @@ static int Narc_Section(const CpFile *file, uint32_t at, const char magic[4], ui
     return CP_OK;
 }
 
-int CpNarc_Open(const CpFile *file, CpNarc *out)
+int CpNarc_Open(const CpRomFile *file, CpNarc *out)
 {
     uint8_t header[0x10], count[2];
     uint32_t fat, fatSize, fnt, fntSize, data, dataSize;
 
-    if (CpFile_Read(file, 0, header, sizeof header) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(file, 0, header, sizeof header) != CP_OK) return CP_ERR_FORMAT;
     if (memcmp(header, "NARC", 4) != 0 || CpLe16(header + 4) != 0xFFFE || CpLe16(header + 12) < 0x10)
         return CP_ERR_FORMAT;
     if (Narc_Section(file, CpLe16(header + 12), "BTAF", &fat, &fatSize) != CP_OK ||
         Narc_Section(file, fat + fatSize, "BTNF", &fnt, &fntSize) != CP_OK ||
         Narc_Section(file, fnt + fntSize, "GMIF", &data, &dataSize) != CP_OK)
         return CP_ERR_FORMAT;
-    if (fatSize < 12 || CpFile_Read(file, fat + 8, count, 2) != CP_OK) return CP_ERR_FORMAT;
+    if (fatSize < 12 || CpRomFile_Read(file, fat + 8, count, 2) != CP_OK) return CP_ERR_FORMAT;
     out->file = *file;
     out->count = CpLe16(count);
     out->fatOffset = fat + 12;
@@ -147,13 +147,13 @@ int CpNarc_Open(const CpFile *file, CpNarc *out)
     return (uint32_t)out->count * 8 <= fatSize - 12 ? CP_OK : CP_ERR_FORMAT;
 }
 
-int CpNarc_Member(const CpNarc *narc, uint32_t index, CpFile *out)
+int CpNarc_Member(const CpNarc *narc, uint32_t index, CpRomFile *out)
 {
     uint8_t span[8];
     uint32_t start, end;
 
     if (index >= narc->count) return CP_ERR_NOT_FOUND;
-    if (CpFile_Read(&narc->file, narc->fatOffset + index * 8, span, sizeof span) != CP_OK) return CP_ERR_FORMAT;
+    if (CpRomFile_Read(&narc->file, narc->fatOffset + index * 8, span, sizeof span) != CP_OK) return CP_ERR_FORMAT;
     start = CpLe32(span);
     end = CpLe32(span + 4);
     if (end < start || end > narc->dataSize) return CP_ERR_FORMAT;
@@ -162,7 +162,7 @@ int CpNarc_Member(const CpNarc *narc, uint32_t index, CpFile *out)
 
 int CpNarc_OpenPath(const CpReader *reader, const char *path, CpNarc *out)
 {
-    CpFile file;
+    CpRomFile file;
     int result = CpNitroFs_Open(reader, path, &file);
 
     return result != CP_OK ? result : CpNarc_Open(&file, out);

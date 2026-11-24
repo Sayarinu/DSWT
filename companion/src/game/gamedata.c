@@ -44,11 +44,11 @@ int CpGame_Open(const CpReader *reader, CpGame *out)
 /* Read the first `size` bytes of an archive member. */
 static int ReadMember(const CpNarc *narc, uint32_t index, void *destination, uint32_t size)
 {
-    CpFile member;
+    CpRomFile member;
     int result = CpNarc_Member(narc, index, &member);
 
     if (result != CP_OK) return result;
-    return member.size < size ? CP_ERR_FORMAT : CpFile_Read(&member, 0, destination, size);
+    return member.size < size ? CP_ERR_FORMAT : CpRomFile_Read(&member, 0, destination, size);
 }
 
 static uint32_t PersonalIndex(const CpGameTable *table, uint16_t species, uint8_t form)

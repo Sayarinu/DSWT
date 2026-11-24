@@ -24,16 +24,16 @@ typedef struct CpReader {
 } CpReader;
 
 /* A byte range of a reader: a NitroFS file or a NARC member. */
-typedef struct CpFile {
+typedef struct CpRomFile {
     const CpReader *reader;
     uint32_t offset, size;
-} CpFile;
+} CpRomFile;
 
 /* Read `size` bytes at `offset` within the range, refusing reads past its end. */
-int CpFile_Read(const CpFile *, uint32_t offset, void *destination, uint32_t size);
+int CpRomFile_Read(const CpRomFile *, uint32_t offset, void *destination, uint32_t size);
 
 /* The whole reader as one range. */
-int CpFile_Whole(const CpReader *, CpFile *out);
+int CpRomFile_Whole(const CpReader *, CpRomFile *out);
 
 static inline uint16_t CpLe16(const uint8_t *p)
 {

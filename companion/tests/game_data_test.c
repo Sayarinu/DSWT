@@ -434,7 +434,7 @@ static void TestNitroFsAndNarc(void)
     RomFile files[3];
     Bytes rom;
     MemoryReader memory;
-    CpFile file, member;
+    CpRomFile file, member;
     CpNarc narc;
     uint8_t buffer[16];
 
@@ -445,8 +445,8 @@ static void TestNitroFsAndNarc(void)
     MemoryReader_Init(&memory, &rom);
 
     assert(CpNitroFs_Open(&memory.reader, "top.bin", &file) == CP_OK && file.size == 7);
-    assert(CpFile_Read(&file, 0, buffer, 7) == CP_OK && buffer[0] == 0x11 && buffer[6] == 0x11);
-    assert(CpFile_Read(&file, 1, buffer, 7) == CP_ERR_IO); /* past the file's end */
+    assert(CpRomFile_Read(&file, 0, buffer, 7) == CP_OK && buffer[0] == 0x11 && buffer[6] == 0x11);
+    assert(CpRomFile_Read(&file, 1, buffer, 7) == CP_ERR_IO); /* past the file's end */
     assert(CpNitroFs_Open(&memory.reader, "dir/other.bin", &file) == CP_OK && file.size == 2);
     assert(CpNitroFs_Open(&memory.reader, "dir/sub/deep.narc", &file) == CP_OK);
     assert(CpNitroFs_Open(&memory.reader, "dir/missing.bin", &file) == CP_ERR_NOT_FOUND);
@@ -457,10 +457,10 @@ static void TestNitroFsAndNarc(void)
 
     assert(CpNarc_OpenPath(&memory.reader, "dir/sub/deep.narc", &narc) == CP_OK && narc.count == 3);
     assert(CpNarc_Member(&narc, 0, &member) == CP_OK && member.size == 3);
-    assert(CpFile_Read(&member, 0, buffer, 3) == CP_OK && buffer[2] == 1);
+    assert(CpRomFile_Read(&member, 0, buffer, 3) == CP_OK && buffer[2] == 1);
     assert(CpNarc_Member(&narc, 1, &member) == CP_OK && member.size == 0);
     assert(CpNarc_Member(&narc, 2, &member) == CP_OK && member.size == 9);
-    assert(CpFile_Read(&member, 8, buffer, 1) == CP_OK && buffer[0] == 3);
+    assert(CpRomFile_Read(&member, 8, buffer, 1) == CP_OK && buffer[0] == 3);
     assert(CpNarc_Member(&narc, 3, &member) == CP_ERR_NOT_FOUND);
     assert(CpNarc_OpenPath(&memory.reader, "top.bin", &narc) == CP_ERR_FORMAT);
 
@@ -563,7 +563,7 @@ static void TestMessageCipher(void)
     const uint16_t *texts[2] = { first, second };
     Bytes bank = MessageBank(0x1234, texts, 2);
     MemoryReader memory;
-    CpFile file;
+    CpRomFile file;
     uint16_t out[4];
     size_t length;
     uint32_t key = 0x1234u * 765u * 2u & 0xFFFF;
@@ -573,7 +573,7 @@ static void TestMessageCipher(void)
     assert(CpLe16(bank.data + 24) == (0x0001 ^ (uint16_t)(2u * 596947u)));
     assert(CpLe16(bank.data + 26) == (0x0002 ^ (uint16_t)(2u * 596947u + 18749u)));
     MemoryReader_Init(&memory, &bank);
-    CpFile_Whole(&memory.reader, &file);
+    CpRomFile_Whole(&memory.reader, &file);
     assert(CpMessage_Read(&file, 1, out, 4, &length) == CP_OK && length == 2);
     assert(out[0] == 1 && out[1] == 2 && out[2] == CP_CHAR_EOS);
     assert(CpMessage_Read(&file, 0, out, 4, NULL) == CP_OK && out[0] == 0x42 && out[1] == CP_CHAR_EOS);

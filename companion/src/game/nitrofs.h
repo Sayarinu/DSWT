@@ -8,19 +8,19 @@
  * bytes at a time, so nothing loads a whole ROM or archive into memory. */
 
 /* Find a file by its NitroFS path, such as "poketool/personal/evo.narc". */
-int CpNitroFs_Open(const CpReader *rom, const char *path, CpFile *out);
+int CpNitroFs_Open(const CpReader *rom, const char *path, CpRomFile *out);
 
 /* A NARC: its member table (BTAF) and data (GMIF) within the file. */
 typedef struct CpNarc {
-    CpFile file;
+    CpRomFile file;
     uint32_t fatOffset, dataOffset, dataSize;
     uint16_t count;
 } CpNarc;
 
-int CpNarc_Open(const CpFile *file, CpNarc *out);
+int CpNarc_Open(const CpRomFile *file, CpNarc *out);
 
 /* Member `index` as a byte range of the ROM. */
-int CpNarc_Member(const CpNarc *, uint32_t index, CpFile *out);
+int CpNarc_Member(const CpNarc *, uint32_t index, CpRomFile *out);
 
 /* Find a NitroFS file and open it as a NARC. */
 int CpNarc_OpenPath(const CpReader *rom, const char *path, CpNarc *out);

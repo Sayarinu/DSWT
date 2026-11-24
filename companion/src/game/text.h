@@ -11,7 +11,7 @@
 /* Entry `entry` of an encrypted message bank (an archive member). Writes at
  * most capacity - 1 codes and CP_CHAR_EOS; `length` (optional) gets the code
  * count before the end. CP_ERR_RANGE when the text does not fit. */
-int CpMessage_Read(const CpFile *bank, uint16_t entry, uint16_t *out, size_t capacity, size_t *length);
+int CpMessage_Read(const CpRomFile *bank, uint16_t entry, uint16_t *out, size_t capacity, size_t *length);
 
 /* A species name in the cartridge's language, from its message archive. */
 int CpGame_SpeciesName(const CpGame *, uint16_t species, uint16_t *out, size_t capacity, size_t *length);
@@ -20,7 +20,7 @@ int CpGame_SpeciesName(const CpGame *, uint16_t species, uint16_t *out, size_t c
 enum { CP_FONT_SYSTEM = 0, CP_FONT_MESSAGE = 1 };
 
 typedef struct CpFont {
-    CpFile file;
+    CpRomFile file;
     uint32_t headerSize, widthOffset, glyphCount;
     uint8_t maxWidth, maxHeight, tilesWide, tilesHigh;
 } CpFont;
