@@ -1,4 +1,4 @@
-# DS Companion: a DSi-mode BlocksDS ROM, ARM9 code with a stock ARM7 core.
+# DS Companion: a DSi-mode BlocksDS ROM, ARM9 code with the stock DSWiFi ARM7 core.
 # Adapted from BlocksDS's rom_arm9 template (CC0-1.0). Build it through
 # scripts/build-companion.sh, which runs it in tools/companion-builder.
 #
@@ -23,17 +23,16 @@ TLS_DIR			?= ../game/mbedtls-4.1.1
 # scripts/configure-connection.py writes this header from a profile.
 CONNECTION_HEADER	?= $(BUILDDIR)/dswt-connection.h
 
-# The ARM7 core only starts the hardware; Wi-Fi comes in a later change.
-ARM7ELF			:= $(BLOCKSDS)/sys/arm7/main_core/arm7_minimal.elf
+# The stock ARM7 core with DSWiFi; it also serves the microphone.
+ARM7ELF			:= $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf
 
 # The game-independent client core, compiled in place. The Nitro-only
-# flash.c, network.c and entropy_game.c and the per-game folders stay out.
-# boot.c stays out until the companion's game adapter supplies WtGame_*
-# (LUNE-869).
+# flash.c, network.c and entropy_game.c and the per-game folders stay out;
+# src/platform/nds supplies what they would (boot_glue.c, net.c, worker.c).
 CLIENT			:= ../client
 CORE_SOURCES		:= $(addprefix $(CLIENT)/src/wonder_trade/,\
 			   engine.c journal.c wire.c http.c tls.c seed.c \
-			   recovery.c entropy.c pokemon_codec.c)
+			   recovery.c entropy.c pokemon_codec.c boot.c)
 
 # The same Mbed TLS sources and include paths as the ROM builds
 # (client/src/wonder_trade/meson.build).
@@ -66,11 +65,13 @@ DEFINES			:= -D__NDS__ -D__BLOCKSDS__ -DARM9 \
 			   -DTF_PSA_CRYPTO_CONFIG_FILE='"wonder_trade/crypto_config.h"'
 INCLUDES		:= -Isrc -I$(CLIENT)/include \
 			   $(addprefix -I$(TLS_DIR)/,$(TLS_INCLUDE_DIRS)) \
-			   -I$(BLOCKSDS)/libs/libnds/include
+			   -I$(BLOCKSDS)/libs/libnds/include \
+			   -I$(BLOCKSDS)/libs/dswifi/include
 BASE_CFLAGS		:= $(ARCH) -std=gnu11 -O2 -ffunction-sections \
 			   -fdata-sections -specs=$(SPECS) $(DEFINES) $(INCLUDES)
-LDFLAGS			:= $(ARCH) -specs=$(SPECS) -L$(BLOCKSDS)/libs/libnds/lib
-LDLIBS			:= -Wl,--start-group $(BUILDDIR)/libwt_tls.a -lnds9 -lc -Wl,--end-group
+LDFLAGS			:= $(ARCH) -specs=$(SPECS) -L$(BLOCKSDS)/libs/libnds/lib \
+			   -L$(BLOCKSDS)/libs/dswifi/lib
+LDLIBS			:= -Wl,--start-group $(BUILDDIR)/libwt_tls.a -ldswifi9 -lnds9 -lc -Wl,--end-group
 
 APP_OBJS		:= $(patsubst %.c,$(BUILDDIR)/app/%.o,$(APP_SOURCES))
 CORE_OBJS		:= $(patsubst $(CLIENT)/src/wonder_trade/%.c,$(BUILDDIR)/core/%.o,$(CORE_SOURCES))

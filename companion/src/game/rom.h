@@ -28,8 +28,12 @@ enum {
 #define CP_BUILD_CODE_LEGACY_PLATINUM 1u
 
 /* Save block footer magic: every Korean Generation IV game uses its own. */
+#ifndef CP_SAVE_MAGIC_INTERNATIONAL
 #define CP_SAVE_MAGIC_INTERNATIONAL 0x20060623u
+#endif
+#ifndef CP_SAVE_MAGIC_KOREAN
 #define CP_SAVE_MAGIC_KOREAN 0x20070903u
+#endif
 
 /* What a cartridge header says about the game. */
 typedef struct CpRomInfo {
