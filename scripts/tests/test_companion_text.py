@@ -94,6 +94,16 @@ class CompanionTextTests(unittest.TestCase):
                 self.tool.font_source(cache)
         self.assertFalse(cache.exists())
 
+    def test_selected_variant_matches_redistribution_pin(self):
+        self.assertTrue(self.tool.FONT_URL.endswith('/src/Galmuri11-Condensed.kbitx'))
+        inventory = json.loads((ROOT / 'licensing/redistribution.json').read_text())
+        entry, = [entry for entry in inventory['components'] if 'Galmuri' in entry['name']]
+        self.assertIn('Galmuri11 Condensed v2.40.4', entry['name'])
+        self.assertIn(self.tool.FONT_URL.replace('raw.githubusercontent.com', 'github.com')
+                      .replace('/galmuri/', '/galmuri/blob/'), entry['evidence'])
+        self.assertIn(self.tool.FONT_SHA256, entry['requirements'])
+        self.assertIn(self.tool.FONT_SHA256, (ROOT / 'NOTICE').read_text())
+
     def test_missing_glyph_is_a_clear_build_failure(self):
         row = dict.fromkeys(self.tool.LANGUAGES, 'A')
         row['id'] = 'Test_Text_Hello'
@@ -173,6 +183,8 @@ int main(void) {
         manifest = json.loads((output / 'font-manifest.json').read_text())
         self.assertEqual(manifest['codepoints'], points)
         self.assertEqual(manifest['name'], 'DSWT Companion Pixel')
+        self.assertEqual(manifest['source_face'], 'Galmuri11 Condensed v2.40.4')
+        self.assertEqual(manifest['source_sha256'], self.tool.FONT_SHA256)
         before = {p.name: p.stat().st_mtime_ns for p in output.iterdir()}
         self.tool.emit(output, messages, glyphs, 14, 16)
         self.assertEqual(before, {p.name: p.stat().st_mtime_ns for p in output.iterdir()})

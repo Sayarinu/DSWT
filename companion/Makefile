@@ -143,6 +143,11 @@ TEXT_DIR                := $(BUILDDIR)/text
 TEXT_OBJ                := $(TEXT_DIR)/companion_text.o
 APP_OBJS                += $(TEXT_OBJ)
 BASE_CFLAGS             += -I$(TEXT_DIR)
+# Retain the complete text interface before the UI starts referencing it.
+TEXT_SYMBOLS            := Companion_Text Companion_FontCodepoints Companion_FontGlyphs \
+                           Companion_FontBitmap Companion_FontGlyphCount Companion_FontBitmapSize \
+                           Companion_FontAscent Companion_FontLineHeight
+LDFLAGS                 += $(foreach symbol,$(TEXT_SYMBOLS),-Wl,--undefined=$(symbol))
 $(ELF) $(LINK_CHECK): $(TEXT_OBJ)
 $(TEXT_OBJ): $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
 	@echo "  CC      $<"

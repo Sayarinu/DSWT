@@ -106,7 +106,7 @@ revisions in the final build by retaining the immutable image rather than
 updating its packages. The package revisions and compiler were checked on
 linux/arm64; verify them on any other build architecture before release.
 
-The proposed UI font is Galmuri11 Bold v2.40.4, Copyright 2019-2025 Lee Minseo,
+The UI font is Galmuri11 Condensed v2.40.4, Copyright 2019-2025 Lee Minseo,
 under OFL-1.1. Its upstream README identifies Bold and Condensed glyphs as
 original; regular faces with Nintendo-derived design ranges are not cleared
 here. Include licensing/ds-companion-galmuri.txt with the font and executable.
@@ -115,6 +115,13 @@ licence. Do not sell the font alone or imply author endorsement. No Reserved
 Font Name is declared in the reviewed licence; name and document the derivative
 subset distinctly. OFL requires no source offer. Review the actual selected
 glyphs, language coverage and readability before distributing a font subset.
+The pinned source is src/Galmuri11-Condensed.kbitx at
+bdb86ae89466a361eb8df861222736b81ff975ef, SHA-256
+7718e0faef8a9593e8f94307f57c3d77bfeaaeed08bdd381bd2b23a2d85e09b3.
+The DSWT Companion Pixel subset covers all 416 currently required codepoints
+at a 16px line height, with original bearings and advances and no fallback.
+The build retains the OFL notice and records the source and selected codepoints
+in its font manifest.
 
 grit and ndstool are build tools, not linked runtime dependencies. This review
 does not permit redistributing them, the toolchain image, example assets,

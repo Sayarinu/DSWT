@@ -21,10 +21,10 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 LANGUAGES = ('en_US', 'fr_FR', 'de_DE', 'it_IT', 'es_ES', 'ja_JP', 'ko_KR')
-# LUNE-864 pins this face by commit; its tree records Git blob 08b9557b58342f719f5fb9530b1c933af88f884a.
+# Release pinned in LUNE-864; Condensed source Git blob cf954a44a98aa50a679d4af5b2ee5efed5ac89d0.
 FONT_REVISION = 'bdb86ae89466a361eb8df861222736b81ff975ef'
-FONT_URL = f'https://raw.githubusercontent.com/quiple/galmuri/{FONT_REVISION}/src/Galmuri11-Bold.kbitx'
-FONT_SHA256 = '064ac0857035b9570301c9800307d0f8fa357ef13b2cb19f7008d5f25995d1d5'
+FONT_URL = f'https://raw.githubusercontent.com/quiple/galmuri/{FONT_REVISION}/src/Galmuri11-Condensed.kbitx'
+FONT_SHA256 = '7718e0faef8a9593e8f94307f57c3d77bfeaaeed08bdd381bd2b23a2d85e09b3'
 PLACEHOLDER = re.compile(r'\{[a-z][a-z0-9_]*\}')
 
 
@@ -128,7 +128,7 @@ def write_if_changed(path, data):
 
 def emit(output, messages, glyphs, ascent, line_height):
     header = '''/* UTF-8 strings, indexed by text id and language. Replace named {tokens} before drawing.
- * DSWT Companion Pixel: OFL-1.1 subset of Galmuri11 Bold v2.40.4.
+ * DSWT Companion Pixel: OFL-1.1 subset of Galmuri11 Condensed v2.40.4.
  * Copyright 2019-2025 Lee Minseo. See dswt-companion-pixel.ofl.txt.
  */
 #ifndef DSWT_COMPANION_TEXT_H
@@ -186,7 +186,7 @@ extern const uint8_t Companion_FontAscent, Companion_FontLineHeight;
     manifest = {
         'name': 'DSWT Companion Pixel', 'license': 'OFL-1.1',
         'copyright': 'Copyright 2019-2025 Lee Minseo',
-        'source_face': 'Galmuri11 Bold v2.40.4', 'source_revision': FONT_REVISION,
+        'source_face': 'Galmuri11 Condensed v2.40.4', 'source_revision': FONT_REVISION,
         'source_url': FONT_URL, 'source_sha256': FONT_SHA256,
         'changes': 'Subset to catalogue codepoints plus printable ASCII; monochrome row-packed MSB-first bitmap conversion; original bearings and advances retained.',
         'encoding': 'UTF-8, literal named {tokens}; newline is layout only',
@@ -223,7 +223,8 @@ def samples(directory, messages, glyphs, ascent, line_height):
     """Render sample strings from the same packed glyph bytes emitted to C, at 256px."""
     for language in LANGUAGES:
         rows = [row for row in messages if row['id'] in (
-            'WonderTrade_Text_Trade', 'Companion_Text_SavePickerTitle', 'Companion_Text_GameConfirm',
+            'WonderTrade_Text_Trade', 'WonderTrade_Text_RefusedEgg',
+            'Companion_Text_SavePickerTitle', 'Companion_Text_GameConfirm',
             'Companion_Text_WifiPasswordWarning', 'Companion_Text_BackupWarning')]
         text = '\n\n'.join(row[language] for row in rows)
         text = text.replace('{game}', 'Platinum').replace('{language}', language).replace('{name}', 'Platinum')
@@ -262,7 +263,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wonder-trade', type=Path, default=ROOT / 'client/res/text/wonder_trade.json')
     parser.add_argument('--companion', type=Path, default=ROOT / 'companion/res/text/companion.json')
-    parser.add_argument('--font-cache', type=Path, default=ROOT / 'game/companion/font/Galmuri11-Bold.kbitx')
+    parser.add_argument('--font-cache', type=Path, default=ROOT / 'game/companion/font/Galmuri11-Condensed.kbitx')
     parser.add_argument('--output', type=Path, default=ROOT / 'game/companion/build/text')
     parser.add_argument('--samples-dir', type=Path)
     args = parser.parse_args()
