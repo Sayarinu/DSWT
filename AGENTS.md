@@ -84,7 +84,6 @@ python3 client/tests/test_tls.py game/tls-tests/tls_probe
 cmake -S companion/tests -B game/companion-tests
 cmake --build game/companion-tests --parallel 2
 ctest --test-dir game/companion-tests --output-on-failure
-docker build -f tools/companion-builder/Dockerfile -t dswt-companion-builder tools/companion-builder
 CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
 docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
 import os

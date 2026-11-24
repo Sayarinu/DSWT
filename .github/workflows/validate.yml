@@ -90,7 +90,6 @@ jobs:
           ctest --test-dir game/companion-tests --output-on-failure
       - name: Build companion with the dummy connection profile
         run: |
-          docker build -f tools/companion-builder/Dockerfile -t dswt-companion-builder tools/companion-builder
           CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
       - name: Check DS and DSi ROM header
         run: |
