@@ -34,3 +34,10 @@ Copyright (C) 2021 Max Thomas
 Copyright (C) 2025 Antonio Niño Díaz
 
 From source/arm7/twl/card.h and card.twl.c.
+
+Additional BMI header copyright notice (MIT, same terms above)
+=============================================================
+
+Copyright (C) 2026 PoroCYon
+
+From include/dsiwifi7_bmi.h.

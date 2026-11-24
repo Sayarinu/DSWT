@@ -16,9 +16,10 @@ licensing/redistribution.json records the exact SDK, nested library, toolchain
 and font source revisions and the distribution requirements for each. This
 review does not add the .nds to the release allowlist or clear a finished build.
 For an eventual statically linked .nds distribution, put this NOTICE, the
-project LICENSE and the applicable licensing/ds-companion-*.txt files in the
-same zip as the executable. Preserve the individual upstream notices in those
-files; the project MIT licence does not replace them.
+project LICENSE, licensing/mbedtls.txt and the applicable
+licensing/ds-companion-*.txt files in the same zip as the executable.
+Preserve the individual upstream notices in those files; the project MIT
+licence does not replace them.
 
 BlocksDS crt0 startup code is covered by MPL-2.0, a file-level copyleft licence.
 Its Source Code Form is governed by MPL-2.0; the licence and associated Zlib
@@ -27,15 +28,22 @@ The reviewed Source Code Form is available at:
 https://github.com/blocksds/sdk/tree/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/crts
 Distributors must make the exact covered source, including their modifications,
 available under MPL-2.0 by reasonable, timely means at no more than distribution
-cost, and tell recipients where to obtain it. Include that source in the zip
-or provide a maintained matching download and identify it there. Preserve
-source notices. MPL permits the larger application under its own terms.
+cost, and tell recipients where to obtain it. Each companion release must include
+BlocksDS v1.25.0 sys/crts/ (MPL-2.0) source, including any modifications, in
+the zip or a working link to that exact source with the release. Maintain the
+matching source download for recipients. Preserve source notices. MPL permits
+the larger application under its own terms.
 
 The companion/Makefile is adapted from BlocksDS v1.25.0's rom_arm9 template,
 SPDX-FileContributor: Antonio Niño Díaz, 2023-2026, under CC0-1.0. The full
 CC0 dedication and fallback licence are in licensing/ds-companion-cc0.txt;
 include it as project policy. CC0 requires no attribution or source offer.
 Original DSWT changes remain under the project MIT licence.
+
+The default ROM banner icon embedded from $(BLOCKSDS)/sys/icon.gif is by
+DVdo, marked CC0 1.0 in BlocksDS v1.25.0 docs/content/docs/credits.md.
+Include licensing/ds-companion-cc0.txt as project policy; CC0 requires no
+attribution or source offer. This covers the default icon only.
 
 libnds uses Zlib, with Doug Lea's dlmalloc implementation under MIT-0 and its
 header under CC0-1.0. Their notices are in licensing/ds-companion-libnds.txt;
@@ -54,7 +62,8 @@ the v1.25.0 Maxmod notice extends Antonio Niño Díaz's credit through 2026.
 
 DSWiFi and its dsiwifi-derived DSi driver use MIT; retain the notices in
 licensing/ds-companion-dswifi.txt, including Daz Jones, Max Thomas, Stephen
-Stair, Dave Murphy and Antonio Niño Díaz. The bundled lwIP 2.2.1 uses BSD
+Stair, Dave Murphy, Antonio Niño Díaz and PoroCYon (Copyright (C) 2026,
+include/dsiwifi7_bmi.h). The bundled lwIP 2.2.1 uses BSD
 variants and a permissive PPP header notice. Include its complete collected
 copyright, condition and disclaimer texts in licensing/ds-companion-lwip.txt;
 observe non-endorsement terms. Neither component requires a source offer.
@@ -64,8 +73,22 @@ Include licensing/ds-companion-mbedtls.txt (the original dual-licence text),
 preserve applicable notices and identify redistributed source modifications.
 This selection imposes no GPL application copyleft or source-offer obligation.
 
+The companion also links its own bounded Mbed TLS 4.1.1 / TF-PSA-Crypto 1.2.0
+through libwt_tls.a, built from the checksum-pinned client/tls-dependency.json
+source using client/include/wonder_trade/tls_config.h and crypto_config.h.
+This dependency selects Apache-2.0; Copyright The Mbed TLS Contributors.
+Ship licensing/mbedtls.txt with every .nds zip and preserve applicable notices.
+The bounded profile leaves MBEDTLS_ECDH_VARIANT_EVEREST_ENABLED and
+MBEDTLS_PSA_P256M_DRIVER_ENABLED undefined: the Everest and p256-m translation
+units compile with their implementations disabled, adding no driver code or
+separate driver copyright notice to the executable. Recheck their notices if
+the profile changes, and verify the final ARM9 linked objects before release.
+Apache-2.0 requires no application copyleft or source offer for static linking.
+
 The pinned image installs Wonderful picolibc 1.8.13.r26367.770d86889-1,
-which supplies libc/libm under mixed permissive per-file terms.
+whose source meson.build declares version 1.8.12 at commit
+770d868896622d726129fa99168d5d20160d0f55. Record both the package and source
+labels; this supplies libc/libm under mixed permissive per-file terms.
 Include the full copyright/licence inventory in
 licensing/ds-companion-picolibc.txt. Its separately licensed AGPL build helper
 and GPL test files are not part of the linked runtime or this distribution.

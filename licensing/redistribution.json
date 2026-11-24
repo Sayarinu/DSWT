@@ -763,6 +763,17 @@
       "requirements": "The companion/Makefile in LUNE-862 is adapted from the BlocksDS v1.25.0 sys/default_makefiles/rom_arm9 template, marked SPDX-License-Identifier: CC0-1.0 and SPDX-FileContributor: Antonio Niño Díaz, 2023-2026. CC0 dedicates copyright and related rights to the public domain with a fallback licence, without attribution, source-offer or application copyleft requirements. Keep the full upstream CC0 text in licensing/ds-companion-cc0.txt and ship it in the .nds zip as project policy. Original DSWT changes remain under the project MIT licence. This review covers the Makefile template, not example assets or the BlocksDS logo."
     },
     {
+      "name": "DS Companion: BlocksDS default ROM icon",
+      "license": "CC0-1.0",
+      "evidence": [
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/docs/content/docs/credits.md",
+        "https://github.com/blocksds/sdk/blob/da93ad5cda6f3aea01769959b3ef7b3c5dd93673/sys/icon.gif",
+        "licensing/ds-companion-cc0.txt"
+      ],
+      "decision": "pinned_embedded_asset_review; nds_release_not_allowlisted",
+      "requirements": "LUNE-862 companion/Makefile embeds $(BLOCKSDS)/sys/icon.gif in the .nds ROM banner. BlocksDS v1.25.0 docs/content/docs/credits.md identifies this default ROM icon as by DVdo, marked CC0 1.0. Pin the SDK revision above. CC0 dedicates copyright and related rights to the public domain with a fallback licence; no attribution, source offer or application copyleft is required. Include licensing/ds-companion-cc0.txt with the .nds zip as project policy. This covers only the default ROM icon, not the separately licensed BlocksDS logo or other example assets."
+    },
+    {
       "name": "DS Companion: libnds",
       "license": "Zlib; dlmalloc: MIT-0 (implementation), CC0-1.0 (header); bundled FatFs and adapters have separate FatFs terms",
       "evidence": [
@@ -785,10 +796,11 @@
         "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/COPYING",
         "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/source/arm7/twl/card.twl.c",
         "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/source/arm7/twl/ath/bmi.h",
+        "https://github.com/blocksds/dswifi/blob/84d91e8c517bd7d15d38aff039640beaf359c230/include/dsiwifi7_bmi.h",
         "licensing/ds-companion-dswifi.txt"
       ],
       "decision": "pinned_dependency_review; nds_release_not_allowlisted",
-      "requirements": "Use the DSWiFi gitlink from BlocksDS v1.25.0, including its DSi/TWL driver derived from dsiwifi; do not substitute a separately downloaded dsiwifi tree. Its driver files carry MIT identifiers, including Daz Jones (2015-2016), Max Thomas (2021) and Antonio Niño Díaz (2025); COPYING also credits Stephen Stair and Dave Murphy. Preserve all of them, not only the incomplete top-level author list. Include licensing/ds-companion-dswifi.txt with every statically linked .nds zip. No source offer is required by MIT. lwIP on ARM9 and Mbed TLS crypto on ARM7 are distinct bundled components reviewed below; DSWiFi is not MIT-only as a whole. This does not authorize bundling a dumped Wi-Fi firmware image."
+      "requirements": "Use the DSWiFi gitlink from BlocksDS v1.25.0, including its DSi/TWL driver derived from dsiwifi; do not substitute a separately downloaded dsiwifi tree. Its driver files carry MIT identifiers, including Daz Jones (2015-2016), Max Thomas (2021) and Antonio Niño Díaz (2025); COPYING also credits Stephen Stair and Dave Murphy. include/dsiwifi7_bmi.h carries MIT and Copyright (C) 2026 PoroCYon. Preserve all of them, not only the incomplete top-level author list. Include licensing/ds-companion-dswifi.txt with every statically linked .nds zip. No source offer is required by MIT. lwIP on ARM9 and Mbed TLS crypto on ARM7 are distinct bundled components reviewed below; DSWiFi is not MIT-only as a whole. This does not authorize bundling a dumped Wi-Fi firmware image."
     },
     {
       "name": "DS Companion: bundled lwIP 2.2.1",
@@ -817,6 +829,21 @@
       "requirements": "The DSWiFi ARM7 build includes this crypto subset, distinct from the game client TLS dependency. The bundled version macros identify 3.6.4; pin the DSWiFi subtree, including its TWL changes, rather than substituting stock Mbed TLS. Exercise the Apache-2.0 option, not the GPL option. Include licensing/ds-companion-mbedtls.txt and Copyright The Mbed TLS Contributors in the .nds zip; the copied upstream file preserves both offered licence texts, but distribution selects Apache-2.0. Preserve applicable copyright, patent, trademark and attribution notices in source copies, identify changed files when redistributing modified source, and retain any applicable upstream NOTICE attribution. No NOTICE file is present in this bundled subset. Apache-2.0 requires no source offer or application copyleft for static linking."
     },
     {
+      "name": "DS Companion: bounded Mbed TLS 4.1.1 with TF-PSA-Crypto 1.2.0",
+      "license": "Apache-2.0 (selected from dual Apache-2.0 OR GPL-2.0-or-later)",
+      "evidence": [
+        "client/tls-dependency.json",
+        "client/include/wonder_trade/tls_config.h",
+        "client/include/wonder_trade/crypto_config.h",
+        "https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-4.1.1",
+        "https://github.com/Mbed-TLS/TF-PSA-Crypto/tree/tf-psa-crypto-1.2.0/drivers/everest",
+        "https://github.com/Mbed-TLS/TF-PSA-Crypto/tree/tf-psa-crypto-1.2.0/drivers/p256-m",
+        "licensing/mbedtls.txt"
+      ],
+      "decision": "pinned_external_companion_dependency; apache_2_0_selected; nds_release_not_allowlisted",
+      "requirements": "The companion/Makefile from LUNE-862 builds libwt_tls.a from game/mbedtls-4.1.1, including its TF-PSA-Crypto 1.2.0, and links it into the ARM9 .nds. This is the companion's own TLS dependency using the shared bounded client profile, separate from DSWiFi's ARM7 Mbed TLS 3.6.4 subset and the game client distribution scope. Use the SHA-256-pinned archive in client/tls-dependency.json. Ship licensing/mbedtls.txt (Apache-2.0) and Copyright The Mbed TLS Contributors with every .nds zip. Preserve applicable upstream notices and identify modified source files if redistributed; static linking requires no application copyleft or source offer under Apache-2.0. The bounded tls_config.h and crypto_config.h leave MBEDTLS_ECDH_VARIANT_EVEREST_ENABLED and MBEDTLS_PSA_P256M_DRIVER_ENABLED undefined. Although the upstream build compiles everest and p256-m translation units, their implementation bodies are preprocessed out: neither contributes driver code under this profile. Everest's separate Copyright 2016-2018 INRIA and Microsoft Corporation (Apache-2.0), and p256-m's Mbed TLS Contributors copyright and Manuel Pégourié-Gonnard author credit, therefore add no driver notice requirement for this executable. Re-audit these and any other enabled drivers if configuration changes. Inspect final ARM9 linked objects and release contents before distribution; no final .nds is cleared here."
+    },
+    {
       "name": "DS Companion: FatFs R0.16 patch 2 and libnds adapters",
       "license": "FatFs permissive source-notice licence (BSD-style, not standard BSD-1-Clause)",
       "evidence": [
@@ -841,7 +868,7 @@
         "licensing/ds-companion-picolibc.txt"
       ],
       "decision": "pinned_dependency_review; runtime_only; nds_release_not_allowlisted",
-      "requirements": "The pinned v1.25.0 image installs Wonderful picolibc package 1.8.13.r26367.770d86889-1; its revision resolves to the full Codeberg source commit above. Use the immutable image, not a fresh package-manager update or moving source branch. This libc/libm supplies the C runtime; libnds supplies DS-specific POSIX glue. Ship the complete COPYING.picolibc as licensing/ds-companion-picolibc.txt with the .nds zip to retain all per-file copyright, permission and disclaimer variants, not just a BSD label. Runtime static linking under the reviewed permissive terms requires no source offer. The inventory also lists scripts/GeneratePicolibcCrossFile.sh (AGPLv3) and test/test-stdio/test-printf-testcases.h plus test-printf.c (GPL-2.0-or-later): these are not linked runtime files. Do not bundle those scripts/tests or toolchain source/binaries without their separate copyleft compliance review. The image package database confirms this libc revision on linux/arm64; inspect final linked objects for both processors before release and verify packages on any other build architecture."
+      "requirements": "The pinned v1.25.0 image installs Wonderful picolibc package 1.8.13.r26367.770d86889-1; its revision resolves to source commit 770d868896622d726129fa99168d5d20160d0f55, whose meson.build declares version 1.8.12. Retain both the package version and source version label to identify the pin unambiguously. Use the immutable image, not a fresh package-manager update or moving source branch. This libc/libm supplies the C runtime; libnds supplies DS-specific POSIX glue. Ship the complete COPYING.picolibc as licensing/ds-companion-picolibc.txt with the .nds zip to retain all per-file copyright, permission and disclaimer variants, not just a BSD label. Runtime static linking under the reviewed permissive terms requires no source offer. The inventory also lists scripts/GeneratePicolibcCrossFile.sh (AGPLv3) and test/test-stdio/test-printf-testcases.h plus test-printf.c (GPL-2.0-or-later): these are not linked runtime files. Do not bundle those scripts/tests or toolchain source/binaries without their separate copyleft compliance review. The image package database confirms this libc revision on linux/arm64; inspect final linked objects for both processors before release and verify packages on any other build architecture."
     },
     {
       "name": "DS Companion: GCC runtime libraries",
