@@ -33,7 +33,7 @@ ARM7ELF			:= $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf
 CLIENT			:= ../client
 CORE_SOURCES		:= $(addprefix $(CLIENT)/src/wonder_trade/,\
 			   engine.c journal.c wire.c http.c tls.c seed.c \
-			   recovery.c entropy.c pokemon_codec.c boot.c)
+			   recovery.c entropy.c pokemon_codec.c boot.c session.c)
 
 # The same Mbed TLS sources and include paths as the ROM builds
 # (client/src/wonder_trade/meson.build).

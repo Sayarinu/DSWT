@@ -1,0 +1,188 @@
+#ifndef COMPANION_TEST_SAVE_FIXTURE_H
+#define COMPANION_TEST_SAVE_FIXTURE_H
+
+/* Synthetic Platinum saves for the adapter tests: no ROM, save or player
+ * data. Pokémon are built here and encrypted with WtPokemon_Encode; the party
+ * extension and the empty slots are encrypted by this file's own LCG. */
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "adapter/platinum.h"
+#include "save/save_image.h"
+#include "save/sha256.h"
+#include "wonder_trade/pokemon_codec.h"
+
+enum {
+    FX_GENERAL = 0, FX_GENERAL_SIZE = 53036, FX_BOXES = 53036, FX_BOXES_SIZE = 74212,
+    FX_PARTY = 152, FX_MON = 236, FX_BOX_MON = 136, FX_PC = 4
+};
+
+typedef struct FxFile {
+    unsigned char bytes[CP_SAVE_FILE_SIZE];
+    unsigned writes, failWrite;
+} FxFile;
+
+static inline uint32_t Fx32(const unsigned char *p)
+{
+    return p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static inline void FxPut16(unsigned char *p, unsigned value) { p[0] = (unsigned char)value; p[1] = (unsigned char)(value >> 8); }
+static inline void FxPut32(unsigned char *p, uint32_t value) { FxPut16(p, value & 65535); FxPut16(p + 2, value >> 16); }
+
+static inline int FxRead(void *context, uint32_t offset, void *data, size_t size)
+{
+    FxFile *file = context;
+    if (offset > sizeof(file->bytes) || size > sizeof(file->bytes) - offset) return -1;
+    memcpy(data, file->bytes + offset, size);
+    return 0;
+}
+
+static inline int FxWrite(void *context, uint32_t offset, const void *data, size_t size)
+{
+    FxFile *file = context;
+    if (++file->writes == file->failWrite) return -1;
+    if (offset > sizeof(file->bytes) || size > sizeof(file->bytes) - offset) return -1;
+    memcpy(file->bytes + offset, data, size);
+    return 0;
+}
+
+static inline int FxSync(void *context) { (void)context; return 0; }
+static inline int FxSize(void *context, uint64_t *size) { (void)context; *size = CP_SAVE_FILE_SIZE; return 0; }
+
+/* A separate formulation of the game's EncodeData, halfword by halfword. */
+static inline void FxCrypt(unsigned char *bytes, unsigned size, uint32_t seed)
+{
+    unsigned i;
+    for (i = 0; i < size / 2; ++i) {
+        unsigned word;
+        seed = seed * 1103515245u + 24691u;
+        word = (bytes[2 * i] | (bytes[2 * i + 1] << 8)) ^ (seed >> 16);
+        bytes[2 * i] = (unsigned char)word; bytes[2 * i + 1] = (unsigned char)(word >> 8);
+    }
+}
+
+static inline unsigned FxCrc(const unsigned char *p, unsigned size)
+{
+    unsigned crc = 0xffff, i;
+    while (size--) {
+        unsigned byte = *p++;
+        for (i = 0; i < 8; ++i) {
+            unsigned carry = ((crc >> 15) ^ (byte >> 7)) & 1;
+            crc = ((crc << 1) ^ (carry ? 0x1021 : 0)) & 65535;
+            byte <<= 1;
+        }
+    }
+    return crc;
+}
+
+static inline void FxSeal(FxFile *file, unsigned half, unsigned block, uint32_t global, uint32_t counter)
+{
+    static const unsigned offsets[2] = { FX_GENERAL, FX_BOXES }, sizes[2] = { FX_GENERAL_SIZE, FX_BOXES_SIZE };
+    unsigned char *body = file->bytes + half * CP_SAVE_HALF_SIZE + offsets[block];
+    unsigned char *footer = body + sizes[block] - 20;
+    unsigned crc = FxCrc(body, sizes[block] - 20);
+    FxPut32(footer, global); FxPut32(footer + 4, counter); FxPut32(footer + 8, sizes[block]);
+    FxPut32(footer + 12, CP_SAVE_MAGIC_INTERNATIONAL); footer[16] = (unsigned char)block; footer[17] = 0;
+    footer[18] = (unsigned char)crc; footer[19] = (unsigned char)(crc >> 8);
+}
+
+/* Pokemon_Init's empty party Pokémon, or BoxPokemon_Init's for 136 bytes. */
+static inline void FxEmpty(unsigned char *bytes, unsigned size)
+{
+    memset(bytes, 0, size);
+    FxCrypt(bytes + 8, 128, 0);
+    if (size == FX_MON) FxCrypt(bytes + FX_BOX_MON, 100, 0);
+}
+
+typedef struct FxSpec {
+    uint32_t pid;
+    unsigned species, item, form, ball, egg, hp, capsule;
+} FxSpec;
+
+static inline void FxCanonical(const FxSpec *spec, unsigned char canonical[136])
+{
+    unsigned sum = 0, i;
+    memset(canonical, 0, 136);
+    FxPut32(canonical, spec->pid);
+    FxPut16(canonical + 0x08, spec->species); FxPut16(canonical + 0x0A, spec->item);
+    FxPut32(canonical + 0x0C, 12345); /* OT ID */
+    FxPut32(canonical + 0x10, spec->pid % 9973); /* experience: distinct per Pokémon */
+    FxPut16(canonical + 0x28, 33); /* a move */
+    FxPut32(canonical + 0x38, (spec->pid & 0x3fffffff) | ((uint32_t)(spec->egg & 1) << 30));
+    canonical[0x40] = (unsigned char)(spec->form << 3);
+    canonical[0x83] = (unsigned char)spec->ball;
+    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
+    FxPut16(canonical + 6, sum & 65535);
+}
+
+/* A party image: the encrypted box Pokémon, then its encrypted extension. */
+static inline void FxPartyMon(const FxSpec *spec, unsigned char image[FX_MON])
+{
+    unsigned char canonical[136], *extension = image + FX_BOX_MON;
+    FxCanonical(spec, canonical);
+    assert(WtPokemon_Encode(canonical, image) == 0);
+    memset(extension, 0, 100);
+    extension[4] = 5; extension[5] = (unsigned char)spec->capsule;
+    FxPut16(extension + 6, spec->hp); FxPut16(extension + 8, 40);
+    FxCrypt(extension, 100, spec->pid);
+}
+
+static inline FxSpec FxDefault(unsigned index)
+{
+    FxSpec spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.pid = 0x1000193u * (index + 1) + 77; spec.species = 25 + index; spec.ball = 4; spec.hp = 20;
+    return spec;
+}
+
+static inline unsigned char *FxGeneral(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_GENERAL; }
+static inline unsigned char *FxBoxes(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_BOXES; }
+
+/* A save whose newer half (1) holds count party Pokémon from specs; the older
+ * half differs, as a retail save's alternate copy does. */
+static inline void FxBuild(FxFile *file, const FxSpec *specs, unsigned count)
+{
+    unsigned half, i;
+    memset(file, 0, sizeof(*file));
+    for (half = 0; half < 2; ++half) {
+        unsigned char *general = FxGeneral(file, half), *boxes = FxBoxes(file, half);
+        for (i = 0; i < FX_GENERAL_SIZE - 20; ++i) general[i] = (unsigned char)(i * 7 + half);
+        for (i = 0; i < FX_BOXES_SIZE - 20; ++i) boxes[i] = (unsigned char)(i * 11 + 3);
+        FxPut32(general + FX_PARTY, 6); FxPut32(general + FX_PARTY + 4, count);
+        for (i = 0; i < 6; ++i) {
+            unsigned char *slot = general + FX_PARTY + 8 + i * FX_MON;
+            if (i < count) FxPartyMon(&specs[i], slot); else FxEmpty(slot, FX_MON);
+        }
+        for (i = 0; i < 18 * 30; ++i) FxEmpty(boxes + FX_PC + i * FX_BOX_MON, FX_BOX_MON);
+        FxSeal(file, half, 0, 10 + half, 20 + half);
+        FxSeal(file, half, 1, 10 + half, 30 + half);
+    }
+}
+
+static inline unsigned char *FxImageParty(CpSaveImage *image, unsigned slot)
+{
+    return CpSaveImage_Block(image, 0) + FX_PARTY + 8 + slot * FX_MON;
+}
+
+static inline unsigned FxImageCount(CpSaveImage *image)
+{
+    return Fx32(CpSaveImage_Block(image, 0) + FX_PARTY + 4);
+}
+
+static inline unsigned char *FxImageBox(CpSaveImage *image, unsigned box, unsigned slot)
+{
+    return CpSaveImage_Block(image, 1) + FX_PC + (box * 30 + slot) * FX_BOX_MON;
+}
+
+static inline int FxSha(const unsigned char *bytes, size_t size, unsigned char digest[32])
+{
+    CpSaveSha256 hash;
+    CpSaveSha256_Init(&hash);
+    CpSaveSha256_Update(&hash, bytes, size);
+    CpSaveSha256_Finish(&hash, digest);
+    return 0;
+}
+
+#endif

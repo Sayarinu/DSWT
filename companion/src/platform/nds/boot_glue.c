@@ -1,11 +1,10 @@
 /* The core symbols boot.c, recovery and the entropy pool need from the
  * platform (wonder_trade/flash.h, wonder_trade/game_adapter.h).
  *
- * The platform-only ones are implemented here. The inventory and game
- * checks need the save image and game data (LUNE-871, LUNE-873); until then
- * they are stubs that fail safely: nothing can be held, nothing is proven
- * absent, so WtBoot_Check blocks any journal with work pending instead of
- * granting it. */
+ * The platform-only ones are implemented here. The inventory, checkpoint,
+ * leave and hold checks are the save adapter's (adapter/platinum.c). Showing a
+ * received Pokémon needs game data (LUNE-873); until then it is a stub that
+ * fails safely. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,35 +56,7 @@ void WtGame_SampleInput(WtEntropySample *sample)
     }
 }
 
-/* STUB (LUNE-871): party and PC access on the save image. */
-int WtGame_Inventory(void *game, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
-{
-    (void)game; (void)step; (void)entry; (void)slot;
-    return -1;
-}
-
-/* STUB (LUNE-871): make both save halves match before a deposit. */
-int WtGame_Checkpoint(WtGame *game)
-{
-    (void)game;
-    return -1;
-}
-
-/* STUB (LUNE-871): nothing is proven, so boot blocks pending work. */
-int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
-{
-    (void)game; (void)entry;
-    return 0;
-}
-
-/* STUB (LUNE-873): refuse every delivery; it stays pending on the server. */
-int WtGame_CanHold(void *game, const unsigned char pokemon[WT_POKEMON_SIZE])
-{
-    (void)game; (void)pokemon;
-    return 0;
-}
-
-/* STUB (LUNE-871): no received Pokémon to show. */
+/* STUB (LUNE-873): no received Pokémon to show. */
 int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
 {
     (void)entry;
