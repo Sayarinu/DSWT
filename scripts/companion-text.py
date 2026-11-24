@@ -13,11 +13,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import struct
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
-import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 LANGUAGES = ('en_US', 'fr_FR', 'de_DE', 'it_IT', 'es_ES', 'ja_JP', 'ko_KR')
@@ -58,13 +56,16 @@ def load_messages(paths):
 
 
 def font_source(cache):
+    source = cache if cache.exists() else FONT_URL
     if cache.exists():
         data = cache.read_bytes()
     else:
         with urllib.request.urlopen(FONT_URL, timeout=60) as response:
             data = response.read(2 * 1024 * 1024 + 1)
     if hashlib.sha256(data).hexdigest() != FONT_SHA256:
-        raise ValueError(f'font checksum mismatch: {cache}; expected SHA-256 {FONT_SHA256}')
+        cache.unlink(missing_ok=True)
+        raise ValueError(f'font checksum mismatch: {source} rejected; expected SHA-256 {FONT_SHA256}. '
+                         f'Delete {cache} if present and rerun to re-fetch.')
     write_if_changed(cache, data)
     return data
 
@@ -219,58 +220,15 @@ def generate(paths, cache, output):
     return messages, glyphs, ascent, line_height
 
 
-def samples(directory, messages, glyphs, ascent, line_height):
-    """Render sample strings from the same packed glyph bytes emitted to C, at 256px."""
-    for language in LANGUAGES:
-        rows = [row for row in messages if row['id'] in (
-            'WonderTrade_Text_Trade', 'WonderTrade_Text_RefusedEgg',
-            'Companion_Text_SavePickerTitle', 'Companion_Text_GameConfirm',
-            'Companion_Text_WifiPasswordWarning', 'Companion_Text_BackupWarning')]
-        text = '\n\n'.join(row[language] for row in rows)
-        text = text.replace('{game}', 'Platinum').replace('{language}', language).replace('{name}', 'Platinum')
-        lines, line, advance = [], '', 0
-        for char in text:
-            width = glyphs[ord(char)][2] if char != '\n' else 0
-            if char == '\n' or advance + width > 248:
-                lines.append(line)
-                line, advance = '', 0
-            if char != '\n':
-                line += char
-                advance += width
-        lines.append(line)
-        width, height = 256, len(lines) * line_height + 8
-        pixels = [bytearray([255] * width) for _ in range(height)]
-        for number, line in enumerate(lines):
-            pen = 4
-            for char in line:
-                x, y, advance, gw, gh, data = glyphs[ord(char)]
-                stride = (gw + 7) // 8
-                for gy in range(gh):
-                    for gx in range(gw):
-                        px, py = pen + x + gx, 4 + number * line_height + ascent - y + gy
-                        if data[gy * stride + gx // 8] & (128 >> (gx % 8)) and 0 <= px < width and 0 <= py < height:
-                            pixels[py][px] = 0
-                pen += advance
-        def chunk(kind, data):
-            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
-        png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 0, 0, 0, 0))
-        png += chunk(b'IDAT', zlib.compress(b''.join(b'\0' + row for row in pixels))) + chunk(b'IEND', b'')
-        write_if_changed(directory / f'{language}.png', png)
-        write_if_changed(directory / f'{language}.txt', (text + '\n').encode())
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wonder-trade', type=Path, default=ROOT / 'client/res/text/wonder_trade.json')
     parser.add_argument('--companion', type=Path, default=ROOT / 'companion/res/text/companion.json')
     parser.add_argument('--font-cache', type=Path, default=ROOT / 'game/companion/font/Galmuri11-Condensed.kbitx')
     parser.add_argument('--output', type=Path, default=ROOT / 'game/companion/build/text')
-    parser.add_argument('--samples-dir', type=Path)
     args = parser.parse_args()
     try:
         result = generate([args.wonder_trade, args.companion], args.font_cache, args.output)
-        if args.samples_dir:
-            samples(args.samples_dir, *result)
         print(f'Companion text: {len(result[0])} strings x {len(LANGUAGES)} languages, {len(result[1])} glyphs -> {args.output}')
     except (OSError, ValueError, KeyError, ET.ParseError) as error:
         print(f'Cannot generate companion text: {error}', file=sys.stderr)

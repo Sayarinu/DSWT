@@ -2,7 +2,8 @@
 # Adapted from BlocksDS's rom_arm9 template (CC0-1.0). Build it through
 # scripts/build-companion.sh, which runs it in tools/companion-builder.
 #
-#   make TLS_DIR=<Mbed TLS source> CONNECTION_HEADER=<configured header>
+# From the repository root:
+#   scripts/build-companion.sh
 #
 # Every output goes under BUILDDIR, so the sources may be read-only.
 
@@ -152,3 +153,8 @@ $(ELF) $(LINK_CHECK): $(TEXT_OBJ)
 $(TEXT_OBJ): $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
 	@echo "  CC      $<"
 	$(V)$(CC) $(BASE_CFLAGS) -Wall -Wextra -Werror -c -o $@ $<
+
+check-inputs: $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
+$(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h:
+	@echo "Missing $@; run scripts/build-companion.sh from the repository root, or generate text with: python3 scripts/companion-text.py --output $(abspath $(TEXT_DIR))" >&2
+	@exit 2

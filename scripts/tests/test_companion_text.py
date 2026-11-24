@@ -82,17 +82,56 @@ class CompanionTextTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, 'bitmap'):
                 self.tool.decode_glyph({'d': base64.b64encode(raw).decode(), 'x': '0', 'y': '0', 'w': '4'})
 
-    def test_checksum_is_checked_on_download_and_cached_source(self):
+    def test_corrupt_cache_is_rejected_and_removed_with_recovery_guidance(self):
         cache = self.directory / 'font.kbitx'
         cache.write_bytes(b'bad font')
-        with self.assertRaisesRegex(ValueError, 'checksum'):
+        with self.assertRaises(ValueError) as error:
             self.tool.font_source(cache)
-        cache.unlink()
+        self.assertIn(f'{cache} rejected', str(error.exception))
+        self.assertIn(f'Delete {cache}', str(error.exception))
+        self.assertIn('re-fetch', str(error.exception))
+        self.assertFalse(cache.exists())
+
+    def test_bad_download_names_its_source_and_is_never_cached(self):
+        cache = self.directory / 'font.kbitx'
         with patch.object(self.tool.urllib.request, 'urlopen') as download:
             download.return_value.__enter__.return_value.read.return_value = b'bad font'
-            with self.assertRaisesRegex(ValueError, 'checksum'):
+            with self.assertRaises(ValueError) as error:
                 self.tool.font_source(cache)
+        self.assertIn(f'{self.tool.FONT_URL} rejected', str(error.exception))
+        self.assertIn(f'Delete {cache}', str(error.exception))
+        self.assertIn('re-fetch', str(error.exception))
         self.assertFalse(cache.exists())
+
+    def test_verified_download_is_cached_and_reused(self):
+        cache = self.directory / 'font.kbitx'
+        data = b'verified font'
+        with patch.object(self.tool, 'FONT_SHA256', self.tool.hashlib.sha256(data).hexdigest()):
+            with patch.object(self.tool.urllib.request, 'urlopen') as download:
+                download.return_value.__enter__.return_value.read.return_value = data
+                self.assertEqual(self.tool.font_source(cache), data)
+                self.assertEqual(cache.read_bytes(), data)
+                self.assertEqual(self.tool.font_source(cache), data)
+                download.assert_called_once()
+
+    def test_make_explains_missing_text_for_default_and_cleaned_builds(self):
+        shutil.copy2(ROOT / 'companion/Makefile', self.directory)
+        (self.directory / 'src').mkdir()
+        for build in ('build', 'custom-build'):
+            with self.subTest(build=build):
+                if build == 'custom-build':
+                    text = self.directory / build / 'text'
+                    text.mkdir(parents=True)
+                    for name in ('companion_text.c', 'companion_text.h'):
+                        (text / name).touch()
+                    subprocess.run(['make', 'clean', f'BUILDDIR={build}'],
+                                   cwd=self.directory, capture_output=True, check=True)
+                result = subprocess.run(['make', f'BUILDDIR={build}', f'CLIENT={ROOT / "client"}'], cwd=self.directory,
+                                        text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('scripts/build-companion.sh', result.stderr)
+                self.assertIn('scripts/companion-text.py --output', result.stderr)
+                self.assertNotIn('No rule to make target', result.stderr)
 
     def test_selected_variant_matches_redistribution_pin(self):
         self.assertTrue(self.tool.FONT_URL.endswith('/src/Galmuri11-Condensed.kbitx'))

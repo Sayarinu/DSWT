@@ -35,7 +35,7 @@
     {
       "id": "Companion_Text_GameConfirm",
       "en_US": "{game}, {language}. Correct?",
-      "fr_FR": "{game}, {language}. C’est bien ça ?",
+      "fr_FR": "{game}, {language}. C’est bien ça ?",
       "de_DE": "{game}, {language}. Stimmt das?",
       "it_IT": "{game}, {language}. Va bene?",
       "es_ES": "{game}, {language}. ¿Es correcto?",
@@ -80,7 +80,7 @@
       "it_IT": "Connessione alla rete Wi-Fi...\nAttendi un momento.",
       "es_ES": "Conectando con la red Wi-Fi...\nPor favor, espera un momento.",
       "ja_JP": "Wi-Fiに　せつぞく　しています\nしばらく　おまちください",
-      "ko_KR": "Wi-Fi에 접속하고 있습니다\n잠시만 기다려주십시오"
+      "ko_KR": "Wi-Fi에 접속하고 있습니다\n잠시만 기다려 주십시오"
     },
     {
       "id": "Companion_Text_WifiConnected",
@@ -119,7 +119,7 @@
       "de_DE": "Sicherungskopien dienen nur der Reparatur.\nStellst du nach einem Tausch eine wieder her,\nkann dieser Spielstand nicht mehr tauschen.",
       "it_IT": "Le copie di sicurezza servono solo a riparare\ni dati. Ripristinarne una dopo uno scambio\nimpedisce altri scambi con questo salvataggio.",
       "es_ES": "Las copias de seguridad son solo para reparar\ndatos. Restaurar una después de un intercambio\nimpide seguir intercambiando en esta partida.",
-      "ja_JP": "バックアップは　しゅうふくようです\nこうかんの　あとで　もとに　もどすと\nこの　レポートでは　こうかん　できなくなります",
+      "ja_JP": "バックアップは　しゅうふく　だけに　つかってください\nこうかんの　あとで　もとに　もどすと\nこの　レポートでは　こうかん　できなくなります",
       "ko_KR": "백업은 복구용으로만 사용해 주십시오\n교환 후 백업을 복원하면\n이 리포트로는 더 이상 교환할 수 없습니다"
     },
     {
