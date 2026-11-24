@@ -67,21 +67,53 @@ static int EndsWithSav(const char *name)
 
 /* ---- The save file as save/file.h's CpFile ---------------------------------- */
 
+/* Every read of the save goes to what the card holds (readDurable: raw
+ * sectors on the DS), never a cache: CpSaveImage_Verify after a retail write,
+ * the adapter's checks and the backup's source must see the card itself.
+ * Raw reads are slow per call, so whole windows are read at once and later
+ * reads served from the window until the next write or sync, which cannot
+ * change the card in between. */
+enum { WINDOW_SIZE = 0x8000 };
+static struct {
+    unsigned char bytes[WINDOW_SIZE];
+    uint32_t start;
+    int valid;
+} sWindow;
+
+static void Invalidate(void) { sWindow.valid = 0; }
+
 static int FileRead(void *context, uint32_t offset, void *data, size_t size)
 {
     const CpPlatformFile *file = &((CpApp *)context)->platformFile;
-    return file->readAt(file->arg, offset, data, size) == 0 ? 0 : -1;
+    unsigned char *out = data;
+    if (!file->readDurable) return file->readAt(file->arg, offset, data, size) == 0 ? 0 : -1;
+    if (offset > CP_SAVE_SIZE || size > CP_SAVE_SIZE - offset) return -1;
+    while (size) {
+        uint32_t start = offset - offset % WINDOW_SIZE, within = offset - start;
+        size_t count = WINDOW_SIZE - within < size ? WINDOW_SIZE - within : size;
+        if (!sWindow.valid || sWindow.start != start) {
+            Invalidate();
+            if (file->readDurable(file->arg, start, sWindow.bytes, WINDOW_SIZE) != 0) return -1;
+            sWindow.start = start;
+            sWindow.valid = 1;
+        }
+        memcpy(out, sWindow.bytes + within, count);
+        out += count; offset += (uint32_t)count; size -= count;
+    }
+    return 0;
 }
 
 static int FileWrite(void *context, uint32_t offset, const void *data, size_t size)
 {
     const CpPlatformFile *file = &((CpApp *)context)->platformFile;
+    Invalidate();
     return file->writeAt && file->writeAt(file->arg, offset, data, size) == 0 ? 0 : -1;
 }
 
 static int FileSync(void *context)
 {
     const CpPlatformFile *file = &((CpApp *)context)->platformFile;
+    Invalidate();
     return file->sync && file->sync(file->arg) == 0 ? 0 : -1;
 }
 
@@ -94,9 +126,27 @@ static int FileSize(void *context, uint64_t *size)
     return 0;
 }
 
+/* The journal writes the same file: its writes and syncs drop the window too. */
+static int JournalWrite(void *arg, uint32_t offset, const void *data, size_t size)
+{
+    (void)arg;
+    Invalidate();
+    return sApp->platformFile.writeAt(sApp->platformFile.arg, offset, data, size);
+}
+
+static int JournalSync(void *arg)
+{
+    (void)arg;
+    Invalidate();
+    return sApp->platformFile.sync(sApp->platformFile.arg);
+}
+
 static WtJournalIO JournalIO(CpApp *app)
 {
-    app->store.file = &app->platformFile;
+    app->journalFile = app->platformFile;
+    if (app->platformFile.writeAt) app->journalFile.writeAt = JournalWrite;
+    if (app->platformFile.sync) app->journalFile.sync = JournalSync;
+    app->store.file = &app->journalFile;
     app->store.hold = app->platform->hold;
     app->store.error = 0;
     return CpJournal_IO(&app->store, CpSaveJournal_Hash);
@@ -322,16 +372,39 @@ static int ReadPhase(CpApp *app, unsigned *phase, unsigned char saveID[16])
     return result;
 }
 
+/* Backups live in <root>/<stem>-<id>/, where <id> is the first four bytes of
+ * the enrolled journal's saveID in hex. The saveID travels with the save: a
+ * moved or renamed file keeps its backups, two saves with the same file name
+ * in different folders never share a folder, and a restored older copy that
+ * enrolls again gets a folder of its own rather than a conflicting one.
+ * Backups made before this naming, in <root>/<stem>/, still count when they
+ * hold this enrollment. */
+static void BackupName(const CpApp *app, const unsigned char saveID[16], char out[64])
+{
+    static const char hex[] = "0123456789abcdef";
+    const char *base = Basename(app->saves[app->index].path);
+    size_t length = strlen(base), i;
+    if (EndsWithSav(base)) length -= 4;
+    if (length > 40) length = 40;
+    memcpy(out, base, length);
+    out[length++] = '-';
+    for (i = 0; i < 4; ++i) { out[length++] = hex[saveID[i] >> 4]; out[length++] = hex[saveID[i] & 15]; }
+    memcpy(out + length, ".sav", 5);
+}
+
 /* The backup contract: a backup taken after enrollment exists before the
  * first edit. One that holds this enrollment (its saveID) already counts;
  * otherwise one is made now. Any failure stops. */
 static int Backup(CpApp *app, const unsigned char saveID[16])
 {
-    const char *name = Basename(app->saves[app->index].path);
+    const char *legacy = Basename(app->saves[app->index].path);
+    char name[64];
     CpBackupResult result;
     int existing;
     if (app->backedUp) return 0;
+    BackupName(app, saveID, name);
     existing = CpBackup_HasIdentity(&app->platform->backup, name, saveID);
+    if (existing == 0) existing = CpBackup_HasIdentity(&app->platform->backup, legacy, saveID);
     if (existing == 1) {
         Log(app, "backup: one of this enrollment exists\n");
         app->backedUp = 1;
@@ -548,6 +621,7 @@ static void CloseFiles(CpApp *app)
     if (app->romOpen) app->platform->closeRom(app->platform->arg, CP_APP_ROM_GAME);
     app->saveOpen = app->romOpen = app->hasFont = 0;
     gCpAppImage.loaded = 0;
+    Invalidate();
 }
 
 static void Unload(void *context)
@@ -556,7 +630,7 @@ static void Unload(void *context)
     CpUiModel *model = &app->model;
     if (app->job) return;
     CloseFiles(app);
-    app->loaded = app->needsProvision = app->backedUp = 0;
+    app->loaded = app->needsProvision = app->backedUp = app->leaveProven = 0;
     model->partyCount = 0;
     memset(model->party, 0, sizeof(model->party));
     model->loadMessage = -1;
@@ -590,7 +664,8 @@ static void Connect(void *context)
     const CpAppPlatform *platform = app->platform;
     ClearOutcome(model);
     app->closing = 0;
-    model->canLeave = !model->recovery;
+    /* Only what the last check proved: a reconnect never grants leave. */
+    model->canLeave = app->leaveProven && !model->recovery;
     if (platform->wifiStatus(platform->arg) == CP_WIFI_CONNECTED) { model->net = CP_UI_NET_READY; return; }
     model->net = CP_UI_NET_BUSY;
     if (platform->wifiConnect(platform->arg) != 0) {
@@ -616,7 +691,7 @@ static void Visit(CpApp *app, int slot, unsigned action)
     if (Start(app, JOB_VISIT, VisitJob, &app->engine.journal) != 0) {
         model->net = CP_UI_NET_ERROR;
         model->error = CP_APP_ERROR_WORKER;
-        model->canLeave = 1;
+        model->canLeave = app->leaveProven;
     }
 }
 
@@ -663,6 +738,8 @@ static void Finish(CpApp *app, int job, int result)
         model->gameLanguage = app->saves[app->index].info.language;
         model->font = app->hasFont ? &app->font : NULL;
         model->recovery = app->result.recovery;
+        /* The boot check proved gameplay may resume, or recovery fences it. */
+        app->leaveProven = !app->result.recovery;
         model->tradePhase = app->result.phase;
         model->partyCount = app->result.partyCount;
         memcpy(model->party, app->result.party, sizeof(model->party));
@@ -682,7 +759,7 @@ static void Finish(CpApp *app, int job, int result)
         model->refusal = app->visit.refusal;
         model->needsEntropy = app->needsEntropy;
         model->hasReceived = 0; /* LUNE-873 */
-        model->canLeave = app->visitCanLeave;
+        model->canLeave = app->leaveProven = app->visitCanLeave;
         model->error = result;
         if (result == 0) model->recovery = 0;
         if (app->closing) {

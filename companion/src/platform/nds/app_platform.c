@@ -182,6 +182,17 @@ static int FreeSpace(void *context, const char *path, uint64_t *available)
     return 0;
 }
 
+/* A backup counts only once the card itself holds it: raw sectors, past
+ * FatFs and its cache (backup_save.h, readDurable). */
+static int BackupDurable(void *context, const char *path, uint32_t offset, void *bytes, size_t size)
+{
+    int result;
+    (void)context;
+    result = CpSdFile_ReadDurablePath(path, offset, bytes, size);
+    if (result != 0) Logf("backup: durable read failed %d\n", result);
+    return result == 0 ? 0 : -1;
+}
+
 /* ---- The worker ----------------------------------------------------------- */
 
 static int Start(void *arg, CpAppJob job, void *jobArg, WtSeed *journal)
@@ -332,6 +343,7 @@ void CpNdsApp_Run(void)
     sPlatform.hold = WtGame_HoldAwake;
     sPlatform.backup.root = backups[0] ? backups : NULL;
     sPlatform.backup.freeSpace = FreeSpace;
+    sPlatform.backup.readDurable = BackupDurable;
     sPlatform.frame = Frame;
     sPlatform.log = Log;
 

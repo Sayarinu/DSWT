@@ -52,6 +52,11 @@ typedef struct Fake {
     int seedWait;
     uint64_t freeSpace;
     int saveFd;
+    /* A write-back cache in front of the card: readAt sees it, readDurable
+     * sees only the card. loseRetail drops retail writes on their way to the
+     * card (a lying cache); failRetail fails them outright. */
+    unsigned char cache[CP_SAVE_SIZE], cached[CP_SAVE_SIZE];
+    int loseRetail, failRetail;
     PosixReader roms[CP_APP_ROM_SLOTS];
     int romOpen[CP_APP_ROM_SLOTS];
     unsigned logLines;
@@ -78,16 +83,32 @@ static int List(void *arg, const char *path, CpAppListEntry entry, void *context
     return 0;
 }
 
-static int SaveRead(void *arg, uint32_t offset, void *bytes, size_t size)
+static int SaveDurable(void *arg, uint32_t offset, void *bytes, size_t size)
 {
     (void)arg;
     return offset + size <= CP_SAVE_SIZE && pread(fake.saveFd, bytes, size, offset) == (ssize_t)size ? 0 : -1;
 }
 
+static int SaveRead(void *arg, uint32_t offset, void *bytes, size_t size)
+{
+    unsigned char *out = bytes;
+    size_t i;
+    if (SaveDurable(arg, offset, bytes, size) != 0) return -1;
+    for (i = 0; i < size; ++i) if (fake.cached[offset + i]) out[i] = fake.cache[offset + i];
+    return 0;
+}
+
+static int RetailOffset(uint32_t offset) { return offset < 0x30000 || (offset >= 0x40000 && offset < 0x70000); }
+
 static int SaveWrite(void *arg, uint32_t offset, const void *bytes, size_t size)
 {
     (void)arg;
-    return offset + size <= CP_SAVE_SIZE && pwrite(fake.saveFd, bytes, size, offset) == (ssize_t)size ? 0 : -1;
+    if (offset + size > CP_SAVE_SIZE) return -1;
+    if (fake.failRetail && RetailOffset(offset)) return -1;
+    memcpy(fake.cache + offset, bytes, size);
+    memset(fake.cached + offset, 1, size);
+    if (fake.loseRetail && RetailOffset(offset)) return 0;
+    return pwrite(fake.saveFd, bytes, size, offset) == (ssize_t)size ? 0 : -1;
 }
 
 static int SaveSync(void *arg) { (void)arg; return fsync(fake.saveFd) == 0 ? 0 : -1; }
@@ -109,7 +130,8 @@ static int OpenSave(void *arg, const char *path, CpPlatformFile *out)
     if (fake.saveFd < 0) return -1;
     out->arg = &fake;
     out->readAt = SaveRead; out->writeAt = SaveWrite; out->sync = SaveSync; out->size = SaveSize;
-    out->readDurable = SaveRead;
+    out->readDurable = SaveDurable;
+    memset(fake.cached, 0, sizeof(fake.cached));
     return 0;
 }
 
@@ -119,6 +141,7 @@ static void CloseSave(void *arg)
     assert(fake.saveFd >= 0);
     close(fake.saveFd);
     fake.saveFd = -1;
+    memset(fake.cached, 0, sizeof(fake.cached));
 }
 
 static int OpenRom(void *arg, int slot, const char *path, CpReader *out)
@@ -274,34 +297,81 @@ static void ReadFile(const char *relative, void *bytes, size_t size)
     fclose(file);
 }
 
-static unsigned CountBackups(const char *name)
+/* Backup folders of a save: <stem>-<id> (and the older <stem>). */
+static int BackupFolder(const char *folder, const char *stem)
 {
-    char path[512];
-    DIR *directory;
-    struct dirent *item;
+    size_t length = strlen(stem);
+    return !strncmp(folder, stem, length) && (!folder[length] || folder[length] == '-');
+}
+
+static unsigned CountBackups(const char *stem)
+{
+    char path[700];
+    DIR *root = opendir(backupRoot), *directory;
+    struct dirent *folder, *item;
     unsigned count = 0;
-    snprintf(path, sizeof(path), "%s/%s", backupRoot, name);
-    directory = opendir(path);
-    if (!directory) return 0;
-    while ((item = readdir(directory))) if (strstr(item->d_name, ".sav") && !strstr(item->d_name, ".tmp")) ++count;
-    closedir(directory);
+    if (!root) return 0;
+    while ((folder = readdir(root))) {
+        if (!BackupFolder(folder->d_name, stem)) continue;
+        snprintf(path, sizeof(path), "%s/%s", backupRoot, folder->d_name);
+        if (!(directory = opendir(path))) continue;
+        while ((item = readdir(directory))) if (strstr(item->d_name, ".sav") && !strstr(item->d_name, ".tmp")) ++count;
+        closedir(directory);
+    }
+    closedir(root);
     return count;
 }
 
-static void RemoveBackups(const char *name)
+static unsigned CountBackupFolders(const char *stem)
 {
-    char path[512], file[700];
-    DIR *directory;
-    struct dirent *item;
-    snprintf(path, sizeof(path), "%s/%s", backupRoot, name);
-    directory = opendir(path);
-    if (!directory) return;
-    while ((item = readdir(directory))) {
-        if (item->d_name[0] == '.') continue;
-        snprintf(file, sizeof(file), "%s/%s", path, item->d_name);
-        assert(unlink(file) == 0);
+    DIR *root = opendir(backupRoot);
+    struct dirent *folder;
+    unsigned count = 0;
+    if (!root) return 0;
+    while ((folder = readdir(root))) count += BackupFolder(folder->d_name, stem);
+    closedir(root);
+    return count;
+}
+
+/* The path of a save's only backup file, relative to the card's root. */
+static void OnlyBackup(const char *stem, char *out, size_t size)
+{
+    char path[700];
+    DIR *root = opendir(backupRoot), *directory;
+    struct dirent *folder, *item;
+    out[0] = 0;
+    assert(root);
+    while ((folder = readdir(root))) {
+        if (!BackupFolder(folder->d_name, stem)) continue;
+        snprintf(path, sizeof(path), "%s/%s", backupRoot, folder->d_name);
+        directory = opendir(path);
+        while (directory && (item = readdir(directory)))
+            if (strstr(item->d_name, ".sav")) snprintf(out, size, "_nds/dswt/backups/%s/%s", folder->d_name, item->d_name);
+        if (directory) closedir(directory);
     }
-    closedir(directory);
+    closedir(root);
+    assert(out[0]);
+}
+
+static void RemoveBackups(const char *stem)
+{
+    char path[700], file[1000];
+    DIR *root = opendir(backupRoot), *directory;
+    struct dirent *folder, *item;
+    if (!root) return;
+    while ((folder = readdir(root))) {
+        if (!BackupFolder(folder->d_name, stem)) continue;
+        snprintf(path, sizeof(path), "%s/%s", backupRoot, folder->d_name);
+        if (!(directory = opendir(path))) continue;
+        while ((item = readdir(directory))) {
+            if (item->d_name[0] == '.') continue;
+            snprintf(file, sizeof(file), "%s/%s", path, item->d_name);
+            assert(unlink(file) == 0);
+        }
+        closedir(directory);
+        assert(rmdir(path) == 0);
+    }
+    closedir(root);
 }
 
 static void WriteRom(const char *relative, const char code[4], uint8_t revision)
@@ -481,9 +551,7 @@ static unsigned char before[0x40000], after[0x40000], original[FX_MON];
 static void OfferStatusCancelCollect(void)
 {
     unsigned char backup[CP_SAVE_FILE_SIZE], live[CP_SAVE_FILE_SIZE];
-    char name[64];
-    DIR *directory;
-    struct dirent *item;
+    char name[256];
     unsigned party;
     memset(&server, 0, sizeof(server));
     Retail("roms/nds/saves/Platinum.sav", before);
@@ -506,13 +574,7 @@ static void OfferStatusCancelCollect(void)
     assert(CountBackups("Platinum") == 1);
     Retail("roms/nds/saves/Platinum.sav", after);
     assert(memcmp(before, after, sizeof(before)) == 0);
-    snprintf(name, sizeof(name), "%s/Platinum", backupRoot);
-    directory = opendir(name);
-    assert(directory);
-    while ((item = readdir(directory)) && !strstr(item->d_name, ".sav")) {}
-    assert(item);
-    snprintf(name, sizeof(name), "_nds/dswt/backups/Platinum/%s", item->d_name);
-    closedir(directory);
+    OnlyBackup("Platinum", name, sizeof(name));
     ReadFile(name, backup, sizeof(backup));
     ReadFile("roms/nds/saves/Platinum.sav", live, sizeof(live));
     assert(memcmp(backup, live, sizeof(live)) == 0);
@@ -686,6 +748,102 @@ static void ScreensDriveTheModel(void)
     puts("PASS model: the screens pick a save, confirm it, connect and reach the menu");
 }
 
+static void Rescan(void)
+{
+    model->ops->close(model->context);
+    Pump();
+    model->ops->unload(model->context);
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    model->ops->scan(model->context);
+    Pump();
+}
+
+static void LoadByPath(const char *part)
+{
+    unsigned i;
+    for (i = 0; i < model->saveCount; ++i) {
+        if (!strstr(app.saves[i].path, part)) continue;
+        model->ops->load(model->context, i);
+        Pump();
+        return;
+    }
+    assert(!"no such save");
+}
+
+/* Retail writes that never reach the card: the save's checks read the card,
+ * not the cache, so the removal is not proven and nothing is submitted. The
+ * visit ends unable to leave, and reconnecting does not change that. */
+static void UnprovenWritesAndTheLeaveFence(void)
+{
+    unsigned submits;
+    RemoveBackups("Second");
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1; fake.wifiFails = 0;
+    Rescan();
+    LoadByName("Second.sav");
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->tradePhase == WT_JOURNAL_IDLE);
+    submits = server.requests[WT_OP_SUBMIT];
+    fake.loseRetail = 1;
+    Visit(1, 0, 0);
+    assert(model->net == CP_UI_NET_ERROR && model->error != CP_APP_ERROR_BACKUP);
+    assert(server.requests[WT_OP_SUBMIT] == submits && !model->canLeave);
+    puts("PASS model: a retail write the card does not hold is never proven; nothing is submitted");
+
+    /* Retry: close, reconnect, and Wi-Fi fails. Exit must stay hidden. */
+    model->ops->close(model->context);
+    assert(model->net == CP_UI_NET_CLOSED);
+    fake.wifiConnected = 0; fake.wifiFails = 1;
+    model->ops->connect(model->context);
+    assert(!model->canLeave);
+    Pump();
+    assert(model->net == CP_UI_NET_ERROR && model->error == CP_APP_ERROR_WIFI && !model->canLeave);
+    fake.loseRetail = 0; fake.wifiFails = 0;
+    model->ops->close(model->context);
+    model->ops->unload(model->context);
+    /* Reopened, the boot check settles the cut deposit from the card. */
+    LoadByName("Second.sav");
+    assert(model->loadMessage == -1 && model->partyCount == 3);
+    model->ops->unload(model->context);
+    puts("PASS model: a reconnect keeps the last proven leave status (no Exit past the recovery fence)");
+}
+
+/* Two saves named Platinum.sav in different folders keep separate backups,
+ * named by their enrollment; a backup in the older <stem>/ folder still counts. */
+static void SameNameSavesKeepSeparateBackups(void)
+{
+    char from[700], to[700];
+    unsigned folders;
+    MakeDirectories("roms/nds/other");
+    WriteRom("roms/nds/other/Platinum.nds", "CPUE", 1);
+    WriteSave("roms/nds/other/Platinum.sav", 4);
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1;
+    Rescan();
+    assert(CountBackupFolders("Platinum") == 1);
+    LoadByPath("other/Platinum.sav");
+    assert(model->loadMessage == -1);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0);
+    assert(CountBackupFolders("Platinum") == 2);
+    CloseSession();
+    puts("PASS model: same-named saves in two folders back up side by side");
+
+    /* Move this enrollment's folder to the older naming: it still counts. */
+    snprintf(from, sizeof(from), "%s/Platinum-%02x515151", backupRoot, fsEnrollments & 0xff);
+    snprintf(to, sizeof(to), "%s/Platinum", backupRoot);
+    assert(rename(from, to) == 0);
+    folders = CountBackupFolders("Platinum");
+    Rescan();
+    LoadByPath("other/Platinum.sav");
+    assert(model->loadMessage == -1 && CountBackupFolders("Platinum") == folders);
+    model->ops->unload(model->context);
+    puts("PASS model: a backup in the older per-name folder still satisfies the contract");
+}
+
 int main(void)
 {
     Setup();
@@ -698,6 +856,8 @@ int main(void)
     BackupFailureStopsBeforeAnyEdit();
     NeedsEntropyAndWifiFailure();
     ScreensDriveTheModel();
+    SameNameSavesKeepSeparateBackups();
+    UnprovenWritesAndTheLeaveFence();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

@@ -52,13 +52,16 @@ typedef struct CpApp {
     int loaded, saveOpen, romOpen, hasFont;
     unsigned index;
     CpReader romReader;
-    CpPlatformFile platformFile;
+    CpPlatformFile platformFile, journalFile;
     CpFile file;
     CpJournalStore store;
     CpGame game;
     CpFont font;
     WtGame adapter;
     int needsProvision, backedUp;
+    /* The last proven leave status (boot check or visit): kept across
+     * reconnects, so only a later check can grant leave again. */
+    int leaveProven;
 
     /* The session. */
     int job, connecting, closing;
