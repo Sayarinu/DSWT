@@ -8,6 +8,7 @@ int WtSession_Next(WtEngine *engine, unsigned requested)
     if (engine->entry.phase == WT_JOURNAL_IDLE && engine->synchronized) return WT_SESSION_DONE;
     if (engine->entry.deliveryKind == WT_DELIVERY_RETURN) operation = WT_OP_COLLECT;
     if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON
+        || (engine->entry.phase == WT_JOURNAL_SUBMIT_READY && engine->lastResult == WT_RESULT_COUNTER_MISMATCH)
         || (engine->entry.requestLength && engine->entry.request[5] == WT_OP_CANCEL
             && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) operation = WT_OP_RECONCILE;
     if (operation == WT_OP_CANCEL && engine->entry.deliveryKind == WT_DELIVERY_MATCH) operation = WT_OP_COLLECT;

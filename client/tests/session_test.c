@@ -156,14 +156,19 @@ static void PendingMutationsAreReplayed(void)
 static void RejectionsReconcileBeforeRetry(void)
 {
     const unsigned actions[] = { 0, WT_OP_COLLECT, WT_OP_CANCEL };
+    const int submitResults[] = { WT_RESULT_ILLEGAL_POKEMON, WT_RESULT_COUNTER_MISMATCH };
     const int results[] = { WT_RESULT_CONFLICT, WT_RESULT_NOT_FOUND };
     Fixture fixture;
-    unsigned action, result;
+    unsigned action, result, synchronized;
     for (action = 0; action < sizeof(actions) / sizeof(actions[0]); ++action) {
-        Init(&fixture, WT_JOURNAL_SUBMIT_READY, 0);
-        fixture.engine.lastResult = WT_RESULT_ILLEGAL_POKEMON;
-        Expect(&fixture, actions[action], WT_OP_RECONCILE);
-        WtEngine_Close(&fixture.engine);
+        for (synchronized = 0; synchronized < 2; ++synchronized) {
+            for (result = 0; result < sizeof(submitResults) / sizeof(submitResults[0]); ++result) {
+                Init(&fixture, WT_JOURNAL_SUBMIT_READY, (int)synchronized);
+                fixture.engine.lastResult = submitResults[result];
+                Expect(&fixture, actions[action], WT_OP_RECONCILE);
+                WtEngine_Close(&fixture.engine);
+            }
+        }
         for (result = 0; result < sizeof(results) / sizeof(results[0]); ++result) {
             Init(&fixture, WT_JOURNAL_QUEUED, 1);
             Expect(&fixture, WT_OP_CANCEL, WT_OP_CANCEL);
@@ -173,12 +178,11 @@ static void RejectionsReconcileBeforeRetry(void)
             Expect(&fixture, actions[action], WT_OP_RECONCILE);
             WtEngine_Close(&fixture.engine);
         }
+        Init(&fixture, WT_JOURNAL_QUEUED, 1);
+        fixture.engine.lastResult = WT_RESULT_COUNTER_MISMATCH;
+        Expect(&fixture, actions[action], actions[action] ? (int)actions[action] : WT_OP_STATUS);
+        WtEngine_Close(&fixture.engine);
     }
-    /* Preserve the probe's existing counter-mismatch retry policy. */
-    Init(&fixture, WT_JOURNAL_SUBMIT_READY, 0);
-    fixture.engine.lastResult = WT_RESULT_COUNTER_MISMATCH;
-    Expect(&fixture, 0, WT_OP_SUBMIT);
-    WtEngine_Close(&fixture.engine);
 }
 
 static void FullStorageEndsVisitAndFailuresBlock(void)
