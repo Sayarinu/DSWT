@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "probe.h"
 #include "wonder_trade/seed.h"
+#include "wonder_trade/session.h"
 #include "wonder_trade/tls.h"
 
 #include <signal.h>
@@ -72,15 +73,9 @@ static int Run(unsigned port, const char *hostname, const unsigned char pins[2][
             if (WtEngine_Deposit(engine, (unsigned)slot) != 0) return -1;
             slot = -1;
         }
-        operation = requested;
-        if (engine->entry.deliveryKind == WT_DELIVERY_RETURN) operation = WT_OP_COLLECT;
-        if (engine->lastResult == WT_RESULT_ILLEGAL_POKEMON
-            || (engine->entry.requestLength && engine->entry.request[5] == WT_OP_CANCEL
-                && (engine->lastResult == WT_RESULT_CONFLICT || engine->lastResult == WT_RESULT_NOT_FOUND))) operation = WT_OP_RECONCILE;
-        if (operation == WT_OP_CANCEL && engine->entry.deliveryKind == WT_DELIVERY_MATCH) operation = WT_OP_COLLECT;
-        result = WtEngine_Request(engine, operation);
-        if (result != 0) return result < 0 ? -1 : 0;
-        operation = engine->frame[5];
+        result = WtSession_Next(engine, requested);
+        if (result <= 0) return result;
+        operation = (unsigned)result;
         result = Exchange(&probe, port, hostname, pins);
         if (result == -100 - WT_RESULT_PROCESSING && processing < WT_ENGINE_PROCESSING_RETRIES) {
             /* Mirrors the game's bounded wait for the server's backup to cover an outcome. */

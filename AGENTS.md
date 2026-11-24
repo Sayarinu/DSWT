@@ -80,6 +80,29 @@ cmake --build game/tls-tests --parallel 2
 ctest --test-dir game/tls-tests --output-on-failure
 python3 client/tests/test_tls.py game/tls-tests/tls_probe
 
+# Build and test DS companion
+cmake -S companion/tests -B game/companion-tests
+cmake --build game/companion-tests --parallel 2
+ctest --test-dir game/companion-tests --output-on-failure
+CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
+docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
+import os
+from pathlib import Path
+import struct
+import subprocess
+
+rom = Path("/out/dswt-companion.nds")
+subprocess.run([os.environ["BLOCKSDS"] + "/tools/ndstool/ndstool", "-i", str(rom)], check=True)
+data = rom.read_bytes()
+assert data[0x12] == 0x02, "ROM must support both DS and DSi"
+assert data[0x1C] & 1, "TWL flag must enable DSi mode"
+for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
+    offset = struct.unpack_from("<I", data, base)[0]
+    size = struct.unpack_from("<I", data, base + 12)[0]
+    assert offset >= 0x4000 and size > 0 and offset + size <= len(data), f"Missing or truncated {name} section"
+print("DS/DSi header and payload checks passed")
+PY
+
 # Build and test isolated legality validator
 docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-tests .
 docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \

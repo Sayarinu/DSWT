@@ -41,3 +41,13 @@ find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
 add_test(NAME save_image_integration_test
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/save/save_image_integration_test.py"
         "$<TARGET_FILE:save_image_test>" "$<TARGET_FILE:save_sha256_probe>")
+
+# --- ROM reader (LUNE-867): header, NitroFS, NARC and game data -------------
+set(COMPANION_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+add_executable(game_data_test game_data_test.c posix_reader.c
+    "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
+    "${COMPANION_SRC}/game/text.c" "${COMPANION_SRC}/game/pairing.c")
+target_include_directories(game_data_test PRIVATE "${COMPANION_SRC}")
+target_compile_options(game_data_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+target_link_options(game_data_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
