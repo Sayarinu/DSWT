@@ -334,6 +334,45 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     isolation.runtime_evidence(self.local, mutated)
 
+    def test_only_https_follows_the_manifest_listen_in_compose_and_runtime(self):
+        for listen in ("127.0.0.1", "192.168.1.25"):
+            self.local.manifest["listen"] = listen
+            expected = {(listen, str(isolation.stack.https_port(self.local.manifest)), 8443)}
+            if self.observability:
+                expected |= {("127.0.0.1", "13000", 3000), ("127.0.0.1", "24224", 24224)}
+            config = self.compose()
+            ports = config["services"]["gateway"]["ports"]
+            for port in ports:
+                port["host_ip"] = listen if port["target"] == 8443 else "127.0.0.1"
+            containers = copy.deepcopy(self.containers)
+            bindings = containers["gateway"]["HostConfig"]["PortBindings"]
+            bindings["8443/tcp"][0]["HostIp"] = listen
+            with self.subTest(listen=listen):
+                self.assertEqual(isolation.published(self.local), expected)
+                self.assertEqual(isolation.compose_evidence(self.local, config)["status"], "pass")
+                self.assertEqual(set(isolation.runtime_evidence(self.local, containers)), set(self.local.services))
+            for target in (8443, 3000, 24224) if self.observability else (8443,):
+                for wrong in ("0.0.0.0", "192.168.1.26", "127.0.0.2"):
+                    with self.subTest(listen=listen, target=target, wrong=wrong):
+                        mutated = copy.deepcopy(config)
+                        next(p for p in mutated["services"]["gateway"]["ports"] if p["target"] == target)["host_ip"] = wrong
+                        with self.assertRaisesRegex(ValueError, "Unexpected published endpoint"):
+                            isolation.compose_evidence(self.local, mutated)
+                        mutated = copy.deepcopy(containers)
+                        mutated["gateway"]["HostConfig"]["PortBindings"][f"{target}/tcp"][0]["HostIp"] = wrong
+                        with self.assertRaisesRegex(ValueError, "Unexpected runtime port publication"):
+                            isolation.runtime_evidence(self.local, mutated)
+            if self.observability and listen != "127.0.0.1":
+                for target in (3000, 24224):
+                    mutated = copy.deepcopy(containers)
+                    mutated["gateway"]["HostConfig"]["PortBindings"][f"{target}/tcp"][0]["HostIp"] = listen
+                    with self.subTest(target=target), self.assertRaises(ValueError):
+                        isolation.runtime_evidence(self.local, mutated)
+                    mutated = copy.deepcopy(config)
+                    next(p for p in mutated["services"]["gateway"]["ports"] if p["target"] == target)["host_ip"] = listen
+                    with self.subTest(target=target), self.assertRaises(ValueError):
+                        isolation.compose_evidence(self.local, mutated)
+
     def compose(self):
         volumes = ("data", "socket") + (isolation.stack.OBSERVABILITY_VOLUMES if self.observability else ())
         config = {"services": {}, "volumes": {key: {"name": "dswt-local-case-" + key, "external": True} for key in volumes}}

@@ -1,10 +1,11 @@
+import copy
 import json
 from pathlib import Path
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 DIRECTORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DIRECTORY))
@@ -57,6 +58,48 @@ class CaptureTests(unittest.TestCase):
         directory = self.workspace / "observability/textfile"
         self.assertEqual([path.name for path in directory.iterdir()], ["backup.prom"])
         self.assertIn(f"{observability.BACKUP_METRIC} 1234\n", (directory / "backup.prom").read_text())
+
+    def test_https_matches_manifest_while_admin_and_ingest_stay_loopback(self):
+        self.local.manifest = {"https_port": 18443}
+        self.local.compose = Mock(return_value=SimpleNamespace(stdout="gateway"))
+        loaded = {"route": {"receiver": "local-capture"},
+                  "receivers": [{"name": "local-capture", "webhook_configs": [{"url": "<secret>"}]}]}
+        responses = [json.dumps({"data": {"storage.tsdb.retention.time": "15d"}}),
+                     json.dumps({"data": {"activeTargets": [
+                         {"labels": {"job": job, "instance": "127.0.0.1:1"}, "health": "up"}
+                         for job in observability.SCRAPE_JOBS]}}),
+                     "limits_config: {retention_period: 1w}\ncompactor: {retention_enabled: true}\n",
+                     json.dumps({"config": {"original": policy.yaml.safe_dump(loaded)}})]
+
+        def configuration(bindings):
+            self.local.run = Mock(return_value=SimpleNamespace(stdout=json.dumps(bindings)))
+            with patch.object(self.observer, "internal", side_effect=responses), \
+                    patch.object(self.observer, "grafana", side_effect=[
+                        (401, None), (200, [{"uid": uid} for uid in ("alertmanager", "loki", "prometheus")]), (200, {})]):
+                return self.observer.configuration()
+
+        for listen in ("127.0.0.1", "192.168.1.25"):
+            if listen == "127.0.0.1":
+                self.local.manifest.pop("listen", None)
+            else:
+                self.local.manifest["listen"] = listen
+            bindings = {"8443/tcp": [{"HostIp": listen, "HostPort": "18443"}],
+                        "3000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "13000"}],
+                        "24224/tcp": [{"HostIp": "127.0.0.1", "HostPort": "24224"}]}
+            with self.subTest(listen=listen):
+                self.assertEqual(configuration(bindings)["published"]["8443/tcp"], [listen + ":18443"])
+            for target in bindings:
+                for wrong in ("0.0.0.0", "192.168.1.26", "127.0.0.2"):
+                    mutated = copy.deepcopy(bindings)
+                    mutated[target][0]["HostIp"] = wrong
+                    with self.subTest(listen=listen, target=target, wrong=wrong), self.assertRaisesRegex(ValueError, "loopback-only"):
+                        configuration(mutated)
+            if listen != "127.0.0.1":
+                for target in ("3000/tcp", "24224/tcp"):
+                    mutated = copy.deepcopy(bindings)
+                    mutated[target][0]["HostIp"] = listen
+                    with self.subTest(target=target), self.assertRaisesRegex(ValueError, "loopback-only"):
+                        configuration(mutated)
 
     def test_only_the_local_capture_receiver_is_accepted(self):
         source = policy.yaml.safe_load((DIRECTORY / "observability/alertmanager.yml").read_text())
