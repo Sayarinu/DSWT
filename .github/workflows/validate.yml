@@ -74,6 +74,49 @@ jobs:
           ctest --test-dir game/tls-tests --output-on-failure
           python3 client/tests/test_tls.py game/tls-tests/tls_probe
 
+  ds-companion:
+    name: Build and test DS companion
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build and run companion host tests
+        run: |
+          cmake -S companion/tests -B game/companion-tests
+          cmake --build game/companion-tests --parallel 2
+          ctest --test-dir game/companion-tests --output-on-failure
+      - name: Build companion with the dummy connection profile
+        run: |
+          CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
+      - name: Check DS and DSi ROM header
+        run: |
+          docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import struct
+          import subprocess
+
+          rom = Path("/out/dswt-companion.nds")
+          subprocess.run([os.environ["BLOCKSDS"] + "/tools/ndstool/ndstool", "-i", str(rom)], check=True)
+          data = rom.read_bytes()
+          assert data[0x12] == 0x02, "ROM must support both DS and DSi"
+          assert data[0x1C] & 1, "TWL flag must enable DSi mode"
+          for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
+              offset = struct.unpack_from("<I", data, base)[0]
+              size = struct.unpack_from("<I", data, base + 12)[0]
+              assert offset >= 0x4000 and size > 0 and offset + size <= len(data), f"Missing or truncated {name} section"
+          print("DS/DSi header and payload checks passed")
+          PY
+      - name: Keep companion ROM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dswt-companion
+          path: game/companion/dswt-companion.nds
+          if-no-files-found: error
+
   legality-validator:
     name: Build and test isolated legality validator
     runs-on: ubuntu-24.04
