@@ -141,6 +141,206 @@
       "es_ES": "No se ha encontrado la ROM correspondiente.\nPon {name}.nds junto a su archivo de guardado.",
       "ja_JP": "たいおうする　ROMが　みつかりません\n{name}.ndsを　レポートと\nおなじ　フォルダーに　いれてください",
       "ko_KR": "일치하는 ROM을 찾을 수 없습니다\n{name}.nds를 리포트와\n같은 폴더에 넣어 주십시오"
+    },
+    {
+      "id": "Companion_Text_ReasonEgg",
+      "en_US": "Egg",
+      "fr_FR": "Œuf",
+      "de_DE": "Ei",
+      "it_IT": "Uovo",
+      "es_ES": "Huevo",
+      "ja_JP": "タマゴ",
+      "ko_KR": "알"
+    },
+    {
+      "id": "Companion_Text_ReasonMail",
+      "en_US": "Holds Mail",
+      "fr_FR": "Tient une Lettre",
+      "de_DE": "Trägt einen Brief",
+      "it_IT": "Tiene una Lettera",
+      "es_ES": "Lleva una Carta",
+      "ja_JP": "メールを　もっている",
+      "ko_KR": "메일을 지니고 있음"
+    },
+    {
+      "id": "Companion_Text_ReasonCapsule",
+      "en_US": "Has a Ball Capsule",
+      "fr_FR": "A une Capsule",
+      "de_DE": "Hat eine Ballkapsel",
+      "it_IT": "Ha una Capsula",
+      "es_ES": "Tiene una Cápsula",
+      "ja_JP": "ボールカプセルつき",
+      "ko_KR": "볼캡슐 장착"
+    },
+    {
+      "id": "Companion_Text_ReasonLastUsable",
+      "en_US": "Last able Pokémon",
+      "fr_FR": "Dernier apte",
+      "de_DE": "Letztes kampffähiges",
+      "it_IT": "Ultimo utilizzabile",
+      "es_ES": "Último utilizable",
+      "ja_JP": "さいごの　1ぴき",
+      "ko_KR": "마지막 한 마리"
+    },
+    {
+      "id": "Companion_Text_ReasonDuplicate",
+      "en_US": "Identical copy",
+      "fr_FR": "Copie identique",
+      "de_DE": "Identische Kopie",
+      "it_IT": "Copia identica",
+      "es_ES": "Copia idéntica",
+      "ja_JP": "おなじ　ポケモン",
+      "ko_KR": "같은 포켓몬 있음"
+    },
+    {
+      "id": "Companion_Text_ReasonOther",
+      "en_US": "Can’t be offered",
+      "fr_FR": "Échange impossible",
+      "de_DE": "Nicht tauschbar",
+      "it_IT": "Non scambiabile",
+      "es_ES": "No intercambiable",
+      "ja_JP": "こうかん　できない",
+      "ko_KR": "교환할 수 없음"
+    },
+    {
+      "id": "Companion_Text_SaveNoRom",
+      "en_US": "ROM not found",
+      "fr_FR": "ROM introuvable",
+      "de_DE": "ROM nicht gefunden",
+      "it_IT": "ROM non trovata",
+      "es_ES": "ROM no encontrada",
+      "ja_JP": "ROMが　ありません",
+      "ko_KR": "ROM 없음"
+    },
+    {
+      "id": "Companion_Text_SaveUnsupported",
+      "en_US": "Not supported",
+      "fr_FR": "Non pris en charge",
+      "de_DE": "Nicht unterstützt",
+      "it_IT": "Non supportato",
+      "es_ES": "No compatible",
+      "ja_JP": "たいおう　していません",
+      "ko_KR": "지원하지 않음"
+    },
+    {
+      "id": "Companion_Text_GameDiamond",
+      "en_US": "Diamond",
+      "fr_FR": "Diamant",
+      "de_DE": "Diamant",
+      "it_IT": "Diamante",
+      "es_ES": "Diamante",
+      "ja_JP": "ダイヤモンド",
+      "ko_KR": "디아루가"
+    },
+    {
+      "id": "Companion_Text_GamePearl",
+      "en_US": "Pearl",
+      "fr_FR": "Perle",
+      "de_DE": "Perl",
+      "it_IT": "Perla",
+      "es_ES": "Perla",
+      "ja_JP": "パール",
+      "ko_KR": "펄기아"
+    },
+    {
+      "id": "Companion_Text_GamePlatinum",
+      "en_US": "Platinum",
+      "fr_FR": "Platine",
+      "de_DE": "Platin",
+      "it_IT": "Platino",
+      "es_ES": "Platino",
+      "ja_JP": "プラチナ",
+      "ko_KR": "기라티나"
+    },
+    {
+      "id": "Companion_Text_GameHeartGold",
+      "en_US": "HeartGold",
+      "fr_FR": "HeartGold",
+      "de_DE": "HeartGold",
+      "it_IT": "HeartGold",
+      "es_ES": "HeartGold",
+      "ja_JP": "ハートゴールド",
+      "ko_KR": "하트골드"
+    },
+    {
+      "id": "Companion_Text_GameSoulSilver",
+      "en_US": "SoulSilver",
+      "fr_FR": "SoulSilver",
+      "de_DE": "SoulSilver",
+      "it_IT": "SoulSilver",
+      "es_ES": "SoulSilver",
+      "ja_JP": "ソウルシルバー",
+      "ko_KR": "소울실버"
+    },
+    {
+      "id": "Companion_Text_LanguageJapanese",
+      "en_US": "Japanese",
+      "fr_FR": "Japonais",
+      "de_DE": "Japanisch",
+      "it_IT": "Giapponese",
+      "es_ES": "Japonés",
+      "ja_JP": "にほんご",
+      "ko_KR": "일본어"
+    },
+    {
+      "id": "Companion_Text_LanguageEnglish",
+      "en_US": "English",
+      "fr_FR": "Anglais",
+      "de_DE": "Englisch",
+      "it_IT": "Inglese",
+      "es_ES": "Inglés",
+      "ja_JP": "えいご",
+      "ko_KR": "영어"
+    },
+    {
+      "id": "Companion_Text_LanguageFrench",
+      "en_US": "French",
+      "fr_FR": "Français",
+      "de_DE": "Französisch",
+      "it_IT": "Francese",
+      "es_ES": "Francés",
+      "ja_JP": "フランスご",
+      "ko_KR": "프랑스어"
+    },
+    {
+      "id": "Companion_Text_LanguageItalian",
+      "en_US": "Italian",
+      "fr_FR": "Italien",
+      "de_DE": "Italienisch",
+      "it_IT": "Italiano",
+      "es_ES": "Italiano",
+      "ja_JP": "イタリアご",
+      "ko_KR": "이탈리아어"
+    },
+    {
+      "id": "Companion_Text_LanguageGerman",
+      "en_US": "German",
+      "fr_FR": "Allemand",
+      "de_DE": "Deutsch",
+      "it_IT": "Tedesco",
+      "es_ES": "Alemán",
+      "ja_JP": "ドイツご",
+      "ko_KR": "독일어"
+    },
+    {
+      "id": "Companion_Text_LanguageSpanish",
+      "en_US": "Spanish",
+      "fr_FR": "Espagnol",
+      "de_DE": "Spanisch",
+      "it_IT": "Spagnolo",
+      "es_ES": "Español",
+      "ja_JP": "スペインご",
+      "ko_KR": "스페인어"
+    },
+    {
+      "id": "Companion_Text_LanguageKorean",
+      "en_US": "Korean",
+      "fr_FR": "Coréen",
+      "de_DE": "Koreanisch",
+      "it_IT": "Coreano",
+      "es_ES": "Coreano",
+      "ja_JP": "かんこくご",
+      "ko_KR": "한국어"
     }
   ]
 }

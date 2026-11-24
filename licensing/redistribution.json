@@ -908,7 +908,25 @@
         "licensing/ds-companion-galmuri.txt"
       ],
       "decision": "pinned_font_selection; review_actual_subset_before_release; nds_release_not_allowlisted",
-      "requirements": "Select only Galmuri11 Condensed from v2.40.4 at the listed commit (src/Galmuri11-Condensed.kbitx, SHA-256 7718e0faef8a9593e8f94307f57c3d77bfeaaeed08bdd381bd2b23a2d85e09b3), credited Copyright 2019-2025 Lee Minseo. Upstream readme states all Bold and Condensed glyphs are original, while regular Galmuri14/11/9/7 contain several ranges following Nintendo designs; those regular faces are not cleared here. Condensed covers all 416 codepoints required by the current seven-language catalogues and printable ASCII without fallback glyphs. Subsetting, conversion to bitmap tiles and embedding retain OFL-1.1 on the Font Software and derived subset; they do not relicense the application. Ship licensing/ds-companion-galmuri.txt with the .nds zip, preserve copyright/licence in font copies, do not sell the font by itself, and do not use author names for endorsement. No Reserved Font Name is declared in this pinned ofl.md; give the derivative a distinct project name and label its source face, revision, selected codepoints and conversion changes. OFL requires no corresponding-source offer, but do not replace the font licence with project MIT. Check the actual subset for original-glyph provenance, required language coverage and DS readability before release. The build converts the pinned source to the DSWT Companion Pixel subset; full upstream font sources and generated data stay in the ignored game/ directory."
+      "requirements": "Select only Galmuri11 Condensed from v2.40.4 at the listed commit (src/Galmuri11-Condensed.kbitx, SHA-256 7718e0faef8a9593e8f94307f57c3d77bfeaaeed08bdd381bd2b23a2d85e09b3), credited Copyright 2019-2025 Lee Minseo. Upstream readme states all Bold and Condensed glyphs are original, while regular Galmuri14/11/9/7 contain several ranges following Nintendo designs; those regular faces are not cleared here. Condensed covers all 443 codepoints required by the current seven-language catalogues and printable ASCII without fallback glyphs. Subsetting, conversion to bitmap tiles and embedding retain OFL-1.1 on the Font Software and derived subset; they do not relicense the application. Ship licensing/ds-companion-galmuri.txt with the .nds zip, preserve copyright/licence in font copies, do not sell the font by itself, and do not use author names for endorsement. No Reserved Font Name is declared in this pinned ofl.md; give the derivative a distinct project name and label its source face, revision, selected codepoints and conversion changes. OFL requires no corresponding-source offer, but do not replace the font licence with project MIT. Check the actual subset for original-glyph provenance, required language coverage and DS readability before release. The build converts the pinned source to the DSWT Companion Pixel subset; full upstream font sources and generated data stay in the ignored game/ directory."
+    },
+    {
+      "name": "DS Companion: project-original UI tiles",
+      "license": "MIT (original project contribution)",
+      "evidence": [
+        "companion/res/gfx/ui_frame.png",
+        "companion/res/gfx/ui_button.png",
+        "companion/res/gfx/ui_icons.png",
+        "companion/res/gfx/ui_spinner.png",
+        "companion/res/gfx/ui_frame.grit",
+        "companion/res/gfx/ui_button.grit",
+        "companion/res/gfx/ui_icons.grit",
+        "companion/res/gfx/ui_spinner.grit",
+        "companion/src/ui/render.c",
+        "LICENSE"
+      ],
+      "decision": "project_original_art; nds_release_not_allowlisted",
+      "requirements": "The companion's backdrop, header, window frame, card, button, icon and spinner tiles were drawn for this project as 8x8 indexed PNGs, every pixel specified individually; no game graphics, GTS tiles, sprites or extracted ROM data were traced, converted or copied. Only the layout (window positions, button geometry from client/include/wonder_trade/menu_input.h) and the palette colour values from client/src/wonder_trade/platinum/application.c, both project code, follow the patched game's Wonder Trade screens. grit converts the PNGs to 4bpp tiles at build time and the .grit files hold its options. Keep any later art project-original; never add tiles, sprites or fonts read from a ROM, which may only be drawn at run time from the player's own cartridge (as companion/src/game/text.h does for names)."
     }
   ],
   "release_allowlist": [

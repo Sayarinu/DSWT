@@ -1,0 +1,2 @@
+# Project-original 8x8 tiles: 4bpp, no map; the code loads the palettes.
+-gt -gB4 -p! -m!
