@@ -286,7 +286,9 @@ class ListenAndConsoleProfileTests(StackFixture):
     def test_invalid_listen_is_refused_before_docker_or_profile_writes(self):
         output = self.workspace / "console.json"
         invalid = ("localhost", "::1", "192.168.1.256", "192.168.001.1", "192.168.1.2:8443",
-                   "0.0.0.0", "224.0.0.1", "255.255.255.255", "192.168.1.1/24")
+                   "0.0.0.0", "224.0.0.1", "255.255.255.255", "192.168.1.1/24",
+                   "8.8.8.8", "169.254.1.2", "192.0.2.1", "240.0.0.1", "127.0.0.2",
+                   "100.64.0.1", "172.15.255.255", "172.32.0.1", "192.169.0.1")
         with patch.object(stack, "command") as command:
             for address in invalid:
                 for arguments in (("up",), ("console-profile", "--output", str(output))):
@@ -295,8 +297,51 @@ class ListenAndConsoleProfileTests(StackFixture):
                         self.assertFalse(output.exists())
             command.assert_not_called()
 
+    def test_listen_allows_only_rfc1918_and_exact_loopback_with_test_key_warning(self):
+        for address in ("127.0.0.1", "10.0.0.1", "10.255.255.254", "172.16.0.1", "172.31.255.254",
+                        "192.168.0.1", "192.168.255.254"):
+            with self.subTest(address=address):
+                self.assertEqual(stack.listen_ipv4(address), address)
+        for address in ("8.8.8.8", "169.254.1.2", "192.0.2.1", "240.0.0.1", "127.0.0.2",
+                        "100.64.0.1", "172.15.255.255", "172.32.0.1", "invalid", None):
+            with self.subTest(address=address), self.assertRaisesRegex(ValueError, "test keys.*publicly"):
+                stack.listen_ipv4(address)
+
+    def test_failed_up_preserves_prior_listen_during_every_manifest_write(self):
+        for prior in (None, "192.168.1.25"):
+            for failure in ("build", "migrate", "--force-recreate", "ready", "inspect"):
+                with self.subTest(prior=prior, failure=failure):
+                    self.manifest.pop("listen", None)
+                    if prior is not None:
+                        self.manifest["listen"] = prior
+                    stack.save_manifest(self.workspace, self.manifest)
+                    requested = "192.168.1.26" if prior is None else "127.0.0.1"
+                    saved_listens = []
+                    save_manifest = stack.save_manifest
+
+                    def save(workspace, manifest):
+                        saved_listens.append(manifest.get("listen"))
+                        save_manifest(workspace, manifest)
+
+                    def command(arguments, **kwargs):
+                        if failure in arguments and (failure != "inspect" or "--format" in arguments):
+                            raise subprocess.CalledProcessError(1, arguments)
+                        return self.fake_command(arguments, **kwargs)
+
+                    with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=command):
+                        local = self.make_stack()
+                        local.manifest["database_system_id"] = None
+                        with patch.object(local, "ready", side_effect=OSError("not ready") if failure == "ready" else None), \
+                                patch.object(stack.time, "monotonic", side_effect=[0, 61]), \
+                                patch.object(stack, "save_manifest", side_effect=save), \
+                                self.assertRaises((subprocess.CalledProcessError, RuntimeError)):
+                            local.up(requested)
+                    self.assertEqual(stack.read_manifest(self.workspace).get("listen"), prior)
+                    self.assertEqual(local.manifest.get("listen"), prior)
+                    self.assertTrue(all(value == prior for value in saved_listens))
+
     def test_manifest_rejects_invalid_listen(self):
-        for address in ("0.0.0.0", "::1", "invalid", 1234, None):
+        for address in ("0.0.0.0", "::1", "invalid", 1234, None, "8.8.8.8", "169.254.1.2", "127.0.0.2", "240.0.0.1"):
             with self.subTest(address=address):
                 stack.save_manifest(self.workspace, dict(self.manifest, listen=address))
                 with self.assertRaises(ValueError):
@@ -328,6 +373,7 @@ class ListenAndConsoleProfileTests(StackFixture):
 
     def test_console_profile_preserves_sni_pins_and_custom_port_and_is_accepted_by_configurator(self):
         self.workspace = self.initialize_observed()
+        stack.save_manifest(self.workspace, dict(stack.read_manifest(self.workspace), listen="192.168.1.25"))
         original = (self.workspace / "tls/connection.json").read_bytes()
         output = self.workspace / "console.json"
         with patch.object(stack, "command") as command:
@@ -346,6 +392,7 @@ class ListenAndConsoleProfileTests(StackFixture):
         self.assertIn("#define WONDER_TRADE_PORT 18443", header.read_text())
 
     def test_console_profile_refuses_existing_or_linked_output(self):
+        stack.save_manifest(self.workspace, dict(self.manifest, listen="192.168.1.25"))
         output = self.workspace / "console.json"
         output.write_text("preserve existing data")
         for linked in (False, True):
@@ -357,6 +404,7 @@ class ListenAndConsoleProfileTests(StackFixture):
             self.assertEqual(output.read_bytes(), original)
 
     def test_console_profile_validates_source_before_creating_output(self):
+        stack.save_manifest(self.workspace, dict(self.manifest, listen="192.168.1.25"))
         source = self.workspace / "tls/connection.json"
         profile = json.loads(source.read_text())
         output = self.workspace / "console.json"
@@ -365,6 +413,20 @@ class ListenAndConsoleProfileTests(StackFixture):
                 source.write_text(json.dumps(invalid))
                 self.assertEqual(self.run_cli("console-profile", "--listen", "192.168.1.25", "--output", str(output)), 1)
                 self.assertFalse(output.exists())
+
+    def test_console_profile_requires_the_current_manifest_listen(self):
+        output = self.workspace / "console.json"
+        for current in ("127.0.0.1", "192.168.1.25"):
+            manifest = dict(self.manifest)
+            if current != "127.0.0.1":
+                manifest["listen"] = current
+            stack.save_manifest(self.workspace, manifest)
+            with self.subTest(current=current), self.assertRaisesRegex(ValueError, "match.*manifest.*" + current):
+                stack.write_console_profile(self.workspace, "192.168.1.26", output)
+            self.assertFalse(output.exists())
+            stack.write_console_profile(self.workspace, current, output)
+            self.assertEqual(json.loads(output.read_text())["ipv4"], current)
+            output.unlink()
 
     def test_listen_and_output_options_are_restricted_to_their_actions(self):
         for arguments in (("init", "--listen", "192.168.1.25"), ("status", "--listen", "192.168.1.25"),

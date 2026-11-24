@@ -84,17 +84,27 @@ def valid_port(value):
 
 
 def listen_ipv4(value):
+    message = ("Use 127.0.0.1 or a private RFC 1918 unicast IPv4 listen address; "
+               "the local stack uses test keys and must not be exposed publicly")
     if not isinstance(value, str):
-        raise ValueError("Use a unicast IPv4 listen address")
-    address = ipaddress.IPv4Address(value)
-    if address.is_unspecified or address.is_multicast or int(address) == 0xffffffff:
-        raise ValueError("Use a unicast IPv4 listen address")
+        raise ValueError(message)
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ipaddress.AddressValueError as error:
+        raise ValueError(message) from error
+    if value != "127.0.0.1" and not any(address in ipaddress.IPv4Network(network)
+                                        for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
+        raise ValueError(message)
     return str(address)
 
 
 def write_console_profile(workspace, listen, output):
+    listen = listen_ipv4(listen)
+    current = read_manifest(workspace).get("listen", "127.0.0.1")
+    if listen != current:
+        raise ValueError(f"--listen must match the manifest's current listen address ({current}); run up --listen first")
     profile = json.loads((workspace / "tls/connection.json").read_text())
-    profile["ipv4"] = listen_ipv4(listen)
+    profile["ipv4"] = listen
     connection_profile.header(profile)
     with output.open("x") as stream:
         json.dump(profile, stream, indent=2)
@@ -322,11 +332,6 @@ class Stack:
 
     def up(self, listen="127.0.0.1"):
         self.env["DSWT_LOCAL_LISTEN"] = listen_ipv4(listen)
-        if listen == "127.0.0.1":
-            self.manifest.pop("listen", None)
-        else:
-            self.manifest["listen"] = listen
-        save_manifest(self.workspace, self.manifest)
         self.volumes(create=True)
         self.compose("build", "gateway", "validator")
         applications = [service for service in self.services if service != "database"]
@@ -352,6 +357,10 @@ class Stack:
         for service in self.services:
             container = self.compose("ps", "-q", service, capture=True).stdout.strip()
             self.manifest["images"][service] = self.run(["inspect", "--format", "{{.Image}}", container], capture=True).stdout.strip()
+        if listen == "127.0.0.1":
+            self.manifest.pop("listen", None)
+        else:
+            self.manifest["listen"] = listen
         save_manifest(self.workspace, self.manifest)
         print("Local stack ready:", self.manifest["host_endpoint"] + "; ROM profile:", self.workspace / self.manifest["profile"])
         if self.env["DSWT_LOCAL_LISTEN"] != "127.0.0.1":
