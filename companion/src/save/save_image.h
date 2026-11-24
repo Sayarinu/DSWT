@@ -42,6 +42,7 @@ typedef struct {
     uint32_t blockCounters[2];
     uint32_t magic;
     unsigned currentHalf[2];
+    unsigned firstBlock;
     int loaded;
 } CpSaveImage;
 
@@ -57,7 +58,8 @@ CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
                               const unsigned char expected[CP_SAVE_HASH_SIZE]);
 /* Always performs two alternating full saves, incrementing global and each
  * block counter per pass. Bodies become identical; footers have adjacent
- * counters. Only the two retail blocks are written. On any write/sync failure
+ * counters. A fallback block is published first, then general-first saves resume.
+ * Only the two retail blocks are written. On any write/sync failure
  * the image is invalidated: reload/recover before any retry. */
 CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
                                   const unsigned char expected[CP_SAVE_HASH_SIZE]);

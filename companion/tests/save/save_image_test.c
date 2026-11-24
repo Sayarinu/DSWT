@@ -453,12 +453,31 @@ static void VerifyFailures(void)
 static void InterruptedCommits(void)
 {
     unsigned fail, partial, fixture;
-    for (fixture = 0; fixture < 8; ++fixture)
+    for (fixture = 0; fixture < 20; ++fixture)
     for (partial = 0; partial < 2; ++partial) for (fail = 1; fail <= 24; ++fail) {
         unsigned char digest[32], oldDigest[32], actual[32];
         unsigned initial[2], selected[2], block, changed[2];
         Fixture();
-        if (fixture == 1) {
+        if (fixture >= 8) {
+            unsigned kind = ((fixture - 8) % 6) / 2, half = fixture % 2;
+            uint32_t global = fixture < 14 ? 41 : UINT32_MAX;
+            for (block = 0; block < 2; ++block) {
+                /* Distinguish discarded bodies from the selected old inventory. */
+                Body(0, block)[20] = (unsigned char)(0x10 + 4 * block);
+                Body(1, block)[20] = (unsigned char)(0x12 + 4 * block);
+                Seal(half, block, global, global, CP_SAVE_MAGIC_INTERNATIONAL);
+            }
+            if (kind < 2) {
+                /* Stale general, with either two valid boxes or partial boxes. */
+                Seal(1 - half, 0, global + 1, global + 1, CP_SAVE_MAGIC_INTERNATIONAL);
+                Seal(1 - half, 1, global - 1, global - 1, CP_SAVE_MAGIC_INTERNATIONAL);
+                if (kind == 1) Footer(1 - half, 1)[18] ^= 1;
+            } else {
+                /* Partial general matching only stale boxes. */
+                Footer(1 - half, 0)[18] ^= 1;
+                Seal(1 - half, 1, global + 1, global + 1, CP_SAVE_MAGIC_INTERNATIONAL);
+            }
+        } else if (fixture == 1) {
             Seal(0, 0, 41, 72, CP_SAVE_MAGIC_INTERNATIONAL);
             Seal(1, 0, 41, 71, CP_SAVE_MAGIC_INTERNATIONAL);
         } else if (fixture >= 6) {
@@ -499,6 +518,9 @@ static void InterruptedCommits(void)
             const unsigned char *body = Body(selected[block], block);
             assert(memcmp(body, old, 20) == 0);
             assert(memcmp(body + 21, old + 21, sizes[block] - 20 - 21) == 0);
+            if (body[20] != old[20] && body[20] != (unsigned char)(old[20] ^ 1))
+                fprintf(stderr, "discarded retail block: fixture=%u partial=%u event=%u block=%u halves=%u/%u old=%u actual=%u\n",
+                        fixture, partial, fail, block, selected[0], selected[1], old[20], body[20]);
             assert(body[20] == old[20] || body[20] == (unsigned char)(old[20] ^ 1));
             changed[block] = body[20] != old[20];
         }
@@ -532,7 +554,7 @@ static void InterruptedCommits(void)
         assert(CpSaveImage_CommitBoth(&image, &file, digest) == CP_SAVE_IO_ERROR);
         assert(!image.loaded && memory.count == 24);
     }
-    puts("PASS interruptions: 384 stopped prefixes across 24 write/sync boundaries, partial writes, split halves, erased footers and counter wrap; exact retail selection, old/new hashes, resumed commit and verify; final read failure");
+    puts("PASS interruptions: 960 stopped prefixes across 24 write/sync boundaries, partial writes, split halves, erased footers and counter wrap; all three fallback starts in both layouts and at wrap; exact retail selection, old/new hashes, resumed commit and verify; final read failure");
 }
 
 static void ExportFixture(const char *path)
