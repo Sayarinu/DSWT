@@ -1,4 +1,6 @@
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -36,6 +38,10 @@ class StackFixture(unittest.TestCase):
                 key = directory / (name + ".key")
                 key.write_text("private synthetic key")
                 key.chmod(0o600)
+            (directory / "connection.json").write_text(json.dumps({
+                "hostname": hostname, "ipv4": ipv4, "port": port,
+                "current_spki_sha256": "12" * 32, "next_spki_sha256": "34" * 32,
+            }))
         self.prepare = prepare
         with patch.object(stack, "load_module", return_value=SimpleNamespace(prepare=prepare)):
             stack.initialize(self.workspace)
@@ -254,6 +260,181 @@ class PortAndObservabilityTests(StackFixture):
         [pressure] = [args for args, _ in self.calls if "create" in args and args[-1].endswith("-pressure")]
         self.assertIn("type=tmpfs", pressure)
         self.assertTrue(any(item.startswith("o=size=16m,") for item in pressure))
+
+
+class ListenAndConsoleProfileTests(StackFixture):
+    def run_cli(self, *arguments):
+        with patch.object(stack.sys, "argv", [str(SCRIPT), "--workspace", str(self.workspace), *arguments]), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return stack.main()
+
+    def test_cli_listen_is_opt_in_and_retained_for_followup_commands(self):
+        with patch.dict(os.environ, {"DSWT_LOCAL_LISTEN": "0.0.0.0"}, clear=True), \
+                patch.object(stack, "command", side_effect=self.fake_command), patch.object(stack.Stack, "ready"):
+            self.assertEqual(self.run_cli("up", "--listen", "192.168.1.25"), 0)
+            manifest = stack.read_manifest(self.workspace)
+            self.assertEqual(manifest["listen"], "192.168.1.25")
+            self.assertEqual(stack.Stack(self.workspace, manifest).env["DSWT_LOCAL_LISTEN"], "192.168.1.25")
+            self.assertTrue(all(options["env"]["DSWT_LOCAL_LISTEN"] == "192.168.1.25"
+                                for args, options in self.calls if "compose" in args))
+            self.calls.clear()
+            self.assertEqual(self.run_cli("up"), 0)
+            self.assertNotIn("listen", stack.read_manifest(self.workspace))
+            self.assertTrue(all(options["env"]["DSWT_LOCAL_LISTEN"] == "127.0.0.1"
+                                for args, options in self.calls if "compose" in args))
+
+    def test_invalid_listen_is_refused_before_docker_or_profile_writes(self):
+        output = self.workspace / "console.json"
+        invalid = ("localhost", "::1", "192.168.1.256", "192.168.001.1", "192.168.1.2:8443",
+                   "0.0.0.0", "224.0.0.1", "255.255.255.255", "192.168.1.1/24",
+                   "8.8.8.8", "169.254.1.2", "192.0.2.1", "240.0.0.1", "127.0.0.2",
+                   "100.64.0.1", "172.15.255.255", "172.32.0.1", "192.169.0.1")
+        with patch.object(stack, "command") as command:
+            for address in invalid:
+                for arguments in (("up",), ("console-profile", "--output", str(output))):
+                    with self.subTest(address=address, action=arguments[0]):
+                        self.assertEqual(self.run_cli(*arguments, "--listen", address), 1)
+                        self.assertFalse(output.exists())
+            command.assert_not_called()
+
+    def test_listen_allows_only_rfc1918_and_exact_loopback_with_test_key_warning(self):
+        for address in ("127.0.0.1", "10.0.0.1", "10.255.255.254", "172.16.0.1", "172.31.255.254",
+                        "192.168.0.1", "192.168.255.254"):
+            with self.subTest(address=address):
+                self.assertEqual(stack.listen_ipv4(address), address)
+        for address in ("8.8.8.8", "169.254.1.2", "192.0.2.1", "240.0.0.1", "127.0.0.2",
+                        "100.64.0.1", "172.15.255.255", "172.32.0.1", "invalid", None):
+            with self.subTest(address=address), self.assertRaisesRegex(ValueError, "test keys.*publicly"):
+                stack.listen_ipv4(address)
+
+    def test_failed_up_preserves_prior_listen_during_every_manifest_write(self):
+        for prior in (None, "192.168.1.25"):
+            for failure in ("build", "migrate", "--force-recreate", "ready", "inspect"):
+                with self.subTest(prior=prior, failure=failure):
+                    self.manifest.pop("listen", None)
+                    if prior is not None:
+                        self.manifest["listen"] = prior
+                    stack.save_manifest(self.workspace, self.manifest)
+                    requested = "192.168.1.26" if prior is None else "127.0.0.1"
+                    saved_listens = []
+                    save_manifest = stack.save_manifest
+
+                    def save(workspace, manifest):
+                        saved_listens.append(manifest.get("listen"))
+                        save_manifest(workspace, manifest)
+
+                    def command(arguments, **kwargs):
+                        if failure in arguments and (failure != "inspect" or "--format" in arguments):
+                            raise subprocess.CalledProcessError(1, arguments)
+                        return self.fake_command(arguments, **kwargs)
+
+                    with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=command):
+                        local = self.make_stack()
+                        local.manifest["database_system_id"] = None
+                        with patch.object(local, "ready", side_effect=OSError("not ready") if failure == "ready" else None), \
+                                patch.object(stack.time, "monotonic", side_effect=[0, 61]), \
+                                patch.object(stack, "save_manifest", side_effect=save), \
+                                self.assertRaises((subprocess.CalledProcessError, RuntimeError)):
+                            local.up(requested)
+                    self.assertEqual(stack.read_manifest(self.workspace).get("listen"), prior)
+                    self.assertEqual(local.manifest.get("listen"), prior)
+                    self.assertTrue(all(value == prior for value in saved_listens))
+
+    def test_manifest_rejects_invalid_listen(self):
+        for address in ("0.0.0.0", "::1", "invalid", 1234, None, "8.8.8.8", "169.254.1.2", "127.0.0.2", "240.0.0.1"):
+            with self.subTest(address=address):
+                stack.save_manifest(self.workspace, dict(self.manifest, listen=address))
+                with self.assertRaises(ValueError):
+                    stack.read_manifest(self.workspace)
+
+    def test_readiness_connects_to_lan_with_verified_localhost_sni(self):
+        self.manifest["listen"] = "192.168.1.25"
+        with patch.dict(os.environ, {}, clear=True), patch.object(stack, "command", side_effect=self.fake_command), \
+                patch.object(stack, "socket", create=True) as sockets, \
+                patch.object(stack.ssl, "create_default_context") as create_context, \
+                patch.object(stack.http.client, "HTTPConnection") as http, \
+                patch.object(stack.http.client, "HTTPSConnection") as https, \
+                patch.object(stack.wire, "decode_response", return_value=SimpleNamespace(
+                    request_id=b"\x01" * 16, operation=stack.wire.Operation.STATUS,
+                    result=stack.wire.Result.UNAUTHENTICATED, next_counter=0, event_highwater=0)):
+            for factory in (http, https):
+                response = factory.return_value.getresponse.return_value
+                response.status = 200
+                response.getheader.return_value = "application/octet-stream"
+            local = self.make_stack()
+            local.ready()
+            sockets.create_connection.assert_called_once_with(("192.168.1.25", 8443), timeout=5)
+            create_context.assert_called_once_with(cafile=str(self.workspace / "tls/current.pem"))
+            create_context.return_value.wrap_socket.assert_called_once_with(
+                sockets.create_connection.return_value.__enter__.return_value, server_hostname="localhost")
+            http.assert_called_once_with("localhost", 8443, timeout=5)
+            self.assertEqual(http.return_value.request.call_args.args[:2], ("POST", "/wt/v1"))
+            http.return_value.close.assert_called_once()
+
+    def test_console_profile_preserves_sni_pins_and_custom_port_and_is_accepted_by_configurator(self):
+        self.workspace = self.initialize_observed()
+        stack.save_manifest(self.workspace, dict(stack.read_manifest(self.workspace), listen="192.168.1.25"))
+        original = (self.workspace / "tls/connection.json").read_bytes()
+        output = self.workspace / "console.json"
+        with patch.object(stack, "command") as command:
+            self.assertEqual(self.run_cli("console-profile", "--listen", "192.168.1.25", "--output", str(output)), 0)
+            command.assert_not_called()
+        expected = dict(json.loads(original), ipv4="192.168.1.25")
+        self.assertEqual(json.loads(output.read_text()), expected)
+        self.assertEqual(expected["hostname"], "localhost")
+        self.assertEqual(expected["port"], 18443)
+        self.assertEqual((self.workspace / "tls/connection.json").read_bytes(), original)
+        header = self.workspace / "connection.h"
+        subprocess.run([stack.sys.executable, str(SCRIPT.parents[2] / "scripts/configure-connection.py"),
+                        str(output), str(header)], check=True, capture_output=True, text=True)
+        self.assertIn('#define WONDER_TRADE_HOSTNAME "localhost"', header.read_text())
+        self.assertIn("#define WONDER_TRADE_IPV4 0xc0a80119UL", header.read_text())
+        self.assertIn("#define WONDER_TRADE_PORT 18443", header.read_text())
+
+    def test_console_profile_refuses_existing_or_linked_output(self):
+        stack.save_manifest(self.workspace, dict(self.manifest, listen="192.168.1.25"))
+        output = self.workspace / "console.json"
+        output.write_text("preserve existing data")
+        for linked in (False, True):
+            if linked:
+                output.unlink()
+                output.symlink_to(self.workspace / "tls/connection.json")
+            original = output.read_bytes()
+            self.assertEqual(self.run_cli("console-profile", "--listen", "192.168.1.25", "--output", str(output)), 1)
+            self.assertEqual(output.read_bytes(), original)
+
+    def test_console_profile_validates_source_before_creating_output(self):
+        stack.save_manifest(self.workspace, dict(self.manifest, listen="192.168.1.25"))
+        source = self.workspace / "tls/connection.json"
+        profile = json.loads(source.read_text())
+        output = self.workspace / "console.json"
+        for invalid in (dict(profile, next_spki_sha256=profile["current_spki_sha256"]), [], None):
+            with self.subTest(profile=invalid):
+                source.write_text(json.dumps(invalid))
+                self.assertEqual(self.run_cli("console-profile", "--listen", "192.168.1.25", "--output", str(output)), 1)
+                self.assertFalse(output.exists())
+
+    def test_console_profile_requires_the_current_manifest_listen(self):
+        output = self.workspace / "console.json"
+        for current in ("127.0.0.1", "192.168.1.25"):
+            manifest = dict(self.manifest)
+            if current != "127.0.0.1":
+                manifest["listen"] = current
+            stack.save_manifest(self.workspace, manifest)
+            with self.subTest(current=current), self.assertRaisesRegex(ValueError, "match.*manifest.*" + current):
+                stack.write_console_profile(self.workspace, "192.168.1.26", output)
+            self.assertFalse(output.exists())
+            stack.write_console_profile(self.workspace, current, output)
+            self.assertEqual(json.loads(output.read_text())["ipv4"], current)
+            output.unlink()
+
+    def test_listen_and_output_options_are_restricted_to_their_actions(self):
+        for arguments in (("init", "--listen", "192.168.1.25"), ("status", "--listen", "192.168.1.25"),
+                          ("up", "--output", "console.json"), ("console-profile",),
+                          ("console-profile", "--listen", "192.168.1.25")):
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit) as error:
+                self.run_cli(*arguments)
+            self.assertEqual(error.exception.code, 2)
 
 
 if __name__ == "__main__":

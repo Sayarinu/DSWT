@@ -61,7 +61,8 @@ def volume_contract(local, service):
 
 def published(local):
     """Expected (host_ip, host_port, container_port) publications on the gateway."""
-    result = {("127.0.0.1", str(stack.https_port(local.manifest)), 8443)}
+    listen = stack.listen_ipv4(local.manifest.get("listen", "127.0.0.1"))
+    result = {(listen, str(stack.https_port(local.manifest)), 8443)}
     if local.observability:
         result |= {("127.0.0.1", str(local.observability["grafana_port"]), 3000),
                    ("127.0.0.1", str(local.observability["log_port"]), 24224)}

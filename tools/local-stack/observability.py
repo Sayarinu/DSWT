@@ -124,8 +124,10 @@ class Observer:
         gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
         bindings = json.loads(self.local.run(["inspect", "--format", "{{json .HostConfig.PortBindings}}", gateway],
                                              capture=True, timeout=10).stdout)
-        require(all(item["HostIp"] == "127.0.0.1" for values in bindings.values() for item in values),
-                "Administrative and ingest ports must be loopback-only")
+        expected = {f"{target}/tcp": [{"HostIp": address, "HostPort": port}]
+                    for address, port, target in isolation.published(self.local)}
+        require(bindings == expected,
+                "Administrative and ingest ports must be loopback-only; HTTPS must match the manifest")
         return {"prometheus_retention": flags["storage.tsdb.retention.time"], "loki_retention": loki_retention,
                 "targets": sorted(f"{job} {instance}" for job, instance in health), "alert_receivers": urls,
                 "grafana_unauthenticated": 401, "grafana_datasources": sorted(item["uid"] for item in sources),

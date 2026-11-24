@@ -50,7 +50,7 @@ services:
   gateway:
     <<: *server
     command: [/build/dswt-server]
-    ports: ["127.0.0.1:${DSWT_LOCAL_HTTPS_PORT}:8443"]
+    ports: ["${DSWT_LOCAL_LISTEN:-127.0.0.1}:${DSWT_LOCAL_HTTPS_PORT}:8443"]
     environment:
       WT_HTTP_PORT: "8443"
       WT_METRICS_PORT: "9091"
