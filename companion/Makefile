@@ -2,7 +2,8 @@
 # Adapted from BlocksDS's rom_arm9 template (CC0-1.0). Build it through
 # scripts/build-companion.sh, which runs it in tools/companion-builder.
 #
-#   make TLS_DIR=<Mbed TLS source> CONNECTION_HEADER=<configured header>
+# From the repository root:
+#   scripts/build-companion.sh
 #
 # Every output goes under BUILDDIR, so the sources may be read-only.
 
@@ -137,3 +138,24 @@ clean:
 	rm -rf $(BUILDDIR)
 
 -include $(APP_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(TLS_OBJS:.o=.d)
+
+# LUNE-868: tables/font are prepared by scripts/build-companion.sh on the host.
+# The no-gc link check above verifies every generated symbol even before UI use.
+TEXT_DIR                := $(BUILDDIR)/text
+TEXT_OBJ                := $(TEXT_DIR)/companion_text.o
+APP_OBJS                += $(TEXT_OBJ)
+BASE_CFLAGS             += -I$(TEXT_DIR)
+# Retain the complete text interface before the UI starts referencing it.
+TEXT_SYMBOLS            := Companion_Text Companion_FontCodepoints Companion_FontGlyphs \
+                           Companion_FontBitmap Companion_FontGlyphCount Companion_FontBitmapSize \
+                           Companion_FontAscent Companion_FontLineHeight
+LDFLAGS                 += $(foreach symbol,$(TEXT_SYMBOLS),-Wl,--undefined=$(symbol))
+$(ELF) $(LINK_CHECK): $(TEXT_OBJ)
+$(TEXT_OBJ): $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
+	@echo "  CC      $<"
+	$(V)$(CC) $(BASE_CFLAGS) -Wall -Wextra -Werror -c -o $@ $<
+
+check-inputs: $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
+$(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h:
+	@echo "Missing $@; run scripts/build-companion.sh from the repository root, or generate text with: python3 scripts/companion-text.py --output $(abspath $(TEXT_DIR))" >&2
+	@exit 2
