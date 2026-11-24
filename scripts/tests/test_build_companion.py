@@ -48,6 +48,9 @@ else:
 record('tls', sys.argv[1:])
 print(os.environ['TEST_TLS'])
 ''')
+        self.tool(self.scripts / 'companion-text.py', '''
+record('text', sys.argv[1:])
+''')
         self.tool(binary / 'docker', '''
 record('docker', sys.argv[1:])
 if sys.argv[1] == 'run':
@@ -89,6 +92,7 @@ def record(tool, args):
         self.assertIn(f'#define WONDER_TRADE_HOSTNAME "{hostname}"', (self.output / 'dswt-connection.h').read_text())
         self.assertFalse((self.output / 'dswt-connection.h.new').exists())
         self.assertEqual(self.calls_for('tls'), [[]])
+        self.assertEqual(self.calls_for('text'), [['--output', str(self.output / 'build/text')]])
         builder = self.root / 'tools/companion-builder'
         build, run = self.calls_for('docker')
         self.assertEqual(build, ['build', '-f', str(builder / 'Dockerfile'), '-t',

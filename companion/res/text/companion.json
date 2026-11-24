@@ -1,0 +1,146 @@
+{
+  "key": 0,
+  "comment": "French, German, Italian, Spanish, Japanese and Korean translations need native review before release. Placeholders are named UTF-8 tokens: {game}, {language}, {name}; callers substitute them before rendering.",
+  "messages": [
+    {
+      "id": "Companion_Text_SavePickerTitle",
+      "en_US": "Choose a save",
+      "fr_FR": "Choisissez une sauvegarde",
+      "de_DE": "Wähle einen Spielstand",
+      "it_IT": "Scegli un salvataggio",
+      "es_ES": "Elige una partida guardada",
+      "ja_JP": "レポートを　えらんでください",
+      "ko_KR": "리포트를 선택해 주십시오"
+    },
+    {
+      "id": "Companion_Text_NoSaves",
+      "en_US": "No saves found.",
+      "fr_FR": "Aucune sauvegarde trouvée.",
+      "de_DE": "Keine Spielstände gefunden.",
+      "it_IT": "Nessun salvataggio trovato.",
+      "es_ES": "No se han encontrado partidas guardadas.",
+      "ja_JP": "レポートが　みつかりません",
+      "ko_KR": "리포트를 찾을 수 없습니다"
+    },
+    {
+      "id": "Companion_Text_SavePickerHint",
+      "en_US": "Use the D-pad to choose.\nPress A to confirm.",
+      "fr_FR": "Choisissez avec la manette +.\nAppuyez sur A pour confirmer.",
+      "de_DE": "Wähle mit dem Steuerkreuz.\nDrücke A zum Bestätigen.",
+      "it_IT": "Scegli con la pulsantiera +.\nPremi A per confermare.",
+      "es_ES": "Elige con la cruz de control.\nPulsa A para confirmar.",
+      "ja_JP": "じゅうじボタンで　えらんで\nAボタンで　きめてください",
+      "ko_KR": "십자버튼으로 선택하고\nA버튼으로 결정해 주십시오"
+    },
+    {
+      "id": "Companion_Text_GameConfirm",
+      "en_US": "{game}, {language}. Correct?",
+      "fr_FR": "{game}, {language}. C’est bien ça ?",
+      "de_DE": "{game}, {language}. Stimmt das?",
+      "it_IT": "{game}, {language}. Va bene?",
+      "es_ES": "{game}, {language}. ¿Es correcto?",
+      "ja_JP": "{game}　{language}\nこれで　よろしいですか？",
+      "ko_KR": "{game}, {language}\n맞습니까?"
+    },
+    {
+      "id": "Companion_Text_WifiScanning",
+      "en_US": "Searching for Wi-Fi networks...",
+      "fr_FR": "Recherche de réseaux Wi-Fi...",
+      "de_DE": "Suche nach Wi-Fi-Netzwerken...",
+      "it_IT": "Ricerca delle reti Wi-Fi...",
+      "es_ES": "Buscando redes Wi-Fi...",
+      "ja_JP": "Wi-Fiネットワークを\nさがしています",
+      "ko_KR": "Wi-Fi 네트워크를\n찾고 있습니다"
+    },
+    {
+      "id": "Companion_Text_WifiChoose",
+      "en_US": "Choose a Wi-Fi network.",
+      "fr_FR": "Choisissez un réseau Wi-Fi.",
+      "de_DE": "Wähle ein Wi-Fi-Netzwerk.",
+      "it_IT": "Scegli una rete Wi-Fi.",
+      "es_ES": "Elige una red Wi-Fi.",
+      "ja_JP": "Wi-Fiネットワークを\nえらんでください",
+      "ko_KR": "Wi-Fi 네트워크를\n선택해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiPassword",
+      "en_US": "Enter the network password.",
+      "fr_FR": "Entrez le mot de passe du réseau.",
+      "de_DE": "Gib das Netzwerkpasswort ein.",
+      "it_IT": "Inserisci la password della rete.",
+      "es_ES": "Introduce la contraseña de la red.",
+      "ja_JP": "ネットワークの　パスワードを\nいれてください",
+      "ko_KR": "네트워크 비밀번호를\n입력해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiConnecting",
+      "en_US": "Connecting to Wi-Fi...\nPlease wait.",
+      "fr_FR": "Connexion au réseau Wi-Fi...\nVeuillez patienter.",
+      "de_DE": "Verbindung zum Wi-Fi-Netzwerk...\nBitte warte einen Moment.",
+      "it_IT": "Connessione alla rete Wi-Fi...\nAttendi un momento.",
+      "es_ES": "Conectando con la red Wi-Fi...\nPor favor, espera un momento.",
+      "ja_JP": "Wi-Fiに　せつぞく　しています\nしばらく　おまちください",
+      "ko_KR": "Wi-Fi에 접속하고 있습니다\n잠시만 기다려 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiConnected",
+      "en_US": "Connected to Wi-Fi.",
+      "fr_FR": "Connexion Wi-Fi établie.",
+      "de_DE": "Wi-Fi-Verbindung hergestellt.",
+      "it_IT": "Connessione Wi-Fi riuscita.",
+      "es_ES": "Conexión Wi-Fi establecida.",
+      "ja_JP": "Wi-Fiに　せつぞく　しました",
+      "ko_KR": "Wi-Fi에 접속했습니다"
+    },
+    {
+      "id": "Companion_Text_WifiFailed",
+      "en_US": "Couldn’t connect to Wi-Fi.\nCheck the password and try again.",
+      "fr_FR": "Impossible de se connecter au Wi-Fi.\nVérifiez le mot de passe et réessayez.",
+      "de_DE": "Keine Wi-Fi-Verbindung möglich.\nPrüfe das Passwort und versuche es erneut.",
+      "it_IT": "Impossibile connettersi al Wi-Fi.\nControlla la password e riprova.",
+      "es_ES": "No se ha podido conectar al Wi-Fi.\nComprueba la contraseña e inténtalo de nuevo.",
+      "ja_JP": "Wi-Fiに　せつぞく　できませんでした\nパスワードを　かくにんして\nもういちど　ためしてください",
+      "ko_KR": "Wi-Fi에 접속할 수 없었습니다\n비밀번호를 확인하고\n다시 시도해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiPasswordWarning",
+      "en_US": "The password is stored as plain text\non the SD card.",
+      "fr_FR": "Le mot de passe est enregistré en clair\nsur la carte SD.",
+      "de_DE": "Das Passwort wird im Klartext\nauf der SD-Karte gespeichert.",
+      "it_IT": "La password viene salvata in chiaro\nsulla scheda SD.",
+      "es_ES": "La contraseña se guarda sin cifrar\nen la tarjeta SD.",
+      "ja_JP": "パスワードは　あんごうか　されずに\nSDカードに　ほぞん　されます",
+      "ko_KR": "비밀번호는 암호화되지 않은\n일반 텍스트로 SD 카드에 저장됩니다"
+    },
+    {
+      "id": "Companion_Text_BackupWarning",
+      "en_US": "Backups are for repair only.\nRestoring one after a trade stops\nthis save from trading.",
+      "fr_FR": "Les copies de sauvegarde servent uniquement\naux réparations. En restaurer une après\nun échange bloque les échanges de cette partie.",
+      "de_DE": "Sicherungskopien dienen nur der Reparatur.\nStellst du nach einem Tausch eine wieder her,\nkann dieser Spielstand nicht mehr tauschen.",
+      "it_IT": "Le copie di sicurezza servono solo a riparare\ni dati. Ripristinarne una dopo uno scambio\nimpedisce altri scambi con questo salvataggio.",
+      "es_ES": "Las copias de seguridad son solo para reparar\ndatos. Restaurar una después de un intercambio\nimpide seguir intercambiando en esta partida.",
+      "ja_JP": "バックアップは　しゅうふく　だけに　つかってください\nこうかんの　あとで　もとに　もどすと\nこの　レポートでは　こうかん　できなくなります",
+      "ko_KR": "백업은 복구용으로만 사용해 주십시오\n교환 후 백업을 복원하면\n이 리포트로는 더 이상 교환할 수 없습니다"
+    },
+    {
+      "id": "Companion_Text_SaveInGameFirst",
+      "en_US": "Load this save in the game\nand save once first.",
+      "fr_FR": "Chargez d’abord cette partie dans le jeu\net sauvegardez une fois.",
+      "de_DE": "Lade diesen Spielstand zuerst im Spiel\nund speichere einmal.",
+      "it_IT": "Prima carica questo salvataggio nel gioco\ne salva una volta.",
+      "es_ES": "Primero carga esta partida en el juego\ny guarda una vez.",
+      "ja_JP": "さきに　ゲームで　レポートを　よみこんで\nいちど　レポートを　かいてください",
+      "ko_KR": "먼저 게임에서 이 리포트를 불러온 뒤\n한 번 저장해 주십시오"
+    },
+    {
+      "id": "Companion_Text_MatchingRomMissing",
+      "en_US": "Matching ROM not found.\nPut {name}.nds next to its save file.",
+      "fr_FR": "ROM correspondante introuvable.\nPlacez {name}.nds à côté de sa sauvegarde.",
+      "de_DE": "Passende ROM nicht gefunden.\nLege {name}.nds neben die Spielstandsdatei.",
+      "it_IT": "ROM corrispondente non trovata.\nMetti {name}.nds accanto al suo salvataggio.",
+      "es_ES": "No se ha encontrado la ROM correspondiente.\nPon {name}.nds junto a su archivo de guardado.",
+      "ja_JP": "たいおうする　ROMが　みつかりません\n{name}.ndsを　レポートと\nおなじ　フォルダーに　いれてください",
+      "ko_KR": "일치하는 ROM을 찾을 수 없습니다\n{name}.nds를 리포트와\n같은 폴더에 넣어 주십시오"
+    }
+  ]
+}
