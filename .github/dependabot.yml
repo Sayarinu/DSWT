@@ -11,6 +11,7 @@ updates:
       - /server
       - /validator
       - /tools/bps-patch
+      - /tools/companion-builder
       - /tools/rom-builder
       - /tools/rom-builder-dp
       - /tools/rom-builder-bw2
