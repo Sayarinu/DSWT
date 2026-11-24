@@ -323,13 +323,16 @@ static Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     evo[95].data[0] = CP_EVO_TRADE_WITH_HELD_ITEM; evo[95].data[2] = 233; evo[95].data[4] = 208;
     evo[95].data[6] = CP_EVO_TRADE_WITH_HELD_ITEM; evo[95].data[8] = 210; evo[95].data[10] = 77;
     for (i = 0; i < ITEM_RECORDS; ++i) {
-        unsigned pocket = i == 113 ? 7 : i % 7; /* record 113 (item 135) is a key item */
+        /* Record 113 (item 135) is a key item and record 398 (item 420) an HM;
+         * both refuse tossing, as does record 2 in an ordinary pocket. */
+        unsigned pocket = i == 113 ? 7 : i == 398 ? 3 : i % 7;
+        unsigned preventToss = i == 113 || i == 398 || i == 2;
 
         items[i] = Filled(36, 0);
         items[i].data[0] = (uint8_t)(i * 10);
         items[i].data[1] = (uint8_t)(i * 10 >> 8);
         items[i].data[2] = (uint8_t)i;
-        items[i].data[8] = (uint8_t)((pocket << 7 | (i == 1) << 5) & 0xFF);
+        items[i].data[8] = (uint8_t)((pocket << 7 | preventToss << 5) & 0xFF);
         items[i].data[9] = (uint8_t)(pocket >> 1);
     }
     for (i = 0; i < 30; ++i) western[i] = asian[i] = i == 0 ? kEmpty : kOther;
@@ -516,11 +519,14 @@ static void TestPlatinumData(void)
     assert(CpGame_TradeEvolution(&game, 10, 0, &evolution) == CP_ERR_NOT_FOUND);
 
     /* Items 113..134 have no record; later IDs shift down by 22. */
-    assert(CpGame_Item(&game, 1, &item) == CP_OK && item.price == 10 && item.preventToss && item.holdable);
+    assert(CpGame_Item(&game, 1, &item) == CP_OK && item.price == 10 && !item.preventToss && item.holdable);
+    /* Holdable follows prevent-toss alone, whatever the pocket. */
+    assert(CpGame_Item(&game, 2, &item) == CP_OK && item.preventToss && !item.holdable && item.fieldPocket == 2);
+    assert(CpGame_Item(&game, 420, &item) == CP_OK && item.fieldPocket == 3 && item.preventToss && !item.holdable);
     assert(CpGame_Item(&game, 112, &item) == CP_OK && item.holdEffect == 112 && item.fieldPocket == 112 % 7);
     assert(CpGame_Item(&game, 113, &item) == CP_ERR_NOT_FOUND && CpGame_Item(&game, 134, &item) == CP_ERR_NOT_FOUND);
     assert(CpGame_Item(&game, 135, &item) == CP_OK && item.holdEffect == 113 && item.fieldPocket == 7);
-    assert(!item.holdable && !item.preventToss);
+    assert(!item.holdable && item.preventToss);
     assert(CpGame_Item(&game, 467, &item) == CP_OK && item.price == 445 * 10);
     assert(CpGame_Item(&game, 0, &item) == CP_ERR_NOT_FOUND && CpGame_Item(&game, 468, &item) == CP_ERR_NOT_FOUND);
 

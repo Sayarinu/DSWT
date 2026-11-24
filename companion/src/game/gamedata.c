@@ -149,6 +149,6 @@ int CpGame_Item(const CpGame *game, uint16_t item, CpItem *out)
     out->holdEffect = record[2];
     out->preventToss = (uint8_t)(bits >> 5 & 1);
     out->fieldPocket = (uint8_t)(bits >> 7 & 0xF);
-    out->holdable = out->fieldPocket != CP_POCKET_KEY_ITEMS;
+    out->holdable = !out->preventToss;
     return CP_OK;
 }

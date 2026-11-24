@@ -80,7 +80,8 @@ typedef struct CpItem {
     uint8_t holdEffect;
     uint8_t fieldPocket; /* the bag pocket; CP_POCKET_KEY_ITEMS for key items */
     uint8_t preventToss;
-    uint8_t holdable; /* a Pokémon may hold it: a real item outside the key pocket */
+    uint8_t holdable; /* a Pokémon may hold it: the game lets nothing it refuses to
+                       * toss (key items, HMs) be held, as the client's Holdable does */
 } CpItem;
 
 /* CP_ERR_NOT_FOUND for item 0, an unused ID or one past the game's items. */
