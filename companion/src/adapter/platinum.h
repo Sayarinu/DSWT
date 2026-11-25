@@ -46,6 +46,13 @@
  * Pokémon, or this one trained in the stock game) is never proof either way:
  * the step fails closed and changes nothing.
  *
+ * The stock game can also move a Pokémon where no journal locator reaches:
+ * the Day Care, the GTS deposit, the HeartGold/SoulSilver Pokéwalker (and
+ * Pal Park's migrated Pokémon are held there too). A Pokémon there with the
+ * identity a step decides by is never proof either way (LUNE-913): the step
+ * fails closed and writes nothing until the player takes it back. Deliveries
+ * still go only to the party or the PC.
+ *
  * LUNE-902: an offer's removal is written with the save counter moved
  * WT_ABANDON_STEP past the one its escrow recorded, and
  * WT_INVENTORY_ABANDONABLE answers 1 only for a save a game wrote over the

@@ -41,6 +41,8 @@ static const FakeSpecies kSpecies[] = {
     { 589, 0, { 70, 135, 105, 20, 60, 105 }, 127, 0, 70, { 75, 142, 0 } },  /* Escavalier */
     { 616, 0, { 50, 40, 85, 25, 40, 65 }, 127, 0, 70, { 93, 75, 142 } },    /* Shelmet */
     { 617, 0, { 80, 70, 40, 145, 100, 60 }, 127, 0, 70, { 93, 60, 84 } },   /* Accelgor */
+    { 492, 0, { 100, 100, 100, 100, 100, 100 }, 255, 3, 100, { 30, 30, 30 } }, /* Shaymin Land */
+    { 492, 1, { 100, 103, 75, 127, 120, 75 }, 255, 3, 100, { 32, 32, 32 } },    /* Shaymin Sky */
     { 479, 0, { 50, 50, 77, 91, 95, 77 }, 255, 0, 0, { 26, 0, 0 } },        /* Rotom */
     { 479, 1, { 50, 65, 107, 86, 105, 107 }, 255, 0, 0, { 26, 0, 0 } },     /* Heat Rotom */
 };
@@ -362,7 +364,8 @@ static void PartyDelivery(void)
     assert(ext[4] == level && Fx5R16(ext + 8) == max && Fx5R16(ext + 6) == max && Fx5R32(ext) == 0);
     assert(Fx5R16(ext + 10) == Stat(50, 20, 4, level, -1) && Fx5R16(ext + 12) == Stat(50, 10, 0, level, 0));
     assert(Fx5R16(ext + 14) == Stat(50, 5, 252, level, 1));
-    assert(box[0x14] == 50 && box[0x15] == 1 && Fx5R16(box + 0x08) == 500);
+    /* Player trades set 70, even though this fixture's species base is 50. */
+    assert(box[0x14] == 70 && box[0x15] == 1 && Fx5R16(box + 0x08) == 500);
     /* PP below the maximum rises; above it stays (party: HealFull). */
     assert(box[0x30] == (unsigned char)(38 + 38 * 20 * 3 / 100) && box[0x31] == 60);
     /* Fields nothing writes stay zero ciphertext: capsule, mail, padding. */
@@ -434,6 +437,7 @@ static void BoxDelivery(void)
     assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
     BothCopies();
     Decoded(Fx5ImageBox(&image, 0, 1), box, NULL);
+    assert(box[0x14] == 70);
     /* The PC restores every move's PP to its maximum, lowering one above it. */
     assert(box[0x30] == (unsigned char)(38 + 38 * 20 * 3 / 100) && box[0x31] == (unsigned char)(40 + 40 * 20 / 100));
     printf("PASS %s PC delivery: the first empty slot, every move's PP at its maximum, 136 bytes recorded\n", FX5_NAME);
@@ -505,6 +509,55 @@ static void Evolutions(void)
     assert(Fx5R16(box + 8) == 617);
     printf("PASS %s trade evolutions: Kadabra despite an Everstone, Everstones stop others, Metal Coat is used, Karrablast and Shelmet need each other\n",
            FX5_NAME);
+}
+
+static void Shaymin(void)
+{
+    unsigned char incoming[136], box[136], ext[84], output[220], partner[220], dex[FX5_POKEDEX_SIZE];
+    CpReceive5Game which = B2W2 ? CP_RECEIVE_BLACK2_WHITE2 : CP_RECEIVE_BLACK_WHITE;
+    unsigned destination, shiny, i;
+    CpReceive5_Empty(partner);
+    for (destination = CP_RECEIVE_PARTY; destination <= CP_RECEIVE_BOX; ++destination) {
+        for (shiny = 0; shiny < 2; ++shiny) {
+            Spec spec = Basic(492);
+            unsigned seen = shiny ? (B2W2 ? 0x307 : 0x305) : 0x2FC;
+            unsigned shown = shiny ? (B2W2 ? 0x31D : 0x317) : (B2W2 ? 0x312 : 0x30E);
+            spec.form = 1; spec.nicknamed = 1;
+            if (shiny) spec.ot = spec.pid;
+            Canonical(&spec, incoming);
+            incoming[0x15] = 32;
+            incoming[0x40] |= 1; /* Preserve the fateful encounter bit. */
+            {
+                unsigned sum = 0;
+                for (i = 8; i < 136; i += 2) sum += Fx5R16(incoming + i);
+                Fx5W16(incoming + 6, sum & 0xFFFF);
+            }
+            memset(dex, 0, sizeof(dex));
+            assert(CpReceive5_Apply(which, &data, dex, incoming, partner, (int)destination, output) == 0);
+            Decoded(output, box, destination == CP_RECEIVE_PARTY ? ext : NULL);
+            assert(Fx5R16(box + 8) == 492 && box[0x40] == 5 && box[0x15] == 30);
+            /* Shaymin's base friendship is 100; a player trade sets 70. */
+            assert(box[0x14] == 70 && Fx5R32(box) == spec.pid && Fx5R32(box + 0x0C) == spec.ot);
+            assert(memcmp(box + 0x48, incoming + 0x48, 22) == 0 && box[0x41] == spec.nature);
+            assert(Bit(dex + seen, 32) && Bit(dex + seen, 33));
+            assert(!Bit(dex + shown, 32) && Bit(dex + shown, 33));
+            assert(Bit(dex + 0x008, 491));
+            if (destination == CP_RECEIVE_PARTY) {
+                static const unsigned stats[] = { 116, 63, 68, 93, 72, 69 };
+                assert(ext[4] == 30 && Fx5R16(ext + 6) == 116 && Fx5R32(ext) == 0);
+                for (i = 0; i < 6; ++i) assert(Fx5R16(ext + 8 + 2 * i) == stats[i]);
+            }
+            /* Land Forme already received: no form helper changes its ability or gender. */
+            spec.form = 0;
+            Canonical(&spec, incoming);
+            memset(dex, 0, sizeof(dex));
+            assert(CpReceive5_Apply(which, &data, dex, incoming, partner, (int)destination, output) == 0);
+            Decoded(output, box, NULL);
+            assert(box[0x40] == incoming[0x40] && box[0x15] == incoming[0x15]);
+            assert(Bit(dex + seen, 32) && !Bit(dex + seen, 33));
+        }
+    }
+    printf("PASS %s Shaymin: party/PC Land Forme, Natural Cure, recalculated stats, Sky then Land dex registration\n", FX5_NAME);
 }
 
 static void Pokedex(void)
@@ -718,6 +771,7 @@ int main(void)
     PartyDelivery();
     BoxDelivery();
     Evolutions();
+    Shaymin();
     Pokedex();
     Returned();
     StockGame();

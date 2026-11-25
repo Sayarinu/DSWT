@@ -355,6 +355,194 @@ static void IdentityCollisions(void)
     printf("PASS %s stock save: another Pokemon with the same identity is never taken as the offer\n", FX5_NAME);
 }
 
+/* ---- LUNE-913: the Day Care, the Dream World, the GTS, DNA Splicers ------- */
+
+/* Where the stock game may hold the offered Pokémon outside the party, the PC
+ * and the Battle Box: block, image offset, flag offset and size (0: none). */
+typedef struct Place {
+    const char *name;
+    unsigned block, mon, flag, flagSize;
+} Place;
+
+static const Place kPlaces[] = {
+    { "left at the Day Care (first slot)", FX5_DAYCARE, 0x04, 0x00, 4 },
+    { "left at the Day Care (second slot)", FX5_DAYCARE, FX5_DAYCARE_SLOT + 0x04, FX5_DAYCARE_SLOT, 4 },
+    { "tucked in for the Dream World", FX5_DREAM_WORLD, 0x08, 0x1A3, 1 },
+    { "deposited at the GTS", FX5_GTS, 0x00, 0xEC, 2 },
+#if FX5_GAME == 1
+    { "fused into Kyurem with the DNA Splicers", FX5_FUSION, 0x04, 0, 0 },
+#endif
+};
+enum { PLACES = sizeof(kPlaces) / sizeof(kPlaces[0]) };
+static unsigned place, healed;
+
+static unsigned char *PlaceMon(unsigned char *loaded, const Place *at) { return loaded + Rl5Offset(at->block) + at->mon; }
+
+static void SetFlag(unsigned char *loaded, const Place *at, unsigned value)
+{
+    unsigned char *flag = loaded + Rl5Offset(at->block) + at->flag;
+    if (at->flagSize == 1) flag[0] = (unsigned char)value;
+    else if (at->flagSize == 2) Fx5W16(flag, value);
+    else if (at->flagSize == 4) Fx5W32(flag, value);
+}
+
+/* A fused Kyurem (Black Kyurem, form 1) in PC tray 3, slot 9. */
+static void FusedKyurem(unsigned char *loaded, int present)
+{
+    unsigned char *slot = loaded + Rl5Offset(3) + 9 * FX5_BOX_MON;
+    if (present) {
+        Fx5Spec spec = Fx5Default(5);
+        unsigned char canonical[136];
+        spec.species = 646; spec.form = 1; spec.pid = 0x6460001;
+        Fx5Canonical(&spec, canonical);
+        assert(WtPokemon_Encode(canonical, slot) == 0);
+    } else Fx5Empty(slot, FX5_BOX_MON);
+}
+
+/* The offered Pokémon's party slot in the loaded save, or the count. */
+static unsigned OfferedSlot(unsigned char *loaded)
+{
+    unsigned char canonical[136];
+    unsigned count = Fx5R32(loaded + Rl5Offset(FX5_PARTY) + 4), slot;
+    for (slot = 0; slot < count; ++slot) {
+        assert(WtPokemon_Decode(PartySlot(loaded, slot), canonical) == 0);
+        if (memcmp(canonical, offered, 4) == 0 && memcmp(canonical + 12, offered + 12, 4) == 0) break;
+    }
+    return slot;
+}
+
+/* The game moves the whole party image there, sets the flag and removes it
+ * from the party. `healed`: the Day Care's deposit restored its PP first. */
+static void HoldOffered(unsigned char *loaded)
+{
+    const Place *at = &kPlaces[place];
+    unsigned char *party = loaded + Rl5Offset(FX5_PARTY), *to = PlaceMon(loaded, at);
+    unsigned count = Fx5R32(party + 4), slot = OfferedSlot(loaded), i;
+    if (slot == count) return;
+    memcpy(to, PartySlot(loaded, slot), FX5_MON);
+    if (healed) {
+        unsigned char canonical[136];
+        unsigned sum = 0;
+        assert(WtPokemon_Decode(to, canonical) == 0);
+        canonical[0x30] = 35; /* Tackle's PP */
+        for (i = 8; i < 136; i += 2) sum += Fx5R16(canonical + i);
+        Fx5W16(canonical + 6, sum & 0xFFFF);
+        assert(WtPokemon_Encode(canonical, to) == 0);
+    }
+    SetFlag(loaded, at, 1);
+    if (!at->flagSize) FusedKyurem(loaded, 1);
+    for (i = slot; i + 1 < count; ++i) memcpy(PartySlot(loaded, i), PartySlot(loaded, i + 1), FX5_MON);
+    Fx5Empty(PartySlot(loaded, count - 1), FX5_MON);
+    Fx5W32(party + 4, count - 1);
+}
+
+/* Taken back to the end of the party as it went in; the place keeps its old
+ * image, only the flag clears (the fused Kyurem splits back). */
+static void WithdrawOffered(unsigned char *loaded)
+{
+    const Place *at = &kPlaces[place];
+    unsigned char *party = loaded + Rl5Offset(FX5_PARTY);
+    unsigned count = Fx5R32(party + 4);
+    assert(count < 6);
+    memcpy(PartySlot(loaded, count), PlaceMon(loaded, at), FX5_MON);
+    Fx5W32(party + 4, count + 1);
+    SetFlag(loaded, at, 0);
+    if (!at->flagSize) FusedKyurem(loaded, 0);
+}
+
+/* Whether the place holds the offered Pokémon in the save the game loads. */
+static int Held(void)
+{
+    const Place *at = &kPlaces[place];
+    const unsigned char *flag;
+    unsigned char canonical[136];
+    RetailLoad5(file.bytes, ram);
+    flag = ram + Rl5Offset(at->block) + at->flag;
+    if (at->flagSize == 0) {
+        assert(WtPokemon_Decode(ram + Rl5Offset(3) + 9 * FX5_BOX_MON, canonical) == 0);
+        if (Fx5R16(canonical + 8) != 646) return 0;
+    } else if (!(at->flagSize == 1 ? flag[0] : at->flagSize == 2 ? Fx5R16(flag) : Fx5R32(flag))) return 0;
+    assert(WtPokemon_Decode(PlaceMon(ram, at), canonical) == 0);
+    return memcmp(canonical, offered, 4) == 0 && memcmp(canonical + 12, offered + 12, 4) == 0;
+}
+
+/* Every cut of REMOVE in escrow and of RECEIVE for a return, then the stock
+ * game moves the offered Pokémon there (when the save it loaded holds it): the
+ * step refuses and writes nothing, the Pokémon is never sent nor added twice.
+ * Once the player takes it back, the step finishes with one copy. */
+static void HeldElsewhere(void)
+{
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned cut, held, state;
+    for (place = 0; place < PLACES; ++place) for (healed = 0; healed <= (place < 2); ++healed)
+    for (state = ESCROW; state <= APPLYING_RETURN; state += APPLYING_RETURN - ESCROW) {
+        enum WtInventoryStep cutStep = kCutStep[state];
+        held = 0;
+        for (cut = 1; cut <= 9; ++cut) {
+            Arrange((enum State)state, &journal);
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(cutStep, &entry) == (cut <= 8 ? -1 : 0));
+            file.failWrite = 0;
+            StockPlay(1, HoldOffered);
+            Load();
+            entry = journal;
+            if (Held()) {
+                ++held;
+                memcpy(before, file.bytes, sizeof(before));
+                assert(Step(cutStep, &entry) == -1);
+                assert(memcmp(before, file.bytes, sizeof(before)) == 0 && Copies() == 0);
+                StockPlay(1, WithdrawOffered);
+                Load();
+                entry = journal;
+                if (healed) {
+                    /* Back changed: never proof either way, still refused. */
+                    memcpy(before, file.bytes, sizeof(before));
+                    assert(Step(cutStep, &entry) == -1 && memcmp(before, file.bytes, sizeof(before)) == 0);
+                    ++cases;
+                    continue;
+                }
+            }
+            /* Taken back (or never there): the step finishes once. */
+            assert(Step(cutStep, &entry) == 0);
+            if (state == ESCROW) {
+                assert(Step(WT_INVENTORY_VERIFY_REMOVED, &entry) == 0 && Copies() == 0 && !Held());
+            } else {
+                assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0 && Copies() == 1 && !Held());
+            }
+            ++cases;
+        }
+        /* Every cut before the step's first write leaves the Pokémon in the party. */
+        assert(held >= 1);
+        printf("PASS %s stock save in %s, then %s%s: refused untouched in %u of 9 cuts, %s once taken back\n",
+            FX5_NAME, kStates[state], kPlaces[place].name, healed ? " (healed)" : "", held,
+            healed ? "still refused (changed)" : "finished");
+    }
+}
+
+/* The offer screen: a Pokémon held elsewhere with the offered one's identity
+ * makes it not unique; an old image the place kept after it left does not. */
+static void HeldUnique(void)
+{
+    for (place = 0; place < PLACES; ++place) {
+        Setup(4);
+        RetailLoad5(file.bytes, ram);
+        memcpy(PlaceMon(ram, &kPlaces[place]), PartySlot(ram, OFFERED_SLOT), FX5_MON);
+        StockSave5(file.bytes, ram);
+        Load();
+        assert(CpGen5_Unique(&image, OFFERED_SLOT));
+        RetailLoad5(file.bytes, ram);
+        SetFlag(ram, &kPlaces[place], 1);
+        if (!kPlaces[place].flagSize) FusedKyurem(ram, 1);
+        StockSave5(file.bytes, ram);
+        Load();
+        assert(!CpGen5_Unique(&image, OFFERED_SLOT));
+        printf("PASS %s offer screen: a copy %s is not unique; an old image there is ignored\n", FX5_NAME,
+               kPlaces[place].name);
+    }
+}
+
 /* LUNE-902: abandoning an escrow is proved by the save's history alone. */
 static void ReleaseOffered(unsigned char *loaded)
 {
@@ -452,6 +640,8 @@ int main(void)
     SubmitReadyAfterPlay();
     ReturnInBattleBox();
     IdentityCollisions();
+    HeldElsewhere();
+    HeldUnique();
     History();
     printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", FX5_NAME, cases);
     return 0;

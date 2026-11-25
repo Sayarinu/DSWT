@@ -156,9 +156,11 @@ def fetch(version, repository, output):
     return {"version": version, "variants": [entry["variant"] for entry in manifest["entries"]]}
 
 
-def publish(version, repository, directory):
+def publish(version, repository, directory, companion=False):
     directory = Path(directory)
     names = {f"dswt-patcher-{version}-{name}.zip" for name in PLATFORMS}
+    if companion:
+        names.add(f"dswt-companion-{version}.zip")
     found = {path.name for path in directory.iterdir() if path.is_file()}
     if found != names | {archive_name(version)}:
         raise build.BuildError(f"Release files differ from the expected set: {sorted(found ^ (names | {archive_name(version)}))}")
@@ -172,7 +174,7 @@ def publish(version, repository, directory):
        str(directory / "SHA256SUMS"), "--repo", repository)
     gh("release", "delete-asset", f"v{version}", archive_name(version), "--repo", repository, "--yes")
     if _draft_assets(version, repository) != names | {"SHA256SUMS"}:
-        raise build.BuildError("The draft does not hold exactly the apps and SHA256SUMS")
+        raise build.BuildError("The draft does not hold exactly the selected downloads and SHA256SUMS")
     gh("release", "edit", f"v{version}", "--repo", repository, "--draft=false", "--latest")
     return {"release": f"v{version}", "published": True, "files": sorted(names | {"SHA256SUMS"})}
 
@@ -187,6 +189,7 @@ def main(argv=None):
     commands.choices["draft"].add_argument("--archive", required=True, type=Path)
     commands.choices["fetch"].add_argument("--output", required=True, type=Path)
     commands.choices["publish"].add_argument("--directory", required=True, type=Path)
+    commands.choices["publish"].add_argument("--companion", choices=("true", "false"), default="false")
     args = parser.parse_args(argv)
     if not VERSION.fullmatch(args.version) or not re.fullmatch(r"[\w.-]+/[\w.-]+", args.repo):
         parser.error("use a version such as 0.1.0 or 0.1.0-rc.1 and an owner/name repository")
@@ -198,7 +201,7 @@ def main(argv=None):
         elif args.command == "fetch":
             result = fetch(args.version, args.repo, args.output)
         else:
-            result = publish(args.version, args.repo, args.directory)
+            result = publish(args.version, args.repo, args.directory, companion=args.companion == "true")
     except (OSError, ValueError, KeyError) as error:
         print(f"{args.command} failed: {error}", file=sys.stderr)
         return 1

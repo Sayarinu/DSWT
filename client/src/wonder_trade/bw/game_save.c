@@ -304,8 +304,8 @@ static unsigned char *Destination(const Image *image, unsigned char *data, WtJou
     return NULL;
 }
 
-/* A traded Pokémon's effects in the receiving game: its friendship returns to
- * its species' base, it is registered as caught, and it evolves by trade as
+/* A traded Pokémon's effects in the receiving game: its friendship becomes
+ * 70, it is registered as caught, and it evolves by trade as
  * the game's own trades check it (CheckEvolveSpecies with WT_EVO_CHECK_TRADE),
  * the Pokémon sent being the partner for Karrablast and Shelmet. The move set
  * is kept; no evolution scene can change a live save. */
@@ -327,12 +327,16 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     pkm->box = box;
     POKE_TOOL_RecalcParam(pkm);
     POKE_TOOL_HealFull(pkm);
-    POKE_TOOL_SetPartyValue(pkm, WT_PARAM_HAPPINESS,
-        POKE_TOOL_GetPersonalParam((u16)POKE_TOOL_GetPartyValue(pkm, WT_PARAM_SPECIES, 0),
-            (u16)POKE_TOOL_GetPartyValue(pkm, WT_PARAM_FORM, 0), WT_PERSONAL_FRIENDSHIP));
+    POKE_TOOL_SetPartyValue(pkm, WT_PARAM_HAPPINESS, 70);
     /* Retail trades register the Pokémon received as caught before the
      * evolution check (pokemontrade_save.c, fld_trade.c). */
     ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    /* Retail pokemontrade_save.c registers both Shaymin forms, Sky first. */
+    if (POKE_TOOL_GetPartyValue(pkm, WT_PARAM_SPECIES, 0) == 492
+        && POKE_TOOL_GetPartyValue(pkm, WT_PARAM_FORM, 0) == 1) {
+        POKE_TOOL_ChangeForm(pkm, 0);
+        ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    }
     memcpy(&partner, entry->original, sizeof(partner));
     target = SHINKA_CHECK_CheckEvolution(Party(image, data), pkm, WT_EVO_CHECK_TRADE, (u32)&partner, 0, &method, game->heapId);
     mbedtls_platform_zeroize(&partner, sizeof(partner));

@@ -29,13 +29,43 @@ static void Write32(unsigned char *p, uint32_t value)
     for (i = 0; i < 4; ++i) p[i] = (unsigned char)(value >> (8 * i));
 }
 
+/* LUNE-913: a Pokémon the save holds outside the party, the PC and the
+ * Battle Box, where no journal locator reaches: its block, where its image
+ * starts (a party-format image, encrypted as in the party) and where the
+ * flag that says it is there lies, with the flag's size in bytes. Each place
+ * keeps its last image when the Pokémon leaves, so only the flag tells.
+ * Flag size 0: Black 2/White 2's DNA Splicers partner, which has no flag and
+ * is there while a fused Kyurem is (Fused). */
+typedef struct Held {
+    uint8_t block;
+    uint16_t mon, flag;
+    uint8_t flagSize;
+} Held;
+
+/* Both games (aletheia, pokebw2): the Day Care's two slots (block 0x32,
+ * DayCareSlot {BOOL used; PartyPkm pkm; u32 steps}), the Pokémon tucked in
+ * for the Dream World (block 0x23, pkm at 8, asleep at 0x1A3) and the GTS
+ * deposit (block 0x2E, pkm at 0, deposited flag at 0xEC). Black 2/White 2
+ * add the Reshiram or Zekrom fused into Kyurem (block 0x2B, pkm at 4). */
+static const Held kHeldBlackWhite[] = {
+    { 0x32, 0x04, 0x00, 4 }, { 0x32, 0xE8, 0xE4, 4 }, { 0x23, 0x08, 0x1A3, 1 }, { 0x2E, 0x00, 0xEC, 2 }
+};
+static const Held kHeldBlack2White2[] = {
+    { 0x32, 0x04, 0x00, 4 }, { 0x32, 0xE8, 0xE4, 4 }, { 0x23, 0x08, 0x1A3, 1 }, { 0x2E, 0x00, 0xEC, 2 },
+    { 0x2B, 0x04, 0x00, 0 }
+};
+
 typedef struct Rules {
     CpReceive5Game receive;
     unsigned itemLast;
+    const Held *held;
+    unsigned heldCount;
 } Rules;
 
-static const Rules kBlackWhite = { CP_RECEIVE_BLACK_WHITE, 626 };
-static const Rules kBlack2White2 = { CP_RECEIVE_BLACK2_WHITE2, 638 };
+static const Rules kBlackWhite = { CP_RECEIVE_BLACK_WHITE, 626, kHeldBlackWhite,
+    sizeof(kHeldBlackWhite) / sizeof(kHeldBlackWhite[0]) };
+static const Rules kBlack2White2 = { CP_RECEIVE_BLACK2_WHITE2, 638, kHeldBlack2White2,
+    sizeof(kHeldBlack2White2) / sizeof(kHeldBlack2White2[0]) };
 
 int CpGen5_Is(const CpSaveImage *image)
 {
@@ -163,13 +193,75 @@ static int Stored(const unsigned char *stored, unsigned char canonical[BOX_MON_S
     return WtPokemon_Decode(stored, canonical) == 0 ? 1 : -1;
 }
 
-/* game_save.c Absent: no party, PC or Battle Box Pokémon is the outgoing one. */
+static const unsigned char *HeldMon(const CpSaveImage *image, const Held *held)
+{
+    return BlockOf(image, held->block) + held->mon;
+}
+
+/* The place's flag is set (always 0 for one without a flag). */
+static int Flagged(const CpSaveImage *image, const Held *held)
+{
+    const unsigned char *flag = BlockOf(image, held->block) + held->flag;
+    return held->flagSize == 1 ? flag[0] != 0 : held->flagSize == 2 ? Read16(flag) != 0
+        : held->flagSize == 4 && Read32(flag) != 0;
+}
+
+/* Nonzero when a fused Kyurem (species 646, form 1 or 2) is anywhere the save
+ * holds a Pokémon, or a slot that might hold one cannot be read: then the
+ * DNA Splicers block holds its partner. */
+static int Fused(const CpSaveImage *image)
+{
+    const Rules *rules = RulesOf(image);
+    unsigned char canonical[BOX_MON_SIZE], *party = Party(image);
+    unsigned i, n;
+    int count = Count(party, 1), kind;
+    if (count < 0) return 1;
+    n = (unsigned)count + BOXES * BOX_SLOTS + BATTLE_BOX_SLOTS + rules->heldCount;
+    for (i = 0; i < n; ++i) {
+        unsigned at = i - (unsigned)count;
+        if (i < (unsigned)count) kind = WtPokemon_Decode(Slot(party, i), canonical) == 0 ? 1 : -1;
+        else if (at < BOXES * BOX_SLOTS) kind = Stored(BoxMon(image, at / BOX_SLOTS, at % BOX_SLOTS), canonical);
+        else if ((at -= BOXES * BOX_SLOTS) < BATTLE_BOX_SLOTS) kind = Stored(BattleBoxMon(image, at), canonical);
+        else {
+            const Held *held = &rules->held[at - BATTLE_BOX_SLOTS];
+            if (!Flagged(image, held)) continue;
+            kind = WtPokemon_Decode(HeldMon(image, held), canonical) == 0 ? 1 : -1;
+        }
+        if (kind < 0) return 1;
+        if (kind == 1 && Read16(canonical + 0x08) == 646 && (canonical[0x40] >> 3) != 0) return 1;
+    }
+    return 0;
+}
+
+/* LUNE-913: zero when no Pokémon the save holds outside the party, the PC and
+ * the Battle Box has the target's identity (personality and trainer ID).
+ * Such a Pokémon is where the journal cannot name it, so it is never proof
+ * that the target is gone, nor that it is missing: -1, as for one that shares
+ * the personality and cannot be read. */
+static int Elsewhere(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+{
+    const Rules *rules = RulesOf(image);
+    unsigned char canonical[BOX_MON_SIZE];
+    unsigned i;
+    for (i = 0; i < rules->heldCount; ++i) {
+        const Held *held = &rules->held[i];
+        const unsigned char *stored = HeldMon(image, held);
+        /* The personality is stored unencrypted. */
+        if (memcmp(stored, target, 4) != 0 || !(held->flagSize ? Flagged(image, held) : Fused(image))) continue;
+        if (WtPokemon_Decode(stored, canonical) != 0
+            || (Read16(canonical + 0x08) && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0)) return -1;
+    }
+    return 0;
+}
+
+/* game_save.c Absent: no party, PC or Battle Box Pokémon is the outgoing one,
+ * and none held elsewhere has its identity. */
 static int Absent(const CpSaveImage *image, const unsigned char outgoing[BOX_MON_SIZE])
 {
     unsigned char canonical[BOX_MON_SIZE], *party = Party(image);
     unsigned box, slot;
     int count, i, kind;
-    if ((count = Count(party, 1)) < 0) return -1;
+    if ((count = Count(party, 1)) < 0 || Elsewhere(image, outgoing) != 0) return -1;
     for (i = 0; i < count; ++i)
         if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0 || memcmp(canonical, outgoing, BOX_MON_SIZE) == 0)
             return -1;
@@ -221,14 +313,14 @@ typedef struct Found {
 } Found;
 
 /* As adapter/platinum.c Locate, over the party, the PC and the Battle Box:
- * 1 found, 0 absent, -1 unreadable or ambiguous. */
+ * 1 found, 0 absent, -1 unreadable or ambiguous, or held elsewhere (Elsewhere). */
 static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
                   unsigned count, Found *found)
 {
     unsigned char canonical[BOX_MON_SIZE], sum[32], *party = Party(image);
     unsigned i, j, n;
     int members, matches = 0, kind;
-    if ((members = Count(party, 1)) < 0) return -1;
+    if ((members = Count(party, 1)) < 0 || Elsewhere(image, target) != 0) return -1;
     n = (unsigned)members + BOXES * BOX_SLOTS + BATTLE_BOX_SLOTS;
     for (i = 0; i < n; ++i) {
         int inParty = i < (unsigned)members, inBattleBox = i >= (unsigned)members + BOXES * BOX_SLOTS;

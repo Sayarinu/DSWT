@@ -22,6 +22,9 @@
  *   the stock game moved to the Battle Box is recorded there (journal locator
  *   kind 3), as the game's WtDelivery_Found records it; nothing is ever
  *   delivered to the Battle Box, and an offer moved there is refused;
+ * - a Pokémon held where no locator reaches (the Day Care, the Dream World,
+ *   the GTS deposit, Black 2/White 2's DNA Splicers partner) with the
+ *   identity a step decides by fails that step closed (LUNE-913);
  * - LUNE-902: the removal moves the save count WT_ABANDON_STEP ahead, and
  *   WT_INVENTORY_ABANDONABLE is decided by it, as adapter/platinum.h says.
  *

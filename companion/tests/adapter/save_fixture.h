@@ -29,6 +29,7 @@ enum { FX_FOOTER = 20, FX_BOX_STRIDE = 30 * 136 };
 #define FX_SHARED 0
 #define FX_LAYOUT (&CpSaveLayout_Platinum)
 #define FX_GAME_NAME "Platinum"
+enum { FX_DAYCARE = 0x1654, FX_GTS = 0x8080, FX_PAL_PARK = 0xC7F0 };
 #elif FX_GAME == 1
 enum {
     FX_GENERAL = 0, FX_GENERAL_SIZE = 0xC100, FX_BOXES = 0xC100, FX_BOXES_SIZE = 0x121E0,
@@ -38,6 +39,7 @@ enum { FX_FOOTER = 20, FX_BOX_STRIDE = 30 * 136 };
 #define FX_SHARED 0
 #define FX_LAYOUT (&CpSaveLayout_DiamondPearl)
 #define FX_GAME_NAME "Diamond/Pearl"
+enum { FX_DAYCARE = 0x141C, FX_GTS = 0x73E8, FX_PAL_PARK = 0xBA28 };
 #elif FX_GAME == 2
 enum {
     FX_GENERAL = 0, FX_GENERAL_SIZE = 0xF628, FX_BOXES = 0xF700, FX_BOXES_SIZE = 0x12310,
@@ -47,7 +49,11 @@ enum { FX_FOOTER = 16, FX_BOX_STRIDE = 0x1000 };
 #define FX_SHARED 1
 #define FX_LAYOUT (&CpSaveLayout_HeartGoldSoulSilver)
 #define FX_GAME_NAME "HeartGold/SoulSilver"
+enum { FX_DAYCARE = 0x15FC, FX_GTS = 0x6910, FX_PAL_PARK = 0xB3C0, FX_WALKER_MON = 0xE5E0 };
 #endif
+/* LUNE-913: the Day Care's second DaycareMon and the GTS's pokemonListed
+ * follow the first Pokémon 0xEC on; Pal Park's six Pokémon are 0xEC apart. */
+enum { FX_DAYCARE_SLOT = 0xEC, FX_GTS_FLAG = FX_GTS + 0xEC };
 /* The Aprijuice modifiers after the party (HeartGold/SoulSilver), and the
  * PC as the bytes from its first slot to past its last. */
 enum { FX_APRIJUICE = FX_PARTY + 8 + 6 * FX_MON, FX_PC_SPAN = 17 * FX_BOX_STRIDE + 30 * FX_BOX_MON };
@@ -228,7 +234,12 @@ static inline void FxBuild(FxFile *file, const FxSpec *specs, unsigned count)
         }
 #if FX_GAME == 2
         memset(general + FX_APRIJUICE, 0, 30); /* no Aprijuice modifiers */
+        memset(general + FX_WALKER_MON, 0, FX_BOX_MON); /* no Pokémon on a walk */
 #endif
+        /* LUNE-913: nothing at the Day Care, the GTS or Pal Park. */
+        FxEmpty(general + FX_DAYCARE, FX_BOX_MON); FxEmpty(general + FX_DAYCARE + FX_DAYCARE_SLOT, FX_BOX_MON);
+        memset(general + FX_GTS, 0, FX_GTS_FLAG + 2 - FX_GTS);
+        for (i = 0; i < 6; ++i) FxEmpty(general + FX_PAL_PARK + i * FX_MON, FX_MON);
         for (i = 0; i < 18 * 30; ++i) FxEmpty(FxPcSlot(boxes, i), FX_BOX_MON);
         FxSeal(file, half, 0, 10 + half, 20 + half);
         FxSeal(file, half, 1, 10 + half, 30 + half);

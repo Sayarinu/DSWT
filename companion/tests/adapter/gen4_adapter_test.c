@@ -616,6 +616,8 @@ static void Returns(void)
  * counters advance in RAM, only the general block is written), HeartGold/
  * SoulSilver both blocks to the other half with the next counter. Written
  * from the decomps' save.c, not from save/save_image.c. */
+static void (*stockAction)(unsigned char *general);
+
 static void StockSave(void)
 {
     unsigned half = image.currentHalf[0], block;
@@ -625,6 +627,7 @@ static void StockSave(void)
     general = FxGeneral(&file, !half);
     memcpy(general, FxGeneral(&file, half), FX_GENERAL_SIZE);
     general[0x60 + 0x10] ^= 0x5a; /* PlayerData: the play time */
+    if (stockAction) stockAction(general);
     FxSeal(&file, !half, 0, global, image.blockCounters[0] + 1);
     (void)block;
 #else
@@ -635,6 +638,7 @@ static void StockSave(void)
     }
     general = FxGeneral(&file, !half);
     general[0x60 + 0x10] ^= 0x5a;
+    if (stockAction) stockAction(general);
     FxSeal(&file, !half, 0, global + 1, 0);
     FxSeal(&file, !half, 1, global + 1, 0);
 #endif
@@ -717,6 +721,59 @@ static void CanHold(void)
     printf("PASS %s can hold: forms, last item, HeartGold/SoulSilver's ball\n", FX_GAME_NAME);
 }
 
+/* ---- LUNE-913: held where no locator reaches ------------------------------- */
+
+static unsigned char offered[136];
+
+static void HeldArrange(int returning, WtJournalEntry *journal)
+{
+    FxSpec specs[6];
+    unsigned char digest[32];
+    Defaults(specs, 4); Setup(specs, 4);
+    FxCanonical(&specs[1], offered);
+    memset(journal, 0, sizeof(*journal));
+    assert(Step(WT_INVENTORY_PREPARE_REMOVE, journal, 1) == 0);
+    journal->phase = WT_JOURNAL_ESCROW;
+    if (!returning) return;
+    assert(Step(WT_INVENTORY_REMOVE, journal, 1) == 0 && Step(WT_INVENTORY_VERIFY_REMOVED, journal, 1) == 0);
+    journal->phase = WT_JOURNAL_RESTORING;
+    /* The patched game saved since: the offer returns like a delivery. */
+    CpSaveImage_Block(&image, 0)[4000] ^= 0x5a;
+    assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK && CpSaveImage_CommitBoth(&image, &cpFile, digest) == CP_SAVE_OK);
+    assert(Step(WT_INVENTORY_PREPARE_RESTORE, journal, 1) == 1);
+    journal->deliveryKind = WT_DELIVERY_RETURN;
+    memcpy(journal->incoming, journal->outgoing, 136);
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, journal, 0) == 0);
+}
+
+static int HeldStep(enum WtInventoryStep step, WtJournalEntry *entry)
+{
+    return Step(step, entry, step == WT_INVENTORY_RECEIVE ? entry->destination.slot : entry->source.slot);
+}
+
+static void HeldStock(void (*action)(unsigned char *general))
+{
+    assert(FxLoad(&image, &cpFile) == CP_SAVE_OK);
+    stockAction = action;
+    StockSave();
+    stockAction = NULL;
+}
+
+/* Copies of the offered Pokémon, by identity, in the loaded party and PC. */
+static unsigned HeldCopies(void)
+{
+    unsigned char canonical[136];
+    unsigned i, copies = 0, count = FxImageCount(&image);
+    for (i = 0; i < count + 18 * 30; ++i) {
+        const unsigned char *slot = i < count ? FxImageParty(&image, i) : FxImageBox(&image, (i - count) / 30, (i - count) % 30);
+        if (WtPokemon_Decode(slot, canonical) != 0 || !R16(canonical + 8)) continue;
+        copies += memcmp(canonical, offered, 4) == 0 && memcmp(canonical + 12, offered + 12, 4) == 0;
+    }
+    return copies;
+}
+
+#include "gen4_held.h"
+
 int main(void)
 {
     Eligibility();
@@ -731,6 +788,8 @@ int main(void)
     FormHistory();
     Returns();
     StockGame();
+    FxHeldSweep();
+    FxHeldUnique();
     CanHold();
     printf("PASS %s adapter\n", FX_GAME_NAME);
     return 0;
