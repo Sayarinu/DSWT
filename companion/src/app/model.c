@@ -21,11 +21,6 @@ enum {
     EXT_LEVEL = 4, EXT_CAPSULE = 5, EXT_HP = 6
 };
 
-/* The item name bank of the message archive (TEXT_BANK_ITEM_NAMES); the
- * Japanese and Korean archives leave out two banks before it. */
-#define ITEM_NAME_BANK 392
-#define ITEM_NAME_BANK_ASIAN 390
-
 CpSaveImage gCpAppImage;
 
 /* The engine's random source has no argument of its own. */
@@ -277,12 +272,11 @@ static void Empty(uint16_t *text) { text[0] = CP_CHAR_EOS; }
 
 static void ItemName(const CpApp *app, unsigned item, uint16_t out[CP_UI_ITEM_NAME_MAX])
 {
-    int asian = app->game.rom.language == CP_LANGUAGE_JAPANESE || app->game.rom.language == CP_LANGUAGE_KOREAN;
     CpRomFile bank;
     Empty(out);
     if (!item) return;
     /* A name too long for the card leaves the held-item mark alone. */
-    if (CpNarc_Member(&app->game.messages, asian ? ITEM_NAME_BANK_ASIAN : ITEM_NAME_BANK, &bank) != CP_OK
+    if (CpNarc_Member(&app->game.messages, CpGame_Bank(&app->game, &app->game.table->itemNames), &bank) != CP_OK
         || CpMessage_Read(&bank, (uint16_t)item, out, CP_UI_ITEM_NAME_MAX, NULL) != CP_OK) Empty(out);
 }
 

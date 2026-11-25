@@ -188,11 +188,74 @@ static void TestPlatinumData(void)
     assert(memcmp(name, kAsianName, sizeof kAsianName) == 0);
     free(rom.data);
 
-    /* A Diamond header is identified, but has no data table yet. */
-    rom = SyntheticPlatinum("ADAE", 5);
+    /* LUNE-880: a Diamond header names Diamond's archives, which this
+     * Platinum-shaped ROM lacks. */
+    rom = SyntheticPlatinum("CPUE", 1);
+    memcpy(rom.data + 0x0C, "ADAE", 4);
     MemoryReader_Init(&memory, &rom);
-    assert(CpGame_Open(&memory.reader, &game) == CP_ERR_UNSUPPORTED && game.rom.family == CP_FAMILY_DP);
+    assert(CpGame_Open(&memory.reader, &game) == CP_ERR_NOT_FOUND && game.rom.family == CP_FAMILY_DP);
     free(rom.data);
+}
+
+/* LUNE-880: Diamond/Pearl and HeartGold/SoulSilver read their own paths,
+ * forms, item gaps and banks. */
+static void TestFamilyData(void)
+{
+    static const struct {
+        const char *code;
+        CpFamily family;
+        uint8_t language;
+        int pearl;
+    } cases[] = {
+        { "ADAE", CP_FAMILY_DP, CP_LANGUAGE_ENGLISH, 0 }, { "APAE", CP_FAMILY_DP, CP_LANGUAGE_ENGLISH, 1 },
+        { "ADAJ", CP_FAMILY_DP, CP_LANGUAGE_JAPANESE, 0 }, { "APAK", CP_FAMILY_DP, CP_LANGUAGE_KOREAN, 1 },
+        { "IPKE", CP_FAMILY_HGSS, CP_LANGUAGE_ENGLISH, 0 }, { "IPGD", CP_FAMILY_HGSS, CP_LANGUAGE_GERMAN, 0 },
+        { "IPKJ", CP_FAMILY_HGSS, CP_LANGUAGE_JAPANESE, 0 }, { "IPGK", CP_FAMILY_HGSS, CP_LANGUAGE_KOREAN, 0 },
+    };
+    unsigned i;
+    for (i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        Bytes rom = SyntheticGame(cases[i].code, 0);
+        MemoryReader memory;
+        CpGame game;
+        CpPersonal personal;
+        CpItem item;
+        uint16_t name[8];
+        size_t length;
+        int dp = cases[i].family == CP_FAMILY_DP, asian = cases[i].language == CP_LANGUAGE_JAPANESE
+            || cases[i].language == CP_LANGUAGE_KOREAN;
+
+        MemoryReader_Init(&memory, &rom);
+        assert(CpGame_Open(&memory.reader, &game) == CP_OK);
+        assert(game.rom.family == cases[i].family && game.rom.language == cases[i].language);
+        /* Pearl has its own personal archive, which Diamond lacks. */
+        assert(strcmp(dp ? (cases[i].pearl ? "poketool/personal_pearl/personal.narc" : "poketool/personal/personal.narc")
+                          : "a/0/0/2",
+                      cases[i].pearl ? game.table->personalPearl : game.table->personal) == 0);
+        /* Deoxys and Wormadam forms everywhere; Rotom, Giratina and Shaymin
+         * forms have records only in HeartGold/SoulSilver. */
+        assert(CpGame_Personal(&game, 386, 3, &personal) == CP_OK && personal.baseStats[0] == (498 & 0xFF));
+        assert(CpGame_Personal(&game, 413, 2, &personal) == CP_OK && personal.baseStats[0] == (500 & 0xFF));
+        assert(CpGame_Personal(&game, 479, 2, &personal) == CP_OK
+            && personal.baseStats[0] == (dp ? 479 & 0xFF : 504 & 0xFF));
+        assert(CpGame_Personal(&game, 492, 1, &personal) == CP_OK
+            && personal.baseStats[0] == (dp ? 492 & 0xFF : 502 & 0xFF));
+        /* Item gaps: DP 112..134 (no Griseous Orb); HGSS 113..134 and 428. */
+        assert((CpGame_Item(&game, 112, &item) == CP_OK) == !dp);
+        assert(CpGame_Item(&game, 134, &item) == CP_ERR_NOT_FOUND);
+        assert(CpGame_Item(&game, 135, &item) == CP_OK && item.holdEffect == (dp ? 112 : 113));
+        assert(CpGame_Item(&game, 427, &item) == CP_OK && item.holdEffect == (uint8_t)(dp ? 404 : 405));
+        assert((CpGame_Item(&game, 428, &item) == CP_OK) == dp);
+        assert(CpGame_Item(&game, 429, &item) == CP_OK && item.holdEffect == (uint8_t)(dp ? 406 : 406));
+        assert(CpGame_Item(&game, dp ? 464 : 536, &item) == CP_OK);
+        assert(CpGame_Item(&game, dp ? 465 : 537, &item) == CP_ERR_NOT_FOUND);
+        /* Species names from the language's own bank number. */
+        assert(CpGame_Bank(&game, &game.table->speciesNames)
+            == (!asian ? (dp ? 362 : 237) : cases[i].language == CP_LANGUAGE_JAPANESE ? (dp ? 356 : 232) : (dp ? 357 : 233)));
+        assert(CpGame_Bank(&game, &game.table->itemNames)
+            == (!asian ? (dp ? 344 : 222) : cases[i].language == CP_LANGUAGE_JAPANESE ? (dp ? 341 : 219) : (dp ? 342 : 220)));
+        assert(CpGame_SpeciesName(&game, 25, name, 8, &length) == CP_OK && length == (asian ? 2u : 4u));
+        free(rom.data);
+    }
 }
 
 static void TestMessageCipher(void)
@@ -293,6 +356,7 @@ int main(void)
     TestSaveMatch();
     TestNitroFsAndNarc();
     TestPlatinumData();
+    TestFamilyData();
     TestMessageCipher();
     TestFont();
     TestPairing();

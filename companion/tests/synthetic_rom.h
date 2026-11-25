@@ -2,7 +2,7 @@
 #define COMPANION_TEST_SYNTHETIC_ROM_H
 
 /* Small synthetic ROMs for the game data and session model tests: NitroFS,
- * NARCs, encrypted message banks and a synthetic Platinum. Every value in
+ * NARCs, encrypted message banks and synthetic games of each family. Every value in
  * them is made up; no game data is here. */
 #include "game/gamedata.h"
 #include "game/text.h"
@@ -287,19 +287,36 @@ static inline void FreeMembers(Bytes *members, uint32_t count)
 #define PERSONAL_COUNT 508
 #define ITEM_RECORDS 446
 #define BANKS 413
+#define ITEM_RECORDS_MAX 515
 
 static const uint16_t kWesternName[] = { 0x012B + 15, 0x0145 + 8, 0x0145 + 10, 0x0145, CP_CHAR_EOS }; /* "Pika" */
 static const uint16_t kAsianName[] = { 0x0010, 0x0020, CP_CHAR_EOS };
 static const uint16_t kOther[] = { 0x0130, CP_CHAR_EOS };
 static const uint16_t kEmpty[] = { CP_CHAR_EOS };
 
-static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
+/* The item records a family's table expects. */
+static inline uint32_t SyntheticItemRecords(const CpGameTable *table)
 {
-    Bytes personal[PERSONAL_COUNT], growth[8], evo[100], items[ITEM_RECORDS], banks[BANKS], fonts[2], moves[40];
+    uint32_t records = table->itemCount, i;
+    for (i = 0; i < table->itemGapCount; ++i) records -= table->itemGaps[i].last - table->itemGaps[i].first + 1u;
+    return records;
+}
+
+/* A synthetic game of the family the code names, at that family's paths
+ * (gamedata.c), with the same made-up data for every family. */
+static inline Bytes SyntheticGame(const char code[4], uint8_t revision)
+{
+    Bytes personal[PERSONAL_COUNT], growth[8], evo[100], items[ITEM_RECORDS_MAX], banks[BANKS], fonts[2], moves[40];
     const uint16_t *western[30], *asian[30];
     RomFile files[9];
     Bytes rom, font = { 0 };
-    uint32_t i, level;
+    uint32_t i, level, itemRecords;
+    CpRomInfo info;
+    const CpGameTable *table;
+
+    assert(CpRom_FromCode(code, revision, &info) == CP_OK && (table = CpGame_Table(info.family)) != NULL);
+    itemRecords = SyntheticItemRecords(table);
+    assert(itemRecords <= ITEM_RECORDS_MAX);
 
     for (i = 0; i < PERSONAL_COUNT; ++i) {
         personal[i] = Filled(44, 0);
@@ -321,7 +338,7 @@ static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     /* Species 95: trade holding item 233 to 208, holding item 210 to 77. */
     evo[95].data[0] = CP_EVO_TRADE_WITH_HELD_ITEM; evo[95].data[2] = 233; evo[95].data[4] = 208;
     evo[95].data[6] = CP_EVO_TRADE_WITH_HELD_ITEM; evo[95].data[8] = 210; evo[95].data[10] = 77;
-    for (i = 0; i < ITEM_RECORDS; ++i) {
+    for (i = 0; i < itemRecords; ++i) {
         /* Record 113 (item 135) is a key item and record 398 (item 420) an HM;
          * both refuse tossing, as does record 2 in an ordinary pocket. */
         unsigned pocket = i == 113 ? 7 : i == 398 ? 3 : i % 7;
@@ -338,10 +355,15 @@ static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     western[25] = kWesternName;
     asian[25] = kAsianName;
     for (i = 0; i < BANKS; ++i) banks[i] = Filled(4, 0);
-    free(banks[412].data);
-    banks[412] = MessageBank(0x1234, western, 30);
-    free(banks[408].data);
-    banks[408] = MessageBank(0x4321, asian, 30);
+    assert(table->speciesNames.international < BANKS);
+    free(banks[table->speciesNames.international].data);
+    banks[table->speciesNames.international] = MessageBank(0x1234, western, 30);
+    free(banks[table->speciesNames.japanese].data);
+    banks[table->speciesNames.japanese] = MessageBank(0x4321, asian, 30);
+    if (table->speciesNames.korean != table->speciesNames.japanese) {
+        free(banks[table->speciesNames.korean].data);
+        banks[table->speciesNames.korean] = MessageBank(0x4321, asian, 30);
+    }
 
     /* A font of three 16x16 glyphs. Glyph 2 (code 3) has its top-left pixel
      * set to 1 and a 2 at (12, 9). */
@@ -361,26 +383,33 @@ static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
         moves[i].data[6] = (uint8_t)i;
     }
 
-    files[0] = (RomFile){ "poketool/personal/pl_personal.narc", Narc(personal, PERSONAL_COUNT) };
-    files[1] = (RomFile){ "poketool/personal/pl_growtbl.narc", Narc(growth, 8) };
-    files[2] = (RomFile){ "poketool/personal/evo.narc", Narc(evo, 100) };
-    files[3] = (RomFile){ "itemtool/itemdata/pl_item_data.narc", Narc(items, ITEM_RECORDS) };
-    files[4] = (RomFile){ "msgdata/pl_msg.narc", Narc(banks, BANKS) };
-    files[5] = (RomFile){ "graphic/pl_font.narc", Narc(fonts, 2) };
+    files[0] = (RomFile){ table->personalPearl && info.version == CP_VERSION_PEARL ? table->personalPearl
+                                                                                     : table->personal,
+                          Narc(personal, PERSONAL_COUNT) };
+    files[1] = (RomFile){ table->growth, Narc(growth, 8) };
+    files[2] = (RomFile){ table->evolution, Narc(evo, 100) };
+    files[3] = (RomFile){ table->items, Narc(items, itemRecords) };
+    files[4] = (RomFile){ table->messages, Narc(banks, BANKS) };
+    files[5] = (RomFile){ table->font, Narc(fonts, 2) };
     files[6] = (RomFile){ "poketool/personal/readme.txt", Filled(3, 'x') };
     files[7] = (RomFile){ "a.bin", Filled(5, 0xAB) };
-    files[8] = (RomFile){ "poketool/waza/pl_waza_tbl.narc", Narc(moves, 40) };
+    files[8] = (RomFile){ table->moves, Narc(moves, 40) };
     rom = Rom(code, revision, files, 9);
 
     FreeMembers(personal, PERSONAL_COUNT);
     FreeMembers(growth, 8);
     FreeMembers(evo, 100);
-    FreeMembers(items, ITEM_RECORDS);
+    FreeMembers(items, itemRecords);
     FreeMembers(banks, BANKS);
     FreeMembers(fonts, 2);
     FreeMembers(moves, 40);
     for (i = 0; i < 9; ++i) free(files[i].data.data);
     return rom;
+}
+
+static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
+{
+    return SyntheticGame(code, revision);
 }
 
 #endif
