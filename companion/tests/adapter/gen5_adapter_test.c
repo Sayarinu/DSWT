@@ -383,6 +383,27 @@ static void PartyDelivery(void)
     }
     printf("PASS %s party delivery: level, stats, heal, friendship and the Pokédex (caught, as retail) as the game's\n",
            FX5_NAME);
+    /* The offer still in the save: a matched delivery is refused and nothing
+     * changes, then prepared once the offer is gone. */
+    {
+        static unsigned char before[sizeof(file.bytes)];
+        unsigned char digest[32], now[32];
+        Fx5Spec specs[3];
+        Defaults(specs, 3);
+        Setup(specs, 3);
+        memset(&entry, 0, sizeof(entry));
+        assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry, 1) == 0);
+        Match(&entry, &spec);
+        memcpy(before, file.bytes, sizeof(before));
+        assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK);
+        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+        assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+        assert(CpSaveImage_Hash(&image, now) == CP_SAVE_OK && memcmp(digest, now, 32) == 0);
+        assert(Step(WT_INVENTORY_REMOVE, &entry, 1) == 0 && Fx5ImageCount(&image) == 2);
+        Deliver(&entry);
+        assert(Fx5ImageCount(&image) == 3 && entry.destination.kind == 1 && entry.destination.slot == 2);
+    }
+    printf("PASS %s party delivery: a matched delivery waits while its offer is still in the save\n", FX5_NAME);
 }
 
 static void BoxDelivery(void)
@@ -583,7 +604,8 @@ static void StockGame(void)
     StockSave(41);
     assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 3);
     assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
-    /* The delivered Pokémon moved to the Battle Box: proof neither way. */
+    /* The delivered Pokémon moved to the Battle Box: recorded there, never
+     * received again. */
     Decoded(Fx5ImageParty(&image, 2), box, NULL);
     assert(WtPokemon_Encode(box, Fx5ImageBattleBox(&image, 0)) == 0);
     Fx5Empty(Fx5ImageParty(&image, 2), FX5_MON);
@@ -592,8 +614,19 @@ static void StockGame(void)
         unsigned char digest[32];
         assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK && CpSaveImage_CommitBoth(&image, &cpFile, digest) == CP_SAVE_OK);
     }
-    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) != 0 && Fx5ImageCount(&image) == 2);
-    printf("PASS %s stock-game saves: a removal and a delivery finish once; one moved to the Battle Box fails closed\n",
+    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 2);
+    assert(entry.destination.kind == 3 && entry.destination.box == 0 && entry.destination.slot == 0
+        && entry.destination.length == 136);
+    assert(memcmp(entry.destinationAfter, Fx5ImageBattleBox(&image, 0), 136) == 0);
+    assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0 && Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    assert(Fx5ImageCount(&image) == 2);
+    entry.phase = WT_JOURNAL_APPLIED;
+    assert(WtGame_CanLeave(&game, &entry) == 1);
+    {
+        WtReceivedPokemon received;
+        assert(WtGame_Received(&entry, &received) == 0 && received.species == 500);
+    }
+    printf("PASS %s stock-game saves: a removal and a delivery finish once; one moved to the Battle Box is recorded there\n",
            FX5_NAME);
 }
 

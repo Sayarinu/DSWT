@@ -252,6 +252,60 @@ static void EscrowAfterPlay(void)
     }
 }
 
+/* The returned Pokémon, wherever it is in the party, moved to Battle Box slot 4. */
+static void BattleBoxReturned(unsigned char *loaded)
+{
+    unsigned char canonical[136], *party = loaded + Rl5Offset(FX5_PARTY);
+    unsigned count = Fx5R32(party + 4), slot, i;
+    for (slot = 0; slot < count; ++slot) {
+        assert(WtPokemon_Decode(PartySlot(loaded, slot), canonical) == 0);
+        if (memcmp(canonical, offered, 136) == 0) break;
+    }
+    if (slot == count) return;
+    memcpy(loaded + Rl5Offset(FX5_BATTLE_BOX) + 4 * FX5_BOX_MON, PartySlot(loaded, slot), FX5_BOX_MON);
+    for (i = slot; i + 1 < count; ++i) memcpy(PartySlot(loaded, i), PartySlot(loaded, i + 1), FX5_MON);
+    Fx5Empty(PartySlot(loaded, count - 1), FX5_MON);
+    Fx5W32(party + 4, count - 1);
+}
+
+/* A return cut at every write, then the stock game moves the Pokémon, if the
+ * save it loaded holds it, to the Battle Box: RECEIVE records it there (journal
+ * locator kind 3) and never adds it again; a save without it receives it once. */
+static void ReturnInBattleBox(void)
+{
+    static unsigned char resumed[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned cut, writes = 8, inBox = 0;
+    for (cut = 1; cut <= writes + 1; ++cut) {
+        Arrange(APPLYING_RETURN, &journal);
+        entry = journal;
+        file.failWrite = file.writes + cut;
+        assert(Step(WT_INVENTORY_RECEIVE, &entry) == (cut <= writes ? -1 : 0));
+        file.failWrite = 0;
+        StockPlay(1, BattleBoxReturned);
+        Load();
+        entry = journal;
+        assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0);
+        assert(Copies() == 1);
+        if (entry.destination.kind == 3) {
+            assert(entry.destination.slot == 4 && entry.destination.length == FX5_BOX_MON);
+            ++inBox;
+        } else {
+            assert(entry.destination.kind == 1);
+        }
+        memcpy(resumed, file.bytes, sizeof(resumed));
+        /* Resumed again from the recorded entry: nothing changes. */
+        Load();
+        assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0);
+        assert(memcmp(resumed, file.bytes, sizeof(resumed)) == 0 && Copies() == 1);
+        ++cases;
+    }
+    /* At least the completed write reached the Battle Box. */
+    assert(inBox >= 1);
+    printf("PASS %s stock save after a return: moved to the Battle Box, recorded there in %u of %u cuts, one copy every time\n",
+           FX5_NAME, inBox, writes + 1);
+}
+
 static void SubmitReadyAfterPlay(void)
 {
     WtJournalEntry journal;
@@ -308,6 +362,7 @@ int main(void)
     Sweep(APPLYING_RETURN);
     EscrowAfterPlay();
     SubmitReadyAfterPlay();
+    ReturnInBattleBox();
     IdentityCollisions();
     printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", FX5_NAME, cases);
     return 0;

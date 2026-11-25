@@ -18,10 +18,10 @@
  * - an older save is judged by its one save count, which the journal records
  *   in all three counters;
  * - between companion sessions the stock game may have saved: REMOVE and
- *   RECEIVE then decide by the Pokémon's exact image (LUNE-899). The Battle
- *   Box holds no journal location (the Generation V journal locator kind 3
- *   of LUNE-898 is not in this core yet): a Pokémon of the trade found there
- *   fails the step closed, so it is never received twice.
+ *   RECEIVE then decide by the Pokémon's exact image (LUNE-899). A delivery
+ *   the stock game moved to the Battle Box is recorded there (journal locator
+ *   kind 3), as the game's WtDelivery_Found records it; nothing is ever
+ *   delivered to the Battle Box, and an offer moved there is refused.
  *
  * The journal banks lie in the musical distribution save
  * (save/musical_area.h), released before the journal's first write. */

@@ -216,12 +216,12 @@ static void Counters(const CpSaveImage *image, WtJournalEntry *entry)
 
 typedef struct Found {
     int party;
-    unsigned box, slot;
+    /* The journal locator kind: 1 party, 2 PC, 3 Battle Box. */
+    unsigned kind, box, slot;
 } Found;
 
-/* As adapter/platinum.c Locate, over the party and the PC: 1 found, 0 absent,
- * -1 unreadable or ambiguous. A Pokémon of the identity in the Battle Box is
- * never proof either way: the journal cannot name the Battle Box yet. */
+/* As adapter/platinum.c Locate, over the party, the PC and the Battle Box:
+ * 1 found, 0 absent, -1 unreadable or ambiguous. */
 static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
                   unsigned count, Found *found)
 {
@@ -241,11 +241,12 @@ static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_S
         if (kind < 0) return -1;
         if (kind == 0) continue;
         if (memcmp(canonical, target, 4) != 0 || memcmp(canonical + 0x0C, target + 0x0C, 4) != 0) continue;
-        if (inBattleBox) return -1;
         Sha(canonical, sizeof(canonical), sum);
         for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
         if (j == count || ++matches > 1) return -1;
-        found->party = inParty; found->box = box; found->slot = slot;
+        found->party = inParty; found->kind = inParty ? 1 : inBattleBox ? 3 : 2;
+        /* The Battle Box follows the last tray: its slot is the same remainder. */
+        found->box = inBattleBox ? 0 : box; found->slot = slot;
     }
     return matches;
 }
@@ -330,6 +331,9 @@ static unsigned char *Destination(const CpSaveImage *image, WtJournalLocator whe
         return Slot(Party(image), where.slot);
     if (where.kind == 2 && where.box < BOXES && where.slot < BOX_SLOTS && where.length == BOX_MON_SIZE)
         return BoxMon(image, where.box, where.slot);
+    /* Only a delivery found there is recorded in the Battle Box. */
+    if (where.kind == 3 && where.box == 0 && where.slot < BATTLE_BOX_SLOTS && where.length == BOX_MON_SIZE)
+        return BattleBoxMon(image, where.slot);
     return NULL;
 }
 
@@ -343,7 +347,11 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
     int count, found, kind;
     if (prepare) {
         if ((count = Count(party, 1)) < 0) return -1;
-        if (entry->deliveryKind == WT_DELIVERY_RETURN && Absent(image, entry->outgoing) != 0) return -1;
+        /* A returned offer that is already back must never be added twice
+         * (Back and ReceiveMoved settle that case first), and a matched
+         * delivery needs its offer gone: a copy still here would make two. The
+         * game refuses both too (client wonder_trade/delivery.h). */
+        if (Absent(image, entry->outgoing) != 0) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (count < PARTY_CAPACITY) {
             entry->destination.kind = 1; entry->destination.slot = (unsigned char)count;
@@ -364,7 +372,7 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
         memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
         memcpy(entry->destinationBefore, destination, entry->destination.length);
     }
-    destination = Destination(image, entry->destination);
+    destination = entry->destination.kind == 3 ? NULL : Destination(image, entry->destination);
     if (!destination || memcmp(destination, entry->destinationBefore, entry->destination.length) != 0
         || (entry->destination.kind == 1 && Read32(party + 4) != entry->destination.slot)) return -1;
     if (entry->deliveryKind == WT_DELIVERY_RETURN) {
@@ -452,7 +460,7 @@ static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int
         WtJournalLocator at;
         unsigned char *stored, canonical[BOX_MON_SIZE];
         memset(&at, 0, sizeof(at));
-        at.kind = found.party ? 1 : 2; at.box = (unsigned char)found.box; at.slot = (unsigned char)found.slot;
+        at.kind = (unsigned char)found.kind; at.box = (unsigned char)found.box; at.slot = (unsigned char)found.slot;
         at.length = found.party ? MON_SIZE : BOX_MON_SIZE;
         if (!(stored = Destination(game->image, at)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
         *restore = 0;
