@@ -112,7 +112,7 @@ static int FakeName(void *arg, uint16_t species, uint16_t *out, size_t capacity,
     return CP_OK;
 }
 
-static CpAdapterData data = { NULL, FakePersonal, FakeExp, FakeEvolution, FakeHoldEffect, FakeMovePp, FakeName, 2 };
+static CpAdapterData data = { NULL, FakePersonal, FakeExp, FakeEvolution, FakeHoldEffect, FakeMovePp, FakeName, 2, NULL };
 
 /* ---- Pokémon and saves ----------------------------------------------------- */
 

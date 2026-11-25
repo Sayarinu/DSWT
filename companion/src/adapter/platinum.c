@@ -1,5 +1,7 @@
 #include "adapter/platinum.h"
 
+#include "adapter/gen5.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -717,6 +719,7 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     WtGame *game = arg;
     unsigned char digest[32];
     if (!game || !game->image || !game->image->loaded || !entry) return -1;
+    if (CpGen5_Is(game->image)) return CpGen5_Inventory(game, step, entry, slot);
     if (step != WT_INVENTORY_PREPARE_REMOVE && !Bound(entry)) return -1;
     switch (step) {
     case WT_INVENTORY_VERIFY_REMOVED:
@@ -733,7 +736,8 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     }
 }
 
-/* game_save.c WtGame_Received: the matched Pokémon as saved, for display. The
+/* game_save.c WtGame_Received: the matched Pokémon as saved, for display; the
+ * same fields in PK4 and PK5. The
  * gender is the one saved with it, which the game computes from the same
  * species and personality (every trade evolution keeps the gender ratio). */
 int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
@@ -761,6 +765,7 @@ int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
 int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 {
     if (!game || !game->image || !game->image->loaded || !entry) return 0;
+    if (CpGen5_Is(game->image)) return CpGen5_CanLeave(game, entry);
     switch (entry->phase) {
     case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_ENROLLING: return 1;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED: case WT_JOURNAL_RESTORING:
@@ -772,16 +777,21 @@ int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 
 int CpAdapter_Eligible(const CpSaveImage *image, unsigned slot)
 {
+    if (CpGen5_Is(image)) return CpGen5_Eligible(image, slot);
+    {
     const unsigned char *general = image && image->loaded
         ? image->bytes + image->currentHalf[0] * CP_SAVE_HALF_SIZE + image->layout->offsets[0] : NULL;
     return general && Eligible(RulesOf(image), general + image->layout->partyOffset, slot);
+    }
 }
 
 int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
 {
-    unsigned char *party = Party(image), canonical[BOX_MON_SIZE];
+    unsigned char *party, canonical[BOX_MON_SIZE];
     Backup *backup;
     int count, unique;
+    if (CpGen5_Is(image)) return CpGen5_Unique(image, slot);
+    party = Party(image);
     if (!party || (count = Count(party, 1)) < 0 || slot >= (unsigned)count
         || WtPokemon_Decode(Slot(party, slot), canonical) != 0) return 1;
     /* Anything uncertain falls through to the deposit's own fail-closed check. */
@@ -840,6 +850,7 @@ int WtGame_CanHold(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
     WtPokemonLimits limits;
     const Rules *rules;
     if (!arg || !pokemon) return 0;
+    if (CpGen5_Is(((const WtGame *)arg)->image)) return CpGen5_CanHold(arg, pokemon);
     rules = RulesOf(((const WtGame *)arg)->image);
     limits.maxSpecies = CP_ADAPTER_MAX_SPECIES; limits.maxItem = rules->maxItem;
     limits.maxBall = CP_ADAPTER_MAX_BALL; limits.forms = rules->forms;

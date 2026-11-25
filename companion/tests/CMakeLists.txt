@@ -116,6 +116,14 @@ target_include_directories(game_data_test PRIVATE "${COMPANION_SRC}")
 target_compile_options(game_data_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_options(game_data_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+# LUNE-881: Generation V data against owned dumps given as arguments.
+add_executable(gen5_rom_check gen5_rom_check.c posix_reader.c
+    "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
+    "${COMPANION_SRC}/game/text.c")
+target_include_directories(gen5_rom_check PRIVATE "${COMPANION_SRC}")
+target_compile_options(gen5_rom_check PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+target_link_options(gen5_rom_check PRIVATE -fsanitize=address,undefined)
+add_test(NAME gen5_rom_check COMMAND gen5_rom_check)
 
 # LUNE-870: save journal detection/provisioning and backup lifecycle.
 add_library(companion_journal STATIC
@@ -174,13 +182,14 @@ endforeach()
 
 # --- Platinum offer adapter and visit driver (LUNE-871) ---------------------
 add_library(companion_adapter STATIC "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
+    "${COMPANION_SRC}/adapter/gen5.c" "${COMPANION_SRC}/adapter/gen5_receive.c"
     "${COMPANION_SRC}/adapter/platinum_receive.c" "${COMPANION_SRC}/adapter/rom_data.c"
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
     "${COMPANION_SRC}/game/text.c" "${COMPANION_SRC}/game/pairing.c"
     "${CLIENT}/src/wonder_trade/pokemon_codec.c")
 target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT}/include")
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
-target_link_libraries(companion_adapter PUBLIC companion_save)
+target_link_libraries(companion_adapter PUBLIC companion_save companion_journal)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
 add_executable(platinum_receive_test adapter/platinum_receive_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c"
@@ -208,10 +217,22 @@ foreach(adapter_game 1 2)
     add_test(NAME gen4_adapter_test_game${adapter_game} COMMAND gen4_adapter_test_game${adapter_game})
 endforeach()
 
+# LUNE-881: the Generation V adapter on Black/White (0) and Black 2/White 2 (1) saves.
+foreach(adapter_game 0 1)
+    add_executable(gen5_adapter_test_game${adapter_game} adapter/gen5_adapter_test.c)
+    target_compile_definitions(gen5_adapter_test_game${adapter_game} PRIVATE FX5_GAME=${adapter_game})
+    target_compile_options(gen5_adapter_test_game${adapter_game} PRIVATE -Wall -Wextra -Werror -pedantic
+        -fsanitize=address,undefined)
+    target_link_libraries(gen5_adapter_test_game${adapter_game} PRIVATE companion_adapter)
+    add_test(NAME gen5_adapter_test_game${adapter_game} COMMAND gen5_adapter_test_game${adapter_game})
+endforeach()
+
 # LUNE-899: a stock-game save between a cut companion step and its resume.
 # The sweeps build the adapter themselves at -O1 (still with the sanitizers):
 # every case hashes and checks whole saves, and must stay within CI's budget.
 set(STOCK_SOURCES "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/platinum_receive.c"
+    "${COMPANION_SRC}/adapter/gen5.c" "${COMPANION_SRC}/adapter/gen5_receive.c"
+    "${COMPANION_SAVE}/journal_save.c" "${COMPANION_SAVE}/musical_area.c" "${COMPANION_SRC}/platform/journal_io.c"
     "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/gen5_save.c" "${COMPANION_SAVE}/sha256.c"
     "${CLIENT}/src/wonder_trade/pokemon_codec.c")
 add_executable(stock_save_test adapter/stock_save_test.c ${STOCK_SOURCES})
