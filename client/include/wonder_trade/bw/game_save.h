@@ -13,8 +13,9 @@ struct WtGame {
 };
 
 int WtGameSave_Eligible(WtGame *, unsigned slot);
-/* FALSE when the deposit's absence check would refuse: an identical copy would
- * remain, or another Pokémon cannot be read. */
+/* FALSE when the deposit's uniqueness check would refuse: a Pokémon with the
+ * same identity (personality and original trainer ID) would remain, or another
+ * Pokémon cannot be read (wonder_trade/delivery.h). */
 BOOL WtGameSave_Unique(WtGame *, unsigned slot);
 /* Frees the musical distribution save for the journal before its first
  * write: zero once the game will never read it again and no data a musical
