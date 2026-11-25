@@ -57,7 +57,7 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
         /* The engine binds and checks the reply; the visit reads only its result. */
         if (WtWire_Decode(request, requestSize, reply, replySize, engine->journal.io.hash, &decoded) != 0) {
             (void)WtEngine_Reply(engine, reply, replySize);
-            result = CP_VISIT_ERROR_JOURNAL; break;
+            result = CP_VISIT_ERROR_REPLY; break;
         }
         if (WtEngine_Reply(engine, reply, replySize) < 0) { result = CP_VISIT_ERROR_JOURNAL; break; }
         /* Nothing was recorded; the trade stays QUEUED for a later Collect. */
