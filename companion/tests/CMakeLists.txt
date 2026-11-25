@@ -120,6 +120,7 @@ add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_C
 # LUNE-870: save journal detection/provisioning and backup lifecycle.
 add_library(companion_journal STATIC
     "${COMPANION_SAVE}/journal_save.c"
+    "${COMPANION_SAVE}/musical_area.c"
     "${COMPANION_SAVE}/journal_host_io.c"
     "${COMPANION_SAVE}/backup_save.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/platform/journal_io.c"
@@ -133,7 +134,7 @@ add_executable(torn_enrollment_test journal/torn_enrollment_test.c "${CLIENT}/sr
 target_link_libraries(torn_enrollment_test PRIVATE companion_journal)
 target_compile_options(torn_enrollment_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 add_test(NAME torn_enrollment_test COMMAND torn_enrollment_test)
-foreach(cp_journal_test journal_save_test backup_save_test)
+foreach(cp_journal_test journal_save_test backup_save_test gen5_journal_test)
     add_executable(${cp_journal_test} "journal/${cp_journal_test}.c")
     target_link_libraries(${cp_journal_test} PRIVATE companion_journal)
     target_compile_options(${cp_journal_test} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)

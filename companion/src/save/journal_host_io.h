@@ -15,5 +15,7 @@ typedef struct {
  * alive while using the returned IO/journal. DSi uses CpJournal_IO directly
  * with its raw readDurable callback, never this host cached-read substitute. */
 WtJournalIO CpJournalHostIO(CpJournalHostStore *store, const CpFile *file);
+/* The same for a game's journal area (NULL: Generation IV). */
+WtJournalIO CpJournalHostIOArea(CpJournalHostStore *store, const CpFile *file, const CpJournalArea *area);
 
 #endif

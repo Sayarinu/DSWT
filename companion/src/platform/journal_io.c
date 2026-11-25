@@ -4,7 +4,14 @@
 
 #include <string.h>
 
-static const uint32_t sBank[2] = { CP_JOURNAL_BANK_0, CP_JOURNAL_BANK_1 };
+const CpJournalArea CpJournalArea_Gen4 = { { CP_JOURNAL_BANK_0, CP_JOURNAL_BANK_1 }, CP_JOURNAL_RESERVED_SIZE };
+const CpJournalArea CpJournalArea_BlackWhite = { { 0x74000u, 0x75000u }, 0x1000u };
+const CpJournalArea CpJournalArea_Black2White2 = { { 0x6B000u, 0x6C000u }, 0x1000u };
+
+static const CpJournalArea *Area(const CpJournalStore *store)
+{
+    return store->area ? store->area : &CpJournalArea_Gen4;
+}
 
 /* Record offsets (record_sections in protocol/save-layout.json). */
 enum {
@@ -157,7 +164,7 @@ static unsigned char sOther[WT_JOURNAL_RECORD_SIZE];
 static int Settle(const CpJournalStore *store, int bank, unsigned char *record)
 {
     const CpPlatformFile *file = store->file;
-    if (file->readAt(file->arg, sBank[bank ^ 1], sOther, sizeof(sOther)) != 0) return -1;
+    if (file->readAt(file->arg, Area(store)->bank[bank ^ 1], sOther, sizeof(sOther)) != 0) return -1;
     if (CpJournal_CutFirstEnrollment(record, sOther, store->hash)) memset(record, 0, WT_JOURNAL_RECORD_SIZE);
     memset(sOther, 0, sizeof(sOther));
     return 0;
@@ -174,12 +181,12 @@ int CpJournal_ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECO
     if (!store || !store->file || !record || bank < 0 || bank > 1) return -1;
     file = store->file;
     if (!SizeMatches(file)) return Fail(store, CP_JOURNAL_ERROR_SIZE);
-    if (file->readAt(file->arg, sBank[bank], record, WT_JOURNAL_RECORD_SIZE) != 0)
+    if (file->readAt(file->arg, Area(store)->bank[bank], record, WT_JOURNAL_RECORD_SIZE) != 0)
         return Fail(store, CP_JOURNAL_ERROR_READ);
     /* Like the game's flash access: the rest of the reserved area must be
      * one blank value, or this is not a save the journal may use. */
-    for (offset = WT_JOURNAL_RECORD_SIZE; offset < CP_JOURNAL_RESERVED_SIZE; offset += sizeof(page)) {
-        if (file->readAt(file->arg, sBank[bank] + offset, page, sizeof(page)) != 0)
+    for (offset = WT_JOURNAL_RECORD_SIZE; offset < Area(store)->reserved; offset += sizeof(page)) {
+        if (file->readAt(file->arg, Area(store)->bank[bank] + offset, page, sizeof(page)) != 0)
             return Fail(store, CP_JOURNAL_ERROR_READ);
         for (i = 0; i < sizeof(page); i++) {
             if (blank == -1) blank = page[i];
@@ -211,7 +218,7 @@ int CpJournal_WriteBank(void *arg, int bank, const unsigned char record[WT_JOURN
     file = store->file;
     if (!file->writeAt || !file->readDurable) return Fail(store, CP_JOURNAL_ERROR_READ_ONLY);
     if (!SizeMatches(file)) return Fail(store, CP_JOURNAL_ERROR_SIZE);
-    address = sBank[bank];
+    address = Area(store)->bank[bank];
     if (store->hold) store->hold(1);
     if (Stage(store, address + TAG, uncommitted, sizeof(uncommitted)) != 0
         || Stage(store, address, record, TAG) != 0
