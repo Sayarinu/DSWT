@@ -22,6 +22,7 @@
 #include "wonder_trade/flash.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
+#include "wonder_trade/receive_guard.h"
 
 /* Accessors the integration patch adds to src/gfl/backup_system.c. */
 SaveDataTable *SaveData_GetTablePtr(SaveData *sv);
@@ -373,6 +374,8 @@ static int BuildReceived(WtGame *game, const Image *image, unsigned char *data, 
     unsigned box = 0, slot = 0;
     int found = 0;
     if (prepare) {
+        if (WtReceive_CheckReturn(entry->deliveryKind,
+                entry->deliveryKind == WT_DELIVERY_RETURN ? Absent(image, data, entry->outgoing) : 0) != 0) return -1;
         if (party->capacity != PARTY_SIZE || party->count < 1 || party->count > PARTY_SIZE) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (party->count < PARTY_SIZE) {

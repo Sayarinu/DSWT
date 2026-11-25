@@ -29,6 +29,7 @@
 #include "wonder_trade/flash.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
+#include "wonder_trade/receive_guard.h"
 
 static unsigned Read16(const unsigned char *p) { return p[0] | ((unsigned)p[1] << 8); }
 static u32 Read32(const unsigned char *p) { return Read16(p) | ((u32)Read16(p + 2) << 16); }
@@ -257,6 +258,8 @@ static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, in
     unsigned char *destination, canonical[136];
     int box, slot, found;
     if (prepare) {
+        if (WtReceive_CheckReturn(entry->deliveryKind,
+                entry->deliveryKind == WT_DELIVERY_RETURN ? Absent(save, entry->outgoing) : 0) != 0) return -1;
         if (party->capacity != 6 || party->currentCount < 1 || party->currentCount > 6) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (party->currentCount < 6) {

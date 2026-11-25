@@ -23,6 +23,7 @@
 #include "wonder_trade/flash.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
+#include "wonder_trade/receive_guard.h"
 
 /* Save_WriteManInit copies these RAM shadows into the save body before every
  * write (src/save.c); syncing first makes the body in RAM what is written. */
@@ -315,6 +316,8 @@ static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, in
     unsigned char *destination, canonical[136];
     int box, slot, found;
     if (prepare) {
+        if (WtReceive_CheckReturn(entry->deliveryKind,
+                entry->deliveryKind == WT_DELIVERY_RETURN ? Absent(save, entry->outgoing) : 0) != 0) return -1;
         if (party->core.maxCount != PARTY_SIZE || party->core.curCount < 1 || party->core.curCount > PARTY_SIZE) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (party->core.curCount < PARTY_SIZE) {
