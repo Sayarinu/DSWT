@@ -467,7 +467,8 @@ static int Back(WtGame *game, const WtJournalEntry *entry)
  * played before the companion could finish). The patched game never gets
  * here: it settles before it can be played. Decided by the Pokémon's exact
  * image (Delivered): present, the delivery was applied (or the offer
- * restored) and the save is only checkpointed; absent, it is prepared again on this save, where PREPARE_RECEIVE would
+ * restored), the save is only checkpointed and the record describes where it
+ * is; absent, it is prepared again on this save, where PREPARE_RECEIVE would
  * put it, and applied. Never twice, never dropped. */
 static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int *restore)
 {
@@ -480,8 +481,23 @@ static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int
         *restore = 0;
         if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) return -1;
     } else {
+        /* Recorded from the save, not the journal: a recovery that put it
+         * elsewhere than prepared (a full party sends it to the PC, with the
+         * PC's effects) may have been cut before the engine committed. The
+         * engine only commits after RECEIVE, so the record is rebuilt here
+         * and the ACK and WtGame_Received report what the save holds. */
+        WtJournalLocator where;
+        unsigned char *stored, canonical[BOX_MON_SIZE];
+        memset(&where, 0, sizeof(where));
+        where.kind = found.party ? 1 : 2; where.box = (unsigned char)found.box; where.slot = (unsigned char)found.slot;
+        where.length = found.party ? MON_SIZE : BOX_MON_SIZE;
+        if (!(stored = Destination(game->image, where)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
         *restore = 0;
-        if (WtGame_Checkpoint(game) != 0) return -1;
+        if (WtGame_Checkpoint(game) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
+        entry->destination = where;
+        memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
+        memcpy(entry->destinationAfter, stored, where.length);
+        Sha(canonical, sizeof(canonical), entry->appliedDigest);
     }
     Counters(game->image, entry);
     return 0;

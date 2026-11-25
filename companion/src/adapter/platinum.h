@@ -25,11 +25,17 @@
  * Between companion sessions the player may load and save the save in the
  * stock game before an interrupted step could resume, so the save matches
  * neither inventory the journal recorded. REMOVE and RECEIVE then decide by
- * the Pokémon itself (its personality and trainer ID): an offer still in the
- * party exactly as offered is removed from this save, one already gone is
- * removed; a delivery or returned offer already in the save is applied, one
- * not there yet is received into this save. Anything less certain fails
- * closed and changes nothing. */
+ * the Pokémon's exact image: an offer still in the party exactly as offered
+ * is removed from this save, one already gone is removed; a delivery or
+ * returned offer already in the save exactly as applied is recorded where it
+ * is, one not there yet is received into this save. A Pokémon that shares
+ * the identity (personality and trainer ID) without being that image (another
+ * Pokémon, or this one trained in the stock game) is never proof either way:
+ * the step fails closed and changes nothing.
+ *
+ * Known limit: a delivery the stock game loaded already applied and the
+ * player then released or traded away looks exactly like one never applied,
+ * and is received again. */
 struct WtGame {
     CpSaveImage *image;
     const CpFile *file;

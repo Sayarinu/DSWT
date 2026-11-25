@@ -735,7 +735,8 @@ static void PlaceImpostor(unsigned char *general, unsigned char *boxes)
     assert(WtPokemon_Encode(impostor, boxes + FX_PC + 3 * FX_BOX_MON) == 0);
 }
 
-/* An identity collision is not a delivery. */
+/* An identity collision is not a delivery, and a delivery recovered into
+ * another place than the one prepared reports that place. */
 static void StockSaveCollision(void)
 {
     static unsigned char before[CP_SAVE_FILE_SIZE];
@@ -754,6 +755,34 @@ static void StockSaveCollision(void)
     puts("PASS stock save while applying: a Pokemon sharing the identity is not taken for the delivery");
 }
 
+static void StockSaveRedirect(void)
+{
+    WtJournalEntry journal, entry;
+    WtReceivedPokemon received;
+    Spec sky = Basic(492, MODEST_ODD_LOW);
+    unsigned char canonical[136], digest[32];
+
+    /* Sky Shaymin prepared for the party, received into the PC (Land Forme)
+     * after the party filled, then cut before the journal recorded it: the
+     * retry records what the save holds. */
+    sky.form = 1;
+    Applying(5, &sky, &journal, 1);
+    assert(FxStockPlay(&file, 1, 0, AddPartyMember));
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    entry = journal;
+    assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    entry = journal;
+    assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    assert(WtGame_Inventory(&game, WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+    assert(entry.destination.kind == 2 && entry.destination.box == 0 && entry.destination.slot == 0);
+    assert(WtPokemon_Decode(FxImageBox(&image, 0, 0), canonical) == 0);
+    FxSha(canonical, 136, digest);
+    assert(memcmp(digest, entry.appliedDigest, 32) == 0);
+    assert(WtGame_Received(&entry, &received) == 0 && received.species == 492 && received.form == 0);
+    puts("PASS stock save while applying: a retried recovery records the Land Forme the PC holds");
+}
+
 int main(void)
 {
     Stats();
@@ -766,6 +795,7 @@ int main(void)
     Placement();
     StockSave();
     StockSaveCollision();
+    StockSaveRedirect();
     puts("PASS platinum receive");
     return 0;
 }
