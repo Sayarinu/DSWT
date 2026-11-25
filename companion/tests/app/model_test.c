@@ -433,7 +433,10 @@ static void OnlyBackup(const char *stem, char *out, size_t size)
         snprintf(path, sizeof(path), "%s/%s", backupRoot, folder->d_name);
         directory = opendir(path);
         while (directory && (item = readdir(directory)))
-            if (strstr(item->d_name, ".sav")) snprintf(out, size, "_nds/dswt/backups/%s/%s", folder->d_name, item->d_name);
+            if (strstr(item->d_name, ".sav")) {
+                int written = snprintf(out, size, "_nds/dswt/backups/%s/%s", folder->d_name, item->d_name);
+                assert(written >= 0 && (size_t)written < size);
+            }
         if (directory) closedir(directory);
     }
     closedir(root);
