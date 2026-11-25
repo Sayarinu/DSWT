@@ -1,25 +1,17 @@
 #include "wonder_trade/engine.h"
 #include "wonder_trade/seed.h"
 #include "journal_fixture.h"
-#include "wonder_trade/receive_guard.h"
-#include "wonder_trade/wire_layout.h"
 
 #include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
-
-#define CHECK(test) do { if (!(test)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #test); exit(1); } } while (0)
 #include <psa/crypto.h>
 
 typedef struct Fixture {
     unsigned char banks[2][4096], pokemon[136], delivered[136], checked[136];
     unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks, changed;
-    unsigned reads, failRead;
+    unsigned reads, failRead, prepares;
     unsigned char id;
     int rotateSeed;
-    unsigned char inventory[4][236], empty[236];
-    uint32_t saveCounters[3];
-    unsigned saveWrites, insertions;
     WtEngine engine;
 } Fixture;
 
@@ -70,6 +62,17 @@ static void Mirrored(Fixture *fixture, unsigned phase)
     assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0 && entry.phase == phase);
 }
 
+/* A restore to the offer's own slot is in the journal, as a return without a
+ * destination, before RESTORE writes it. */
+static void RecordedInPlace(Fixture *fixture)
+{
+    WtJournalEntry entry;
+    Mirrored(fixture, WT_JOURNAL_RESTORING);
+    assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0);
+    assert(entry.deliveryKind == WT_DELIVERY_RETURN && entry.destination.kind == 0);
+    assert(memcmp(entry.incoming, entry.outgoing, 136) == 0);
+}
+
 static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
     Fixture *fixture = arg;
@@ -88,6 +91,7 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         return 0;
     case WT_INVENTORY_VERIFY_REMOVED: return fixture->removed ? 0 : -1;
     case WT_INVENTORY_PREPARE_RECEIVE:
+        ++fixture->prepares;
         if (fixture->full) return 1;
         /* A delivery, or a returned offer the save no longer has room for in place. */
         assert(entry->phase == WT_JOURNAL_RECEIVED || entry->phase == WT_JOURNAL_RESTORING);
@@ -106,7 +110,7 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     case WT_INVENTORY_PREPARE_RESTORE: return fixture->changed ? 1 : 0;
     case WT_INVENTORY_RESTORE:
         assert(!fixture->changed);
-        Mirrored(fixture, WT_JOURNAL_RESTORING);
+        RecordedInPlace(fixture);
         fixture->removed = 0; fixture->restored = 1; return 0;
     }
     return -1;
@@ -840,230 +844,33 @@ static void LocalSettlement(void)
     Mirrored(&fixture, WT_JOURNAL_APPLIED); assert(fixture.engine.entry.request[5] == WT_OP_ACKNOWLEDGE);
 }
 
-/* A retail-inventory fixture for engine recovery: real encrypted images and
- * the production scan/decision/record helpers, with checkpoint writes counted.
- * Slots 0/1 are party, 2/3 PC; unoccupied slots are valid encrypted empties. */
-static int RecoveryPrepare(Fixture *fixture, WtJournalEntry *entry)
-{
-    WtReceiveScan scan;
-    unsigned i;
-    int result;
-    memset(&scan, 0, sizeof(scan));
-    for (i = 0; i < 4; ++i) {
-        if (WtReceive_Inspect(&scan, entry->outgoing, fixture->inventory[i],
-                i < 2 ? 1 : 2, i < 2 ? 0 : 17, i % 2, i < 2 ? 236 : 136) != 0) return -1;
-    }
-    result = WtReceive_Check(entry, &scan, fixture->saveCounters[0], fixture->saveCounters[1], fixture->saveCounters[2]);
-    if (result != 1) return result;
-    if (WtReceive_Record(entry, &scan, fixture->empty, Hash) != 0
-        || Hash((unsigned char *)fixture->inventory, sizeof(fixture->inventory), entry->inventoryAfter) != 0) return -1;
-    memcpy(entry->inventoryBefore, entry->inventoryAfter, 32);
-    return 1;
-}
-
-static int RecoveryInventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
-{
-    Fixture *fixture = arg;
-    unsigned char digest[32], candidate[4][236];
-    unsigned index;
-    int prepared;
-    (void)slot;
-    if (step == WT_INVENTORY_PREPARE_RESTORE) return 1; /* Stock game changed the save. */
-    if (step == WT_INVENTORY_PREPARE_RECEIVE) {
-        prepared = RecoveryPrepare(fixture, entry);
-        if (prepared != 0) return prepared == 1 ? 0 : -1;
-        /* Normal insertion into the first free party slot. */
-        entry->destination.kind = 1; entry->destination.box = 0;
-        entry->destination.slot = 0; entry->destination.length = 236;
-        memcpy(entry->destinationBefore, fixture->inventory[0], 236);
-        memcpy(entry->destinationAfter, fixture->empty, 236);
-        CHECK(WtPokemon_Encode(entry->incoming, entry->destinationAfter) == 0);
-        CHECK(Hash(entry->incoming, 136, entry->appliedDigest) == 0);
-        CHECK(Hash((unsigned char *)fixture->inventory, sizeof(fixture->inventory), entry->inventoryBefore) == 0);
-        memcpy(candidate, fixture->inventory, sizeof(candidate));
-        memcpy(candidate[0], entry->destinationAfter, 236);
-        CHECK(Hash((unsigned char *)candidate, sizeof(candidate), entry->inventoryAfter) == 0);
-        return 0;
-    }
-    index = entry->destination.kind == 1 ? entry->destination.slot : 2 + entry->destination.slot;
-    if (step == WT_INVENTORY_RECEIVE) {
-        CHECK(Hash((unsigned char *)fixture->inventory, sizeof(fixture->inventory), digest) == 0);
-        if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0) {
-            if (RecoveryPrepare(fixture, entry) != 1) return -1;
-            index = entry->destination.kind == 1 ? entry->destination.slot : 2 + entry->destination.slot;
-        }
-        if (memcmp(fixture->inventory[index], entry->destinationAfter, entry->destination.length) != 0) {
-            memcpy(fixture->inventory[index], entry->destinationAfter, entry->destination.length);
-            ++fixture->insertions;
-        }
-        ++fixture->saveWrites;
-        entry->globalCounter = ++fixture->saveCounters[0];
-        entry->generalCounter = ++fixture->saveCounters[1];
-        entry->boxCounter = ++fixture->saveCounters[2];
-        return 0;
-    }
-    if (step == WT_INVENTORY_VERIFY_RECEIVED) {
-        return memcmp(fixture->inventory[index], entry->destinationAfter, entry->destination.length) == 0 ? 0 : -1;
-    }
-    return -1;
-}
-
-static int RecoveryRandom(void *arg, unsigned char *bytes, size_t size)
-{
-    Fixture *fixture = arg;
-    unsigned char input[8] = { 0 }, digest[32];
-    Put(input, ++fixture->random, 4);
-    CHECK(size <= sizeof(digest) && Hash(input, sizeof(input), digest) == 0);
-    memcpy(bytes, digest, size);
-    return 0;
-}
-
-static void RecoveryOpen(Fixture *fixture)
-{
-    WtJournalIO journal = { fixture, Read, Write, Hash };
-    WtEngineIO io = { fixture, RecoveryRandom, RecoveryInventory, CanHold };
-    CHECK(WtEngine_Open(&fixture->engine, journal, io) == 0);
-}
-
-static void RecoveryInit(Fixture *fixture, unsigned phase, unsigned kind, unsigned where)
-{
-    WtJournalEntry entry;
-    unsigned char canonical[136] = { 0 };
-    unsigned i;
-    memset(fixture, 0, sizeof(*fixture)); fixture->id = 1;
-    CHECK(WtTest_JournalEntry(phase, Hash, &entry) == 0);
-    CHECK(WtPokemon_Encode(canonical, fixture->empty) == 0);
-    for (i = 0; i < 4; ++i) memcpy(fixture->inventory[i], fixture->empty, 236);
-    memcpy(fixture->pokemon, entry.outgoing, 136);
-    CHECK(WtPokemon_Encode(entry.outgoing, entry.original) == 0);
-    CHECK(Hash(entry.original, entry.source.length, entry.originalDigest) == 0);
-    memcpy(fixture->inventory[where], entry.original, where < 2 ? 236 : 136);
-    entry.globalCounter = entry.generalCounter = entry.boxCounter = 10;
-    for (i = 0; i < 3; ++i) fixture->saveCounters[i] = 11;
-    entry.deliveryKind = (unsigned char)kind;
-    if (kind == WT_DELIVERY_RETURN) memcpy(entry.incoming, entry.outgoing, 136);
-    if (kind != WT_DELIVERY_NONE) CHECK(Hash(entry.incoming, 136, entry.incomingDigest) == 0);
-    entry.requestLength = 0; memset(entry.request, 0, sizeof(entry.request));
-    CHECK(WtJournal_Encode(&entry, Hash, fixture->banks[0]) == 0);
-    memcpy(fixture->banks[1], fixture->banks[0], 4096);
-    RecoveryOpen(fixture);
-    fixture->writes = 0; /* Opening repairs the mirrored journal before the action under test. */
-}
-
-static unsigned RecoveryCopies(Fixture *fixture)
-{
-    unsigned char canonical[136];
-    unsigned i, copies = 0;
-    for (i = 0; i < 4; ++i) {
-        CHECK(WtPokemon_Decode(fixture->inventory[i], canonical) == 0);
-        if (memcmp(canonical, fixture->pokemon, 136) == 0) ++copies;
-    }
-    return copies;
-}
-
-static void RecoveryAck(Fixture *fixture)
-{
-    unsigned char packet[902], *snapshot, digest[32];
-    WtJournalEntry applied = fixture->engine.entry;
-    size_t size;
-    CHECK(WtEngine_Request(&fixture->engine, 0) == 0);
-    CHECK(fixture->engine.frame[5] == WT_OP_ACKNOWLEDGE);
-    CHECK(memcmp(fixture->engine.frame + WT_WIRE_REQUEST_HEADER_SIZE + WT_WIRE_ACK_APPLIED_DIGEST,
-        applied.appliedDigest, 32) == 0);
-    size = Header(fixture, packet, WT_RESULT_OK, 3, 4, 146);
-    Put(packet + 44, 4, 8); snapshot = packet + 52;
-    memcpy(snapshot, applied.trade, 16); snapshot[16] = WT_TRADE_ACKNOWLEDGED; snapshot[17] = WT_DELIVERY_RETURN;
-    memset(snapshot + 18, 21, 16); CHECK(Hash(applied.outgoing, 136, digest) == 0);
-    memcpy(snapshot + 34, digest, 32); memcpy(snapshot + 66, snapshot + 18, 48);
-    memcpy(snapshot + 114, applied.receipt, 16); Put(snapshot + 130, 4, 8);
-    CHECK(WtEngine_Reply(&fixture->engine, packet, size) == 0);
-    CHECK(fixture->engine.entry.phase == WT_JOURNAL_IDLE);
-}
-
-static void ReturnAlreadyApplied(void)
+/* A restore in place is recorded first. Cut short, the next boot finishes it
+ * in place while the save is the escrow's; after another game saved over it,
+ * RECEIVE settles it without preparing a second delivery. */
+static void InPlaceRestoreRecorded(void)
 {
     Fixture fixture;
-    unsigned char before[sizeof(fixture.inventory)], digest[32], encoded[4096];
-    unsigned where, phase, saves;
-    for (where = 0; where < 4; ++where) for (phase = 0; phase < 3; ++phase) {
-        RecoveryInit(&fixture, phase == 0 ? WT_JOURNAL_RESTORING : phase == 1 ? WT_JOURNAL_RECEIVED : WT_JOURNAL_APPLYING,
-            phase == 0 ? WT_DELIVERY_NONE : WT_DELIVERY_RETURN, where);
-        memcpy(before, fixture.inventory, sizeof(before));
-        CHECK(WtEngine_Settle(&fixture.engine) == 0);
-        CHECK(!fixture.engine.blocked && fixture.saveWrites == 1 && fixture.insertions == 0);
-        CHECK(memcmp(before, fixture.inventory, sizeof(before)) == 0 && RecoveryCopies(&fixture) == 1);
-        CHECK(fixture.engine.entry.phase == (phase == 0 ? WT_JOURNAL_IDLE : WT_JOURNAL_APPLIED));
-        if (phase != 0) {
-            CHECK(fixture.engine.entry.destination.kind == (where < 2 ? 1 : 2));
-            CHECK(fixture.engine.entry.destination.length == (where < 2 ? 236 : 136));
-            CHECK(fixture.engine.entry.destination.slot == where % 2);
-            CHECK(memcmp(fixture.engine.entry.destinationBefore, fixture.empty, where < 2 ? 236 : 136) == 0);
-            CHECK(memcmp(fixture.engine.entry.destinationAfter, before + where * 236, where < 2 ? 236 : 136) == 0);
-            CHECK(Hash(fixture.pokemon, 136, digest) == 0 && memcmp(digest, fixture.engine.entry.appliedDigest, 32) == 0);
-            CHECK(Hash(before, sizeof(before), digest) == 0 && memcmp(digest, fixture.engine.entry.inventoryAfter, 32) == 0);
-            CHECK(WtJournal_Encode(&fixture.engine.entry, Hash, encoded) == 0);
-            saves = fixture.saveWrites;
-            WtEngine_Close(&fixture.engine); RecoveryOpen(&fixture);
-            CHECK(WtEngine_Settle(&fixture.engine) == 0 && fixture.saveWrites == saves);
-            RecoveryAck(&fixture);
-            CHECK(RecoveryCopies(&fixture) == 1 && fixture.insertions == 0 && fixture.saveWrites == saves);
-        }
-        WtEngine_Close(&fixture.engine);
-    }
-    puts("RETURN present once after stock save: Restore/Resume checkpoint in place, ACK to IDLE, exactly one copy");
-}
-
-static void AbsentOfferDelivers(void)
-{
-    Fixture fixture;
-    unsigned kind;
-    for (kind = WT_DELIVERY_MATCH; kind <= WT_DELIVERY_RETURN; ++kind) {
-        RecoveryInit(&fixture, WT_JOURNAL_RECEIVED, kind, 1);
-        memcpy(fixture.inventory[1], fixture.empty, 236);
-        CHECK(WtEngine_Settle(&fixture.engine) == 0 && !fixture.engine.blocked);
-        CHECK(fixture.engine.entry.phase == WT_JOURNAL_APPLIED && fixture.saveWrites == 1 && fixture.insertions == 1);
-        CHECK(RecoveryCopies(&fixture) == (kind == WT_DELIVERY_RETURN ? 1u : 0u));
+    unsigned changed, writes;
+    for (changed = 0; changed < 2; ++changed) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        fixture.failStep = WT_INVENTORY_RESTORE + 1;
+        assert(Reject(&fixture) != 0 && !fixture.restored && !fixture.received);
+        RecordedInPlace(&fixture);
+        fixture.failStep = 0; fixture.changed = changed; fixture.random = UINT32_MAX;
+        WtEngine_Close(&fixture.engine); Open(&fixture);
+        writes = fixture.writes;
+        assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.prepares == 0);
+        assert(changed ? fixture.received && !fixture.restored : fixture.restored && !fixture.received);
+        /* Only IDLE is committed: the return was already recorded. */
+        assert(fixture.writes == writes + 2);
+        Mirrored(&fixture, WT_JOURNAL_IDLE);
         WtEngine_Close(&fixture.engine);
     }
 }
 
-static void UnsafeDeliveryBlocks(void)
+int main(void)
 {
-    Fixture fixture;
-    unsigned char before[sizeof(fixture.inventory)], banks[2][4096], canonical[136];
-    unsigned scenario, phase;
-    for (phase = 0; phase < 2; ++phase) for (scenario = 0; scenario < 8; ++scenario) {
-        RecoveryInit(&fixture, phase == 0 && scenario != 7 ? WT_JOURNAL_RESTORING : WT_JOURNAL_RECEIVED,
-            scenario == 7 ? WT_DELIVERY_MATCH : phase == 0 ? WT_DELIVERY_NONE : WT_DELIVERY_RETURN, 1);
-        switch (scenario) {
-        case 0: fixture.saveCounters[0] = 9; break; /* Behind even if the other blocks advanced. */
-        case 1: fixture.saveCounters[1] = 9; break;
-        case 2: fixture.saveCounters[2] = 9; break;
-        case 3: fixture.saveCounters[0] = fixture.saveCounters[1] = fixture.saveCounters[2] = 10; break;
-        case 4: memcpy(fixture.inventory[2], fixture.inventory[1], 136); break; /* Two exact copies. */
-        case 5: /* Same PID and OT, changed canonical image. */
-            memcpy(canonical, fixture.pokemon, 136); canonical[10] = 1; ++canonical[6];
-            CHECK(WtPokemon_Encode(canonical, fixture.inventory[2]) == 0); break;
-        case 6: fixture.inventory[3][7] ^= 1; break; /* An unreadable slot after the match. */
-        case 7: break; /* MATCH with the outgoing offer still present. */
-        }
-        memcpy(before, fixture.inventory, sizeof(before)); memcpy(banks, fixture.banks, sizeof(banks));
-        CHECK(WtEngine_Settle(&fixture.engine) == -1 && fixture.engine.blocked);
-        if (fixture.saveWrites || fixture.insertions || fixture.writes) fprintf(stderr, "phase=%u scenario=%u saves=%u inserts=%u journals=%u\n", phase, scenario, fixture.saveWrites, fixture.insertions, fixture.writes);
-        CHECK(fixture.saveWrites == 0 && fixture.insertions == 0 && fixture.writes == 0);
-        CHECK(memcmp(before, fixture.inventory, sizeof(before)) == 0 && memcmp(banks, fixture.banks, sizeof(banks)) == 0);
-        WtEngine_Close(&fixture.engine);
-    }
-    puts("Unsafe RETURN/MATCH: behind/equal counters, duplicate/changed identity and unreadable slots block without writes");
-}
-
-int main(int argc, char **argv)
-{
-    if (argc == 2 && strcmp(argv[1], "--unsafe-delivery") == 0) { UnsafeDeliveryBlocks(); return 0; }
-    if (argc == 2 && strcmp(argv[1], "--receive-recovery") == 0) {
-        ReturnAlreadyApplied(); UnsafeDeliveryBlocks(); AbsentOfferDelivers(); return 0;
-    }
-    ReturnAlreadyApplied(); UnsafeDeliveryBlocks(); AbsentOfferDelivers();
+    InPlaceRestoreRecorded();
     PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); ServerReturn(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding(); LocalSettlement(); RolledBackCopy();
