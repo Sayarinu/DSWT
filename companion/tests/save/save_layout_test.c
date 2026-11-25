@@ -76,10 +76,20 @@ static unsigned char *Footer(unsigned half, unsigned block)
 
 /* A footer as the game builds it: DP SaveChunkFooter {global, block counter,
  * size, magic, u8 block, pad, crc}; HGSS {count, size, magic, u16 block, crc}. */
+/* The selection matrix reseals unchanged bodies thousands of times: their CRCs
+ * are kept while crcCached is set. */
+static int crcCached;
+static unsigned crcCache[2][2];
+
+static unsigned BodyCrc(unsigned half, unsigned block)
+{
+    return crcCached ? crcCache[half][block] : Crc(Body(half, block), game->sizes[block] - game->footer);
+}
+
 static void Seal(unsigned half, unsigned block, uint32_t global, uint32_t counter, uint32_t magic)
 {
     unsigned char *footer = Footer(half, block);
-    unsigned crc = Crc(Body(half, block), game->sizes[block] - game->footer);
+    unsigned crc = BodyCrc(half, block);
     if (game->shared) {
         Write32(footer, global); Write32(footer + 4, game->sizes[block]); Write32(footer + 8, magic);
         footer[12] = (unsigned char)block; footer[13] = 0;
@@ -94,12 +104,11 @@ static void Seal(unsigned half, unsigned block, uint32_t global, uint32_t counte
 static int Valid(unsigned half, unsigned block)
 {
     const unsigned char *footer = Footer(half, block);
-    unsigned size = game->sizes[block] - game->footer;
     if (game->shared)
         return Read32(footer + 4) == game->sizes[block] && Read32(footer + 8) == CP_SAVE_MAGIC_INTERNATIONAL
-            && (unsigned)(footer[12] | footer[13] << 8) == block && (unsigned)(footer[14] | footer[15] << 8) == Crc(Body(half, block), size);
+            && (unsigned)(footer[12] | footer[13] << 8) == block && (unsigned)(footer[14] | footer[15] << 8) == BodyCrc(half, block);
     return Read32(footer + 8) == game->sizes[block] && Read32(footer + 12) == CP_SAVE_MAGIC_INTERNATIONAL
-        && footer[16] == block && (unsigned)(footer[18] | footer[19] << 8) == Crc(Body(half, block), size);
+        && footer[16] == block && (unsigned)(footer[18] | footer[19] << 8) == BodyCrc(half, block);
 }
 
 static int ReadAt(void *context, uint32_t offset, void *data, size_t size)
@@ -249,12 +258,14 @@ static int GameLoad(unsigned halves[2])
 static void SelectionMatrix(void)
 {
     static const uint32_t values[] = { 8, 9, UINT32_MAX, 0 };
-    unsigned combination, cases = 0, loaded = 0, block;
+    unsigned combination, cases = 0, loaded = 0, block, half;
+    Fixture();
+    for (block = 0; block < 2; ++block) for (half = 0; half < 2; ++half) crcCache[half][block] = BodyCrc(half, block);
+    crcCached = 1; /* the loop changes footers only */
     for (combination = 0; combination < 16 * 256; ++combination) {
-        unsigned mask = combination % 16, rest = combination / 16, half, block, halves[2];
+        unsigned mask = combination % 16, rest = combination / 16, halves[2];
         uint32_t globals[2][2];
         CpSaveResult result;
-        Fixture();
         for (block = 0; block < 2; ++block) for (half = 0; half < 2; ++half) {
             globals[block][half] = values[rest % 4]; rest /= 4;
             /* DP block counters follow the global so that LoadCheck holds them consistent. */
@@ -274,6 +285,7 @@ static void SelectionMatrix(void)
             if ((mask & 3) == 0 || (mask & 12) == 0) assert(result == CP_SAVE_INVALID);
         }
     }
+    crcCached = 0;
     /* DP's general-only saves: two general copies share the global counter. */
     if (!game->shared) {
         Fixture();
@@ -456,6 +468,9 @@ static void Interruptions(void)
     for (fail = 1; fail <= Events(); ++fail) {
         unsigned char oldDigest[32], digest[32], actual[32];
         unsigned initial[2], halves[2], block, changed[2];
+        /* HeartGold/SoulSilver: a cut at boxes 1..16 (events 7..38 of each
+         * 44-event save) leaves the states of a cut at box 0 or 17, which run. */
+        if (game->shared && (fail - 1) % 44 + 1 >= 7 && (fail - 1) % 44 + 1 <= 38) continue;
         Fixture();
         if (fixture == 1) {
             /* Wrap: the newer half's counter is 0. */
