@@ -317,14 +317,19 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     PokeParty_SetParam(pkm, PKM_PARAM_HAPPINESS,
         PML_PersonalGetParamSingle((u16)PokeParty_GetParam(pkm, PKM_PARAM_SPECIES, NULL),
             (u16)PokeParty_GetParam(pkm, PKM_PARAM_FORM, NULL), PERSONAL_FRIENDSHIP));
+    /* Retail trades register the Pokémon received as caught, with its
+     * language (pokemontrade_save.c addPkmToDex), before the evolution check. */
+    addPkmToDex(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     memcpy(&partner, entry->original, sizeof(partner));
     target = CheckEvolveSpecies(Party(image, data), pkm, EVO_CHECK_TRADE, (u32)&partner, 0, &method, game->heapId);
     mbedtls_platform_zeroize(&partner, sizeof(partner));
     if (target) {
         setChangedPkmSpecies(pkm, target);
         if (method == EVO_METHOD_TRADE_WITH_ITEM) PokeParty_SetParam(pkm, PKM_PARAM_ITEM, 0);
+        /* The evolution scene registers the evolved species (evolution_demo.c). */
+        PokeDex_RegistPkm(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+        addPkmToDex(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     }
-    PokeDex_RegistPkm(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     return 0;
 }
 
