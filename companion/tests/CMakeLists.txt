@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 project(dswt_companion_tests C)
 
+# Keep the sanitizer-backed host suite within the CI runtime budget.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Host test build type" FORCE)
+endif()
+
 # These test executables use assert() for their checks, including release builds.
 add_compile_options(-UNDEBUG)
 set(CMAKE_C_STANDARD 99)
