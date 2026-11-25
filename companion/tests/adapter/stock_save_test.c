@@ -323,6 +323,19 @@ static void AddTwin(unsigned char *general, unsigned char *boxes)
     FxTrain(slot);
 }
 
+/* The twin left at the Day Care (LUNE-913: Locate sees it there). */
+static void TwinInDayCare(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    (void)boxes;
+    memcpy(canonical, offered, 136);
+    FxPut32(canonical + 0x10, Fx32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
+    FxPut16(canonical + 6, sum & 65535);
+    assert(WtPokemon_Encode(canonical, general + FX_DAYCARE) == 0);
+}
+
 static void TwinAndTrain(unsigned char *general, unsigned char *boxes)
 {
     AddTwin(general, boxes);
@@ -358,7 +371,8 @@ static unsigned ExactCopies(void)
  * too, untouched: never taken for the offer. */
 static void History(void)
 {
-    static const FxStockAction actions[] = { NULL, TrainOffered, DepositOffered, ReleaseOffered, AddTwin, TwinAndTrain };
+    static const FxStockAction actions[] = { NULL, TrainOffered, DepositOffered, ReleaseOffered, AddTwin, TwinAndTrain,
+                                             TwinInDayCare };
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
     unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
@@ -388,7 +402,7 @@ static void History(void)
             if (answer) assert(held);
             if (held && action) assert(answer == 1);
             abandoned += (unsigned)answer;
-            if (!held && (action == 4 || action == 5)) {
+            if (!held && action >= 4) {
                 Load();
                 entry = journal;
                 assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
@@ -398,7 +412,7 @@ static void History(void)
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);
-    printf("PASS stock save after a cut removal: %u cuts x 2 stock plays x 6 plays, abandonable %u times, "
+    printf("PASS stock save after a cut removal: %u cuts x 2 stock plays x 7 plays, abandonable %u times, "
            "only from a save that held the offer; %u twins after the removal refused\n", writes + 1, abandoned, refused);
 }
 

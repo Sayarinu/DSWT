@@ -567,6 +567,19 @@ static void AddTwin(unsigned char *loaded)
     assert(WtPokemon_Encode(canonical, slot) == 0);
 }
 
+/* The twin left at the Day Care (LUNE-913: Locate sees it there). */
+static void TwinInDayCare(unsigned char *loaded)
+{
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    memcpy(canonical, offered, 136);
+    Fx5W32(canonical + 0x10, Fx5R32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += Fx5R16(canonical + i);
+    Fx5W16(canonical + 6, sum & 0xFFFF);
+    assert(WtPokemon_Encode(canonical, PlaceMon(loaded, &kPlaces[0])) == 0);
+    SetFlag(loaded, &kPlaces[0], 1);
+}
+
 static void TwinAndTrain(unsigned char *loaded)
 {
     AddTwin(loaded);
@@ -581,7 +594,7 @@ static void TwinAndTrain(unsigned char *loaded)
 static void History(void)
 {
     static const Action actions[] = { NULL, TrainOffered, DepositOffered, BattleBoxOffered, ReleaseOffered, AddTwin,
-                                      TwinAndTrain };
+                                      TwinAndTrain, TwinInDayCare };
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
     unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
@@ -616,7 +629,7 @@ static void History(void)
                 assert(memcmp(digest, journal.inventoryAfter, 32) == 0);
             }
             abandoned += (unsigned)answer;
-            if (!held && (action == 5 || action == 6)) {
+            if (!held && action >= 5) {
                 Load();
                 entry = journal;
                 assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
@@ -626,7 +639,7 @@ static void History(void)
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);
-    printf("PASS %s stock save after a cut removal: %u cuts x 2 stock plays x 7 plays, abandonable %u times, "
+    printf("PASS %s stock save after a cut removal: %u cuts x 2 stock plays x 8 plays, abandonable %u times, "
            "only from a save that held the offer; %u twins after the removal refused\n", FX5_NAME, writes + 1,
            abandoned, refused);
 }
