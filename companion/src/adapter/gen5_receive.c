@@ -16,7 +16,7 @@ enum {
     EXT_STATUS = 0, EXT_LEVEL = 4, EXT_HP = 6, EXT_MAX_HP = 8, EXT_STATS = 10,
     NAME = 11,
     SPECIES_KADABRA = 64, SPECIES_SHEDINJA = 292, SPECIES_SPINDA = 327, SPECIES_CASTFORM = 351,
-    SPECIES_CHERRIM = 421, SPECIES_KARRABLAST = 588, SPECIES_SHELMET = 616, SPECIES_DARMANITAN = 555,
+    SPECIES_CHERRIM = 421, SPECIES_SHAYMIN = 492, SPECIES_KARRABLAST = 588, SPECIES_SHELMET = 616, SPECIES_DARMANITAN = 555,
     SPECIES_MELOETTA = 648, SPECIES_LAST = 649, SPECIES_EGG = 650,
     HOLD_NO_EVOLVE = 64,
     EVO_TRADE = 5, EVO_TRADE_ITEM = 6, EVO_TRADE_SPECIES = 7,
@@ -258,6 +258,23 @@ static int ChangeSpecies(Mon *mon, unsigned target)
     return Recalc(mon);
 }
 
+/* POKE_TOOL_ChangeForm / PokeParty_ChangeForme: change the form, update
+ * ability and gender from that form's personal data, then recalculate stats. */
+static int ChangeForm(Mon *mon, unsigned form)
+{
+    CpPersonal personal;
+    uint32_t mask = mon->box[PK_ORIGIN] < VERSION_WHITE ? 1 : 0x10000;
+    if (Personal(mon->data, Species(mon), form, &personal) != 0) return -1;
+    mon->box[PK_FORM] = (unsigned char)((mon->box[PK_FORM] & 7u) | (form << 3));
+    if (mon->box[PK_HIDDEN] & 1) mon->box[PK_ABILITY] = personal.hiddenAbility;
+    else mon->box[PK_ABILITY] = personal.abilities[1] && (Pid(mon->box) & mask)
+        ? personal.abilities[1] : personal.abilities[0];
+    if ((personal.genderRatio != 0 && personal.genderRatio != 254 && personal.genderRatio != 255)
+        || personal.genderRatio == 255)
+        mon->box[PK_FORM] = (unsigned char)((mon->box[PK_FORM] & ~6u) | Gender(personal.genderRatio, Pid(mon->box)) << 1);
+    return Recalc(mon);
+}
+
 /* ---- Pokédex -------------------------------------------------------------- */
 
 typedef struct Dex {
@@ -389,6 +406,9 @@ int CpReceive5_Apply(CpReceive5Game game, const CpAdapterData *data, unsigned ch
     mon.box[PK_FRIENDSHIP] = personal.baseFriendship;
     /* The trade registers the Pokémon received, the evolution the species it became. */
     if (CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
+    if (Species(&mon) == SPECIES_SHAYMIN && Form(mon.box) == 1) {
+        if (ChangeForm(&mon, 0) != 0 || CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
+    }
     if (TradeTarget(&mon, partner, &target, &method) != 0) return -1;
     if (target) {
         if (ChangeSpecies(&mon, target) != 0) return -1;

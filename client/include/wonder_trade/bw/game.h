@@ -265,6 +265,7 @@ void POKE_TOOL_SetPartyValue(WtPartyPokemon *pokemon, u32 id, u32 arg);
 void POKE_TOOL_ClearPartyParam(WtPartyPokemon *pokemon);
 void POKE_TOOL_RecalcParam(WtPartyPokemon *pokemon);
 void POKE_TOOL_HealFull(WtPartyPokemon *pokemon);
+u32 POKE_TOOL_ChangeForm(WtPartyPokemon *pokemon, u32 form);
 void POKE_TOOL_ChangeSpecies(WtPartyPokemon *pokemon, u32 species);
 u32 POKE_TOOL_GetPersonalParam(u16 species, u16 form, u32 field);
 u32 SHINKA_CHECK_CheckEvolution(WtParty *party, WtPartyPokemon *pokemon, u32 mode, u32 arg, u8 timezone,
