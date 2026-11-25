@@ -17,8 +17,6 @@ static CpScreen sTop = { .text = { .tiles = sTopText } }, sBottom = { .text = { 
 #define WINDOW_W 216
 #define WINDOW_H 48
 
-static const uint8_t kVersions[] = { CP_VERSION_DIAMOND, CP_VERSION_PEARL, CP_VERSION_PLATINUM,
-    CP_VERSION_HEARTGOLD, CP_VERSION_SOULSILVER };
 static const uint8_t kLanguages[] = { CP_LANGUAGE_JAPANESE, CP_LANGUAGE_ENGLISH, CP_LANGUAGE_FRENCH,
     CP_LANGUAGE_ITALIAN, CP_LANGUAGE_GERMAN, CP_LANGUAGE_SPANISH, CP_LANGUAGE_KOREAN };
 static const char *const kSaveNames[] = {
@@ -26,6 +24,15 @@ static const char *const kSaveNames[] = {
     "Pokemon Platinum Version (Europe) (En,Fr,De,Es,It) (Rev 1).sav",
     "PokemonPlatinumVersionEuropeEnFrDeEsItRev1WithoutAnySpaces.sav",
 };
+
+static int SupportedVersion(unsigned version)
+{
+    unsigned family;
+    for (family = 1; family <= UINT8_MAX; family++)
+        if (CpBuildCode_Family(CpBuildCode((CpFamily)family, version, CP_LANGUAGE_ENGLISH, 0)) != CP_FAMILY_NONE)
+            return 1;
+    return 0;
+}
 
 /* The full text window a message takes when it needs more than three lines. */
 #define BODY_X 16
@@ -162,10 +169,11 @@ int main(void)
     TestWrap();
     TestWifiMessages();
     for (l = 0; l < sizeof(kLanguages); l++) {
-        for (v = 0; v < sizeof(kVersions); v++) {
+        for (v = 0; v < CP_VERSION_COUNT; v++) {
+            if (!SupportedVersion(v)) continue;
             memset(&model, 0, sizeof(model));
             memset(&ui, 0, sizeof(ui));
-            model.gameVersion = kVersions[v];
+            model.gameVersion = v;
             model.gameLanguage = kLanguages[l];
             model.loadMessage = -1;
             ui.state = CP_UI_GAME_CONFIRM;
@@ -176,6 +184,11 @@ int main(void)
             {
                 char message[CP_RENDER_MESSAGE_MAX];
                 CpRender_Message(&ui, &model, message, sizeof(message));
+                /* Every supported version must resolve to a catalogue name. */
+                if (!message[0] || message[0] == '?' || message[0] == ',') {
+                    fprintf(stderr, "missing game name: version %u, language %u: %s\n", v, kLanguages[l], message);
+                    assert(0);
+                }
                 assert(CpRender_MessageLines(message, NULL) <= WINDOW_H / 16);
             }
         }
