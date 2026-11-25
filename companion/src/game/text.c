@@ -35,10 +35,8 @@ int CpMessage_Read(const CpRomFile *bank, uint16_t entry, uint16_t *out, size_t 
 
 int CpGame_SpeciesName(const CpGame *game, uint16_t species, uint16_t *out, size_t capacity, size_t *length)
 {
-    int asian = game->rom.language == CP_LANGUAGE_JAPANESE || game->rom.language == CP_LANGUAGE_KOREAN;
     CpRomFile bank;
-    int result = CpNarc_Member(&game->messages,
-        asian ? game->table->speciesNameBankAsian : game->table->speciesNameBank, &bank);
+    int result = CpNarc_Member(&game->messages, CpGame_Bank(game, &game->table->speciesNames), &bank);
 
     return result != CP_OK ? result : CpMessage_Read(&bank, species, out, capacity, length);
 }

@@ -7,8 +7,9 @@
 #include "wonder_trade/pokemon_codec.h"
 
 /* The party (Party in the game) begins with its capacity and count, both
- * 32-bit, then six 236-byte Pokémon. The PC (PCBoxes) begins with the current
- * box, then 18 boxes of 30 stored Pokémon. */
+ * 32-bit, then six 236-byte Pokémon; HeartGold/SoulSilver follow them with
+ * each slot's Aprijuice modifiers. The PC holds 18 boxes of 30 stored Pokémon
+ * where the save layout says (save_image.h). */
 enum {
     PARTY_SLOTS = 8,
     MON_SIZE = CP_SAVE_PARTY_STRIDE,
@@ -16,7 +17,12 @@ enum {
     EXTENSION_SIZE = MON_SIZE - BOX_MON_SIZE,
     BOXES = 18,
     BOX_SLOTS = 30,
-    BOX_SLOTS_OFFSET = CP_SAVE_BOX_SLOTS_OFFSET - CP_SAVE_BOX_OFFSET,
+    /* PartyExtra: PERFORMANCE_MAX (5) modifiers per slot, after the six Pokémon. */
+    APRIJUICE_OFFSET = PARTY_SLOTS + CP_SAVE_PARTY_CAPACITY * MON_SIZE,
+    APRIJUICE_SIZE = 5,
+    SPECIES_PICHU = 172,
+    /* BALL_PARK: HeartGold/SoulSilver's last ball, which they keep at 0x86. */
+    HGSS_LAST_BALL = 25,
     /* Bits of the unencrypted word at 4: party and box decrypted, checksum failed. */
     FLAG_DECRYPTED = 3,
     FLAG_CHECKSUM_FAILED = 4,
@@ -31,6 +37,42 @@ static void Write32(unsigned char *p, uint32_t value)
 {
     unsigned i;
     for (i = 0; i < 4; ++i) p[i] = (unsigned char)(value >> (8 * i));
+}
+
+/* What differs between the games' adapters (client/src/wonder_trade/
+ * platinum/, dp/ and hgss/ game_save.c), chosen by the save's layout. */
+typedef struct Rules {
+    CpReceiveGame receive;
+    unsigned maxItem;
+    unsigned (*forms)(unsigned species);
+    /* Behind and Moved compare: 3 every counter (Platinum), 2 the global and
+     * general ones (Diamond/Pearl, whose game records a box counter its flash
+     * may not hold yet), 1 the one counter (HeartGold/SoulSilver). */
+    unsigned counters;
+    /* HeartGold/SoulSilver: Aprijuice modifiers move with the party, an offer
+     * needs none, Spiky-eared Pichu is never offered, the 0x86 ball counts. */
+    int heartGold;
+} Rules;
+
+static unsigned FormsDiamondPearl(unsigned species);
+static unsigned FormsHeartGoldSoulSilver(unsigned species);
+
+static const Rules kPlatinumRules = { CP_RECEIVE_PLATINUM, CP_ADAPTER_MAX_ITEM, CpAdapter_Forms, 3, 0 };
+/* ITEM_SECRETPOTION (464) is Diamond/Pearl's last item. */
+static const Rules kDiamondPearlRules = { CP_RECEIVE_DIAMOND_PEARL, 464, FormsDiamondPearl, 2, 0 };
+/* ITEM_ENIGMA_STONE (536) is HeartGold/SoulSilver's last item. */
+static const Rules kHeartGoldSoulSilverRules = { CP_RECEIVE_HEARTGOLD_SOULSILVER, 536, FormsHeartGoldSoulSilver, 1, 1 };
+
+static const Rules *RulesOf(const CpSaveImage *image)
+{
+    if (image && image->layout == &CpSaveLayout_DiamondPearl) return &kDiamondPearlRules;
+    if (image && image->layout == &CpSaveLayout_HeartGoldSoulSilver) return &kHeartGoldSoulSilverRules;
+    return &kPlatinumRules;
+}
+
+static uint32_t GeneralBody(const CpSaveImage *image)
+{
+    return image->layout->sizes[0] - image->layout->footerSize;
 }
 
 static void Sha(const unsigned char *bytes, size_t size, unsigned char digest[32])
@@ -55,13 +97,13 @@ static void Crypt(unsigned char *bytes, size_t size, uint32_t seed)
 static unsigned char *Party(CpSaveImage *image)
 {
     unsigned char *general = CpSaveImage_Block(image, 0);
-    return general ? general + CP_SAVE_PARTY_CAPACITY_OFFSET : NULL;
+    return general ? general + image->layout->partyOffset : NULL;
 }
 
 static unsigned char *BoxMon(CpSaveImage *image, unsigned box, unsigned slot)
 {
     unsigned char *boxes = CpSaveImage_Block(image, 1);
-    return boxes ? boxes + BOX_SLOTS_OFFSET + (box * BOX_SLOTS + slot) * BOX_MON_SIZE : NULL;
+    return boxes ? boxes + image->layout->boxSlotsOffset + box * image->layout->boxStride + slot * BOX_MON_SIZE : NULL;
 }
 
 static unsigned char *Slot(unsigned char *party, unsigned slot)
@@ -107,9 +149,18 @@ static unsigned HeldItem(const Mon *mon) { return Read16(mon->box + 0x0A); }
 static unsigned BallCapsule(const Mon *mon) { return mon->extension[5]; }
 static unsigned Hp(const Mon *mon) { return Read16(mon->extension + 6); }
 
+/* No Aprijuice modifiers in the slot: the journal keeps only the Pokémon, so
+ * a restore could not bring them back (hgss/game_save.c AprijuiceClear). */
+static int AprijuiceClear(const unsigned char *party, unsigned slot)
+{
+    unsigned i;
+    for (i = 0; i < APRIJUICE_SIZE; ++i) if (party[APRIJUICE_OFFSET + slot * APRIJUICE_SIZE + i]) return 0;
+    return 1;
+}
+
 /* game_save.c Eligible. A stored image that claims to be decrypted, which the
  * game would read unencrypted, is refused. */
-static int Eligible(const unsigned char *party, unsigned slot)
+static int Eligible(const Rules *rules, const unsigned char *party, unsigned slot)
 {
     Mon mon;
     int count = Count(party, 2), usable = 0, i;
@@ -119,6 +170,8 @@ static int Eligible(const unsigned char *party, unsigned slot)
     item = HeldItem(&mon);
     if (mon.decrypted || !Species(&mon) || Species(&mon) > CP_ADAPTER_MAX_SPECIES || Egg(&mon)
         || BallCapsule(&mon) || (item >= CP_ADAPTER_FIRST_MAIL && item <= CP_ADAPTER_LAST_MAIL)) return 0;
+    if (rules->heartGold && ((Species(&mon) == SPECIES_PICHU && (mon.box[0x40] >> 3) != 0)
+            || !AprijuiceClear(party, slot))) return 0;
     for (i = 0; i < count; ++i) {
         if ((unsigned)i == slot) continue;
         ReadMon(party + PARTY_SLOTS + i * MON_SIZE, 1, &mon);
@@ -164,22 +217,34 @@ static void Empty(unsigned char *image, unsigned size)
     if (size == MON_SIZE) Crypt(image + BOX_MON_SIZE, EXTENSION_SIZE, 0);
 }
 
-/* Party_RemovePokemonBySlotIndex: later Pokémon move down one slot and the
- * last becomes the empty Pokémon. */
-static void Remove(unsigned char *party, unsigned slot)
+static unsigned char *Aprijuice(unsigned char *party, unsigned slot)
+{
+    return party + APRIJUICE_OFFSET + slot * APRIJUICE_SIZE;
+}
+
+/* Party_RemovePokemonBySlotIndex: later Pokémon (and in HeartGold/SoulSilver
+ * their Aprijuice modifiers) move down one slot and the last becomes the
+ * empty Pokémon. */
+static void Remove(const Rules *rules, unsigned char *party, unsigned slot)
 {
     unsigned count = Read32(party + 4), i;
-    for (i = slot; i + 1 < count; ++i) memcpy(Slot(party, i), Slot(party, i + 1), MON_SIZE);
+    for (i = slot; i + 1 < count; ++i) {
+        memcpy(Slot(party, i), Slot(party, i + 1), MON_SIZE);
+        if (rules->heartGold) memcpy(Aprijuice(party, i), Aprijuice(party, i + 1), APRIJUICE_SIZE);
+    }
     Empty(Slot(party, i), MON_SIZE);
+    if (rules->heartGold) memset(Aprijuice(party, i), 0, APRIJUICE_SIZE);
     Write32(party + 4, count - 1);
 }
 
-/* Nonzero when the loaded save is older than the one recorded in the entry. */
+/* Nonzero when the loaded save is older than the one recorded in the entry,
+ * by the counters the game's own Behind compares. */
 static int Behind(const CpSaveImage *image, const WtJournalEntry *entry)
 {
+    unsigned counters = RulesOf(image)->counters;
     return (uint32_t)(image->globalCounter - entry->globalCounter) >= UINT32_C(0x80000000)
-        || (uint32_t)(image->blockCounters[0] - entry->generalCounter) >= UINT32_C(0x80000000)
-        || (uint32_t)(image->blockCounters[1] - entry->boxCounter) >= UINT32_C(0x80000000);
+        || (counters >= 2 && (uint32_t)(image->blockCounters[0] - entry->generalCounter) >= UINT32_C(0x80000000))
+        || (counters >= 3 && (uint32_t)(image->blockCounters[1] - entry->boxCounter) >= UINT32_C(0x80000000));
 }
 
 static void Counters(const CpSaveImage *image, WtJournalEntry *entry)
@@ -194,8 +259,10 @@ static void Counters(const CpSaveImage *image, WtJournalEntry *entry)
  * played; the stock game, played between companion sessions, does not. */
 static int Moved(const CpSaveImage *image, const WtJournalEntry *entry)
 {
+    unsigned counters = RulesOf(image)->counters;
     return !Behind(image, entry) && (image->globalCounter != entry->globalCounter
-        || image->blockCounters[0] != entry->generalCounter || image->blockCounters[1] != entry->boxCounter);
+        || (counters >= 2 && image->blockCounters[0] != entry->generalCounter)
+        || (counters >= 3 && image->blockCounters[1] != entry->boxCounter));
 }
 
 /* Where a save holds a Pokémon: the slot whose canonical form digests to one
@@ -268,8 +335,9 @@ int WtGame_Checkpoint(WtGame *game)
  * prepares: the general block (the party and everything a delivery's effects
  * reach) and the one PC slot a delivery may fill. */
 typedef struct Backup {
-    unsigned char general[CP_SAVE_GENERAL_SIZE - CP_SAVE_FOOTER_SIZE], box[BOX_MON_SIZE];
+    unsigned char general[CP_SAVE_GENERAL_BODY_MAX], box[BOX_MON_SIZE];
     unsigned char *generalAt, *boxAt;
+    size_t generalSize;
 } Backup;
 
 static Backup *Keep(CpSaveImage *image)
@@ -278,7 +346,8 @@ static Backup *Keep(CpSaveImage *image)
     if (!backup) return NULL;
     backup->generalAt = CpSaveImage_Block(image, 0); backup->boxAt = NULL;
     if (!backup->generalAt) { free(backup); return NULL; }
-    memcpy(backup->general, backup->generalAt, sizeof(backup->general));
+    backup->generalSize = GeneralBody(image);
+    memcpy(backup->general, backup->generalAt, backup->generalSize);
     return backup;
 }
 
@@ -291,7 +360,7 @@ static void KeepBox(Backup *backup, unsigned char *box)
 static void Release(Backup *backup, int restore)
 {
     if (restore) {
-        memcpy(backup->generalAt, backup->general, sizeof(backup->general));
+        memcpy(backup->generalAt, backup->general, backup->generalSize);
         if (backup->boxAt) memcpy(backup->boxAt, backup->box, sizeof(backup->box));
     }
     memset(backup, 0, sizeof(*backup));
@@ -390,8 +459,8 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
             if (WtPokemon_Decode(entry->destinationAfter, canonical) != 0) return -1;
             KeptSentences(entry->destinationAfter, kept);
         }
-        if (CpReceive_Apply(game->data, CpSaveImage_Block(image, 0), entry->incoming,
-                entry->destination.kind == 1 ? CP_RECEIVE_PARTY : CP_RECEIVE_BOX,
+        if (CpReceive_ApplyGame(RulesOf(image)->receive, game->version, game->data, CpSaveImage_Block(image, 0),
+                entry->incoming, entry->destination.kind == 1 ? CP_RECEIVE_PARTY : CP_RECEIVE_BOX,
                 !prepare && entry->destination.kind == 1 ? kept : NULL, built) != 0) return -1;
     } else return -1;
     if (WtPokemon_Decode(built, canonical) != 0) return -1;
@@ -402,7 +471,11 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
     } else if (memcmp(entry->destinationAfter, built, entry->destination.length) != 0) return -1;
     if (entry->destination.kind == 2) KeepBox(backup, destination);
     memcpy(destination, built, entry->destination.length);
-    if (entry->destination.kind == 1) Write32(party + 4, Read32(party + 4) + 1);
+    if (entry->destination.kind == 1) {
+        /* HeartGold/SoulSilver clear the new slot's Aprijuice modifiers. */
+        if (RulesOf(image)->heartGold) memset(Aprijuice(party, entry->destination.slot), 0, APRIJUICE_SIZE);
+        Write32(party + 4, Read32(party + 4) + 1);
+    }
     return 0;
 }
 
@@ -436,7 +509,7 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
 static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
 {
     unsigned char digests[3][32], image[MON_SIZE], canonical[BOX_MON_SIZE], *general, *scratch;
-    const size_t size = CP_SAVE_GENERAL_SIZE - CP_SAVE_FOOTER_SIZE;
+    const size_t size = GeneralBody(game->image);
     unsigned count = 1, i;
     if (entry->deliveryKind == WT_DELIVERY_RETURN) {
         Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
@@ -447,7 +520,8 @@ static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
     memcpy(digests[0], entry->appliedDigest, 32);
     for (i = 0; i < 2; ++i) {
         memcpy(scratch, general, size);
-        if (CpReceive_Apply(game->data, scratch, entry->incoming, i ? CP_RECEIVE_BOX : CP_RECEIVE_PARTY, NULL, image) != 0
+        if (CpReceive_ApplyGame(RulesOf(game->image)->receive, game->version, game->data, scratch, entry->incoming,
+                i ? CP_RECEIVE_BOX : CP_RECEIVE_PARTY, NULL, image) != 0
             || WtPokemon_Decode(image, canonical) != 0) { free(scratch); return -1; }
         Sha(canonical, sizeof(canonical), digests[count++]);
     }
@@ -563,12 +637,12 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
     where = Locate(image, entry->outgoing, digest, 1, &found);
     if (where < 0) return -1;
     if (where == 1) {
-        if (!found.party || !Eligible(party, found.slot)) return -1;
+        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return -1;
         entry->source.slot = (unsigned char)found.slot;
         memcpy(entry->original, Slot(party, found.slot), MON_SIZE);
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) return -1;
-        Remove(party, found.slot);
+        Remove(RulesOf(image), party, found.slot);
         if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) return -1;
         *restore = 0;
         if (SaveBoth(game, entry->inventoryAfter) != 0) return -1;
@@ -589,14 +663,14 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
     unsigned i;
     if (!party || !(backup = Keep(image))) return -1;
     if (step == WT_INVENTORY_PREPARE_REMOVE) {
-        if (!Eligible(party, slot) || WtPokemon_Decode(Slot(party, slot), canonical) != 0) goto done;
+        if (!Eligible(RulesOf(image), party, slot) || WtPokemon_Decode(Slot(party, slot), canonical) != 0) goto done;
         entry->source.kind = 1; entry->source.box = 0;
         entry->source.slot = (unsigned char)slot; entry->source.length = MON_SIZE;
         memcpy(entry->original, Slot(party, slot), MON_SIZE);
         memcpy(entry->outgoing, canonical, sizeof(canonical));
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
-        Remove(party, slot);
+        Remove(RulesOf(image), party, slot);
         if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
@@ -611,7 +685,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
             count = Count(party, 1);
             if (count < 0 || slot >= (unsigned)count || memcmp(Slot(party, slot), entry->original, MON_SIZE) != 0) goto done;
-            Remove(party, slot);
+            Remove(RulesOf(image), party, slot);
             if (Hash(image, digest) != 0) goto done;
         }
         if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
@@ -619,8 +693,12 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         if (memcmp(digest, entry->inventoryAfter, 32) == 0) {
             count = Count(party, 0);
             if (count < 0 || count >= CP_SAVE_PARTY_CAPACITY || slot > (unsigned)count) goto done;
-            for (i = (unsigned)count; i > slot; --i) memcpy(Slot(party, i), Slot(party, i - 1), MON_SIZE);
+            for (i = (unsigned)count; i > slot; --i) {
+                memcpy(Slot(party, i), Slot(party, i - 1), MON_SIZE);
+                if (RulesOf(image)->heartGold) memcpy(Aprijuice(party, i), Aprijuice(party, i - 1), APRIJUICE_SIZE);
+            }
             memcpy(Slot(party, slot), entry->original, MON_SIZE);
+            if (RulesOf(image)->heartGold) memset(Aprijuice(party, slot), 0, APRIJUICE_SIZE);
             Write32(party + 4, (uint32_t)count + 1);
             if (Hash(image, digest) != 0) goto done;
         }
@@ -695,8 +773,8 @@ int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 int CpAdapter_Eligible(const CpSaveImage *image, unsigned slot)
 {
     const unsigned char *general = image && image->loaded
-        ? image->bytes + image->currentHalf[0] * CP_SAVE_HALF_SIZE + CP_SAVE_GENERAL_OFFSET : NULL;
-    return general && Eligible(general + CP_SAVE_PARTY_CAPACITY_OFFSET, slot);
+        ? image->bytes + image->currentHalf[0] * CP_SAVE_HALF_SIZE + image->layout->offsets[0] : NULL;
+    return general && Eligible(RulesOf(image), general + image->layout->partyOffset, slot);
 }
 
 int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
@@ -708,7 +786,7 @@ int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
         || WtPokemon_Decode(Slot(party, slot), canonical) != 0) return 1;
     /* Anything uncertain falls through to the deposit's own fail-closed check. */
     if (!(backup = Keep(image))) return 1;
-    Remove(party, slot);
+    Remove(RulesOf(image), party, slot);
     unique = Absent(image, canonical) == 0;
     Release(backup, 1);
     return unique;
@@ -735,6 +813,22 @@ unsigned CpAdapter_Forms(unsigned species)
     }
 }
 
+/* Diamond/Pearl draw only these forms (dp/game_save.c Forms); Rotom's,
+ * Giratina's and Shaymin's other forms are Platinum's. */
+static unsigned FormsDiamondPearl(unsigned species)
+{
+    switch (species) {
+    case 479: case 487: case 492: return 1;
+    default: return CpAdapter_Forms(species);
+    }
+}
+
+/* HeartGold/SoulSilver add Spiky-eared Pichu to Platinum's forms. */
+static unsigned FormsHeartGoldSoulSilver(unsigned species)
+{
+    return species == SPECIES_PICHU ? 2 : CpAdapter_Forms(species);
+}
+
 static int Holdable(void *arg, unsigned item)
 {
     const WtGame *game = arg;
@@ -744,9 +838,13 @@ static int Holdable(void *arg, unsigned item)
 int WtGame_CanHold(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
 {
     WtPokemonLimits limits;
+    const Rules *rules;
     if (!arg || !pokemon) return 0;
-    limits.maxSpecies = CP_ADAPTER_MAX_SPECIES; limits.maxItem = CP_ADAPTER_MAX_ITEM;
-    limits.maxBall = CP_ADAPTER_MAX_BALL; limits.forms = CpAdapter_Forms;
+    rules = RulesOf(((const WtGame *)arg)->image);
+    limits.maxSpecies = CP_ADAPTER_MAX_SPECIES; limits.maxItem = rules->maxItem;
+    limits.maxBall = CP_ADAPTER_MAX_BALL; limits.forms = rules->forms;
     limits.holdable = Holdable; limits.arg = arg;
+    /* HeartGold/SoulSilver read their own ball (Fast to Park) from 0x86. */
+    if (rules->heartGold && pokemon[0x86] > HGSS_LAST_BALL) return 0;
     return WtPokemon_Fits(pokemon, &limits);
 }

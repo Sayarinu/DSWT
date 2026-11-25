@@ -472,6 +472,15 @@ static void WriteRom(const char *relative, const char code[4], uint8_t revision)
     free(rom.data);
 }
 
+/* LUNE-880: a game the companion does not trade for (Pokémon Black's code). */
+static void WriteOtherRom(const char *relative)
+{
+    Bytes rom = SyntheticPlatinum("CPUE", 1);
+    memcpy(rom.data + 0x0C, "IRBO", 4);
+    WriteFile(relative, rom.data, rom.size);
+    free(rom.data);
+}
+
 /* Pokedex_Init, an empty Pokétch history and journal page, encoded records:
  * what a matched delivery's receive effects read (as platinum_receive_test.c). */
 static void FreshGeneral(unsigned char *general)
@@ -540,6 +549,8 @@ static void Setup(void)
     WriteSave("roms/nds/saves/Lonely.sav", 2);
     WriteRom("roms/nds/Diamond.nds", "ADAE", 5);
     WriteSave("roms/nds/saves/Diamond.sav", 2);
+    WriteOtherRom("roms/nds/Black.nds");
+    WriteSave("roms/nds/saves/Black.sav", 2);
     WriteRom("roms/nds/Blank.nds", "CPUE", 1);
     memset(blank, 0xFF, sizeof(blank));
     WriteFile("roms/nds/saves/Blank.sav", blank, sizeof(blank));
@@ -634,20 +645,22 @@ static int NameIs(const uint16_t *text, const uint16_t *expected)
 
 static void ScanFindsSavesAndTheirRoms(void)
 {
-    int platinum, second, lonely, diamond, blank;
+    int platinum, second, lonely, diamond, blank, black;
     CpApp_Init(&app, &platform, Companion_Language_en_US);
     model->ops->scan(model->context);
     assert(model->busy);
     Pump();
-    assert(model->saveCount == 5);
+    assert(model->saveCount == 6);
     platinum = FindSave("Platinum.sav"); second = FindSave("Second.sav"); lonely = FindSave("Lonely.sav");
-    diamond = FindSave("Diamond.sav"); blank = FindSave("Blank.sav");
-    assert(platinum >= 0 && second >= 0 && lonely >= 0 && diamond >= 0 && blank >= 0);
+    diamond = FindSave("Diamond.sav"); blank = FindSave("Blank.sav"); black = FindSave("Black.sav");
+    assert(platinum >= 0 && second >= 0 && lonely >= 0 && diamond >= 0 && blank >= 0 && black >= 0);
     assert(model->saves[platinum].status == CP_UI_SAVE_READY && model->saves[platinum].version == CP_VERSION_PLATINUM
         && model->saves[platinum].language == CP_LANGUAGE_ENGLISH);
     assert(model->saves[second].status == CP_UI_SAVE_READY);
     assert(model->saves[lonely].status == CP_UI_SAVE_NO_ROM);
-    assert(model->saves[diamond].status == CP_UI_SAVE_UNSUPPORTED && model->saves[diamond].version == CP_VERSION_DIAMOND);
+    /* LUNE-880: Diamond/Pearl and HeartGold/SoulSilver trade too. */
+    assert(model->saves[diamond].status == CP_UI_SAVE_READY && model->saves[diamond].version == CP_VERSION_DIAMOND);
+    assert(model->saves[black].status == CP_UI_SAVE_UNSUPPORTED);
     assert(!strcmp(app.saves[second].rom + strlen(fake.root), "roms/nds/pt/Second.nds"));
     assert(!fake.romOpen[CP_APP_ROM_SCAN]);
     puts("PASS model: scan pairs saves in saves/, beside ROMs and one folder down; skips non-saves");
@@ -658,8 +671,12 @@ static void LoadRefusals(void)
     LoadByName("Lonely.sav");
     assert(model->loadMessage == Companion_Text_MatchingRomMissing && !model->busy);
     model->ops->unload(model->context);
-    LoadByName("Diamond.sav");
+    LoadByName("Black.sav");
     assert(model->loadMessage == Companion_Text_SaveUnsupported);
+    model->ops->unload(model->context);
+    /* A Platinum save beside a Diamond ROM is not a save Diamond would load. */
+    LoadByName("Diamond.sav");
+    assert(model->loadMessage == Companion_Text_SaveInGameFirst);
     model->ops->unload(model->context);
     LoadByName("Blank.sav");
     assert(model->loadMessage == Companion_Text_SaveInGameFirst);
@@ -912,7 +929,7 @@ static void ScreensDriveTheModel(void)
     CpUi_Start(&ui, model);
     memset(&input, 0, sizeof(input));
     for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
-    assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 5);
+    assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 6);
     target = FindSave("Second.sav");
     ui.listCursor = target;
     input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;

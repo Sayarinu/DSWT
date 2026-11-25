@@ -21,11 +21,6 @@ enum {
     EXT_LEVEL = 4, EXT_CAPSULE = 5, EXT_HP = 6
 };
 
-/* The item name bank of the message archive (TEXT_BANK_ITEM_NAMES); the
- * Japanese and Korean archives leave out two banks before it. */
-#define ITEM_NAME_BANK 392
-#define ITEM_NAME_BANK_ASIAN 390
-
 CpSaveImage gCpAppImage;
 
 /* The engine's random source has no argument of its own. */
@@ -203,7 +198,7 @@ static void AddSave(CpApp *app, const char *path)
         if (CpRom_Identify(&reader, &save->info) == CP_OK) {
             shown->version = save->info.version;
             shown->language = save->info.language;
-            shown->status = save->info.family == CP_FAMILY_PLATINUM ? CP_UI_SAVE_READY : CP_UI_SAVE_UNSUPPORTED;
+            shown->status = CpApp_Layout(save->info.family) ? CP_UI_SAVE_READY : CP_UI_SAVE_UNSUPPORTED;
         } else {
             shown->status = CP_UI_SAVE_UNSUPPORTED;
         }
@@ -277,12 +272,11 @@ static void Empty(uint16_t *text) { text[0] = CP_CHAR_EOS; }
 
 static void ItemName(const CpApp *app, unsigned item, uint16_t out[CP_UI_ITEM_NAME_MAX])
 {
-    int asian = app->game.rom.language == CP_LANGUAGE_JAPANESE || app->game.rom.language == CP_LANGUAGE_KOREAN;
     CpRomFile bank;
     Empty(out);
     if (!item) return;
     /* A name too long for the card leaves the held-item mark alone. */
-    if (CpNarc_Member(&app->game.messages, asian ? ITEM_NAME_BANK_ASIAN : ITEM_NAME_BANK, &bank) != CP_OK
+    if (CpNarc_Member(&app->game.messages, CpGame_Bank(&app->game, &app->game.table->itemNames), &bank) != CP_OK
         || CpMessage_Read(&bank, (uint16_t)item, out, CP_UI_ITEM_NAME_MAX, NULL) != CP_OK) Empty(out);
 }
 
@@ -322,7 +316,7 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
     unsigned count, slot;
     memset(party, 0, CP_UI_PARTY_MAX * sizeof(*party));
     if (!general) return 0;
-    list = general + CP_SAVE_PARTY_CAPACITY_OFFSET;
+    list = general + gCpAppImage.layout->partyOffset;
     count = Read32(list + 4);
     if (Read32(list) != CP_SAVE_PARTY_CAPACITY || count > CP_SAVE_PARTY_CAPACITY) return 0;
     for (slot = 0; slot < count; ++slot) {
@@ -434,10 +428,20 @@ static int Backup(CpApp *app, const unsigned char saveID[16])
     return 0;
 }
 
+const CpSaveLayout *CpApp_Layout(CpFamily family)
+{
+    switch (family) {
+    case CP_FAMILY_DP: return &CpSaveLayout_DiamondPearl;
+    case CP_FAMILY_PLATINUM: return &CpSaveLayout_Platinum;
+    case CP_FAMILY_HGSS: return &CpSaveLayout_HeartGoldSoulSilver;
+    default: return NULL;
+    }
+}
+
 static int Reload(CpApp *app)
 {
     uint32_t magic = app->game.rom.language == CP_LANGUAGE_KOREAN ? CP_SAVE_MAGIC_KOREAN : CP_SAVE_MAGIC_INTERNATIONAL;
-    return CpSaveImage_Load(&gCpAppImage, &app->file, magic);
+    return CpSaveImage_LoadLayout(&gCpAppImage, &app->file, CpApp_Layout(app->game.rom.family), magic);
 }
 
 static int LoadJob(void *arg)
@@ -478,6 +482,7 @@ static int LoadJob(void *arg)
     app->adapter.file = &app->file;
     app->adapter.holdable = CpAdapter_RomHoldable;
     app->adapter.holdableArg = &app->game;
+    app->adapter.version = app->game.rom.version;
     /* Matched deliveries take the game's receive effects from the paired ROM. */
     CpAdapter_RomData(&app->romData, &app->game);
     app->adapter.data = &app->romData;
