@@ -44,7 +44,7 @@ static WtJournalIO journalIO;
 static FxFile fixture;
 static unsigned char live[CP_SAVE_FILE_SIZE], durable[CP_SAVE_FILE_SIZE];
 static unsigned char digests[4][32];
-static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[540 * FX_BOX_MON];
+static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[FX_PC_SPAN];
 enum Outcome { RECOVERED, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST, OUTCOMES };
 static const char *outcomes[] = { "recovered", "journal-blocked", "save-blocked", "stuck", "duplicate", "lost" };
 static unsigned unexpected;
@@ -342,11 +342,11 @@ static void StockGameSave(void)
     RetailLoad(live, selected);
     for (block = 0; block < 2; ++block) {
         const unsigned char *body = live + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block];
-        const unsigned char *footer = body + blockSizes[block] - 20;
+        const unsigned char *footer = body + blockSizes[block] - FX_FOOTER;
         memcpy(ram + blockOffsets[block], body, blockSizes[block]);
-        counters[block] = Fx32(footer + 4);
+        counters[block] = Fx32(footer + (FX_SHARED ? 0 : 4));
     }
-    global = Fx32(ram + FX_GENERAL_SIZE - 20);
+    global = Fx32(ram + FX_GENERAL_SIZE - FX_FOOTER);
     ram[0x10] ^= 0x5a; /* The player plays: play time changes. */
     for (pass = 0; pass < stockSaves; ++pass) {
         ++global;
@@ -356,10 +356,15 @@ static void StockGameSave(void)
             selected[block] ^= 1;
             body = live + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block];
             memcpy(body, ram + blockOffsets[block], blockSizes[block]);
-            footer = body + blockSizes[block] - 20;
+            footer = body + blockSizes[block] - FX_FOOTER;
+            crc = FxCrc(body, blockSizes[block] - FX_FOOTER);
+#if FX_SHARED
+            /* HeartGold/SoulSilver: one counter, the CRC last. */
+            FxPut32(footer, global); FxPut16(footer + 14, crc);
+#else
             FxPut32(footer, global); FxPut32(footer + 4, ++counters[block]);
-            crc = FxCrc(body, blockSizes[block] - 20);
             FxPut16(footer + 18, crc);
+#endif
         }
     }
     stockPlayed = 1;
@@ -382,7 +387,7 @@ static void CheckFinal(int capture)
 {
     WtJournalEntry entry = ReadEntry();
     const unsigned char *party, *pc;
-    assert(CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    assert(FxLoad(&image, &file) == CP_SAVE_OK);
     Conservation(live, &entry, digests);
     party = CpSaveImage_Block(&image, 0) + FX_PARTY;
     pc = CpSaveImage_Block(&image, 1) + FX_PC;
@@ -407,7 +412,7 @@ static void Resume(void)
     assert(close(posix.fd) == 0);
     OpenBytes(live);
     Bind(); randomCounter += 1000; /* Fresh entropy after reboot. */
-    load = CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL);
+    load = FxLoad(&image, &file);
     if (CpSaveJournal_Detect(&file) == CP_SAVE_JOURNAL_UNUSED) {
         assert(scenario == PROVISION);
         Provision();
@@ -435,7 +440,7 @@ static void Resume(void)
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
         StockGameSave();
-        load = CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL);
+        load = FxLoad(&image, &file);
     }
     if (load != CP_SAVE_OK) Finish(SAVE_BLOCKED);
     OpenEngine(&engine);
@@ -486,7 +491,7 @@ static void Setup(void)
     }
     FxBuild(&fixture, specs, 4);
     OpenBytes(fixture.bytes); Bind();
-    assert(CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    assert(FxLoad(&image, &file) == CP_SAVE_OK);
     if (scenario != PROVISION) Provision();
     if (scenario == CANCEL_RETURN) {
         WtEngine engine;

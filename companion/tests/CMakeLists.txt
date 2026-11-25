@@ -155,6 +155,16 @@ foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
 
+# LUNE-880: the same adapter on Diamond/Pearl (1) and HeartGold/SoulSilver (2) saves.
+foreach(adapter_game 1 2)
+    add_executable(gen4_adapter_test_game${adapter_game} adapter/gen4_adapter_test.c)
+    target_compile_definitions(gen4_adapter_test_game${adapter_game} PRIVATE FX_GAME=${adapter_game})
+    target_compile_options(gen4_adapter_test_game${adapter_game} PRIVATE -Wall -Wextra -Werror -pedantic
+        -fsanitize=address,undefined)
+    target_link_libraries(gen4_adapter_test_game${adapter_game} PRIVATE companion_adapter)
+    add_test(NAME gen4_adapter_test_game${adapter_game} COMMAND gen4_adapter_test_game${adapter_game})
+endforeach()
+
 # LUNE-899: a stock-game save between a cut companion step and its resume.
 # The sweeps build the adapter themselves at -O1 (still with the sanitizers):
 # every case hashes and checks whole saves, and must stay within CI's budget.

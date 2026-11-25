@@ -13,6 +13,35 @@ static int RetailCompare(uint32_t a, uint32_t b)
     return (a > b) - (a < b);
 }
 
+#if FX_SHARED
+/* LUNE-880: HeartGold/SoulSilver's Save_GetSaveFilesStatus. One counter per
+ * half; the newer half when its blocks agree, else the older one. */
+static void RetailLoad(const unsigned char *bytes, unsigned selected[2])
+{
+    unsigned block, half, valid[2] = { 0, 0 }, newer, older, chosen = 2;
+    uint32_t counts[2][2];
+    for (block = 0; block < 2; ++block) {
+        for (half = 0; half < 2; ++half) {
+            const unsigned char *body = bytes + half * CP_SAVE_HALF_SIZE + blockOffsets[block];
+            const unsigned char *footer = body + blockSizes[block] - FX_FOOTER;
+            if (Fx32(footer + 4) == blockSizes[block] && Fx32(footer + 8) == CP_SAVE_MAGIC_INTERNATIONAL
+                && (unsigned)(footer[12] | footer[13] << 8) == block
+                && (unsigned)(footer[14] | footer[15] << 8) == FxCrc(body, blockSizes[block] - FX_FOOTER))
+                valid[block] |= 1u << half;
+            counts[block][half] = valid[block] >> half & 1 ? Fx32(footer) : 0;
+        }
+        assert(valid[block] != 0);
+    }
+    newer = valid[0] == 3 ? RetailCompare(counts[0][0], counts[0][1]) < 0 : valid[0] == 2;
+    older = valid[0] == 3 ? !newer : 2;
+    if (valid[0] != 3 && valid[1] != 3) {
+        if ((valid[0] & valid[1]) != 0) chosen = newer;
+    } else if (counts[0][newer] == counts[1][newer]) chosen = newer;
+    else if (older != 2 && counts[0][older] == counts[1][older]) chosen = older;
+    assert(chosen != 2 && (valid[0] & valid[1] & (1u << chosen)));
+    selected[0] = selected[1] = chosen;
+}
+#else
 static void RetailLoad(const unsigned char *bytes, unsigned selected[2])
 {
     unsigned block, half, valid[2] = { 0, 0 };
@@ -42,15 +71,27 @@ static void RetailLoad(const unsigned char *bytes, unsigned selected[2])
         assert(globals[0][selected[0]] == globals[1][selected[1]]);
     }
 }
+#endif
 
 static void SelectedHash(const unsigned char *bytes, const unsigned selected[2], unsigned char digest[32])
 {
     CpSaveSha256 hash;
     unsigned block;
     CpSaveSha256_Init(&hash);
-    for (block = 0; block < 2; ++block)
-        CpSaveSha256_Update(&hash, bytes + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block],
-            blockSizes[block] - 20);
+    for (block = 0; block < 2; ++block) {
+        const unsigned char *body = bytes + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block];
+#if FX_SHARED
+        /* The PC's modified flag reads as zero (hgss/game_save.c Update). */
+        static const unsigned char zero[4] = { 0, 0, 0, 0 };
+        if (block == 1) {
+            CpSaveSha256_Update(&hash, body, 0x12004);
+            CpSaveSha256_Update(&hash, zero, 4);
+            CpSaveSha256_Update(&hash, body + 0x12008, blockSizes[block] - FX_FOOTER - 0x12008);
+            continue;
+        }
+#endif
+        CpSaveSha256_Update(&hash, body, blockSizes[block] - FX_FOOTER);
+    }
     CpSaveSha256_Finish(&hash, digest);
 }
 
@@ -72,7 +113,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     for (mon = 0; mon < Fx32(general + FX_PARTY + 4) + 540; ++mon) {
         unsigned count = Fx32(general + FX_PARTY + 4);
         const unsigned char *slot = mon < count ? general + FX_PARTY + 8 + mon * FX_MON
-            : boxes + FX_PC + (mon - count) * FX_BOX_MON;
+            : FxPcSlotConst(boxes, mon - count);
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
         for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
