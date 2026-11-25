@@ -60,24 +60,8 @@ static const struct KnownFailure {
 } knownFailures[] = {
     { OFFER, 15, "tail-first", 512, 0, JOURNAL_BLOCKED, "LUNE-901" },
     { OFFER, 21, "tail-first", 512, 0, JOURNAL_BLOCKED, "LUNE-901" },
-    { OFFER, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { OFFER, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { OFFER, 107, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { OFFER, 107, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 83, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 83, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
     { REJECT_RESTORE, 15, "tail-first", 512, 0, JOURNAL_BLOCKED, "LUNE-901" },
     { REJECT_RESTORE, 21, "tail-first", 512, 0, JOURNAL_BLOCKED, "LUNE-901" },
-    { REJECT_RESTORE, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 107, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 107, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 143, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 143, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 155, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 155, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
 };
 #define KNOWN_FAILURES (sizeof(knownFailures) / sizeof(knownFailures[0]))
 static unsigned knownSeen[KNOWN_FAILURES], unexpected;
@@ -617,7 +601,7 @@ int main(void)
     }
     assert(ran != 0);
     free(seen);
-    printf("%s recovery expectations: %u mismatches; %u distinct known failures remain (LUNE-901/LUNE-899)\n",
+    printf("%s recovery expectations: %u mismatches; %u distinct known failures remain (LUNE-901)\n",
         unexpected ? "FAIL" : "PASS", unexpected, failures);
     return unexpected ? 1 : 0;
 }
