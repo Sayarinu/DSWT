@@ -46,6 +46,11 @@ typedef struct CpVisit {
     /* What happened, for the screens: the network worker's flags. */
     int completed, returned, rejected, waiting, superseded, refused, rolledBack;
     unsigned char refusal; /* enum WtWireRefusal, when the server said */
+    /* A matched delivery's Pokémon as saved (WtGame_Received), read before
+     * the ACK retires the journal entry, with the images of the Pokémon sent
+     * and received, as the game's RunTrade keeps them for its animation. */
+    int hasReceived;
+    WtReceivedPokemon received;
     /* Whether gameplay may resume on this save: the patched game's CanLeave. */
     int canLeave;
     uint16_t phase;

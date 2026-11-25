@@ -381,6 +381,28 @@ static void WriteRom(const char *relative, const char code[4], uint8_t revision)
     free(rom.data);
 }
 
+/* Pokedex_Init, an empty Pokétch history and journal page, encoded records:
+ * what a matched delivery's receive effects read (as platinum_receive_test.c). */
+static void FreshGeneral(unsigned char *general)
+{
+    unsigned char *dex = general + CP_RECEIVE_POKEDEX_OFFSET, *records = general + CP_RECEIVE_RECORDS_OFFSET;
+    unsigned sum = 0, i;
+    memset(dex, 0, 804);
+    FxPut32(dex, 0xBEEFCAFE);
+    memset(dex + 268, 0xFF, 28);
+    dex[264] = dex[265] = dex[266] = dex[267] = 0xFF;
+    FxPut32(dex + 796, 0xFFFFFFFF); dex[800] = dex[801] = 0xFF;
+    dex[67] = 0xFF; dex[131] = 0xFF;
+    memset(records, 0, 444);
+    FxPut16(records + 442, 0x1234);
+    for (i = 4; i < 440; ++i) sum += records[i];
+    FxPut16(records + 440, sum & 65535);
+    FxCrypt(records + 4, 436, (sum & 65535) | (0x1234u << 16));
+    memset(general + CP_RECEIVE_POKETCH_OFFSET + 184, 0, 96);
+    memset(general + CP_RECEIVE_JOURNAL_OFFSET, 0, 112);
+    FxPut16(general + CP_RECEIVE_VARS_OFFSET + 2 * 86, 0);
+}
+
 /* A Platinum save with `count` party Pokémon; the journal banks are blank. */
 static void WriteSave(const char *relative, unsigned count)
 {
@@ -388,6 +410,10 @@ static void WriteSave(const char *relative, unsigned count)
     unsigned i;
     for (i = 0; i < count; ++i) specs[i] = FxDefault(i);
     FxBuild(&saveBytes, specs, count);
+    for (i = 0; i < 2; ++i) {
+        FreshGeneral(FxGeneral(&saveBytes, i));
+        FxSeal(&saveBytes, i, 0, 10 + i, 20 + i);
+    }
     WriteFile(relative, saveBytes.bytes, sizeof(saveBytes.bytes));
 }
 
@@ -625,7 +651,9 @@ static void ReloadEnrolledSave(void)
     puts("PASS model: an enrolled save with a backup of its enrollment loads and resumes");
 }
 
-static void MatchedDeliveryIsLeftPending(void)
+/* A matched delivery lands with the game's receive effects; the RECEIVED card
+ * shows it. One this game cannot hold stays pending, the save untouched. */
+static void MatchedDeliveries(void)
 {
     unsigned char canonical[136];
     FxSpec spec = FxDefault(5);
@@ -635,18 +663,40 @@ static void MatchedDeliveryIsLeftPending(void)
     Visit(-1, 0, 0);
     Visit(0, 0, 0);
     assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3);
-    Retail("roms/nds/saves/Platinum.sav", before);
-    spec.species = 151;
+    spec.species = 25;
     FxCanonical(&spec, canonical);
     FsMatch(canonical);
     acknowledged = server.requests[WT_OP_ACKNOWLEDGE];
     Visit(-1, 1, 0);
-    assert(model->net == CP_UI_NET_RESPONSE && model->refused && !model->completed);
+    assert(model->net == CP_UI_NET_RESPONSE && model->completed && !model->returned && !model->refused);
+    assert(model->tradePhase == WT_JOURNAL_IDLE && model->canLeave);
+    assert(server.requests[WT_OP_ACKNOWLEDGE] == acknowledged + 1);
+    assert(model->partyCount == 4 && model->party[3].species == 25);
+    assert(model->hasReceived && model->received.species == 25 && NameIs(model->received.speciesName, kWesternName));
+    assert(model->received.originalTrainer[CP_UI_TRAINER_MAX - 1] == CP_CHAR_EOS);
+    CloseSession();
+    /* Reopened: the save loads and holds the received Pokémon. */
+    LoadByName("Platinum.sav");
+    assert(model->loadMessage == -1 && !model->recovery && model->partyCount == 4 && model->party[3].species == 25);
+    puts("PASS model: a matched delivery lands in the party; the RECEIVED card shows it");
+
+    /* A species this game cannot hold: refused before anything is recorded. */
+    Connect();
+    Visit(-1, 0, 0);
+    Visit(0, 0, 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3);
+    Retail("roms/nds/saves/Platinum.sav", before);
+    spec.species = 600;
+    FxCanonical(&spec, canonical);
+    FsMatch(canonical);
+    acknowledged = server.requests[WT_OP_ACKNOWLEDGE];
+    Visit(-1, 1, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->refused && !model->completed && !model->hasReceived);
     assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3 && model->canLeave);
     Retail("roms/nds/saves/Platinum.sav", after);
     assert(memcmp(before, after, sizeof(before)) == 0 && server.requests[WT_OP_ACKNOWLEDGE] == acknowledged);
     CloseSession();
-    puts("PASS model: a matched delivery stays pending on the server; the save is untouched (LUNE-873)");
+    puts("PASS model: a delivery this game cannot hold stays pending; the save is untouched");
 }
 
 static void RestoredRetailNeedsRecovery(void)
@@ -844,6 +894,66 @@ static void SameNameSavesKeepSeparateBackups(void)
     puts("PASS model: a backup in the older per-name folder still satisfies the contract");
 }
 
+/* Copies of a Pokémon (by canonical bytes) in a save file's party and PC. */
+static unsigned Copies(const char *relative, const unsigned char original[FX_MON])
+{
+    static FxFile file;
+    static CpSaveImage image;
+    CpFile cpFile = { &file, FxRead, FxWrite, FxSync, FxSize };
+    unsigned char want[136], have[136];
+    unsigned count = 0, i;
+    ReadFile(relative, file.bytes, sizeof(file.bytes));
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    assert(WtPokemon_Decode(original, want) == 0);
+    for (i = 0; i < FxImageCount(&image); ++i)
+        if (WtPokemon_Decode(FxImageParty(&image, i), have) == 0 && !memcmp(have, want, 136)) ++count;
+    for (i = 0; i < 18 * 30; ++i)
+        if (WtPokemon_Decode(FxImageBox(&image, i / 30, i % 30), have) == 0 && !memcmp(have, want, 136)) ++count;
+    return count;
+}
+
+/* LUNE-897's guard through the model: an offer whose Pokémon is already back
+ * in the save (an older copy restored, then saved in a stock game) is never
+ * added again when its return is collected; the visit fails closed. */
+static void ReturnAlreadyPresentFailsClosed(void)
+{
+    unsigned char original[FX_MON];
+    unsigned half, acknowledged;
+    RemoveBackups("Second");
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1;
+    Rescan();
+    LoadByName("Second.sav");
+    memcpy(original, FxImageParty(&gCpAppImage, 1), FX_MON);
+    Connect();
+    Visit(-1, 0, 0);
+    Visit(1, 0, 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && Copies("roms/nds/pt/Second.sav", original) == 0);
+    Rescan();
+    /* The player puts it back in the PC and saves in a stock game. */
+    ReadFile("roms/nds/pt/Second.sav", saveBytes.bytes, sizeof(saveBytes.bytes));
+    for (half = 0; half < 2; ++half) {
+        memcpy(FxBoxes(&saveBytes, half) + FX_PC, original, FX_BOX_MON);
+        FxSeal(&saveBytes, half, 0, 1000 + half, 2000 + half);
+        FxSeal(&saveBytes, half, 1, 1000 + half, 3000 + half);
+    }
+    WriteFile("roms/nds/pt/Second.sav", saveBytes.bytes, sizeof(saveBytes.bytes));
+    assert(Copies("roms/nds/pt/Second.sav", original) == 1);
+    LoadByName("Second.sav");
+    assert(model->loadMessage == -1 && model->recovery);
+    Connect();
+    acknowledged = server.requests[WT_OP_ACKNOWLEDGE];
+    Visit(-1, 1, 1);
+    assert(model->net == CP_UI_NET_ERROR && !model->completed && !model->canLeave);
+    assert(server.requests[WT_OP_ACKNOWLEDGE] == acknowledged);
+    assert(Copies("roms/nds/pt/Second.sav", original) == 1);
+    model->ops->close(model->context);
+    Pump();
+    model->ops->unload(model->context);
+    puts("PASS model: a returned offer already back in the save is never added twice (fails closed)");
+}
+
 int main(void)
 {
     Setup();
@@ -851,13 +961,14 @@ int main(void)
     LoadRefusals();
     OfferStatusCancelCollect();
     ReloadEnrolledSave();
-    MatchedDeliveryIsLeftPending();
+    MatchedDeliveries();
     RestoredRetailNeedsRecovery();
     BackupFailureStopsBeforeAnyEdit();
     NeedsEntropyAndWifiFailure();
     ScreensDriveTheModel();
     SameNameSavesKeepSeparateBackups();
     UnprovenWritesAndTheLeaveFence();
+    ReturnAlreadyPresentFailsClosed();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

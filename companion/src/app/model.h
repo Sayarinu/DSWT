@@ -2,6 +2,7 @@
 #define COMPANION_APP_MODEL_H
 
 #include "adapter/platinum.h"
+#include "adapter/rom_data.h"
 #include "app/platform.h"
 #include "game/gamedata.h"
 #include "game/pairing.h"
@@ -23,8 +24,9 @@
  * - the first backup of a session is taken after enrollment and before the
  *   first step that may edit the save (backup_save.h); if it fails nothing
  *   is edited and the visit stops with CP_APP_ERROR_BACKUP;
- * - matched deliveries are refused (left pending on the server) until the
- *   adapter applies them (LUNE-873), so a collect shows "cannot hold". */
+ * - a matched delivery is applied with the game's receive effects, from the
+ *   paired ROM's data (adapter/rom_data.h); one this game cannot hold is
+ *   refused before anything is recorded and stays pending on the server. */
 
 /* Support codes of the companion's own failures, outside the visit's. */
 enum CpAppError {
@@ -58,6 +60,7 @@ typedef struct CpApp {
     CpGame game;
     CpFont font;
     WtGame adapter;
+    CpAdapterData romData;
     int needsProvision, backedUp;
     /* The last proven leave status (boot check or visit): kept across
      * reconnects, so only a later check can grant leave again. */
@@ -78,6 +81,8 @@ typedef struct CpApp {
         int loadMessage, recovery;
         unsigned phase, partyCount;
         CpUiPokemon party[CP_UI_PARTY_MAX];
+        int hasReceived;
+        CpUiReceived received;
     } result;
 } CpApp;
 

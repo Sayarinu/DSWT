@@ -38,7 +38,15 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
         operation = WtSession_Next(engine, action);
         if (operation == WT_SESSION_BLOCKED) { result = CP_VISIT_ERROR_JOURNAL; break; }
         if (operation == WT_SESSION_DONE) { result = 0; break; }
-        if (operation == WT_OP_ACKNOWLEDGE) visit->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
+        if (operation == WT_OP_ACKNOWLEDGE) {
+            visit->returned = engine->entry.deliveryKind == WT_DELIVERY_RETURN;
+            /* The ACK retires this journal entry, so read what was saved first. */
+            visit->hasReceived = WtGame_Received(&engine->entry, &visit->received) == 0;
+            if (visit->hasReceived) {
+                memcpy(visit->received.sent, engine->entry.original, sizeof(visit->received.sent));
+                memcpy(visit->received.image, engine->entry.destinationAfter, sizeof(visit->received.image));
+            }
+        }
         requestSize = engine->frameSize;
         memcpy(request, engine->frame, requestSize);
         replySize = 0;

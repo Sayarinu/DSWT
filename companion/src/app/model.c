@@ -462,9 +462,9 @@ static int LoadJob(void *arg)
     app->adapter.file = &app->file;
     app->adapter.holdable = CpAdapter_RomHoldable;
     app->adapter.holdableArg = &app->game;
-    /* LUNE-873 hook: once WtGame has `data`, fill it from the paired ROM here
-     * (CpAdapter_RomData(&app->romData, &app->game); app->adapter.data = &app->romData;)
-     * and let VisitJob's engine use WtGame_CanHold instead of HoldNothingMatched. */
+    /* Matched deliveries take the game's receive effects from the paired ROM. */
+    CpAdapter_RomData(&app->romData, &app->game);
+    app->adapter.data = &app->romData;
     detection = CpSaveJournal_Detect(&app->file);
     Log(app, "load: journal %s\n", detection == CP_SAVE_JOURNAL_HAS_JOURNAL ? "present"
         : detection == CP_SAVE_JOURNAL_UNUSED ? "unused" : "refused");
@@ -494,13 +494,27 @@ static int Random(void *arg, unsigned char *bytes, size_t size)
     return sApp && sApp->platform->random(sApp->platform->arg, bytes, size) == 0 ? 0 : -1;
 }
 
-/* LUNE-873 hook: the adapter cannot apply a matched delivery yet. Refusing it here,
- * before the engine records anything, leaves the trade pending on the server
- * and the save untouched; the screens say this game cannot hold it. */
-static int HoldNothingMatched(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
+/* The received Pokémon's card, from what the visit read before its ACK. */
+static void FillReceived(CpApp *app)
 {
-    (void)arg; (void)pokemon;
-    return 0;
+    const WtReceivedPokemon *from = &app->visit.received;
+    CpUiReceived *to = &app->result.received;
+    unsigned i;
+    memset(to, 0, sizeof(*to));
+    app->result.hasReceived = app->visit.hasReceived;
+    if (!app->visit.hasReceived) return;
+    to->species = from->species;
+    to->gender = from->gender > CP_UI_GENDERLESS ? CP_UI_GENDERLESS : from->gender;
+    to->shiny = from->shiny;
+    to->hasNickname = from->hasNickname != 0;
+    to->originalTrainerGender = from->originalTrainerGender;
+    for (i = 0; i + 1 < CP_UI_NAME_MAX && i < WT_GAME_NAME_LENGTH + 1; ++i) to->nickname[i] = from->nickname[i];
+    to->nickname[CP_UI_NAME_MAX - 1] = CP_CHAR_EOS;
+    for (i = 0; i + 1 < CP_UI_TRAINER_MAX && i < WT_GAME_TRAINER_NAME_LENGTH + 1; ++i)
+        to->originalTrainer[i] = from->originalTrainer[i];
+    to->originalTrainer[CP_UI_TRAINER_MAX - 1] = CP_CHAR_EOS;
+    if (CpGame_SpeciesName(&app->game, to->species, to->speciesName, CP_UI_NAME_MAX, NULL) != CP_OK)
+        memcpy(to->speciesName, to->nickname, sizeof(to->speciesName));
 }
 
 static int Provision(CpApp *app)
@@ -535,11 +549,12 @@ static int VisitJob(void *arg)
 {
     CpApp *app = arg;
     WtEngine *engine = &app->engine;
-    WtEngineIO io = { &app->adapter, Random, WtGame_Inventory, HoldNothingMatched };
+    WtEngineIO io = { &app->adapter, Random, WtGame_Inventory, WtGame_CanHold };
     WtJournalIO journal = JournalIO(app);
     uint32_t build = app->saves[app->index].info.buildCode;
     int result, resumed = 0;
     memset(&app->visit, 0, sizeof(app->visit));
+    app->result.hasReceived = 0;
     app->visitOpened = 0;
     app->visitCanLeave = 0;
     if (app->needsProvision) {
@@ -585,6 +600,7 @@ done:
         if (Reload(app) != CP_SAVE_OK) { app->visitCanLeave = 0; if (result == 0) result = CP_APP_ERROR_SAVE; }
     }
     app->result.partyCount = FillParty(app, app->result.party);
+    FillReceived(app);
     return result;
 }
 
@@ -758,7 +774,8 @@ static void Finish(CpApp *app, int job, int result)
         model->refused = app->visit.refused;
         model->refusal = app->visit.refusal;
         model->needsEntropy = app->needsEntropy;
-        model->hasReceived = 0; /* LUNE-873 */
+        model->hasReceived = app->result.hasReceived;
+        model->received = app->result.received;
         model->canLeave = app->leaveProven = app->visitCanLeave;
         model->error = result;
         if (result == 0) model->recovery = 0;
