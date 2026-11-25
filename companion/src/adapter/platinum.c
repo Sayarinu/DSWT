@@ -420,10 +420,11 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
     if (!party) return -1;
     if (prepare) {
         if ((count = Count(party, 1)) < 0) return -1;
-        /* A returned offer that is already back must never be added twice:
-         * fail closed (Back and ReceiveMoved settle that case first). The game
-         * has no such check; RECEIVE only follows a PREPARE on the same image. */
-        if (entry->deliveryKind == WT_DELIVERY_RETURN && Absent(image, entry->outgoing) != 0) return -1;
+        /* A returned offer that is already back must never be added twice
+         * (Back and ReceiveMoved settle that case first), and a matched
+         * delivery needs its offer gone: a copy still here would make two. The
+         * game refuses both too (client wonder_trade/delivery.h). */
+        if (Absent(image, entry->outgoing) != 0) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (count < CP_SAVE_PARTY_CAPACITY) {
             entry->destination.kind = 1; entry->destination.slot = (unsigned char)count;
