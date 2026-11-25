@@ -311,6 +311,33 @@ static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], 
     return matches;
 }
 
+/* Pokémon with the target's identity in the party and PC; -1 when a slot
+ * cannot be read as the game would. */
+static int Identities(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+{
+    unsigned char canonical[BOX_MON_SIZE];
+    unsigned char *party = Party(image);
+    unsigned box, slot;
+    int members, i, count = 0;
+    Mon mon;
+    if (!party || (members = Count(party, 1)) < 0) return -1;
+    for (i = 0; i < members; ++i) {
+        if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0) return -1;
+        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+    }
+    for (box = 0; box < BOXES; ++box) for (slot = 0; slot < BOX_SLOTS; ++slot) {
+        const unsigned char *stored = BoxMon(image, box, slot);
+        ReadMon(stored, 0, &mon);
+        if (!Read16(mon.box + 0x08)) {
+            if (mon.decrypted || mon.mutates) return -1;
+            continue;
+        }
+        if (WtPokemon_Decode(stored, canonical) != 0) return -1;
+        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+    }
+    return count;
+}
+
 static int Hash(const CpSaveImage *image, unsigned char digest[32])
 {
     return CpSaveImage_Hash(image, digest) == CP_SAVE_OK ? 0 : -1;
@@ -623,13 +650,18 @@ done:
 
 /* REMOVE when a game saved over both recorded inventories (the stock game,
  * played before the companion could finish an offer). Nothing was sent: an
- * escrow's Submit goes out only once the removal is proven. The engine has no
- * way back from an escrow, and the patched game would finish the removal, so
- * this does too, decided by the Pokémon itself. Still in the party exactly as
- * offered: removed from this save, with the escrow recorded again against it
- * (its slot, image and both inventories), as PREPARE_REMOVE would record it
- * now. Absent (the game loaded the removal): only a checkpoint. Anything else,
- * a changed, moved or unreadable copy, fails closed and changes nothing. */
+ * escrow's Submit goes out only once the removal is proven. The patched game
+ * would finish the removal, so this does too where it can, decided by the
+ * Pokémon itself. Still in the party exactly as offered: removed from this
+ * save, with the escrow recorded again against it (its slot, image and both
+ * inventories), as PREPARE_REMOVE would record it now. Absent (the game
+ * loaded the removal): only a checkpoint. The only Pokémon with its identity,
+ * but changed by play, deposited in the PC or no longer one the party may
+ * offer: WT_INVENTORY_KEPT, nothing written; the offer is still in this save,
+ * as play left it (wonder_trade/delivery.h: play never changes the identity),
+ * and the engine abandons the escrow once the server proves it never received
+ * it. Anything else, two such Pokémon or an unreadable slot, fails closed and
+ * changes nothing. */
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
@@ -638,9 +670,9 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
     int where;
     Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
     where = Locate(image, entry->outgoing, digest, 1, &found);
-    if (where < 0) return -1;
+    if (where < 0) return Identities(image, entry->outgoing) == 1 ? WT_INVENTORY_KEPT : -1;
     if (where == 1) {
-        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return -1;
+        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return WT_INVENTORY_KEPT;
         entry->source.slot = (unsigned char)found.slot;
         memcpy(entry->original, Slot(party, found.slot), MON_SIZE);
         Sha(entry->original, MON_SIZE, entry->originalDigest);

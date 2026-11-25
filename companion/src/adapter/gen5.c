@@ -251,6 +251,27 @@ static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_S
     return matches;
 }
 
+/* Pokémon with the target's identity in the party, the PC and the Battle
+ * Box; -1 when a slot cannot be read as the game would. */
+static int Identities(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+{
+    unsigned char canonical[BOX_MON_SIZE], *party = Party(image);
+    unsigned box, slot;
+    int members, i, kind, count = 0;
+    if ((members = Count(party, 1)) < 0) return -1;
+    for (i = 0; i < members; ++i) {
+        if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0) return -1;
+        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+    }
+    for (box = 0; box <= BOXES; ++box) for (slot = 0; slot < BOX_SLOTS; ++slot) {
+        if (box == BOXES && slot >= BATTLE_BOX_SLOTS) break;
+        kind = Stored(box == BOXES ? BattleBoxMon(image, slot) : BoxMon(image, box, slot), canonical);
+        if (kind < 0) return -1;
+        count += kind == 1 && memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+    }
+    return count;
+}
+
 static int Hash(const CpSaveImage *image, unsigned char digest[32])
 {
     return CpSaveImage_Hash(image, digest) == CP_SAVE_OK ? 0 : -1;
@@ -508,6 +529,10 @@ done:
     return result;
 }
 
+/* As adapter/platinum.c RemoveMoved, over the party, the PC and the Battle
+ * Box: the only Pokémon with the offer's identity, changed by play, moved to
+ * the PC or the Battle Box, or no longer one the party may offer, answers
+ * WT_INVENTORY_KEPT and writes nothing (LUNE-902). */
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
@@ -516,9 +541,9 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
     int where;
     Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
     where = Locate(image, entry->outgoing, digest, 1, &found);
-    if (where < 0) return -1;
+    if (where < 0) return Identities(image, entry->outgoing) == 1 ? WT_INVENTORY_KEPT : -1;
     if (where == 1) {
-        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return -1;
+        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return WT_INVENTORY_KEPT;
         entry->source.slot = (unsigned char)found.slot;
         memset(entry->original, 0, sizeof(entry->original));
         memcpy(entry->original, Slot(party, found.slot), MON_SIZE);

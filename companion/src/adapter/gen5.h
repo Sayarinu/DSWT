@@ -21,7 +21,10 @@
  *   RECEIVE then decide by the Pokémon's exact image (LUNE-899). A delivery
  *   the stock game moved to the Battle Box is recorded there (journal locator
  *   kind 3), as the game's WtDelivery_Found records it; nothing is ever
- *   delivered to the Battle Box, and an offer moved there is refused.
+ *   delivered to the Battle Box. An offer not yet removed that the stock
+ *   game changed, or moved to the PC or the Battle Box, is kept: REMOVE
+ *   answers WT_INVENTORY_KEPT and the engine abandons its unsent escrow
+ *   (LUNE-902, as adapter/platinum.h).
  *
  * The journal banks lie in the musical distribution save
  * (save/musical_area.h), released before the journal's first write. */

@@ -1184,6 +1184,62 @@ static void ReturnAlreadyPresentFailsClosed(void)
     puts("PASS model: a returned offer already back in the save is never added twice (fails closed)");
 }
 
+
+/* LUNE-902 through the model: an offer cut before its removal reached the
+ * card, then trained in a stock game. The load needs recovery; connecting
+ * abandons the unsent escrow, the trained Pokémon stays, nothing is sent. */
+static void UnsentOfferTrainedInStockGame(void)
+{
+    unsigned char original[FX_MON], trained[FX_MON];
+    unsigned half, submits;
+    RemoveBackups("Second");
+    WriteSave("roms/nds/pt/Second.sav", 3);
+    /* Both retail copies already hold the save, so the offer's checkpoint
+     * writes nothing and the first retail write is the removal. */
+    memcpy(FxGeneral(&saveBytes, 0), FxGeneral(&saveBytes, 1), FX_GENERAL_SIZE);
+    memcpy(FxBoxes(&saveBytes, 0), FxBoxes(&saveBytes, 1), FX_BOXES_SIZE);
+    FxSeal(&saveBytes, 0, 0, 10, 20);
+    FxSeal(&saveBytes, 0, 1, 10, 30);
+    WriteFile("roms/nds/pt/Second.sav", saveBytes.bytes, sizeof(saveBytes.bytes));
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1;
+    Rescan();
+    LoadByName("Second.sav");
+    memcpy(original, FxImageParty(&gCpAppImage, 1), FX_MON);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->tradePhase == WT_JOURNAL_IDLE);
+    submits = server.requests[WT_OP_SUBMIT];
+    fake.failRetail = 1;
+    Visit(1, 0, 0);
+    fake.failRetail = 0;
+    assert(model->net == CP_UI_NET_ERROR && model->tradePhase == WT_JOURNAL_ESCROW);
+    assert(server.requests[WT_OP_SUBMIT] == submits && Copies("roms/nds/pt/Second.sav", original) == 1);
+    model->ops->close(model->context);
+    Pump();
+    model->ops->unload(model->context);
+    /* The player trains it in a stock game and saves. */
+    ReadFile("roms/nds/pt/Second.sav", saveBytes.bytes, sizeof(saveBytes.bytes));
+    for (half = 0; half < 2; ++half) {
+        FxTrain(FxGeneral(&saveBytes, half) + FX_PARTY + 8 + FX_MON);
+        memcpy(trained, FxGeneral(&saveBytes, half) + FX_PARTY + 8 + FX_MON, FX_MON);
+        FxSeal(&saveBytes, half, 0, 1000 + half, 2000 + half);
+        FxSeal(&saveBytes, half, 1, 1000 + half, 3000 + half);
+    }
+    WriteFile("roms/nds/pt/Second.sav", saveBytes.bytes, sizeof(saveBytes.bytes));
+    assert(Copies("roms/nds/pt/Second.sav", original) == 0 && Copies("roms/nds/pt/Second.sav", trained) == 1);
+    Rescan();
+    LoadByName("Second.sav");
+    assert(model->loadMessage == -1 && model->recovery && model->tradePhase == WT_JOURNAL_ESCROW);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->tradePhase == WT_JOURNAL_IDLE && model->canLeave);
+    assert(!model->recovery && server.requests[WT_OP_SUBMIT] == submits && server.state == WT_TRADE_NONE);
+    assert(Copies("roms/nds/pt/Second.sav", trained) == 1);
+    CloseSession();
+    puts("PASS model: an unsent offer trained in a stock game is abandoned on connect; it stays, nothing is sent");
+}
+
 /* Valid UTF-8 throughout, with no partial character at the end. */
 static int ValidUtf8(const char *text)
 {
@@ -1629,6 +1685,7 @@ int main(void)
     SameNameSavesKeepSeparateBackups();
     UnprovenWritesAndTheLeaveFence();
     ReturnAlreadyPresentFailsClosed();
+    UnsentOfferTrainedInStockGame();
     BackupStems();
     JapaneseSaveBacksUp();
     WifiScanListsNetworks();

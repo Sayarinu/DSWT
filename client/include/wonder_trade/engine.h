@@ -19,6 +19,18 @@ enum WtInventoryStep {
     WT_INVENTORY_PREPARE_RESTORE
 };
 
+/* LUNE-902, DS Companion builds only (WT_ABANDON_UNSENT): REMOVE's answer, in
+ * ESCROW, when a game that does not settle first (the unmodified game, played
+ * between companion sessions) changed the offered Pokémon where it is:
+ * trained it, moved it to the PC, or made it the party's last. The save holds
+ * the only Pokémon with its identity, so the offer is still there but cannot
+ * be removed as offered; nothing is written. The engine then abandons the
+ * escrow, which was never sent, once the server proves it holds nothing of it
+ * (WtEngine_Request). The games never define WT_ABANDON_UNSENT: their boot
+ * settle runs before play, their REMOVE answers only 0 or -1, and their
+ * engine and journal compile exactly as before. */
+#define WT_INVENTORY_KEPT 2
+
 /* PREPARE only computes checked images/locators/hashes in the candidate entry.
  * REMOVE/RECEIVE/RESTORE accept only the recorded exact pre/post inventory;
  * they save BOTH retail copies and verify CRC, counters and affected bytes.
@@ -69,12 +81,17 @@ void WtEngine_Close(WtEngine *);
 int WtEngine_Enroll(WtEngine *, uint32_t build);
 int WtEngine_Deposit(WtEngine *, unsigned slot);
 /* Zero selects the recovery request. Pending mutation bytes always take
- * precedence. Returned frame belongs to the engine and contains a credential. */
+ * precedence. Returned frame belongs to the engine and contains a credential.
+ * With WT_ABANDON_UNSENT, an escrow REMOVE finds kept is never submitted: the
+ * request is a Reconcile, and the escrow returns to IDLE, the save untouched,
+ * only when its answer shows the server holds nothing past the journal's
+ * cursor or counter. Any other answer blocks. */
 int WtEngine_Request(WtEngine *, unsigned operation);
 /* Finish what needs no network or randomness, before gameplay: complete an
  * interrupted deposit's removal (its Submit is sent on the next visit),
  * restore a rejected offer, and apply a collected delivery. 1 keeps a delivery or return in the journal
- * while storage is full. Everything else waits for the next visit. */
+ * while storage is full. WT_INVENTORY_KEPT (WT_ABANDON_UNSENT) leaves an
+ * escrow whose offer a stock game changed for the next visit. Everything else waits for the next visit. */
 int WtEngine_Settle(WtEngine *);
 /* The exact outstanding frame binds the raw reply. HTTP/TLS success alone
  * cannot advance the journal. A positive return retains a pending operation,

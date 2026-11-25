@@ -64,8 +64,10 @@ NDSTOOL			:= $(BLOCKSDS)/tools/ndstool/ndstool
 
 ARCH			:= -mthumb -mcpu=arm946e-s+nofp
 SPECS			:= $(BLOCKSDS)/sys/crts/ds_arm9.specs
+# WT_ABANDON_UNSENT: the engine may abandon an escrow the stock game changed
+# and the server never received (LUNE-902, client wonder_trade/engine.h).
 DEFINES			:= -D__NDS__ -D__BLOCKSDS__ -DARM9 \
-			   -DWT_GAME_FAMILY=WT_FAMILY_GEN4 \
+			   -DWT_GAME_FAMILY=WT_FAMILY_GEN4 -DWT_ABANDON_UNSENT \
 			   -DMBEDTLS_CONFIG_FILE='"wonder_trade/tls_config.h"' \
 			   -DTF_PSA_CRYPTO_CONFIG_FILE='"wonder_trade/crypto_config.h"'
 INCLUDES		:= -Isrc -I$(CLIENT)/include \

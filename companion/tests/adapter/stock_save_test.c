@@ -167,20 +167,15 @@ static void DepositOffered(unsigned char *general, unsigned char *boxes)
 
 static void TrainOffered(unsigned char *general, unsigned char *boxes)
 {
-    unsigned char canonical[136], *slot = PartySlot(general, OFFERED_SLOT);
-    unsigned sum = 0, i;
     (void)boxes;
-    assert(WtPokemon_Decode(slot, canonical) == 0);
-    FxPut32(canonical + 0x10, Fx32(canonical + 0x10) + 100); /* experience */
-    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
-    FxPut16(canonical + 6, sum & 65535);
-    assert(WtPokemon_Encode(canonical, slot) == 0);
+    FxTrain(PartySlot(general, OFFERED_SLOT));
 }
 
 /* An escrow whose removal never reached the card, after the player moved the
  * Pokémon: within the party it is removed from where it is now; deposited in
- * the PC or changed, the companion cannot know it is the one offered and
- * refuses, changing nothing (the save keeps it, the journal stays in escrow). */
+ * the PC or changed, it cannot be removed as offered: REMOVE answers KEPT,
+ * changing nothing (the save keeps it), and the engine abandons the escrow
+ * once the server proves it never received it (LUNE-902). */
 static void EscrowAfterPlay(void)
 {
     WtJournalEntry journal, entry;
@@ -208,18 +203,29 @@ static void EscrowAfterPlay(void)
     Load();
     memcpy(before, file.bytes, sizeof(before));
     entry = journal;
-    assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == WT_INVENTORY_KEPT);
     assert(memcmp(before, file.bytes, sizeof(before)) == 0 && FxStockCopies(&file, offered) == 1);
-    puts("PASS stock save in escrow: deposited in the PC, refused and the save untouched");
+    puts("PASS stock save in escrow: deposited in the PC, kept and the save untouched");
 
     Arrange(ESCROW, &journal);
     assert(FxStockPlay(&file, 1, 0, TrainOffered));
     Load();
     memcpy(before, file.bytes, sizeof(before));
     entry = journal;
-    assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == WT_INVENTORY_KEPT);
     assert(memcmp(before, file.bytes, sizeof(before)) == 0 && FxStockCopies(&file, offered) == 1);
-    puts("PASS stock save in escrow: trained in the stock game, refused and the save untouched");
+    puts("PASS stock save in escrow: trained in the stock game, kept and the save untouched");
+
+    /* Trained and then deposited in the PC: kept too. */
+    Arrange(ESCROW, &journal);
+    assert(FxStockPlay(&file, 1, 0, TrainOffered));
+    assert(FxStockPlay(&file, 1, 0, DepositOffered));
+    Load();
+    memcpy(before, file.bytes, sizeof(before));
+    entry = journal;
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == WT_INVENTORY_KEPT);
+    assert(memcmp(before, file.bytes, sizeof(before)) == 0 && FxStockCopies(&file, offered) == 1);
+    puts("PASS stock save in escrow: trained and deposited in the PC, kept and the save untouched");
 }
 
 /* Submitted, then the stock game: the removal is already proven. */
@@ -270,7 +276,11 @@ static void IdentityCollisions(void)
     entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
     assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry) == -1);
     assert(memcmp(before, file.bytes, sizeof(before)) == 0);
-    /* An escrow, removed or not: refused either way. */
+    /* An escrow, removed or not, never removes anything. Not removed: two
+     * Pokémon with the identity, refused. Removed: the save's only one is
+     * taken as the offer as play left it (wonder_trade/delivery.h), so
+     * REMOVE answers KEPT and the escrow, never sent, may be abandoned; the
+     * identity then stays in exactly one place. */
     for (cut = 1; cut <= 13; cut += 12) {
         Arrange(ESCROW, &journal);
         entry = journal;
@@ -281,8 +291,9 @@ static void IdentityCollisions(void)
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : WT_INVENTORY_KEPT));
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+        assert(FxStockCopies(&file, offered) == (cut <= 12 ? 2u : 1u));
     }
     puts("PASS stock save: another Pokemon with the same identity is never taken as the offer");
 }

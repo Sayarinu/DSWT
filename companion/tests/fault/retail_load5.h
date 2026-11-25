@@ -5,6 +5,10 @@
  * card, by the independent load model of adapter/gen5_stock.h. */
 #include "../adapter/gen5_stock.h"
 
+/* As retail_load.h: LUNE-902's changed offer, counted by identity. */
+static int changedOffer, savedOver;
+static unsigned char changedIdentity[136];
+
 /* As retail_load.h Ownership, over the party, the PC and the Battle Box. */
 static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     unsigned char digests[4][32], int played)
@@ -23,8 +27,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
             : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
-        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        for (i = 0; i < 4; ++i) {
+            if (i == 1 && changedOffer) counts[1] += (canonical[8] | canonical[9]) && FxSameIdentity(canonical, changedIdentity);
+            else if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        }
     }
+    played = played || savedOver;
     SelectedHash5(ram, inventory);
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:

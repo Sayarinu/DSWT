@@ -9,6 +9,9 @@ endif()
 # These test executables use assert() for their checks, including release builds.
 add_compile_options(-UNDEBUG)
 set(CMAKE_C_STANDARD 99)
+# The companion's engine and journal may abandon an unsent escrow (LUNE-902),
+# as companion/Makefile builds them.
+add_compile_definitions(WT_ABANDON_UNSENT)
 set(CLIENT "${CMAKE_CURRENT_SOURCE_DIR}/../../client")
 
 enable_testing()

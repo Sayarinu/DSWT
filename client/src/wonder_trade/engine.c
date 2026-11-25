@@ -150,8 +150,18 @@ static int Resume(WtEngine *engine)
     int result = -1;
     if (engine->blocked) goto done;
     if (next.phase == WT_JOURNAL_ESCROW) {
+#ifdef WT_ABANDON_UNSENT
+        /* The companion only (WT_INVENTORY_KEPT): the offer is still in the
+         * save, nothing was written, and the escrow waits for
+         * WtEngine_Request to abandon it. Any other failure blocks. */
+        int removed = engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, &next, next.source.slot);
+        if (removed == WT_INVENTORY_KEPT) { result = WT_INVENTORY_KEPT; goto done; }
+        if (removed != 0) { Block(engine); goto done; }
+        if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+#else
         if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+#endif
         next.phase = WT_JOURNAL_SUBMIT_READY;
         if (Commit(engine, &next) != 0) goto done;
     }
@@ -274,6 +284,26 @@ done:
     return result;
 }
 
+#ifdef WT_ABANDON_UNSENT
+/* An escrow REMOVE found kept: ask the server, with an uncounted Reconcile
+ * from the journal's cursor, whether it holds anything past it. Nothing is
+ * recorded; the Submit stays unsent. WtEngine_Reply abandons the escrow only
+ * on an empty page at this escrow's own counter (Abandon). */
+static int AskUnsent(WtEngine *engine)
+{
+    WtWireRequest request;
+    int result = -1;
+    if (engine->entry.phase != WT_JOURNAL_ESCROW || !engine->entry.requestLength
+        || engine->entry.operationCounter != engine->entry.nextCounter) return Block(engine);
+    if (RequestIdentity(engine, &request, WT_OP_RECONCILE) != 0) goto done;
+    request.body.reconcile.after = engine->entry.eventCursor; request.body.reconcile.limit = 8;
+    result = Encode(engine, &request, NULL);
+done:
+    Clear(&request, sizeof(request));
+    return result;
+}
+#endif
+
 int WtEngine_Request(WtEngine *engine, unsigned operation)
 {
     WtJournalEntry next;
@@ -281,6 +311,9 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     int result = -1, rejectionLookup;
     if (Refresh(engine) != 0 || engine->frameSize) return -1;
     result = Resume(engine);
+#ifdef WT_ABANDON_UNSENT
+    if (result == WT_INVENTORY_KEPT) return AskUnsent(engine);
+#endif
     if (result != 0) return result;
     if (engine->entry.phase == WT_JOURNAL_APPLIED && !engine->entry.requestLength && Acknowledge(engine) != 0) return -1;
     next = engine->entry;
@@ -334,6 +367,31 @@ static int ContextMatches(WtEngine *engine, const WtWireReply *reply, int finali
 /* Reconcile's answer when the page holds an event for a trade this journal
  * never made: only another copy of this save could have made it. */
 #define WT_RECONCILE_FOREIGN (-2)
+
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: the escrow AskUnsent asked about, abandoned when REMOVE still
+ * finds it kept and the server holds nothing past the journal's cursor, its
+ * next counter still this escrow's. The Submit's frame only ever leaves from
+ * SUBMIT_READY, which is committed after the removal is proven, so this copy
+ * of the save never sent it; another copy that did would have moved that
+ * counter. Nothing else is ever abandoned. The save is not touched: it keeps
+ * the Pokémon as the stock game left it, and the journal returns to IDLE with
+ * its counter and cursor as they were (journal.c allows exactly this). A cut
+ * while IDLE is recorded leaves the escrow, which the next visit asks about
+ * again. */
+static int Abandon(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
+{
+    if (next->phase != WT_JOURNAL_ESCROW || !next->requestLength || next->request[5] != WT_OP_SUBMIT
+        || next->operationCounter != next->nextCounter || reply->nextCounter != next->nextCounter
+        || reply->highwater != next->eventCursor || reply->body.page.count || reply->body.page.hasMore
+        || reply->body.page.end != next->eventCursor
+        || engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, next, next->source.slot) != WT_INVENTORY_KEPT) return -1;
+    Idle(next);
+    if (Commit(engine, next) != 0) return -1;
+    engine->synchronized = 1;
+    return 0;
+}
+#endif
 
 static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
 {
@@ -456,6 +514,13 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         memcpy(next.saveID, reply.body.saveID, 16); next.phase = WT_JOURNAL_IDLE; ClearRequest(&next);
         result = Commit(engine, &next); goto done;
     }
+#ifdef WT_ABANDON_UNSENT
+    /* Only AskUnsent sends a Reconcile while the journal is in ESCROW. */
+    if (operation == WT_OP_RECONCILE && next.phase == WT_JOURNAL_ESCROW) {
+        if (Abandon(engine, &reply, &next) != 0) goto blocked;
+        result = 0; goto done;
+    }
+#endif
     if (operation == WT_OP_RECONCILE) {
         result = Reconcile(engine, &reply, &next);
         foreign = result == WT_RECONCILE_FOREIGN;

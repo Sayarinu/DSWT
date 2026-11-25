@@ -442,6 +442,94 @@ static void RedirectThroughJournal(void)
     puts("PASS stock save during a return: a recovery into the PC commits APPLIED and is acknowledged");
 }
 
+/* LUNE-902: what the player does with the offer in the stock game. */
+static void TrainOffered(unsigned char *general, unsigned char *boxes)
+{
+    (void)boxes;
+    FxTrain(general + FX_PARTY + 8 + OFFERED_SLOT * FX_MON);
+}
+
+static void DepositOffered(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char *party = general + FX_PARTY + 8;
+    unsigned count = Fx32(general + FX_PARTY + 4), i;
+    memcpy(FxPcSlot(boxes, 7), party + OFFERED_SLOT * FX_MON, FX_BOX_MON);
+    for (i = OFFERED_SLOT; i + 1 < count; ++i) memcpy(party + i * FX_MON, party + (i + 1) * FX_MON, FX_MON);
+    FxEmpty(party + i * FX_MON, FX_MON);
+    FxPut32(general + FX_PARTY + 4, count - 1);
+}
+
+/* An offer cut once ESCROW is recorded, before its removal wrote anything,
+ * then changed in the stock game: the next visit abandons the escrow, which
+ * was never sent, and leaves the Pokémon as the stock game saved it. The same
+ * escrow restored after another copy of the save did send its Submit finds
+ * the offer on the server and is never abandoned. */
+static void UnsentOffer(void)
+{
+    static World escrow, played;
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    static const FxStockAction actions[] = { TrainOffered, DepositOffered };
+    static const char *const kActions[] = { "trained", "deposited in the PC" };
+    Server fresh;
+    WtEngine engine;
+    CpVisit visit;
+    unsigned action;
+    scenario = OFFER;
+    for (action = 0; action < 2; ++action) {
+        Setup();
+        cutAfter = WT_JOURNAL_ESCROW;
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, OFFERED_SLOT, 0, &transport, &visit) != 0);
+        WtEngine_Close(&engine);
+        saveCut = 0;
+        assert(visit.phase == WT_JOURNAL_ESCROW && server.state == WT_TRADE_NONE);
+        escrow = live; fresh = server;
+        /* The stock game: the offer is changed, and is the save's only copy. */
+        memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+        assert(FxStockPlay(&stock, 1, 0, actions[action]));
+        memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+        played = live;
+        assert(FxStockCopies(&stock, offered) == 1);
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(WtEngine_Settle(&engine) == WT_INVENTORY_KEPT && engine.entry.phase == WT_JOURNAL_ESCROW);
+        WtEngine_Close(&engine);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+        WtEngine_Close(&engine);
+        assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave);
+        assert(memcmp(live.bytes, played.bytes, sizeof(live.bytes)) == 0);
+        assert(!server.requests[WT_OP_SUBMIT] && server.state == WT_TRADE_NONE);
+        memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+        assert(FxStockCopies(&stock, offered) == 1);
+        /* The save trades again: the changed Pokémon is offered and leaves it. */
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, 0, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_QUEUED);
+        WtEngine_Close(&engine);
+        printf("PASS unsent offer %s in the stock game: abandoned, kept in the save, nothing sent\n", kActions[action]);
+
+        /* Another copy of the escrow finished the removal and sent the Submit. */
+        live = escrow; server = fresh; memset(replay, 0, sizeof(replay)); replayCount = 0;
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_QUEUED);
+        WtEngine_Close(&engine);
+        assert(server.state == WT_TRADE_QUEUED);
+        /* This copy, changed in the stock game, is never abandoned. */
+        live = played;
+        Bind(&liveGame, &liveImage, &liveFile);
+        memcpy(before, live.bytes, sizeof(before));
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0);
+        assert(engine.blocked && engine.entry.phase == WT_JOURNAL_ESCROW && !visit.canLeave);
+        WtEngine_Close(&engine);
+        assert(memcmp(live.banks, played.banks, sizeof(live.banks)) == 0);
+        assert(memcmp(live.bytes, before, sizeof(before)) == 0 && server.state == WT_TRADE_QUEUED);
+        printf("PASS unsent offer %s in the stock game: a server holding it is never abandoned\n", kActions[action]);
+    }
+}
+
 int main(void)
 {
     unsigned total[OUTCOMES] = { 0, 0, 0, 0 }, i;
@@ -465,6 +553,7 @@ int main(void)
     }
     assert(total[STUCK] == 0 && total[DUPLICATE] == 0 && total[LOST] == 0);
     RedirectThroughJournal();
+    UnsentOffer();
     printf("PASS stock save before resume: %u cases recovered, 0 stuck, 0 duplicates, 0 lost\n", total[RECOVERED]);
     return 0;
 }

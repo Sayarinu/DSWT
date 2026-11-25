@@ -217,10 +217,11 @@ static void Impostor(unsigned char *loaded)
 
 /* An escrow whose removal never reached the card, after the player moved the
  * Pokémon: within the party it is removed from where it is now; deposited in
- * the PC or the Battle Box, or changed, the companion refuses, changing nothing. */
+ * the PC or the Battle Box, or changed, it is kept (LUNE-902): REMOVE answers
+ * KEPT, changing nothing, and the engine abandons the unsent escrow. */
 static void EscrowAfterPlay(void)
 {
-    static const Action refused[3] = { DepositOffered, BattleBoxOffered, TrainOffered };
+    static const Action kept[3] = { DepositOffered, BattleBoxOffered, TrainOffered };
     static const char *const kinds[3] = { "deposited in the PC", "put in the Battle Box", "trained" };
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
@@ -241,14 +242,14 @@ static void EscrowAfterPlay(void)
            FX5_NAME);
     for (i = 0; i < 3; ++i) {
         Arrange(ESCROW, &journal);
-        StockPlay(1, refused[i]);
+        StockPlay(1, kept[i]);
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == WT_INVENTORY_KEPT);
         /* The save keeps it (a trained one no longer matches its image). */
         assert(memcmp(before, file.bytes, sizeof(before)) == 0 && Copies() == (i < 2 ? 1u : 0u));
-        printf("PASS %s stock save in escrow: %s, refused and the save untouched\n", FX5_NAME, kinds[i]);
+        printf("PASS %s stock save in escrow: %s, kept and the save untouched\n", FX5_NAME, kinds[i]);
     }
 }
 
@@ -349,7 +350,9 @@ static void IdentityCollisions(void)
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+        /* Not removed: two Pokémon with the identity, refused. Removed: the
+         * save's only one is taken as the offer as play left it (LUNE-902). */
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 8 ? -1 : WT_INVENTORY_KEPT));
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
     printf("PASS %s stock save: another Pokemon with the same identity is never taken as the offer\n", FX5_NAME);

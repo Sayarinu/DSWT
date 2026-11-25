@@ -95,6 +95,13 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
     CpSaveSha256_Finish(&hash, digest);
 }
 
+/* LUNE-902: scenarios where the stock game changes the offered Pokémon
+ * (digests[1]) count it by identity (changedOffer), as play leaves it; once
+ * the stock game saved over an escrow (savedOver), the save is neither of its
+ * inventories. */
+static int changedOffer, savedOver;
+static unsigned char changedIdentity[136];
+
 /* Journal images retained after a save transition are replay evidence, not
  * another owned Pokémon. ESCROW/RESTORING/APPLYING choose ownership by the
  * recorded before/after inventory hashes; published phases require one side.
@@ -116,8 +123,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
             : FxPcSlotConst(boxes, mon - count);
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
-        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        for (i = 0; i < 4; ++i) {
+            if (i == 1 && changedOffer) counts[1] += (canonical[8] | canonical[9]) && FxSameIdentity(canonical, changedIdentity);
+            else if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        }
     }
+    played = played || savedOver;
     SelectedHash(bytes, selected, inventory);
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
