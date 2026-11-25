@@ -17,19 +17,39 @@ enum WtInventoryStep {
     /* 0 when RESTORE can put the escrowed Pokémon back exactly (the save is
      * unchanged since the escrow), 1 when the save has changed since. */
     WT_INVENTORY_PREPARE_RESTORE
+#ifdef WT_ABANDON_UNSENT
+    /* LUNE-902, DS Companion builds only: 1 when the loaded save provably
+     * descends from the escrow's save before its removal (a game saved over
+     * it, and the removal, which moves the save counter WT_ABANDON_STEP ahead,
+     * never reached what it loaded) and REMOVE would not remove the offer
+     * from it as offered; 0 otherwise, -1 when it cannot tell. Writes nothing. */
+    , WT_INVENTORY_ABANDONABLE
+#endif
 };
 
-/* LUNE-902, DS Companion builds only (WT_ABANDON_UNSENT): REMOVE's answer, in
- * ESCROW, when a game that does not settle first (the unmodified game, played
- * between companion sessions) changed the offered Pokémon where it is:
- * trained it, moved it to the PC, or made it the party's last. The save holds
- * the only Pokémon with its identity, so the offer is still there but cannot
- * be removed as offered; nothing is written. The engine then abandons the
- * escrow, which was never sent, by fencing its counter with a counted Cancel
- * of a trade nobody holds, recorded in the journal first (WtEngine_Request). The games never define WT_ABANDON_UNSENT: their boot
- * settle runs before play, their REMOVE answers only 0 or -1, and their
- * engine and journal compile exactly as before. */
+/* LUNE-902, DS Companion builds only (WT_ABANDON_UNSENT): Settle's and
+ * Resume's answer for an escrow the companion abandons. Only the companion's
+ * own escrow qualifies (engine.c CompanionEscrow), when ABANDONABLE proves
+ * from the save's counters that its removal never reached the save a game
+ * loaded and saved over: the offer was still there, as play then left it.
+ * The engine fences the escrow's counter with a counted Cancel of a trade
+ * nobody holds, recorded in the journal first (WtEngine_Request), and returns
+ * to IDLE without touching the save. The games never define
+ * WT_ABANDON_UNSENT and compile exactly as before. */
 #define WT_INVENTORY_KEPT 2
+#ifdef WT_ABANDON_UNSENT
+/* How far the companion's removal moves the save counter ahead of the one the
+ * escrow recorded, and the most a game may have saved over the save before
+ * the removal for ABANDONABLE to accept it. Counters near the top of their
+ * range are never moved (WT_ABANDON_LIMIT), and such escrows never abandoned. */
+#define WT_ABANDON_STEP UINT32_C(0x100000)
+#define WT_ABANDON_SAVES UINT32_C(0x80000)
+#define WT_ABANDON_LIMIT (UINT32_C(0xFFFFFFFF) - 4 * WT_ABANDON_STEP)
+/* An ESCROW entry's true inventoryBefore (masked in the journal for the
+ * companion's own escrows): 1 for the companion's escrow, 0 for any other,
+ * -1 on bad arguments. For tests and tools. */
+int WtEngine_EscrowInventoryBefore(const WtJournalEntry *, WtJournalHash, unsigned char before[32]);
+#endif
 
 /* PREPARE only computes checked images/locators/hashes in the candidate entry.
  * REMOVE/RECEIVE/RESTORE accept only the recorded exact pre/post inventory;

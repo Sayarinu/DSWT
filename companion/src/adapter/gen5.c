@@ -1,5 +1,4 @@
 #include "adapter/gen5.h"
-#include "adapter/same_pokemon.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -250,33 +249,6 @@ static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_S
         found->box = inBattleBox ? 0 : box; found->slot = slot;
     }
     return matches;
-}
-
-/* Pokémon with the target's identity in the party, the PC and the Battle
- * Box, the last of them in `found` (canonical); -1 when a slot cannot be read
- * as the game would. */
-static int Identities(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE],
-                      unsigned char found[BOX_MON_SIZE])
-{
-    unsigned char canonical[BOX_MON_SIZE], *party = Party(image);
-    unsigned box, slot;
-    int members, i, kind, count = 0;
-    if ((members = Count(party, 1)) < 0) return -1;
-    for (i = 0; i < members; ++i) {
-        if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0) return -1;
-        if (memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
-            memcpy(found, canonical, BOX_MON_SIZE); ++count;
-        }
-    }
-    for (box = 0; box <= BOXES; ++box) for (slot = 0; slot < BOX_SLOTS; ++slot) {
-        if (box == BOXES && slot >= BATTLE_BOX_SLOTS) break;
-        kind = Stored(box == BOXES ? BattleBoxMon(image, slot) : BoxMon(image, box, slot), canonical);
-        if (kind < 0) return -1;
-        if (kind == 1 && memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
-            memcpy(found, canonical, BOX_MON_SIZE); ++count;
-        }
-    }
-    return count;
 }
 
 static int Hash(const CpSaveImage *image, unsigned char digest[32])
@@ -536,23 +508,63 @@ done:
     return result;
 }
 
-/* As adapter/platinum.c RemoveMoved, over the party, the PC and the Battle
- * Box: the only Pokémon with the offer's identity, changed by play, moved to
- * the PC or the Battle Box, or no longer one the party may offer, answers
- * WT_INVENTORY_KEPT and writes nothing (LUNE-902). */
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: the offer's removal is written with the save counter
+ * WT_ABANDON_STEP past the one the escrow recorded (the counter the game
+ * compares to pick its copies and adds one to at every save). A save holding
+ * the removal, and every save a game writes over it, so keeps a counter at
+ * least that far ahead; Abandonable takes only a save closer than
+ * WT_ABANDON_SAVES for one a game wrote over the escrow's save before the
+ * removal. A counter too near the top of its range is not moved, and its
+ * escrow is never abandoned. Copies already holding the removal are kept. */
+static int SaveRemoval(WtGame *game, const WtJournalEntry *entry, const unsigned char expected[32])
+{
+    CpSaveImage *image = game->image;
+    unsigned char actual[32];
+    uint32_t recorded = entry->globalCounter;
+    if (Hash(image, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
+    if (CpSaveImage_Verify(image, game->file, expected) == CP_SAVE_OK) return 0;
+    if (recorded <= WT_ABANDON_LIMIT && (uint32_t)(image->globalCounter - recorded) < WT_ABANDON_STEP)
+        image->globalCounter = recorded + WT_ABANDON_STEP - 1;
+    return CpSaveImage_CommitBoth(image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
+}
+
+/* WT_INVENTORY_ABANDONABLE: 1 when a game saved over the escrow's save before
+ * the removal reached what it loaded (neither recorded inventory, counters
+ * moved on but none behind, and the counter less than WT_ABANDON_SAVES past
+ * the recorded one: the removal would have put it WT_ABANDON_STEP past), and
+ * the offer is not in the party exactly as offered, where REMOVE takes it as
+ * before. The offer was in that save: wherever play has since put it, it is
+ * the player's, and the escrow, never sent, may go. Writes nothing. */
+static int Abandonable(WtGame *game, const WtJournalEntry *entry)
+{
+    CpSaveImage *image = game->image;
+    unsigned char digest[32], digests[1][32], *party = Party(image);
+    Found found;
+    int where;
+    if (!party || Hash(image, digest) != 0) return -1;
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0 || memcmp(digest, entry->inventoryAfter, 32) == 0
+        || !Moved(image, entry) || entry->globalCounter > WT_ABANDON_LIMIT
+        || (uint32_t)(image->globalCounter - entry->globalCounter) >= WT_ABANDON_SAVES) return 0;
+    Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
+    where = Locate(image, entry->outgoing, digests, 1, &found);
+    return where == 1 && found.party && Eligible(RulesOf(image), party, found.slot) ? 0 : 1;
+}
+#else
+#define SaveRemoval(game, entry, expected) SaveBoth(game, expected)
+#endif
+
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
-    unsigned char digest[1][32], other[BOX_MON_SIZE];
+    unsigned char digest[1][32];
     Found found;
     int where;
     Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
     where = Locate(image, entry->outgoing, digest, 1, &found);
-    if (where < 0)
-        return Identities(image, entry->outgoing, other) == 1 && CpSamePokemon(game->data, 1, entry->outgoing, other)
-            ? WT_INVENTORY_KEPT : -1;
+    if (where < 0) return -1;
     if (where == 1) {
-        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return WT_INVENTORY_KEPT;
+        if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return -1;
         entry->source.slot = (unsigned char)found.slot;
         memset(entry->original, 0, sizeof(entry->original));
         memcpy(entry->original, Slot(party, found.slot), MON_SIZE);
@@ -561,7 +573,7 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
         Remove(party, found.slot);
         if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) return -1;
         *restore = 0;
-        if (SaveBoth(game, entry->inventoryAfter) != 0) return -1;
+        if (SaveRemoval(game, entry, entry->inventoryAfter) != 0) return -1;
     } else {
         *restore = 0;
         if (Checkpoint(game) != 0) return -1;
@@ -589,8 +601,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
         Remove(party, slot);
-        /* No other Pokémon with its identity stays (LUNE-902), as the games' WtDelivery_Unique. */
-        if (Identities(image, entry->outgoing, canonical) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
+        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= PARTY_CAPACITY
@@ -620,7 +631,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         if (memcmp(digest, entry->inventoryBefore, 32) != 0) goto done;
     }
     restore = 0;
-    if (SaveBoth(game, digest) != 0) goto done;
+    if ((step == WT_INVENTORY_REMOVE ? SaveRemoval(game, entry, digest) : SaveBoth(game, digest)) != 0) goto done;
     Counters(image, entry); result = 0;
 done:
     Release(backup, restore);
@@ -642,6 +653,10 @@ int CpGen5_Inventory(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         return Receive(game, step, entry);
     case WT_INVENTORY_PREPARE_REMOVE: case WT_INVENTORY_REMOVE: case WT_INVENTORY_RESTORE:
         return PartyStep(game, step, entry, slot);
+#ifdef WT_ABANDON_UNSENT
+    case WT_INVENTORY_ABANDONABLE:
+        return Abandonable(game, entry);
+#endif
     default:
         return -1;
     }
@@ -672,7 +687,7 @@ int CpGen5_Eligible(const CpSaveImage *image, unsigned slot)
 
 int CpGen5_Unique(CpSaveImage *image, unsigned slot)
 {
-    unsigned char *party, canonical[BOX_MON_SIZE], other[BOX_MON_SIZE];
+    unsigned char *party, canonical[BOX_MON_SIZE];
     Backup *backup;
     int count, unique;
     if (!CpGen5_Is(image) || !image->loaded) return 1;
@@ -681,7 +696,7 @@ int CpGen5_Unique(CpSaveImage *image, unsigned slot)
         return 1;
     if (!(backup = Keep(image))) return 1;
     Remove(party, slot);
-    unique = Identities(image, canonical, other) == 0;
+    unique = Absent(image, canonical) == 0;
     Release(backup, 1);
     return unique;
 }

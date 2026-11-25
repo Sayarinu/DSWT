@@ -11,7 +11,7 @@ typedef struct Fixture {
     unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks, changed;
     unsigned reads, failRead, prepares;
     /* Nonzero: REMOVE answers this without removing (a stock game changed the offer). */
-    int removeAnswer, verifyAnswer;
+    int removeAnswer, verifyAnswer, abandonable;
     unsigned char id;
     int rotateSeed;
     WtEngine engine;
@@ -89,6 +89,8 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         return 0;
     case WT_INVENTORY_REMOVE:
         Mirrored(fixture, WT_JOURNAL_ESCROW);
+        /* The adapter always sees the escrow's true inventoryBefore. */
+        assert(entry->inventoryBefore[0] == 1 && entry->inventoryBefore[31] == 1);
         if (fixture->removeAnswer) return fixture->removeAnswer;
         fixture->removed = 1; entry->globalCounter = entry->generalCounter = entry->boxCounter = 2;
         return 0;
@@ -113,6 +115,12 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         return 0;
     case WT_INVENTORY_VERIFY_RECEIVED: return fixture->received && memcmp(fixture->delivered, entry->incoming, 136) == 0 ? 0 : -1;
     case WT_INVENTORY_PREPARE_RESTORE: return fixture->changed ? 1 : 0;
+#ifdef WT_ABANDON_UNSENT
+    case WT_INVENTORY_ABANDONABLE:
+        Mirrored(fixture, WT_JOURNAL_ESCROW);
+        assert(entry->inventoryBefore[0] == 1 && entry->inventoryBefore[31] == 1);
+        return fixture->abandonable;
+#endif
     case WT_INVENTORY_RESTORE:
         assert(!fixture->changed);
         RecordedInPlace(fixture);
@@ -890,13 +898,15 @@ static size_t FencePage(Fixture *fixture, unsigned char packet[902], const unsig
 
 #ifdef WT_ABANDON_UNSENT
 /* The escrow as a game or an older companion deposits it: a request ID
- * without the companion's identity-unique mark (engine.c UniqueMark). */
+ * without the companion's mark, and inventoryBefore stored as it is. */
 static void Unmark(Fixture *fixture)
 {
     WtJournalEntry entry;
     unsigned bank;
     assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0 && entry.phase == WT_JOURNAL_ESCROW);
+    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 1);
     entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
+    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 0);
     for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, fixture->banks[bank]) == 0);
     WtEngine_Close(&fixture->engine); Open(fixture);
 }
@@ -910,7 +920,10 @@ static void KeptEscrow(Fixture *fixture, int answer)
     fixture->failStep = WT_INVENTORY_REMOVE + 1;
     assert(WtEngine_Deposit(&fixture->engine, 0) != 0 && fixture->engine.blocked && !fixture->removed);
     Mirrored(fixture, WT_JOURNAL_ESCROW);
-    fixture->failStep = 0; fixture->removeAnswer = answer;
+    fixture->failStep = 0;
+    /* KEPT: the save's history proves the removal never landed (ABANDONABLE). */
+    fixture->abandonable = answer == WT_INVENTORY_KEPT;
+    fixture->removeAnswer = answer;
     WtEngine_Close(&fixture->engine); Open(fixture);
 }
 
@@ -947,8 +960,33 @@ static void UnsentEscrow(void)
         assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.removed);
     }
 #ifdef WT_ABANDON_UNSENT
-    /* Unmarked (deposited where another Pokémon may share its identity):
-     * KEPT is not believed, the escrow blocks as before and nothing is written. */
+    /* The companion's escrow stores inventoryBefore masked (the games' REMOVE
+     * cannot match it) and the true hash once the removal is proven. */
+    KeptEscrow(&fixture, WT_INVENTORY_KEPT);
+    {
+        WtJournalEntry stored;
+        unsigned char truth[32];
+        memset(truth, 1, 32);
+        assert(WtJournal_Decode(fixture.banks[0], Hash, &stored) == 0 && memcmp(stored.inventoryBefore, truth, 32) != 0);
+        assert(WtEngine_EscrowInventoryBefore(&stored, Hash, stored.inventoryBefore) == 1);
+        assert(memcmp(stored.inventoryBefore, truth, 32) == 0);
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        assert(WtEngine_Deposit(&fixture.engine, 0) == 0);
+        assert(WtJournal_Decode(fixture.banks[0], Hash, &stored) == 0 && stored.phase == WT_JOURNAL_SUBMIT_READY);
+        assert(memcmp(stored.inventoryBefore, truth, 32) == 0);
+    }
+    /* ABANDONABLE failing or saying no: removed as before, or blocked. */
+    KeptEscrow(&fixture, -1);
+    fixture.abandonable = -1;
+    memcpy(before, fixture.banks, sizeof(before));
+    assert(WtEngine_Settle(&fixture.engine) == -1 && fixture.engine.blocked);
+    assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.removed);
+    KeptEscrow(&fixture, 0);
+    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed);
+    Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
+
+    /* Unmarked (a game's or an older companion's escrow, whose removal may not
+     * have moved the counter): never abandoned; REMOVE decides as before. */
     KeptEscrow(&fixture, WT_INVENTORY_KEPT);
     Unmark(&fixture);
     memcpy(before, fixture.banks, sizeof(before));
@@ -973,7 +1011,7 @@ static void UnsentEscrow(void)
     assert(memcmp(fixture.engine.frame + 80, pending + 80, 16) != 0);
     memcpy(fence, fixture.engine.frame, 256); memcpy(operation, fixture.engine.entry.operation, 16);
     /* Once recorded, the escrow is abandoned whatever the save holds: REMOVE is never asked again. */
-    fixture.removeAnswer = -1;
+    fixture.removeAnswer = -1; fixture.abandonable = -1;
     WtEngine_Close(&fixture.engine); Open(&fixture);
     assert(WtEngine_Settle(&fixture.engine) == WT_INVENTORY_KEPT && !fixture.engine.blocked);
     /* A lost reply resends the same Cancel; a transient error retries it. */
@@ -991,7 +1029,7 @@ static void UnsentEscrow(void)
     size = FencePage(&fixture, packet, operation);
     assert(WtEngine_Reply(&fixture.engine, packet, size) == 0 && fixture.engine.synchronized);
     assert(fixture.engine.entry.eventCursor == 2 && !fixture.engine.rolledBack);
-    fixture.removeAnswer = 0;
+    fixture.removeAnswer = 0; fixture.abandonable = 0;
     assert(WtEngine_Deposit(&fixture.engine, 0) == 0 && fixture.removed);
     assert(WtEngine_Request(&fixture.engine, 0) == 0 && fixture.engine.frame[5] == WT_OP_SUBMIT);
     assert(fixture.engine.frame[72] == 2);

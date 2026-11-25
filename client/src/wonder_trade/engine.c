@@ -71,42 +71,72 @@ static int Random(WtEngine *engine, unsigned char *bytes, size_t size)
 }
 
 #ifdef WT_ABANDON_UNSENT
-/* LUNE-902: the DS Companion deposits only an offer whose identity is unique
- * in the save (its adapters' PREPARE_REMOVE). Its Submit's request ID says so:
- * 4 random bytes, then 12 bytes of SHA-256 over them, the save, the counter,
- * the save before the deposit and the offer. Only an escrow so marked may be
- * abandoned: one deposited by a game or an older companion, under a rule
- * that compared whole images, may share its identity with another Pokémon
- * the save still holds, and stays blocked. The mark is committed with the
- * escrow itself; the games accept any nonzero request ID. */
-static const char kUniqueDeposit[] = "DSWT LUNE-902 identity-unique deposit";
+/* LUNE-902: which escrows the DS Companion may abandon, proved by the save's
+ * history rather than by the Pokémon it holds (wonder_trade/engine.h
+ * WT_INVENTORY_ABANDONABLE). Only a companion escrow qualifies, and its
+ * removal must be one that moved the save counter far ahead, so it must be
+ * one only the companion can write:
+ * - its Submit's request ID is 4 random bytes, then 12 bytes of SHA-256 over
+ *   them, the save, the counter, the save before the deposit and the offer
+ *   (CompanionMark): an escrow without it (a game's, an older companion's) is
+ *   never abandoned;
+ * - its inventoryBefore is stored masked with SHA-256 of a label and the
+ *   request ID (BeforeMask). The games' REMOVE (and an older companion's)
+ *   finds the save matching neither recorded inventory and fails, changing
+ *   nothing, unless the companion's own removal already landed; only this
+ *   engine unmasks it, and it records the true hash once the removal is
+ *   proven (SUBMIT_READY). The games accept any nonzero request ID and any
+ *   nonzero inventory hash; nothing else is stored. */
+static const char kCompanionDeposit[] = "DSWT LUNE-902 companion deposit v2";
+static const char kBeforeMask[] = "DSWT LUNE-902 masked inventoryBefore";
 
-static int UniqueMark(WtEngine *engine, const WtJournalEntry *entry, const unsigned char id[16], unsigned char mark[32])
+static int CompanionMark(WtJournalHash hash, const WtJournalEntry *entry, const unsigned char before[32],
+                         const unsigned char id[16], unsigned char mark[32])
 {
-    unsigned char bytes[sizeof(kUniqueDeposit) + 16 + 4 + 8 + 32 + 136], *at = bytes;
+    unsigned char bytes[sizeof(kCompanionDeposit) + 16 + 4 + 8 + 32 + 136], *at = bytes;
     uint64_t counter = entry->operationCounter;
     unsigned i;
     int result;
-    memcpy(at, kUniqueDeposit, sizeof(kUniqueDeposit)); at += sizeof(kUniqueDeposit);
+    memcpy(at, kCompanionDeposit, sizeof(kCompanionDeposit)); at += sizeof(kCompanionDeposit);
     memcpy(at, entry->saveID, 16); at += 16;
     memcpy(at, id, 4); at += 4;
     for (i = 0; i < 8; ++i) *at++ = (unsigned char)(counter >> (8 * i));
-    memcpy(at, entry->inventoryBefore, 32); at += 32;
+    memcpy(at, before, 32); at += 32;
     memcpy(at, entry->outgoing, 136);
-    result = engine->journal.io.hash(bytes, sizeof(bytes), mark);
+    result = hash(bytes, sizeof(bytes), mark);
     Clear(bytes, sizeof(bytes));
     return result;
 }
 
-/* Nonzero when the escrow's Submit carries the companion's mark. */
-static int MarkedUnique(WtEngine *engine, const WtJournalEntry *entry)
+static int BeforeMask(WtJournalHash hash, const unsigned char id[16], unsigned char mask[32])
 {
-    unsigned char mark[32];
-    int marked = entry->requestLength && entry->request[5] == WT_OP_SUBMIT
-        && memcmp(entry->request + 8, entry->operation, 16) == 0
-        && UniqueMark(engine, entry, entry->operation, mark) == 0 && memcmp(mark, entry->operation + 4, 12) == 0;
-    Clear(mark, sizeof(mark));
-    return marked;
+    unsigned char bytes[sizeof(kBeforeMask) + 16];
+    memcpy(bytes, kBeforeMask, sizeof(kBeforeMask)); memcpy(bytes + sizeof(kBeforeMask), id, 16);
+    return hash(bytes, sizeof(bytes), mask);
+}
+
+/* 1 when an ESCROW entry is the companion's, with `before` its true
+ * inventoryBefore; 0 for any other escrow (`before` is then the stored one). */
+static int CompanionEscrow(WtJournalHash hash, const WtJournalEntry *entry, unsigned char before[32])
+{
+    unsigned char mask[32], mark[32];
+    unsigned i;
+    int companion = 0;
+    memcpy(before, entry->inventoryBefore, 32);
+    if (entry->phase == WT_JOURNAL_ESCROW && entry->requestLength && entry->request[5] == WT_OP_SUBMIT
+        && memcmp(entry->request + 8, entry->operation, 16) == 0 && BeforeMask(hash, entry->operation, mask) == 0) {
+        for (i = 0; i < 32; ++i) mask[i] ^= entry->inventoryBefore[i];
+        companion = CompanionMark(hash, entry, mask, entry->operation, mark) == 0
+            && memcmp(mark, entry->operation + 4, 12) == 0;
+        if (companion) memcpy(before, mask, 32);
+    }
+    Clear(mask, sizeof(mask)); Clear(mark, sizeof(mark));
+    return companion;
+}
+
+int WtEngine_EscrowInventoryBefore(const WtJournalEntry *entry, WtJournalHash hash, unsigned char before[32])
+{
+    return entry && hash && before ? CompanionEscrow(hash, entry, before) : -1;
 }
 #endif
 
@@ -197,18 +227,19 @@ static int Resume(WtEngine *engine)
     if (engine->blocked) goto done;
     if (next.phase == WT_JOURNAL_ESCROW) {
 #ifdef WT_ABANDON_UNSENT
-        /* The companion only (WT_INVENTORY_KEPT): the offer is still in the
-         * save, nothing was written, and the escrow waits for
-         * WtEngine_Request to fence its counter and abandon it. An escrow
-         * whose fence is recorded is abandoned whatever the save holds now.
-         * Any other failure blocks. */
-        int removed = next.request[5] == WT_OP_CANCEL ? WT_INVENTORY_KEPT
-            : engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, &next, next.source.slot);
-        /* Only an escrow marked unique at its deposit (UniqueMark) is kept. */
-        if (removed == WT_INVENTORY_KEPT && next.request[5] == WT_OP_SUBMIT && !MarkedUnique(engine, &next)) removed = -1;
-        if (removed == WT_INVENTORY_KEPT) { result = WT_INVENTORY_KEPT; goto done; }
-        if (removed != 0) { Block(engine); goto done; }
-        if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+        /* The companion only. An escrow whose fence is recorded (Fence) is
+         * being abandoned whatever the save holds now. A companion escrow
+         * the save's history proves was never removed (ABANDONABLE) waits
+         * for WtEngine_Request to fence its counter and abandon it. Every
+         * other escrow is removed exactly as the games remove it. */
+        if (next.request[5] == WT_OP_CANCEL) { result = WT_INVENTORY_KEPT; goto done; }
+        if (CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore)) {
+            int abandonable = engine->io.inventory(engine->io.arg, WT_INVENTORY_ABANDONABLE, &next, next.source.slot);
+            if (abandonable == 1) { result = WT_INVENTORY_KEPT; goto done; }
+            if (abandonable != 0) { Block(engine); goto done; }
+        }
+        if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
+            || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
 #else
         if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
@@ -325,10 +356,16 @@ int WtEngine_Deposit(WtEngine *engine, unsigned slot)
     memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
 #ifdef WT_ABANDON_UNSENT
     {
-        unsigned char mark[32];
-        if (UniqueMark(engine, &next, request.requestID, mark) != 0) { Clear(mark, sizeof(mark)); Block(engine); goto done; }
-        memcpy(request.requestID + 4, mark, 12); memcpy(next.operation, request.requestID, 16);
-        Clear(mark, sizeof(mark));
+        unsigned char mark[32], mask[32];
+        unsigned i;
+        int marked = CompanionMark(engine->journal.io.hash, &next, next.inventoryBefore, request.requestID, mark) == 0;
+        if (marked) {
+            memcpy(request.requestID + 4, mark, 12); memcpy(next.operation, request.requestID, 16);
+            marked = BeforeMask(engine->journal.io.hash, next.operation, mask) == 0;
+            for (i = 0; i < 32; ++i) next.inventoryBefore[i] ^= mask[i];
+        }
+        Clear(mark, sizeof(mark)); Clear(mask, sizeof(mask));
+        if (!marked) { Block(engine); goto done; }
     }
 #endif
     request.counter = next.operationCounter;

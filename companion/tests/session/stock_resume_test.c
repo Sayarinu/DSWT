@@ -492,6 +492,26 @@ static void UnsentOffer(void)
         saveCut = 0;
         assert(visit.phase == WT_JOURNAL_ESCROW && server.state == WT_TRADE_NONE);
         escrow = live; fresh = server;
+        {
+            /* The games' REMOVE (the adapter's, without the companion's
+             * unmasking) cannot match the masked inventoryBefore: it fails and
+             * writes nothing, so only the companion removes this offer, moving
+             * the counter. With the true hash it would remove it. */
+            WtJournalEntry stored;
+            static unsigned char untouched[CP_SAVE_FILE_SIZE];
+            uint32_t recorded;
+            assert(WtJournal_Decode(live.banks[0], Hash, &stored) == 0 && stored.phase == WT_JOURNAL_ESCROW);
+            Bind(&liveGame, &liveImage, &liveFile);
+            memcpy(untouched, live.bytes, sizeof(untouched));
+            assert(WtGame_Inventory(&liveGame, WT_INVENTORY_REMOVE, &stored, stored.source.slot) == -1);
+            assert(memcmp(untouched, live.bytes, sizeof(untouched)) == 0);
+            assert(WtEngine_EscrowInventoryBefore(&stored, Hash, stored.inventoryBefore) == 1);
+            recorded = stored.globalCounter;
+            Bind(&liveGame, &liveImage, &liveFile);
+            assert(WtGame_Inventory(&liveGame, WT_INVENTORY_REMOVE, &stored, stored.source.slot) == 0);
+            assert(liveImage.globalCounter - recorded >= WT_ABANDON_STEP);
+            live = escrow;
+        }
         /* The stock game: the offer is changed, and is the save's only copy. */
         memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
         assert(FxStockPlay(&stock, 1, 0, actions[action]));
@@ -593,7 +613,10 @@ static void LegacyTwin(void)
     assert(visit.phase == WT_JOURNAL_ESCROW);
     memcpy(marked.banks, live.banks, sizeof(marked.banks));
     assert(WtJournal_Decode(live.banks[0], Hash, &entry) == 0);
+    /* As a game or an older companion records it: inventoryBefore unmasked, no mark. */
+    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 1);
     entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
+    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 0);
     for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, live.banks[bank]) == 0);
     memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
     assert(FxStockPlay(&stock, 1, 0, TwinOnly));

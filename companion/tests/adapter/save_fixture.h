@@ -208,12 +208,6 @@ static inline void FxTrain(unsigned char *stored)
     assert(WtPokemon_Encode(canonical, stored) == 0);
 }
 
-/* Nonzero when two canonical Pokémon share the identity. */
-static inline int FxSameIdentity(const unsigned char *a, const unsigned char *b)
-{
-    return memcmp(a, b, 4) == 0 && memcmp(a + 0x0C, b + 0x0C, 4) == 0;
-}
-
 static inline unsigned char *FxGeneral(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_GENERAL; }
 static inline unsigned char *FxBoxes(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_BOXES; }
 

@@ -217,11 +217,10 @@ static void Impostor(unsigned char *loaded)
 
 /* An escrow whose removal never reached the card, after the player moved the
  * Pokémon: within the party it is removed from where it is now; deposited in
- * the PC or the Battle Box, or changed, it is kept (LUNE-902): REMOVE answers
- * KEPT, changing nothing, and the engine abandons the unsent escrow. */
+ * the PC or the Battle Box, or changed, the companion refuses, changing nothing. */
 static void EscrowAfterPlay(void)
 {
-    static const Action kept[3] = { DepositOffered, BattleBoxOffered, TrainOffered };
+    static const Action refused[3] = { DepositOffered, BattleBoxOffered, TrainOffered };
     static const char *const kinds[3] = { "deposited in the PC", "put in the Battle Box", "trained" };
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
@@ -242,14 +241,14 @@ static void EscrowAfterPlay(void)
            FX5_NAME);
     for (i = 0; i < 3; ++i) {
         Arrange(ESCROW, &journal);
-        StockPlay(1, kept[i]);
+        StockPlay(1, refused[i]);
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == WT_INVENTORY_KEPT);
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
         /* The save keeps it (a trained one no longer matches its image). */
         assert(memcmp(before, file.bytes, sizeof(before)) == 0 && Copies() == (i < 2 ? 1u : 0u));
-        printf("PASS %s stock save in escrow: %s, kept and the save untouched\n", FX5_NAME, kinds[i]);
+        printf("PASS %s stock save in escrow: %s, refused and the save untouched\n", FX5_NAME, kinds[i]);
     }
 }
 
@@ -350,21 +349,98 @@ static void IdentityCollisions(void)
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        /* Not removed: two Pokémon with the identity. Removed: the only one
-         * is another species, which the offer cannot evolve into, so the
-         * offer is in the journal alone. Refused either way (LUNE-902). */
         assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
-    /* A deposit needs the offer's identity to be unique, not only its image. */
-    Setup(4);
-    StockPlay(1, Impostor);
-    Load();
-    memset(&entry, 0, sizeof(entry));
-    entry.source.slot = OFFERED_SLOT;
-    assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry) == -1);
-    assert(!CpGen5_Unique(&image, OFFERED_SLOT));
     printf("PASS %s stock save: another Pokemon with the same identity is never taken as the offer\n", FX5_NAME);
+}
+
+/* LUNE-902: abandoning an escrow is proved by the save's history alone. */
+static void ReleaseOffered(unsigned char *loaded)
+{
+    unsigned char *party = loaded + Rl5Offset(FX5_PARTY);
+    unsigned count = Fx5R32(party + 4), i;
+    for (i = OFFERED_SLOT; i + 1 < count; ++i) memcpy(PartySlot(loaded, i), PartySlot(loaded, i + 1), FX5_MON);
+    Fx5Empty(PartySlot(loaded, count - 1), FX5_MON);
+    Fx5W32(party + 4, count - 1);
+}
+
+/* A twin from the stock game (an N's Pokémon, say): the offer's identity and
+ * every field play leaves alone, differing in experience. */
+static void AddTwin(unsigned char *loaded)
+{
+    unsigned char *slot = loaded + Rl5Offset(4) + 9 * FX5_BOX_MON;
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    memcpy(canonical, offered, 136);
+    Fx5W32(canonical + 0x10, Fx5R32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += Fx5R16(canonical + i);
+    Fx5W16(canonical + 6, sum & 0xFFFF);
+    assert(WtPokemon_Encode(canonical, slot) == 0);
+}
+
+static void TwinAndTrain(unsigned char *loaded)
+{
+    AddTwin(loaded);
+    TrainOffered(loaded);
+}
+
+/* As stock_save_test.c History, on this generation's save: the removal cut
+ * at each write and after the last, the stock game played and saved over it.
+ * ABANDONABLE writes nothing and answers 1 only when what the stock game
+ * loaded still held the offer exactly as offered (always, when play then
+ * moved it, unless play left exactly the recorded removal); a twin after the removal is refused by REMOVE too, untouched. */
+static void History(void)
+{
+    static const Action actions[] = { NULL, TrainOffered, DepositOffered, BattleBoxOffered, ReleaseOffered, AddTwin,
+                                      TwinAndTrain };
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
+    int answer;
+    Arrange(ESCROW, &journal);
+    entry = journal; writes = file.writes;
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+    writes = file.writes - writes;
+    assert(image.globalCounter - journal.globalCounter >= WT_ABANDON_STEP);
+    for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves)
+        for (action = 0; action < sizeof(actions) / sizeof(*actions); ++action) {
+            Arrange(ESCROW, &journal);
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= writes ? -1 : 0));
+            file.failWrite = 0;
+            held = Copies();
+            assert(held <= 1);
+            StockPlay(saves, actions[action]);
+            Load();
+            memcpy(before, file.bytes, sizeof(before));
+            entry = journal;
+            answer = Step(WT_INVENTORY_ABANDONABLE, &entry);
+            assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+            assert(answer == 0 || answer == 1);
+            if (answer) assert(held);
+            if (held && action && answer != 1) {
+                /* Released in the party, the save is exactly the recorded removal:
+                 * REMOVE takes it as removed, as before. */
+                unsigned char digest[32];
+                assert(action == 4 && CpSaveImage_Hash(&image, digest) == CP_SAVE_OK);
+                assert(memcmp(digest, journal.inventoryAfter, 32) == 0);
+            }
+            abandoned += (unsigned)answer;
+            if (!held && (action == 5 || action == 6)) {
+                Load();
+                entry = journal;
+                assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+                assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+                ++refused;
+            }
+            ++cases;
+        }
+    assert(abandoned > 0 && refused > 0);
+    printf("PASS %s stock save after a cut removal: %u cuts x 2 stock plays x 7 plays, abandonable %u times, "
+           "only from a save that held the offer; %u twins after the removal refused\n", FX5_NAME, writes + 1,
+           abandoned, refused);
 }
 
 int main(void)
@@ -376,6 +452,7 @@ int main(void)
     SubmitReadyAfterPlay();
     ReturnInBattleBox();
     IdentityCollisions();
+    History();
     printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", FX5_NAME, cases);
     return 0;
 }

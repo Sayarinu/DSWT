@@ -44,14 +44,14 @@
  * is, one not there yet is received into this save. A Pokémon that shares
  * the identity (personality and trainer ID) without being that image (another
  * Pokémon, or this one trained in the stock game) is never proof either way:
- * the step fails closed and changes nothing. The one exception is an offer
- * not yet removed, whose escrow was never sent: when the save holds exactly
- * one Pokémon with its identity, changed by play, deposited in the PC or no
- * longer one the party may offer, REMOVE answers WT_INVENTORY_KEPT, writing
- * nothing, and the engine abandons the escrow by fencing its counter on the
- * server (wonder_trade/engine.h). The found Pokémon must also match the offer
- * where play never reaches (adapter/same_pokemon.h), and a deposit requires
- * the offer's identity to be unique.
+ * the step fails closed and changes nothing.
+ *
+ * LUNE-902: an offer's removal is written with the save counter moved
+ * WT_ABANDON_STEP past the one its escrow recorded, and
+ * WT_INVENTORY_ABANDONABLE answers 1 only for a save a game wrote over the
+ * escrow's save before that removal reached it (wonder_trade/engine.h): then
+ * the offer was in what it loaded, and the engine may abandon the escrow. The
+ * Pokémon the save holds is never proof of that.
  *
  * Known limit: a delivery the stock game loaded already applied and the
  * player then released or traded away looks exactly like one never applied,

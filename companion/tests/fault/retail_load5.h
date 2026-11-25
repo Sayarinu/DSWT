@@ -5,9 +5,9 @@
  * card, by the independent load model of adapter/gen5_stock.h. */
 #include "../adapter/gen5_stock.h"
 
-/* As retail_load.h: LUNE-902's changed offer, counted by identity. */
+/* As retail_load.h: LUNE-902's changed offer, as offered or trained. */
 static int changedOffer, savedOver;
-static unsigned char changedIdentity[136];
+static unsigned char trainedDigest[32];
 
 /* As retail_load.h Ownership, over the party, the PC and the Battle Box. */
 static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
@@ -28,8 +28,8 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
         for (i = 0; i < 4; ++i) {
-            if (i == 1 && changedOffer) counts[1] += (canonical[8] | canonical[9]) && FxSameIdentity(canonical, changedIdentity);
-            else if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            else if (i == 1 && changedOffer && memcmp(digest, trainedDigest, 32) == 0) ++counts[1];
         }
     }
     played = played || savedOver;
@@ -37,8 +37,11 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
         if (played) { escrow = counts[1] == 0; break; }
-        assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
-            || memcmp(inventory, entry->inventoryAfter, 32) == 0);
+        {
+            unsigned char before[32];
+            assert(WtEngine_EscrowInventoryBefore(entry, Hash, before) >= 0);
+            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, entry->inventoryAfter, 32) == 0);
+        }
         escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
         break;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED:

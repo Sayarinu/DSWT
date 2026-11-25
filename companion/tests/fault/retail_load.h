@@ -96,11 +96,12 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
 }
 
 /* LUNE-902: scenarios where the stock game changes the offered Pokémon
- * (digests[1]) count it by identity (changedOffer), as play leaves it; once
- * the stock game saved over an escrow (savedOver), the save is neither of its
- * inventories. */
+ * (digests[1]) count it as offered or as trained (trainedDigest), never a
+ * twin that only shares its identity; once the stock game saved over an
+ * escrow (savedOver), the save is neither of its inventories. The journal
+ * keeps the companion's escrow inventoryBefore masked (engine.c). */
 static int changedOffer, savedOver;
-static unsigned char changedIdentity[136];
+static unsigned char trainedDigest[32];
 
 /* Journal images retained after a save transition are replay evidence, not
  * another owned Pokémon. ESCROW/RESTORING/APPLYING choose ownership by the
@@ -124,8 +125,8 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
         for (i = 0; i < 4; ++i) {
-            if (i == 1 && changedOffer) counts[1] += (canonical[8] | canonical[9]) && FxSameIdentity(canonical, changedIdentity);
-            else if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            else if (i == 1 && changedOffer && memcmp(digest, trainedDigest, 32) == 0) ++counts[1];
         }
     }
     played = played || savedOver;
@@ -133,8 +134,11 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
         if (played) { escrow = counts[1] == 0; break; }
-        assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
-            || memcmp(inventory, entry->inventoryAfter, 32) == 0);
+        {
+            unsigned char before[32];
+            assert(WtEngine_EscrowInventoryBefore(entry, Hash, before) >= 0);
+            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, entry->inventoryAfter, 32) == 0);
+        }
         escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
         break;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED:
