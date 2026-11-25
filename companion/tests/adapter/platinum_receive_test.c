@@ -900,7 +900,7 @@ static int MatchPost(void *arg, const unsigned char *request, size_t size,
     return 0;
 }
 
-static const CpTransport matchTransport = { NULL, MatchPost, NULL, NULL };
+static const CpTransport matchTransport = { NULL, MatchPost, NULL, NULL, NULL };
 
 /* The journal banks; a commit of `refusePhase` fails once (the power is cut
  * before the journal records it), and once `cutAfter` is committed the next

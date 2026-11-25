@@ -7,9 +7,10 @@
  * pool, a read-only open of a save on the SD card, Wi-Fi with the console's
  * saved connections, and POST /wt/v1 STATUS requests for a random, never
  * enrolled save (the server answers UNAUTHENTICATED and writes nothing).
- * The real UI replaces it (LUNE-872).
+ * The companion opens it instead of the screens whenever
+ * <drive>/dswt-companion/diag.txt exists (main.c).
  *
- * Optional settings, one key=value per line, in <drive>/dswt-companion/diag.txt:
+ * Optional settings, one key=value per line, in that diag.txt:
  *   sav=<path>        the save to open read-only (default: the first .sav
  *                     file in <drive>/dswt-companion/)
  *   attempts=<n>      STATUS requests to send, 1 to 100 (default 1)

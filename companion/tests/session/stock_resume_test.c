@@ -174,7 +174,7 @@ static int Post(void *arg, const unsigned char *request, size_t size,
     return 0;
 }
 
-static const CpTransport transport = { NULL, Post, NULL, NULL };
+static const CpTransport transport = { NULL, Post, NULL, NULL, NULL };
 
 /* --- Two worlds: the interrupted visit, and one cut's recovery. --- */
 

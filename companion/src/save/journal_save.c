@@ -36,7 +36,7 @@ CpSaveJournalDetection CpSaveJournal_Detect(const CpFile *file)
 {
     WtJournal journal;
     CpPlatformFile platform = { (void *)file, Read, NULL, NULL, Size, NULL };
-    CpJournalStore store = { &platform, NULL, 0 };
+    CpJournalStore store = { &platform, NULL, 0, CpSaveJournal_Hash };
     WtJournalIO io = { &store, CpJournal_ReadBank, NoWrite, CpSaveJournal_Hash };
     int result;
     if (!file || !file->readAt || !file->size) return CP_SAVE_JOURNAL_REFUSE;
@@ -46,7 +46,8 @@ CpSaveJournalDetection CpSaveJournal_Detect(const CpFile *file)
         WtJournal_Close(&journal);
         return CP_SAVE_JOURNAL_HAS_JOURNAL;
     }
-    /* Initialize(NULL) checks WtJournal_Unused without writing: like the game,
+    /* A cut first enrollment write reads as blank (CpJournal_ReadBank).
+     * Initialize(NULL) checks WtJournal_Unused without writing: like the game,
      * a cut first write can be erased and initialized with fresh entropy. */
     return WtJournal_Initialize(&journal, io, NULL) == WT_JOURNAL_NEEDS_SEED
         ? CP_SAVE_JOURNAL_UNUSED : CP_SAVE_JOURNAL_REFUSE;

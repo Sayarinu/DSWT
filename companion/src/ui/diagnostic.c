@@ -16,6 +16,7 @@
 
 #include "platform/entropy_pool.h"
 #include "platform/journal_io.h"
+#include "platform/nds/app_platform.h"
 #include "platform/nds/entropy_nds.h"
 #include "platform/nds/net.h"
 #include "platform/nds/sd_file.h"
@@ -355,7 +356,7 @@ int CpDiagnostic_Run(CompanionScreens *screens)
 
     CpNdsEntropy_Start();
     CpNdsEntropy_Jitter();
-    fat = fatInitDefault();
+    fat = CpNdsCard_Mount();
     CpNdsEntropy_Jitter();
     if (fat) snprintf(sBase, sizeof(sBase), "%sdswt-companion/", fatGetDefaultDrive());
     Log("\n=== DSWT Companion diagnostic, %s mode, drive %s\n", isDSiMode() ? "DSi" : "DS", fat ? fatGetDefaultDrive() : "none");
