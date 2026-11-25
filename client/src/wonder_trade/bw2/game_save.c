@@ -320,6 +320,12 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     /* Retail trades register the Pokémon received as caught, with its
      * language (pokemontrade_save.c addPkmToDex), before the evolution check. */
     addPkmToDex(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    /* Retail pokemontrade_save.c registers both Shaymin forms, Sky first. */
+    if (PokeParty_GetParam(pkm, PKM_PARAM_SPECIES, NULL) == SPECIES_SHAYMIN
+        && PokeParty_GetParam(pkm, PKM_PARAM_FORM, NULL) == 1) {
+        PokeParty_ChangeForme(pkm, 0);
+        addPkmToDex(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    }
     memcpy(&partner, entry->original, sizeof(partner));
     target = CheckEvolveSpecies(Party(image, data), pkm, EVO_CHECK_TRADE, (u32)&partner, 0, &method, game->heapId);
     mbedtls_platform_zeroize(&partner, sizeof(partner));

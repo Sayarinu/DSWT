@@ -333,6 +333,12 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     /* Retail trades register the Pokémon received as caught before the
      * evolution check (pokemontrade_save.c, fld_trade.c). */
     ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    /* Retail pokemontrade_save.c registers both Shaymin forms, Sky first. */
+    if (POKE_TOOL_GetPartyValue(pkm, WT_PARAM_SPECIES, 0) == 492
+        && POKE_TOOL_GetPartyValue(pkm, WT_PARAM_FORM, 0) == 1) {
+        POKE_TOOL_ChangeForm(pkm, 0);
+        ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+    }
     memcpy(&partner, entry->original, sizeof(partner));
     target = SHINKA_CHECK_CheckEvolution(Party(image, data), pkm, WT_EVO_CHECK_TRADE, (u32)&partner, 0, &method, game->heapId);
     mbedtls_platform_zeroize(&partner, sizeof(partner));
