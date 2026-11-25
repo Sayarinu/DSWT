@@ -73,6 +73,29 @@ static void RetailLoad(const unsigned char *bytes, unsigned selected[2])
 }
 #endif
 
+/* LUNE-913: the places a Gen 4 save holds a Pokémon outside the party and
+ * PC that play can fill (adapter/platinum.c Held): the box part (or party
+ * image) offset in the general block and the u16 flag (0: none). */
+typedef struct FxHeldPlace { unsigned mon, flag, size; } FxHeldPlace;
+static const FxHeldPlace kFxHeld[] = {
+    { FX_DAYCARE, 0, FX_BOX_MON }, { FX_DAYCARE + FX_DAYCARE_SLOT, 0, FX_BOX_MON }, { FX_GTS, FX_GTS_FLAG, FX_MON },
+#if FX_GAME == 2
+    { FX_WALKER_MON, 0, FX_BOX_MON },
+#endif
+};
+enum { FX_HELD_PLACES = sizeof(kFxHeld) / sizeof(kFxHeld[0]) };
+
+static int FxHeldOccupied(const unsigned char *general, unsigned place)
+{
+    static const unsigned char zeros[FX_BOX_MON];
+    unsigned char canonical[136];
+    const unsigned char *slot = general + kFxHeld[place].mon;
+    if (kFxHeld[place].flag) return (general[kFxHeld[place].flag] | general[kFxHeld[place].flag + 1]) != 0;
+    if (memcmp(slot, zeros, sizeof(zeros)) == 0) return 0;
+    assert(WtPokemon_Decode(slot, canonical) == 0);
+    return (canonical[8] | canonical[9]) != 0;
+}
+
 static void SelectedHash(const unsigned char *bytes, const unsigned selected[2], unsigned char digest[32])
 {
     CpSaveSha256 hash;
@@ -114,6 +137,15 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         unsigned count = Fx32(general + FX_PARTY + 4);
         const unsigned char *slot = mon < count ? general + FX_PARTY + 8 + mon * FX_MON
             : FxPcSlotConst(boxes, mon - count);
+        assert(WtPokemon_Decode(slot, canonical) == 0);
+        FxSha(canonical, sizeof(canonical), digest);
+        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+    }
+    /* LUNE-913: and where no locator reaches: the Day Care, the GTS while
+     * pokemonListed, the Pokéwalker. */
+    for (mon = 0; mon < FX_HELD_PLACES; ++mon) {
+        const unsigned char *slot = general + kFxHeld[mon].mon;
+        if (!FxHeldOccupied(general, mon)) continue;
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
         for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];

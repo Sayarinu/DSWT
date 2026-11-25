@@ -54,16 +54,51 @@ typedef struct Rules {
     /* HeartGold/SoulSilver: Aprijuice modifiers move with the party, an offer
      * needs none, Spiky-eared Pichu is never offered, the 0x86 ball counts. */
     int heartGold;
+    /* LUNE-913: every other Pokémon the general block holds (Held). */
+    const struct Held *held;
+    unsigned heldCount;
 } Rules;
+
+/* LUNE-913: a Pokémon the save holds outside the party and the PC, where no
+ * journal locator reaches: where its image starts in the general block (a box
+ * image, or the box part of a party image), and the u16 flag that says it is
+ * there (0: the image itself says, empty or all zeros when it is not). */
+typedef struct Held {
+    uint16_t mon, flag;
+} Held;
+
+/* The Day Care's two DaycareMon (BoxPokemon first, 0xEC apart), the GTS
+ * deposit (a Pokemon, pokemonListed at 0xEC) and the six Pokémon Pal Park
+ * migrated from a GBA cartridge (Pokemon, 0xEC apart), by the save tables of
+ * pokeplatinum (src/savedata/save_table.c), pokediamond (arm9/src/
+ * save_arrays.c) and pokeheartgold (src/save_arrays.c); HeartGold/SoulSilver
+ * add the Pokéwalker's BoxPokemon (POKEWALKER + 4, all zeros when empty). */
+static const Held kHeldPlatinum[] = {
+    { 0x1654, 0 }, { 0x1740, 0 }, { 0x8080, 0x816C },
+    { 0xC7F0, 0 }, { 0xC8DC, 0 }, { 0xC9C8, 0 }, { 0xCAB4, 0 }, { 0xCBA0, 0 }, { 0xCC8C, 0 }
+};
+static const Held kHeldDiamondPearl[] = {
+    { 0x141C, 0 }, { 0x1508, 0 }, { 0x73E8, 0x74D4 },
+    { 0xBA28, 0 }, { 0xBB14, 0 }, { 0xBC00, 0 }, { 0xBCEC, 0 }, { 0xBDD8, 0 }, { 0xBEC4, 0 }
+};
+static const Held kHeldHeartGoldSoulSilver[] = {
+    { 0x15FC, 0 }, { 0x16E8, 0 }, { 0x6910, 0x69FC },
+    { 0xB3C0, 0 }, { 0xB4AC, 0 }, { 0xB598, 0 }, { 0xB684, 0 }, { 0xB770, 0 }, { 0xB85C, 0 },
+    { 0xE5E0, 0 }
+};
+#define HELD(list) list, sizeof(list) / sizeof(list[0])
 
 static unsigned FormsDiamondPearl(unsigned species);
 static unsigned FormsHeartGoldSoulSilver(unsigned species);
 
-static const Rules kPlatinumRules = { CP_RECEIVE_PLATINUM, CP_ADAPTER_MAX_ITEM, CpAdapter_Forms, 3, 0 };
+static const Rules kPlatinumRules = { CP_RECEIVE_PLATINUM, CP_ADAPTER_MAX_ITEM, CpAdapter_Forms, 3, 0,
+    HELD(kHeldPlatinum) };
 /* ITEM_SECRETPOTION (464) is Diamond/Pearl's last item. */
-static const Rules kDiamondPearlRules = { CP_RECEIVE_DIAMOND_PEARL, 464, FormsDiamondPearl, 2, 0 };
+static const Rules kDiamondPearlRules = { CP_RECEIVE_DIAMOND_PEARL, 464, FormsDiamondPearl, 2, 0,
+    HELD(kHeldDiamondPearl) };
 /* ITEM_ENIGMA_STONE (536) is HeartGold/SoulSilver's last item. */
-static const Rules kHeartGoldSoulSilverRules = { CP_RECEIVE_HEARTGOLD_SOULSILVER, 536, FormsHeartGoldSoulSilver, 1, 1 };
+static const Rules kHeartGoldSoulSilverRules = { CP_RECEIVE_HEARTGOLD_SOULSILVER, 536, FormsHeartGoldSoulSilver, 1, 1,
+    HELD(kHeldHeartGoldSoulSilver) };
 
 static const Rules *RulesOf(const CpSaveImage *image)
 {
@@ -183,9 +218,34 @@ static int Eligible(const Rules *rules, const unsigned char *party, unsigned slo
     return usable != 0;
 }
 
-/* game_save.c Absent: no party or PC Pokémon is the outgoing one. An empty PC
- * slot whose checksum fails is refused: the game's read would mark it, so its
- * save would no longer match the escrow's recorded hash. */
+/* LUNE-913: zero when no Pokémon the save holds outside the party and the PC
+ * (Held) has the target's identity (personality and trainer ID). Such a
+ * Pokémon is where the journal cannot name it, so it is never proof that the
+ * target is gone, nor that it is missing: -1, as for one that shares the
+ * personality and cannot be read. */
+static int Elsewhere(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+{
+    static const unsigned char zeros[BOX_MON_SIZE];
+    const Rules *rules = RulesOf(image);
+    const unsigned char *general = CpSaveImage_Block(image, 0);
+    unsigned char canonical[BOX_MON_SIZE];
+    unsigned i;
+    if (!general) return -1;
+    for (i = 0; i < rules->heldCount; ++i) {
+        const unsigned char *stored = general + rules->held[i].mon;
+        /* The personality is stored unencrypted. */
+        if (memcmp(stored, target, 4) != 0 || memcmp(stored, zeros, sizeof(zeros)) == 0
+            || (rules->held[i].flag && !Read16(general + rules->held[i].flag))) continue;
+        if (WtPokemon_Decode(stored, canonical) != 0
+            || (Read16(canonical + 0x08) && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0)) return -1;
+    }
+    return 0;
+}
+
+/* game_save.c Absent: no party or PC Pokémon is the outgoing one, and none
+ * held elsewhere has its identity. An empty PC slot whose checksum fails is
+ * refused: the game's read would mark it, so its save would no longer match
+ * the escrow's recorded hash. */
 static int Absent(CpSaveImage *image, const unsigned char outgoing[BOX_MON_SIZE])
 {
     unsigned char canonical[BOX_MON_SIZE];
@@ -193,7 +253,7 @@ static int Absent(CpSaveImage *image, const unsigned char outgoing[BOX_MON_SIZE]
     unsigned box, slot;
     int count, i;
     Mon mon;
-    if (!party || (count = Count(party, 1)) < 0) return -1;
+    if (!party || (count = Count(party, 1)) < 0 || Elsewhere(image, outgoing) != 0) return -1;
     for (i = 0; i < count; ++i) {
         if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0
             || memcmp(canonical, outgoing, BOX_MON_SIZE) == 0) return -1;
@@ -276,8 +336,9 @@ typedef struct Found {
 
 /* 1 found, 0 absent. -1 when a slot cannot be read as the game would, or when
  * a Pokémon shares the identity (personality and original trainer ID) without
- * being one of those images, or two do: another Pokémon, or this one changed
- * by play, is never proof either way. */
+ * being one of those images, or two do, or one is held where no locator
+ * reaches (Elsewhere): another Pokémon, this one changed by play, or one the
+ * journal cannot name is never proof either way. */
 static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
     unsigned count, Found *found)
 {
@@ -286,7 +347,7 @@ static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], 
     unsigned box, slot, i, j, n;
     int members, matches = 0;
     Mon mon;
-    if (!party || (members = Count(party, 1)) < 0) return -1;
+    if (!party || (members = Count(party, 1)) < 0 || Elsewhere(image, target) != 0) return -1;
     n = (unsigned)members + BOXES * BOX_SLOTS;
     for (i = 0; i < n; ++i) {
         const unsigned char *stored;

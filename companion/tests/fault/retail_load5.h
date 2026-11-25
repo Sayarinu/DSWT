@@ -5,6 +5,22 @@
  * card, by the independent load model of adapter/gen5_stock.h. */
 #include "../adapter/gen5_stock.h"
 
+/* LUNE-913: the Day Care's two slots, the Dream World and the GTS: block,
+ * party image offset, flag offset and size (adapter/gen5.c Held). */
+typedef struct Fx5HeldPlace { unsigned block, mon, flag, flagSize; } Fx5HeldPlace;
+static const Fx5HeldPlace kFx5Held[] = {
+    { FX5_DAYCARE, 0x04, 0x00, 4 }, { FX5_DAYCARE, FX5_DAYCARE_SLOT + 0x04, FX5_DAYCARE_SLOT, 4 },
+    { FX5_DREAM_WORLD, 0x08, 0x1A3, 1 }, { FX5_GTS, 0x00, 0xEC, 2 }
+};
+enum { FX5_HELD_PLACES = sizeof(kFx5Held) / sizeof(kFx5Held[0]) };
+
+static int Fx5HeldOccupied(const unsigned char *ram, unsigned place)
+{
+    const unsigned char *flag = ram + Rl5Offset(kFx5Held[place].block) + kFx5Held[place].flag;
+    return kFx5Held[place].flagSize == 1 ? flag[0] != 0 : kFx5Held[place].flagSize == 2 ? Fx5R16(flag) != 0
+        : Fx5R32(flag) != 0;
+}
+
 /* As retail_load.h Ownership, over the party, the PC and the Battle Box. */
 static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     unsigned char digests[4][32], int played)
@@ -22,6 +38,13 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
             : mon < count + 720 ? ram + Rl5Offset(1 + (mon - count) / 30) + (mon - count) % 30 * FX5_BOX_MON
             : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
         assert(WtPokemon_Decode(slot, canonical) == 0);
+        FxSha(canonical, sizeof(canonical), digest);
+        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+    }
+    /* LUNE-913: and where no locator reaches, while each place's flag is set. */
+    for (mon = 0; mon < FX5_HELD_PLACES; ++mon) {
+        if (!Fx5HeldOccupied(ram, mon)) continue;
+        assert(WtPokemon_Decode(ram + Rl5Offset(kFx5Held[mon].block) + kFx5Held[mon].mon, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
         for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
     }

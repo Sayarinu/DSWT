@@ -21,7 +21,10 @@
  *   RECEIVE then decide by the Pokémon's exact image (LUNE-899). A delivery
  *   the stock game moved to the Battle Box is recorded there (journal locator
  *   kind 3), as the game's WtDelivery_Found records it; nothing is ever
- *   delivered to the Battle Box, and an offer moved there is refused.
+ *   delivered to the Battle Box, and an offer moved there is refused;
+ * - a Pokémon held where no locator reaches (the Day Care, the Dream World,
+ *   the GTS deposit, Black 2/White 2's DNA Splicers partner) with the
+ *   identity a step decides by fails that step closed (LUNE-913).
  *
  * The journal banks lie in the musical distribution save
  * (save/musical_area.h), released before the journal's first write. */
