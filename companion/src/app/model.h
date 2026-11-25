@@ -8,6 +8,7 @@
 #include "game/pairing.h"
 #include "game/text.h"
 #include "platform/journal_io.h"
+#include "platform/wifi_config.h"
 #include "save/save_image.h"
 #include "ui/model.h"
 #include "wonder_trade/engine.h"
@@ -35,6 +36,12 @@ enum CpAppError {
     CP_APP_ERROR_WORKER = -22,    /* the worker was busy or failed to start */
     CP_APP_ERROR_SAVE = -23,      /* the save could not be read or written again */
     CP_APP_ERROR_ENTROPY = -24,   /* the entropy pool failed */
+    /* Joining a network chosen in the Wi-Fi settings (LUNE-875). */
+    CP_APP_ERROR_WIFI_NOT_FOUND = -25, /* the network was not in range */
+    CP_APP_ERROR_WIFI_REJECTED = -26,  /* it ended while authenticating: most often a wrong password */
+    CP_APP_ERROR_WIFI_NO_ADDRESS = -27, /* joined, but DHCP gave no IPv4 address */
+    CP_APP_ERROR_WIFI_TIMEOUT = -28,   /* found, but no answer in time */
+    CP_APP_ERROR_WIFI_FORGET = -29,    /* wifi.cfg could not be deleted (a locked or read-only card) */
     CP_APP_ERROR_BACKUP = -90     /* the backup failed: nothing was edited */
 };
 
@@ -66,6 +73,21 @@ typedef struct CpApp {
      * reconnects, so only a later check can grant leave again. */
     int leaveProven;
 
+    /* Wi-Fi (LUNE-875): what the connection is doing (joining the stored
+     * network, the console's saved connections, listing networks for the
+     * settings or joining the one chosen there), the network stored in
+     * wifi.cfg and the one being joined. Passwords stay out of the log. */
+    struct {
+        int phase;
+        /* Listing networks took the radio off any network: until an attempt
+         * connects again, the driver's last status is not trusted. */
+        int dropped;
+        int haveConfig;
+        CpWifiConfig config, joining;
+        unsigned frames;
+        char path[CP_PATH_MAX];
+    } wifi;
+
     /* The session. */
     int job, connecting, closing;
     int slot;
@@ -90,6 +112,15 @@ typedef struct CpApp {
 extern CpSaveImage gCpAppImage;
 
 void CpApp_Init(CpApp *, const CpAppPlatform *, CompanionLanguage systemLanguage);
+
+/* Start joining Wi-Fi in the background, as the companion starts: the network
+ * stored by the Wi-Fi settings first, then the console's saved connections.
+ * The stored one goes first because the player chose it in the companion,
+ * most often because the console's saved connections did not work: trying
+ * those first would repeat a failing wait of up to 90 seconds on every
+ * launch, while a stored network out of range is given up after a scan of a
+ * few seconds. connect joins whatever attempt is under way. */
+void CpApp_StartWifi(CpApp *);
 
 /* The save's part of its backup folder name (<stem>-<id>): the file name
  * without .sav, cut to at most CP_APP_BACKUP_STEM_MAX bytes at a UTF-8
