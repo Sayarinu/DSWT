@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "adapter/gen5.h"
 #include "adapter/holdable.h"
+#include "core/journal_family.h"
 #include "platform/wifi_status.h"
 #include "save/journal_save.h"
 #include "wonder_trade/boot.h"
@@ -136,6 +138,12 @@ static int JournalSync(void *arg)
     return sApp->platformFile.sync(sApp->platformFile.arg);
 }
 
+/* The paired game's journal area, and its family's journal (core/journal_family.h). */
+static const CpJournalArea *JournalArea(const CpApp *app)
+{
+    return CpSaveJournal_Area(CpApp_Layout(app->game.rom.family));
+}
+
 static WtJournalIO JournalIO(CpApp *app)
 {
     app->journalFile = app->platformFile;
@@ -144,6 +152,7 @@ static WtJournalIO JournalIO(CpApp *app)
     app->store.file = &app->journalFile;
     app->store.hold = app->platform->hold;
     app->store.error = 0;
+    app->store.area = JournalArea(app);
     return CpJournal_IO(&app->store, CpSaveJournal_Hash);
 }
 
@@ -272,12 +281,10 @@ static void Empty(uint16_t *text) { text[0] = CP_CHAR_EOS; }
 
 static void ItemName(const CpApp *app, unsigned item, uint16_t out[CP_UI_ITEM_NAME_MAX])
 {
-    CpRomFile bank;
     Empty(out);
     if (!item) return;
     /* A name too long for the card leaves the held-item mark alone. */
-    if (CpNarc_Member(&app->game.messages, CpGame_Bank(&app->game, &app->game.table->itemNames), &bank) != CP_OK
-        || CpMessage_Read(&bank, (uint16_t)item, out, CP_UI_ITEM_NAME_MAX, NULL) != CP_OK) Empty(out);
+    if (CpGame_ItemName(&app->game, (uint16_t)item, out, CP_UI_ITEM_NAME_MAX, NULL) != CP_OK) Empty(out);
 }
 
 /* Why the adapter refuses a slot, in the order the game's checks run. */
@@ -309,25 +316,40 @@ static void CopyName(uint16_t out[CP_UI_NAME_MAX], const unsigned char *name)
     out[i] = CP_CHAR_EOS;
 }
 
+/* Generation V's refusals, as the screens name them. */
+static unsigned Gen5Reason(unsigned slot)
+{
+    switch (CpGen5_Reason(&gCpAppImage, slot)) {
+    case CP_GEN5_EGG: return CP_UI_INELIGIBLE_EGG;
+    case CP_GEN5_MAIL: return CP_UI_INELIGIBLE_MAIL;
+    case CP_GEN5_LAST_USABLE: return CP_UI_INELIGIBLE_LAST_USABLE;
+    default: return CP_UI_INELIGIBLE_OTHER;
+    }
+}
+
 static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
 {
-    unsigned char *general = gCpAppImage.loaded ? CpSaveImage_Block(&gCpAppImage, 0) : NULL;
+    int gen5 = CpGen5_Is(&gCpAppImage);
+    unsigned char *general = !gCpAppImage.loaded ? NULL
+        : CpSaveImage_Block(&gCpAppImage, gen5 ? gCpAppImage.layout->gen5->partyBlock : 0);
     const unsigned char *list;
-    unsigned count, slot;
+    /* A Generation V party Pokémon is 220 bytes; the fields read here are the
+     * same in PK4 and PK5, and so is the start of the battle stats. */
+    unsigned count, slot, stride = gen5 ? 220 : CP_SAVE_PARTY_STRIDE;
     memset(party, 0, CP_UI_PARTY_MAX * sizeof(*party));
     if (!general) return 0;
-    list = general + gCpAppImage.layout->partyOffset;
+    list = gen5 ? general : general + gCpAppImage.layout->partyOffset;
     count = Read32(list + 4);
     if (Read32(list) != CP_SAVE_PARTY_CAPACITY || count > CP_SAVE_PARTY_CAPACITY) return 0;
     for (slot = 0; slot < count; ++slot) {
-        const unsigned char *image = list + 8 + slot * CP_SAVE_PARTY_STRIDE;
+        const unsigned char *image = list + 8 + slot * stride;
         unsigned char canonical[WT_POKEMON_SIZE], extension[PK_EXTENSION_SIZE];
         CpUiPokemon *mon = &party[slot];
         uint32_t pid, ot;
         Empty(mon->speciesName); Empty(mon->nickname); Empty(mon->itemName);
         if (WtPokemon_Decode(image, canonical) != 0) { mon->ineligible = CP_UI_INELIGIBLE_OTHER; continue; }
-        memcpy(extension, image + WT_POKEMON_SIZE, sizeof(extension));
-        Crypt(extension, sizeof(extension), Read32(image));
+        memcpy(extension, image + WT_POKEMON_SIZE, gen5 ? 84 : sizeof(extension));
+        Crypt(extension, gen5 ? 84 : sizeof(extension), Read32(image));
         pid = Read32(canonical + PK_PID);
         ot = Read32(canonical + PK_OT_ID);
         mon->species = (uint16_t)Read16(canonical + PK_SPECIES);
@@ -340,7 +362,8 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
         if (mon->isEgg || CpGame_SpeciesName(&app->game, mon->species, mon->speciesName, CP_UI_NAME_MAX, NULL) != CP_OK)
             memcpy(mon->speciesName, mon->nickname, sizeof(mon->speciesName));
         ItemName(app, mon->heldItem, mon->itemName);
-        if (!CpAdapter_Eligible(&gCpAppImage, slot)) mon->ineligible = (uint8_t)Reason(list, count, slot, canonical, extension);
+        if (!CpAdapter_Eligible(&gCpAppImage, slot))
+            mon->ineligible = (uint8_t)(gen5 ? Gen5Reason(slot) : Reason(list, count, slot, canonical, extension));
         else mon->ineligible = CpAdapter_Unique(&gCpAppImage, slot) ? CP_UI_ELIGIBLE : CP_UI_INELIGIBLE_DUPLICATE;
         memset(canonical, 0, sizeof(canonical));
     }
@@ -434,14 +457,25 @@ const CpSaveLayout *CpApp_Layout(CpFamily family)
     case CP_FAMILY_DP: return &CpSaveLayout_DiamondPearl;
     case CP_FAMILY_PLATINUM: return &CpSaveLayout_Platinum;
     case CP_FAMILY_HGSS: return &CpSaveLayout_HeartGoldSoulSilver;
+    case CP_FAMILY_BW: return &CpSaveLayout_BlackWhite;
+    case CP_FAMILY_B2W2: return &CpSaveLayout_Black2White2;
     default: return NULL;
     }
 }
 
+static int Gen5Family(CpFamily family)
+{
+    return family == CP_FAMILY_BW || family == CP_FAMILY_B2W2;
+}
+
 static int Reload(CpApp *app)
 {
-    uint32_t magic = app->game.rom.language == CP_LANGUAGE_KOREAN ? CP_SAVE_MAGIC_KOREAN : CP_SAVE_MAGIC_INTERNATIONAL;
-    return CpSaveImage_LoadLayout(&gCpAppImage, &app->file, CpApp_Layout(app->game.rom.family), magic);
+    CpFamily family = app->game.rom.family;
+    uint32_t magic = Gen5Family(family) ? CP_SAVE_MAGIC_GEN5
+        : app->game.rom.language == CP_LANGUAGE_KOREAN ? CP_SAVE_MAGIC_KOREAN : CP_SAVE_MAGIC_INTERNATIONAL;
+    /* The journal of the paired game's family, from here until it is unloaded. */
+    CpCore_SelectFamily(Gen5Family(family) ? CP_CORE_GEN5 : CP_CORE_GEN4);
+    return CpSaveImage_LoadLayout(&gCpAppImage, &app->file, CpApp_Layout(family), magic);
 }
 
 static int LoadJob(void *arg)
@@ -486,7 +520,14 @@ static int LoadJob(void *arg)
     /* Matched deliveries take the game's receive effects from the paired ROM. */
     CpAdapter_RomData(&app->romData, &app->game);
     app->adapter.data = &app->romData;
-    detection = CpSaveJournal_Detect(&app->file);
+    /* Black/White and Black 2/White 2: a downloaded musical the game would
+     * still load lives where the journal goes; trading would erase it. */
+    if (CpGen5_MusicalSaved(&gCpAppImage)) {
+        Log(app, "load: the save holds a downloaded musical\n");
+        app->result.loadMessage = Companion_Text_MusicalSaved;
+        return -1;
+    }
+    detection = CpSaveJournal_DetectArea(&app->file, JournalArea(app));
     Log(app, "load: journal %s\n", detection == CP_SAVE_JOURNAL_HAS_JOURNAL ? "present"
         : detection == CP_SAVE_JOURNAL_UNUSED ? "unused" : "refused");
     if (detection == CP_SAVE_JOURNAL_REFUSE) return -1;
@@ -542,7 +583,7 @@ static int Provision(CpApp *app)
 {
     unsigned char seed[32];
     WtJournal journal;
-    CpSaveJournalDetection detection = CpSaveJournal_Detect(&app->file);
+    CpSaveJournalDetection detection = CpSaveJournal_DetectArea(&app->file, JournalArea(app));
     int result;
     if (detection == CP_SAVE_JOURNAL_HAS_JOURNAL) { app->needsProvision = 0; return 0; }
     if (detection != CP_SAVE_JOURNAL_UNUSED) return CP_VISIT_ERROR_JOURNAL;
@@ -550,7 +591,7 @@ static int Provision(CpApp *app)
     if (result == WT_ENTROPY_WAIT) { app->needsEntropy = 1; memset(seed, 0, sizeof(seed)); return 1; }
     if (result != 0) { memset(seed, 0, sizeof(seed)); return CP_APP_ERROR_ENTROPY; }
     memset(&journal, 0, sizeof(journal));
-    result = CpSaveJournal_Provision(&app->file, &journal, JournalIO(app), seed);
+    result = CpSaveJournal_ProvisionArea(&app->file, JournalArea(app), &journal, JournalIO(app), seed);
     WtJournal_Close(&journal);
     memset(seed, 0, sizeof(seed));
     Log(app, "journal: provisioned %d\n", result);
@@ -578,6 +619,18 @@ static int VisitJob(void *arg)
     app->result.hasReceived = 0;
     app->visitOpened = 0;
     app->visitCanLeave = 0;
+    if (CpGen5_Is(&gCpAppImage)) {
+        /* As the patched game opens Wonder Trade: the game must never read
+         * the journal's area again, and a musical's leftovers go first. */
+        result = CpGen5_ReleaseMusical(&app->adapter);
+        Log(app, "visit: musical area %d\n", result);
+        if (result != 0) {
+            /* As a blocked engine: only verified pre-enrollment data may leave. */
+            app->visitCanLeave = WtRecovery_Check(JournalIO(app)) == 0;
+            if (!gCpAppImage.loaded && Reload(app) != CP_SAVE_OK) app->visitCanLeave = 0;
+            return CP_APP_ERROR_SAVE;
+        }
+    }
     if (app->needsProvision) {
         result = Provision(app);
         if (result != 0) { app->visitCanLeave = 1; return result > 0 ? 0 : result; }

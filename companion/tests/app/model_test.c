@@ -9,6 +9,7 @@
 #include "../posix_reader.h"
 #include "../session/fake_server.h"
 #include "../synthetic_rom.h"
+#include "../adapter/gen5_fixture.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -472,13 +473,50 @@ static void WriteRom(const char *relative, const char code[4], uint8_t revision)
     free(rom.data);
 }
 
-/* LUNE-880: a game the companion does not trade for (Pokémon Black's code). */
+/* LUNE-880: a game the companion does not trade for (Pokémon Ranger's code). */
 static void WriteOtherRom(const char *relative)
 {
     Bytes rom = SyntheticPlatinum("CPUE", 1);
-    memcpy(rom.data + 0x0C, "IRBO", 4);
+    memcpy(rom.data + 0x0C, "YP2E", 4);
     WriteFile(relative, rom.data, rom.size);
     free(rom.data);
+}
+
+/* LUNE-881: a synthetic Black, and a Black save of `count` party Pokémon. */
+static void WriteBlackRom(const char *relative)
+{
+    Bytes rom = SyntheticGen5("IRBO", 0);
+    WriteFile(relative, rom.data, rom.size);
+    free(rom.data);
+}
+
+static Fx5File gen5Save;
+
+static void WriteBlackSave(const char *relative, unsigned count, int musical)
+{
+    Fx5Spec specs[6];
+    unsigned i;
+    for (i = 0; i < count; ++i) specs[i] = Fx5Default(i);
+    Fx5Build(&gen5Save, specs, count, 40);
+    if (musical) {
+        /* A downloaded musical the game would load, marked in the save. */
+        unsigned char *base = gen5Save.bytes + FX5_MUSICAL, *footer = base + FX5_MUSICAL_USED - 16;
+        unsigned char *trainer = Fx5Block(&gen5Save, 0, FX5_TRAINER);
+        unsigned crc;
+        memset(base, 0x42, FX5_MUSICAL_BLOCK);
+        crc = Fx5Crc(base, FX5_MUSICAL_BLOCK);
+        Fx5W16(base + FX5_MUSICAL_BLOCK + 2, crc);
+        Fx5W16(footer - 4, crc); Fx5W16(footer - 2, 0);
+        Fx5W32(footer, 9); Fx5W32(footer + 4, FX5_MUSICAL_USED); Fx5W32(footer + 8, CP_SAVE_MAGIC_GEN5);
+        Fx5W16(footer + 14, Fx5Crc(footer - 4, 4));
+        Fx5W16(trainer + 0x3C, 0xC21E);
+        Fx5W32(trainer + FX5_COUNTS + 24, 9);
+        Fx5SealBoth(&gen5Save, 40);
+    } else {
+        /* Leftovers of a musical the game no longer reads, in the journal banks. */
+        for (i = 0; i < 0x2000; ++i) gen5Save.bytes[FX5_JOURNAL + i] = (unsigned char)(i * 5 + 1);
+    }
+    WriteFile(relative, gen5Save.bytes, sizeof(gen5Save.bytes));
 }
 
 /* Pokedex_Init, an empty Pokétch history and journal page, encoded records:
@@ -549,8 +587,12 @@ static void Setup(void)
     WriteSave("roms/nds/saves/Lonely.sav", 2);
     WriteRom("roms/nds/Diamond.nds", "ADAE", 5);
     WriteSave("roms/nds/saves/Diamond.sav", 2);
-    WriteOtherRom("roms/nds/Black.nds");
-    WriteSave("roms/nds/saves/Black.sav", 2);
+    WriteOtherRom("roms/nds/Ranger.nds");
+    WriteSave("roms/nds/saves/Ranger.sav", 2);
+    WriteBlackRom("roms/nds/Black.nds");
+    WriteBlackSave("roms/nds/saves/Black.sav", 4, 0);
+    WriteBlackRom("roms/nds/Musical.nds");
+    WriteBlackSave("roms/nds/saves/Musical.sav", 2, 1);
     WriteRom("roms/nds/Blank.nds", "CPUE", 1);
     memset(blank, 0xFF, sizeof(blank));
     WriteFile("roms/nds/saves/Blank.sav", blank, sizeof(blank));
@@ -645,22 +687,25 @@ static int NameIs(const uint16_t *text, const uint16_t *expected)
 
 static void ScanFindsSavesAndTheirRoms(void)
 {
-    int platinum, second, lonely, diamond, blank, black;
+    int platinum, second, lonely, diamond, blank, black, ranger;
     CpApp_Init(&app, &platform, Companion_Language_en_US);
     model->ops->scan(model->context);
     assert(model->busy);
     Pump();
-    assert(model->saveCount == 6);
+    assert(model->saveCount == 8);
     platinum = FindSave("Platinum.sav"); second = FindSave("Second.sav"); lonely = FindSave("Lonely.sav");
     diamond = FindSave("Diamond.sav"); blank = FindSave("Blank.sav"); black = FindSave("Black.sav");
-    assert(platinum >= 0 && second >= 0 && lonely >= 0 && diamond >= 0 && blank >= 0 && black >= 0);
+    ranger = FindSave("Ranger.sav");
+    assert(platinum >= 0 && second >= 0 && lonely >= 0 && diamond >= 0 && blank >= 0 && black >= 0 && ranger >= 0);
     assert(model->saves[platinum].status == CP_UI_SAVE_READY && model->saves[platinum].version == CP_VERSION_PLATINUM
         && model->saves[platinum].language == CP_LANGUAGE_ENGLISH);
     assert(model->saves[second].status == CP_UI_SAVE_READY);
     assert(model->saves[lonely].status == CP_UI_SAVE_NO_ROM);
     /* LUNE-880: Diamond/Pearl and HeartGold/SoulSilver trade too. */
     assert(model->saves[diamond].status == CP_UI_SAVE_READY && model->saves[diamond].version == CP_VERSION_DIAMOND);
-    assert(model->saves[black].status == CP_UI_SAVE_UNSUPPORTED);
+    assert(model->saves[ranger].status == CP_UI_SAVE_UNSUPPORTED);
+    /* LUNE-881: and Black/White and Black 2/White 2. */
+    assert(model->saves[black].status == CP_UI_SAVE_READY && model->saves[black].version == CP_VERSION_BLACK);
     assert(!strcmp(app.saves[second].rom + strlen(fake.root), "roms/nds/pt/Second.nds"));
     assert(!fake.romOpen[CP_APP_ROM_SCAN]);
     puts("PASS model: scan pairs saves in saves/, beside ROMs and one folder down; skips non-saves");
@@ -671,8 +716,18 @@ static void LoadRefusals(void)
     LoadByName("Lonely.sav");
     assert(model->loadMessage == Companion_Text_MatchingRomMissing && !model->busy);
     model->ops->unload(model->context);
-    LoadByName("Black.sav");
+    LoadByName("Ranger.sav");
     assert(model->loadMessage == Companion_Text_SaveUnsupported);
+    model->ops->unload(model->context);
+    /* LUNE-881: a downloaded musical the game would load is never erased. */
+    {
+        static unsigned char before[CP_SAVE_FILE_SIZE], after[CP_SAVE_FILE_SIZE];
+        ReadFile("roms/nds/saves/Musical.sav", before, sizeof(before));
+        LoadByName("Musical.sav");
+        assert(model->loadMessage == Companion_Text_MusicalSaved);
+        ReadFile("roms/nds/saves/Musical.sav", after, sizeof(after));
+        assert(memcmp(before, after, sizeof(before)) == 0);
+    }
     model->ops->unload(model->context);
     /* A Platinum save beside a Diamond ROM is not a save Diamond would load. */
     LoadByName("Diamond.sav");
@@ -748,6 +803,38 @@ static void OfferStatusCancelCollect(void)
         fake.posts, fake.seedWrites);
     CloseSession();
     assert(fake.saveFd < 0 && !fake.romOpen[CP_APP_ROM_GAME]);
+}
+
+/* LUNE-881: a Black save end to end: the party as the screens show it, the
+ * journal provisioned in the musical distribution area after its leftovers
+ * are erased, an offer and its return. */
+static void BlackOfferAndReturn(void)
+{
+    static unsigned char bytes[CP_SAVE_FILE_SIZE];
+    unsigned i;
+    memset(&server, 0, sizeof(server));
+    LoadByName("Black.sav");
+    assert(model->loadMessage == -1 && model->font && model->gameVersion == CP_VERSION_BLACK);
+    assert(model->partyCount == 4 && model->party[0].species == 495 && model->party[0].level == 5);
+    assert(model->party[0].speciesName[0] == 'S' && model->party[0].speciesName[5] == CP_CHAR_EOS);
+    assert(model->party[0].ineligible == CP_UI_ELIGIBLE && app.needsProvision);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0 && model->tradePhase == WT_JOURNAL_IDLE);
+    ReadFile("roms/nds/saves/Black.sav", bytes, sizeof(bytes));
+    assert(memcmp(bytes + 0x74000, "DSWJ", 4) == 0 && memcmp(bytes + 0x75000, "DSWJ", 4) == 0);
+    for (i = 4096 - 4; i < 4096; ++i) assert(bytes[0x74000 + i] == "CMIT"[i - 4092]);
+    assert(CountBackups("Black") == 1);
+    Visit(1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0 && model->tradePhase == WT_JOURNAL_QUEUED);
+    assert(model->partyCount == 3 && server.requests[WT_OP_SUBMIT] == 1);
+    Visit(-1, 1, 1);
+    assert(model->completed && model->returned && model->tradePhase == WT_JOURNAL_IDLE && model->partyCount == 4);
+    /* The game loads the save the companion left: both copies hold it. */
+    ReadFile("roms/nds/saves/Black.sav", bytes, sizeof(bytes));
+    assert(memcmp(bytes, bytes + 0x24000, 0x23F9C) == 0);
+    CloseSession();
+    puts("PASS model: a Black save trades: journal in the musical area, offer and return, both copies alike");
 }
 
 static void SupportCodesMatchTheGame(void)
@@ -929,7 +1016,7 @@ static void ScreensDriveTheModel(void)
     CpUi_Start(&ui, model);
     memset(&input, 0, sizeof(input));
     for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
-    assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 6);
+    assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 8);
     target = FindSave("Second.sav");
     ui.listCursor = target;
     input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;
@@ -1531,6 +1618,7 @@ int main(void)
     ScanFindsSavesAndTheirRoms();
     LoadRefusals();
     OfferStatusCancelCollect();
+    BlackOfferAndReturn();
     SupportCodesMatchTheGame();
     ReloadEnrolledSave();
     MatchedDeliveries();
