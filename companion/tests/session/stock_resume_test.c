@@ -563,6 +563,64 @@ static void UnsentOffer(void)
     }
 }
 
+/* The only Pokémon left with the offer's identity is a twin: the offer
+ * removed, another Pokémon sharing its identity and every field play never
+ * changes, differing in experience, in the PC. */
+static void TwinOnly(unsigned char *general, unsigned char *boxes)
+{
+    DepositOffered(general, boxes);
+    FxTrain(FxPcSlot(boxes, 7));
+}
+
+/* LUNE-902: an escrow deposited by a game or an older companion (no
+ * identity-unique mark) is never abandoned, whatever the save holds: the
+ * twin left could be another Pokémon and the offer only in the journal. The
+ * visit blocks; the save, the journal and the server are untouched. */
+static void LegacyTwin(void)
+{
+    static World played, marked;
+    WtEngine engine;
+    WtJournalEntry entry;
+    CpVisit visit;
+    unsigned bank, submits, cancels;
+    scenario = OFFER;
+    Setup();
+    cutAfter = WT_JOURNAL_ESCROW;
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, OFFERED_SLOT, 0, &transport, &visit) != 0);
+    WtEngine_Close(&engine);
+    saveCut = 0;
+    assert(visit.phase == WT_JOURNAL_ESCROW);
+    memcpy(marked.banks, live.banks, sizeof(marked.banks));
+    assert(WtJournal_Decode(live.banks[0], Hash, &entry) == 0);
+    entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
+    for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, live.banks[bank]) == 0);
+    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+    assert(FxStockPlay(&stock, 1, 0, TwinOnly));
+    memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+    played = live; submits = server.requests[WT_OP_SUBMIT]; cancels = server.requests[WT_OP_CANCEL];
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(WtEngine_Settle(&engine) == -1 && engine.blocked);
+    WtEngine_Close(&engine);
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0 && !visit.canLeave);
+    WtEngine_Close(&engine);
+    assert(memcmp(&live, &played, sizeof(live)) == 0);
+    assert(server.requests[WT_OP_SUBMIT] == submits && server.requests[WT_OP_CANCEL] == cancels);
+    /* The companion's own escrow, marked unique at its deposit: that Pokémon
+     * can only be the offer, trained and deposited, and it is abandoned. */
+    memcpy(marked.bytes, played.bytes, sizeof(marked.bytes));
+    live = marked;
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+    WtEngine_Close(&engine);
+    assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave && server.requests[WT_OP_SUBMIT] == submits);
+    assert(memcmp(live.bytes, played.bytes, sizeof(live.bytes)) == 0);
+    puts("PASS legacy escrow with only a twin left: blocked, save, journal and server untouched; marked, abandoned");
+}
+
 int main(void)
 {
     unsigned total[OUTCOMES] = { 0, 0, 0, 0 }, i;
@@ -587,6 +645,7 @@ int main(void)
     assert(total[STUCK] == 0 && total[DUPLICATE] == 0 && total[LOST] == 0);
     RedirectThroughJournal();
     UnsentOffer();
+    LegacyTwin();
     printf("PASS stock save before resume: %u cases recovered, 0 stuck, 0 duplicates, 0 lost\n", total[RECOVERED]);
     return 0;
 }

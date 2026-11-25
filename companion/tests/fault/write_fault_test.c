@@ -741,6 +741,28 @@ static void Setup(void)
         OpenEngine(&engine);
         assert(WtEngine_Settle(&engine) == WT_INVENTORY_KEPT && engine.entry.phase == WT_JOURNAL_ESCROW);
         WtEngine_Close(&engine);
+        {
+            /* The same escrow as a game or an older companion deposits it
+             * (no identity-unique mark): never kept, the visit blocks and
+             * nothing is written or sent. Then the companion's own again. */
+            static unsigned char saved[CP_SAVE_FILE_SIZE], record[WT_JOURNAL_RECORD_SIZE];
+            unsigned requests[8], bank;
+            WtJournalEntry marked = ReadEntry(), unmarked = marked;
+            unmarked.operation[9] ^= 0x5A; unmarked.request[8 + 9] ^= 0x5A;
+            assert(WtJournal_Encode(&unmarked, Hash, record) == 0);
+            for (bank = 0; bank < 2; ++bank) assert(journalIO.write(journalIO.arg, (int)bank, record) == 0);
+            memcpy(saved, live, sizeof(saved)); memcpy(requests, server.requests, sizeof(requests));
+            OpenEngine(&engine);
+            assert(WtEngine_Settle(&engine) == -1 && engine.blocked);
+            WtEngine_Close(&engine);
+            OpenEngine(&engine);
+            assert(CpVisit_Run(&engine, &game, 7, -1, 0, &transport, &visit) != 0 && !visit.canLeave);
+            WtEngine_Close(&engine);
+            assert(memcmp(saved, live, sizeof(saved)) == 0 && memcmp(requests, server.requests, sizeof(requests)) == 0);
+            assert(WtJournal_Encode(&marked, Hash, record) == 0);
+            for (bank = 0; bank < 2; ++bank) assert(journalIO.write(journalIO.arg, (int)bank, record) == 0);
+            assert(LOAD(&image, &file) == CP_SAVE_OK);
+        }
     }
     if (scenario == CANCEL_RETURN) {
         WtEngine engine;

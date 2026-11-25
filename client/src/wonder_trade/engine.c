@@ -70,6 +70,46 @@ static int Random(WtEngine *engine, unsigned char *bytes, size_t size)
     return engine->io.random(engine->io.arg, bytes, size) == 0 && !Zero(bytes, size) ? 0 : Block(engine);
 }
 
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: the DS Companion deposits only an offer whose identity is unique
+ * in the save (its adapters' PREPARE_REMOVE). Its Submit's request ID says so:
+ * 4 random bytes, then 12 bytes of SHA-256 over them, the save, the counter,
+ * the save before the deposit and the offer. Only an escrow so marked may be
+ * abandoned: one deposited by a game or an older companion, under a rule
+ * that compared whole images, may share its identity with another Pokémon
+ * the save still holds, and stays blocked. The mark is committed with the
+ * escrow itself; the games accept any nonzero request ID. */
+static const char kUniqueDeposit[] = "DSWT LUNE-902 identity-unique deposit";
+
+static int UniqueMark(WtEngine *engine, const WtJournalEntry *entry, const unsigned char id[16], unsigned char mark[32])
+{
+    unsigned char bytes[sizeof(kUniqueDeposit) + 16 + 4 + 8 + 32 + 136], *at = bytes;
+    uint64_t counter = entry->operationCounter;
+    unsigned i;
+    int result;
+    memcpy(at, kUniqueDeposit, sizeof(kUniqueDeposit)); at += sizeof(kUniqueDeposit);
+    memcpy(at, entry->saveID, 16); at += 16;
+    memcpy(at, id, 4); at += 4;
+    for (i = 0; i < 8; ++i) *at++ = (unsigned char)(counter >> (8 * i));
+    memcpy(at, entry->inventoryBefore, 32); at += 32;
+    memcpy(at, entry->outgoing, 136);
+    result = engine->journal.io.hash(bytes, sizeof(bytes), mark);
+    Clear(bytes, sizeof(bytes));
+    return result;
+}
+
+/* Nonzero when the escrow's Submit carries the companion's mark. */
+static int MarkedUnique(WtEngine *engine, const WtJournalEntry *entry)
+{
+    unsigned char mark[32];
+    int marked = entry->requestLength && entry->request[5] == WT_OP_SUBMIT
+        && memcmp(entry->request + 8, entry->operation, 16) == 0
+        && UniqueMark(engine, entry, entry->operation, mark) == 0 && memcmp(mark, entry->operation + 4, 12) == 0;
+    Clear(mark, sizeof(mark));
+    return marked;
+}
+#endif
+
 static void ClearRequest(WtJournalEntry *entry)
 {
     Clear(entry->request, sizeof(entry->request)); entry->requestLength = 0;
@@ -164,6 +204,8 @@ static int Resume(WtEngine *engine)
          * Any other failure blocks. */
         int removed = next.request[5] == WT_OP_CANCEL ? WT_INVENTORY_KEPT
             : engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, &next, next.source.slot);
+        /* Only an escrow marked unique at its deposit (UniqueMark) is kept. */
+        if (removed == WT_INVENTORY_KEPT && next.request[5] == WT_OP_SUBMIT && !MarkedUnique(engine, &next)) removed = -1;
         if (removed == WT_INVENTORY_KEPT) { result = WT_INVENTORY_KEPT; goto done; }
         if (removed != 0) { Block(engine); goto done; }
         if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
@@ -281,6 +323,14 @@ int WtEngine_Deposit(WtEngine *engine, unsigned slot)
         || RequestIdentity(engine, &request, WT_OP_SUBMIT) != 0) goto done;
     next.phase = WT_JOURNAL_ESCROW;
     memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
+#ifdef WT_ABANDON_UNSENT
+    {
+        unsigned char mark[32];
+        if (UniqueMark(engine, &next, request.requestID, mark) != 0) { Clear(mark, sizeof(mark)); Block(engine); goto done; }
+        memcpy(request.requestID + 4, mark, 12); memcpy(next.operation, request.requestID, 16);
+        Clear(mark, sizeof(mark));
+    }
+#endif
     request.counter = next.operationCounter;
     request.body.submit.generation = next.generation + 1;
     memcpy(request.body.submit.pokemon, next.outgoing, 136);

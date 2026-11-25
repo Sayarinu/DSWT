@@ -9,10 +9,13 @@
  * items, friendship, ribbons, contest stats, Pokérus, the nickname, form and
  * (through evolution) species, ability and gender, never what is compared
  * here: the language, the IVs, the fateful-encounter bit, the Generation V
- * nature, the Platinum and Generation V location words at 0x44, the origin
- * game, the original trainer's name, the egg and met dates and locations, the
- * ball, the met level and trainer gender, the encounter type and the
- * HeartGold/SoulSilver ball. The species must be the offer's or one it can
+ * nature and hidden-ability / N's Pokémon flags (0x41, 0x42), the words at
+ * 0x44 (Platinum and HeartGold/SoulSilver egg and met locations; unused, and
+ * never written, in Generation V), the origin game, the original trainer's
+ * name, the egg and met dates and locations, the ball, the met level and
+ * trainer gender, the encounter type and the HeartGold/SoulSilver ball.
+ * This is defence in depth: the engine keeps an escrow only when its deposit
+ * proved the identity unique (wonder_trade/engine.c UniqueMark). The species must be the offer's or one it can
  * evolve into (two steps at most), read from the player's ROM; without ROM
  * data only the same species counts. Anything else is not proof. */
 #include <stdint.h>
@@ -39,8 +42,8 @@ static inline int CpSamePokemon_Evolves(const CpAdapterData *data, unsigned from
 }
 
 /* Nonzero when `found` (canonical) can be `offer` (canonical) after play.
- * 0x41 is the nature in Generation V, HeartGold/SoulSilver's shiny leaves
- * (which play changes) in Generation IV. */
+ * 0x41 and 0x42 are the nature and flags in Generation V; in Generation IV
+ * 0x41 holds HeartGold/SoulSilver's shiny leaves, which play changes. */
 static inline int CpSamePokemon(const CpAdapterData *data, int gen5, const unsigned char offer[136],
                                 const unsigned char found[136])
 {
@@ -48,7 +51,7 @@ static inline int CpSamePokemon(const CpAdapterData *data, int gen5, const unsig
         ^ (found[0x38] | found[0x39] << 8 | found[0x3A] << 16 | (found[0x3B] & 0x3Fu) << 24);
     return CpSamePokemon_Fields(offer, found, 0x00, 4) && CpSamePokemon_Fields(offer, found, 0x0C, 4)
         && CpSamePokemon_Fields(offer, found, 0x17, 1) && ivs == 0 && ((offer[0x40] ^ found[0x40]) & 1) == 0
-        && (!gen5 || CpSamePokemon_Fields(offer, found, 0x41, 1)) && CpSamePokemon_Fields(offer, found, 0x44, 4)
+        && (!gen5 || CpSamePokemon_Fields(offer, found, 0x41, 2)) && CpSamePokemon_Fields(offer, found, 0x44, 4)
         && CpSamePokemon_Fields(offer, found, 0x5F, 1) && CpSamePokemon_Fields(offer, found, 0x68, 16)
         && CpSamePokemon_Fields(offer, found, 0x78, 10) && CpSamePokemon_Fields(offer, found, 0x83, 4)
         && CpSamePokemon_Evolves(data, (unsigned)(offer[0x08] | offer[0x09] << 8),

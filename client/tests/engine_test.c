@@ -888,6 +888,20 @@ static size_t FencePage(Fixture *fixture, unsigned char packet[902], const unsig
 }
 #endif
 
+#ifdef WT_ABANDON_UNSENT
+/* The escrow as a game or an older companion deposits it: a request ID
+ * without the companion's identity-unique mark (engine.c UniqueMark). */
+static void Unmark(Fixture *fixture)
+{
+    WtJournalEntry entry;
+    unsigned bank;
+    assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0 && entry.phase == WT_JOURNAL_ESCROW);
+    entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
+    for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, fixture->banks[bank]) == 0);
+    WtEngine_Close(&fixture->engine); Open(fixture);
+}
+#endif
+
 /* An escrow cut before its removal, after which the unmodified game changed
  * the offer where it is (REMOVE answers KEPT): the server never saw it. */
 static void KeptEscrow(Fixture *fixture, int answer)
@@ -933,6 +947,16 @@ static void UnsentEscrow(void)
         assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.removed);
     }
 #ifdef WT_ABANDON_UNSENT
+    /* Unmarked (deposited where another Pokémon may share its identity):
+     * KEPT is not believed, the escrow blocks as before and nothing is written. */
+    KeptEscrow(&fixture, WT_INVENTORY_KEPT);
+    Unmark(&fixture);
+    memcpy(before, fixture.banks, sizeof(before));
+    assert(WtEngine_Settle(&fixture.engine) == -1 && fixture.engine.blocked);
+    WtEngine_Close(&fixture.engine); Open(&fixture);
+    assert(WtEngine_Request(&fixture.engine, 0) == -1 && fixture.engine.blocked && !fixture.engine.frameSize);
+    assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.removed);
+
     /* Boot leaves it for the next visit, which records the fence, then sends it. */
     KeptEscrow(&fixture, WT_INVENTORY_KEPT);
     memcpy(before, fixture.banks, sizeof(before)); memcpy(pending, fixture.engine.entry.request, 256);
