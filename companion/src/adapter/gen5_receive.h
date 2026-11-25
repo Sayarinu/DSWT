@@ -12,8 +12,8 @@
  * evolution_check.c, pokedex_savedata.c), with the Pokédex registered as the
  * retail games' own trades register it:
  * - the party Pokémon is built over 84 zero bytes of encrypted battle stats:
- *   its stats are calculated, it is healed, and its friendship becomes its
- *   species' base;
+ *   its stats are calculated, it is healed, and its friendship becomes 70
+ *   as in retail player trades (the server refuses Eggs);
  * - it evolves as the game's trades check it, the Pokémon sent being the
  *   partner for Karrablast and Shelmet: an Everstone (hold effect 64) stops
  *   all but Kadabra; a trade holding an item drops the item; an evolution

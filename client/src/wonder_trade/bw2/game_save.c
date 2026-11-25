@@ -12,7 +12,6 @@
 #include "gfl/savedata.h"
 #include "pml/evolution.h"
 #include "pml/item.h"
-#include "pml/personal.h"
 #include "pml/poke_party.h"
 #include "save/box.h"
 #include "save/musical_savedata.h"
@@ -291,8 +290,8 @@ static unsigned char *Destination(const Image *image, unsigned char *data, WtJou
     return NULL;
 }
 
-/* A traded Pokémon's effects in the receiving game: its friendship returns to
- * its species' base, it is registered as caught, and it evolves by trade as
+/* A traded Pokémon's effects in the receiving game: its friendship becomes
+ * 70, it is registered as caught, and it evolves by trade as
  * the game's own trades check it (CheckEvolveSpecies with EVO_CHECK_TRADE),
  * the Pokémon sent being the partner for Karrablast and Shelmet. The move set
  * is kept; no evolution scene can change a live save. */
@@ -314,9 +313,7 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     pkm->base = box;
     PokeParty_RecalcStats(pkm);
     PokeParty_Recover(pkm);
-    PokeParty_SetParam(pkm, PKM_PARAM_HAPPINESS,
-        PML_PersonalGetParamSingle((u16)PokeParty_GetParam(pkm, PKM_PARAM_SPECIES, NULL),
-            (u16)PokeParty_GetParam(pkm, PKM_PARAM_FORM, NULL), PERSONAL_FRIENDSHIP));
+    PokeParty_SetParam(pkm, PKM_PARAM_HAPPINESS, 70);
     /* Retail trades register the Pokémon received as caught, with its
      * language (pokemontrade_save.c addPkmToDex), before the evolution check. */
     addPkmToDex(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);

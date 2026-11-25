@@ -363,7 +363,8 @@ static void PartyDelivery(void)
     assert(ext[4] == level && Fx5R16(ext + 8) == max && Fx5R16(ext + 6) == max && Fx5R32(ext) == 0);
     assert(Fx5R16(ext + 10) == Stat(50, 20, 4, level, -1) && Fx5R16(ext + 12) == Stat(50, 10, 0, level, 0));
     assert(Fx5R16(ext + 14) == Stat(50, 5, 252, level, 1));
-    assert(box[0x14] == 50 && box[0x15] == 1 && Fx5R16(box + 0x08) == 500);
+    /* Player trades set 70, even though this fixture's species base is 50. */
+    assert(box[0x14] == 70 && box[0x15] == 1 && Fx5R16(box + 0x08) == 500);
     /* PP below the maximum rises; above it stays (party: HealFull). */
     assert(box[0x30] == (unsigned char)(38 + 38 * 20 * 3 / 100) && box[0x31] == 60);
     /* Fields nothing writes stay zero ciphertext: capsule, mail, padding. */
@@ -435,6 +436,7 @@ static void BoxDelivery(void)
     assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
     BothCopies();
     Decoded(Fx5ImageBox(&image, 0, 1), box, NULL);
+    assert(box[0x14] == 70);
     /* The PC restores every move's PP to its maximum, lowering one above it. */
     assert(box[0x30] == (unsigned char)(38 + 38 * 20 * 3 / 100) && box[0x31] == (unsigned char)(40 + 40 * 20 / 100));
     printf("PASS %s PC delivery: the first empty slot, every move's PP at its maximum, 136 bytes recorded\n", FX5_NAME);
@@ -533,7 +535,8 @@ static void Shaymin(void)
             assert(CpReceive5_Apply(which, &data, dex, incoming, partner, (int)destination, output) == 0);
             Decoded(output, box, destination == CP_RECEIVE_PARTY ? ext : NULL);
             assert(Fx5R16(box + 8) == 492 && box[0x40] == 5 && box[0x15] == 30);
-            assert(box[0x14] == 100 && Fx5R32(box) == spec.pid && Fx5R32(box + 0x0C) == spec.ot);
+            /* Shaymin's base friendship is 100; a player trade sets 70. */
+            assert(box[0x14] == 70 && Fx5R32(box) == spec.pid && Fx5R32(box + 0x0C) == spec.ot);
             assert(memcmp(box + 0x48, incoming + 0x48, 22) == 0 && box[0x41] == spec.nature);
             assert(Bit(dex + seen, 32) && Bit(dex + seen, 33));
             assert(!Bit(dex + shown, 32) && Bit(dex + shown, 33));
