@@ -389,7 +389,6 @@ int CpReceive5_Apply(CpReceive5Game game, const CpAdapterData *data, unsigned ch
                      unsigned char image[220])
 {
     Mon mon;
-    CpPersonal personal;
     unsigned target, method, i;
     uint32_t sum = 0;
     if (!data || !pokedex || !incoming || !partner || !image
@@ -401,9 +400,8 @@ int CpReceive5_Apply(CpReceive5Game game, const CpAdapterData *data, unsigned ch
     /* The battle stats start as 84 zero bytes of ciphertext: their plaintext
      * is the PID's key stream, which fields never written keep. */
     Crypt(mon.ext, EXTENSION, Pid(mon.box));
-    if (Read16(mon.box + PK_FLAGS) != 0 || Recalc(&mon) != 0 || Heal(&mon) != 0
-        || Personal(data, Species(&mon), Form(mon.box), &personal) != 0) return -1;
-    mon.box[PK_FRIENDSHIP] = personal.baseFriendship;
+    if (Read16(mon.box + PK_FLAGS) != 0 || Recalc(&mon) != 0 || Heal(&mon) != 0) return -1;
+    mon.box[PK_FRIENDSHIP] = 70;
     /* The trade registers the Pokémon received, the evolution the species it became. */
     if (CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
     if (Species(&mon) == SPECIES_SHAYMIN && Form(mon.box) == 1) {
