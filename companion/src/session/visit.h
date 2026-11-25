@@ -37,6 +37,7 @@ enum CpVisitError {
     CP_VISIT_ERROR_LOOP = -33,        /* too many exchanges in one visit */
     CP_VISIT_ERROR_TRANSPORT = -34,
     CP_VISIT_ERROR_CANCELLED = -15,
+    CP_VISIT_ERROR_REPLY = -18,       /* malformed or unbound reply, as in the game */
     CP_VISIT_ERROR_ROLLED_BACK = -35, /* an older copy of this save: it may never trade again */
     CP_VISIT_ERROR_CHECKPOINT = -3200 /* minus the checkpoint's own result */
 };

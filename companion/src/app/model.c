@@ -1056,7 +1056,8 @@ static void Finish(CpApp *app, int job, int result)
         model->hasReceived = app->result.hasReceived;
         model->received = app->result.received;
         model->canLeave = app->leaveProven = app->visitCanLeave;
-        model->error = result;
+        /* Match WT_NET_ERROR_ROLLED_BACK without changing the visit's result. */
+        model->error = result == CP_VISIT_ERROR_ROLLED_BACK ? -41 : result;
         if (result == 0) model->recovery = 0;
         if (app->closing) {
             app->closing = 0;
