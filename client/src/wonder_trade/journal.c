@@ -399,7 +399,14 @@ static int TornIdentityKnown(const unsigned char *partial, const unsigned char *
             && PrefixAndZeros(partial + WT_REC_CREDENTIAL, complete + WT_REC_CREDENTIAL, WT_REC_NEXT_COUNTER - WT_REC_CREDENTIAL))) return 0;
     if (partialPhase <= WT_JOURNAL_IDLE && Get(complete + WT_REC_NEXT_COUNTER, 8) == 1 && Zero(complete + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR)
         && (completePhase == WT_JOURNAL_ENROLLING || completePhase == WT_JOURNAL_IDLE)
-        && (Get(partial + WT_REC_NEXT_COUNTER, 8) > 1 || !Zero(partial + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR) || !Zero(partial + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)
+        && (Get(partial + WT_REC_NEXT_COUNTER, 8) > 1
+            /* The first Reconcile after enrollment moves only the cursor, past
+             * ENROLLED. The valid enrolled record stays selected and the server
+             * replays the event; nothing else may have moved. */
+            || (partialPhase == WT_JOURNAL_IDLE && completePhase == WT_JOURNAL_IDLE
+                ? Get(partial + WT_REC_EVENT_CURSOR, 8) > 1 || !Zero(partial + WT_REC_LAST_RECEIPT, WT_REC_OPERATION - WT_REC_LAST_RECEIPT)
+                : !Zero(partial + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR))
+            || !Zero(partial + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)
             || !InitialPacketKnown(partial, 1))) return 0;
     if (Zero(complete + WT_REC_SAVE_ID, 16)) return partialPhase <= WT_JOURNAL_IDLE
         && Get(partial + WT_REC_NEXT_COUNTER, 8) <= 1 && Zero(partial + WT_REC_EVENT_CURSOR, WT_REC_OPERATION - WT_REC_EVENT_CURSOR) && Zero(partial + WT_REC_OPERATION, WT_REC_ENTROPY_FORMAT - WT_REC_OPERATION)

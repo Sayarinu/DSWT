@@ -15,6 +15,7 @@ static const CpGameTable kPlatinum = {
     "itemtool/itemdata/pl_item_data.narc",
     "msgdata/pl_msg.narc",
     "graphic/pl_font.narc",
+    "poketool/waza/pl_waza_tbl.narc",
     412, 408,
     113, 134, 468,
     kPlatinumForms, sizeof kPlatinumForms / sizeof kPlatinumForms[0],
@@ -36,7 +37,8 @@ int CpGame_Open(const CpReader *reader, CpGame *out)
         (result = CpNarc_OpenPath(reader, out->table->evolution, &out->evolution)) != CP_OK ||
         (result = CpNarc_OpenPath(reader, out->table->items, &out->items)) != CP_OK ||
         (result = CpNarc_OpenPath(reader, out->table->messages, &out->messages)) != CP_OK ||
-        (result = CpNarc_OpenPath(reader, out->table->font, &out->font)) != CP_OK)
+        (result = CpNarc_OpenPath(reader, out->table->font, &out->font)) != CP_OK ||
+        (result = CpNarc_OpenPath(reader, out->table->moves, &out->moves)) != CP_OK)
         return result;
     return CP_OK;
 }
@@ -150,5 +152,17 @@ int CpGame_Item(const CpGame *game, uint16_t item, CpItem *out)
     out->preventToss = (uint8_t)(bits >> 5 & 1);
     out->fieldPocket = (uint8_t)(bits >> 7 & 0xF);
     out->holdable = !out->preventToss;
+    return CP_OK;
+}
+
+int CpGame_MovePp(const CpGame *game, uint16_t move, uint8_t *out)
+{
+    /* effect, class, power, type, accuracy, then the PP. */
+    uint8_t record[7];
+    int result;
+
+    if (move == 0) return CP_ERR_NOT_FOUND;
+    if ((result = ReadMember(&game->moves, move, record, sizeof record)) != CP_OK) return result;
+    *out = record[6];
     return CP_OK;
 }

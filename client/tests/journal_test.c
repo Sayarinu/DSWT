@@ -290,6 +290,13 @@ static void IdentityBootstrapAndExhaustion(void)
                 assert(memcmp(saved, banks[1], 4096) == 0);
             }
         }
+        /* Only an enrolled record lets the first sync's cursor through. */
+        assert(WtJournal_Encode(&entry, Hash, banks[0]) == 0);
+        assert(WtJournal_Encode(&bound, Hash, banks[1]) == 0);
+        banks[1][104] = 1; memset(banks[1] + 4092, 0, 4);
+        memcpy(saved, banks[1], 4096); writes = 0;
+        assert(WtJournal_Open(&store, IO()) != 0 && writes == 0);
+        assert(memcmp(saved, banks[1], 4096) == 0);
         assert(WtJournal_Encode(&empty, Hash, banks[0]) == 0);
         assert(WtJournal_Encode(&entry, Hash, banks[1]) == 0);
         banks[1][1952] = 0; banks[1][1953] = 1; banks[1][1965] = 2;
@@ -340,6 +347,57 @@ static void DeliveryByteCuts(void)
     memcpy(next.request + 112, next.incomingDigest, 32); memcpy(next.request + 144, next.appliedDigest, 32);
     next.request[176] = (unsigned char)next.generation;
     CutTransition(&before, &next);
+}
+
+/* Writes `record` to bank 1 with its tag never written, as a cut leaves it. */
+static int OpensTorn(const unsigned char *complete, const unsigned char *record, int *cursor)
+{
+    WtJournal store;
+    WtJournalEntry view;
+    unsigned char saved[2][4096];
+    int result;
+    Reset(); memcpy(banks[0], complete, 4096); memcpy(banks[1], record, 4096); memset(banks[1] + 4092, 0, 4);
+    memcpy(saved, banks, sizeof(saved));
+    result = WtJournal_Open(&store, IO()) == 0;
+    assert(writes == 0 && memcmp(saved, banks, sizeof(saved)) == 0);
+    if (result) {
+        assert(store.selected == 0 && WtJournal_Read(&store, &view) == 0);
+        *cursor = (int)view.eventCursor;
+    }
+    WtJournal_Close(&store);
+    return result;
+}
+
+/* LUNE-896: the first Reconcile after enrollment moves only the event cursor,
+ * 0 to 1. A cut during either bank write opens the record before or after it. */
+static void FirstReconcileCursorCuts(void)
+{
+    WtJournalEntry enrolled, synced;
+    unsigned char complete[4096], record[4096];
+    int cursor = -1;
+    Identity(&enrolled); enrolled.generation = 3;
+    synced = enrolled; synced.generation++; synced.eventCursor = 1;
+    CutTransition(&enrolled, &synced);
+    assert(WtJournal_Encode(&enrolled, Hash, complete) == 0);
+    assert(WtJournal_Encode(&synced, Hash, record) == 0);
+    assert(OpensTorn(complete, record, &cursor) && cursor == 0);
+    /* Anything beyond the cursor moving past ENROLLED is still unknown: a
+     * later cursor, a used counter, receipt or operation, reserved bytes,
+     * another credential, enrollment or save, or a phase before IDLE. */
+    {
+        static const struct { int offset; unsigned char value; } changes[] = {
+            { 104, 2 }, { 105, 1 }, { 111, 128 }, { 96, 2 }, { 112, 10 }, { 127, 10 }, { 128, 9 }, { 143, 9 },
+            { 144, 1 }, { 152, 1 }, { 159, 1 }, { 48, 0x22 }, { 80, 0x13 }, { 32, 0x11 },
+            { 6, WT_JOURNAL_ENROLLING }, { 160, 1 }
+        };
+        size_t i;
+        for (i = 0; i < sizeof(changes) / sizeof(changes[0]); i++) {
+            assert(WtJournal_Encode(&synced, Hash, record) == 0);
+            assert(record[changes[i].offset] != changes[i].value);
+            record[changes[i].offset] = changes[i].value;
+            assert(!OpensTorn(complete, record, &cursor));
+        }
+    }
 }
 
 static void ProgressCannotMoveBackwards(void)
@@ -423,6 +481,7 @@ int main(void)
     ByteCuts(); OwnershipAndStaleness(); UnknownEvidence(); ReadbackAndPoisoning(); ReceiptImagesAndPacketBinding();
     IdentityBootstrapAndExhaustion();
     DeliveryByteCuts();
+    FirstReconcileCursorCuts();
     ProgressCannotMoveBackwards();
     EmptyCannotDiscardActiveEvidence();
     PendingPacketsAreImmutable();
