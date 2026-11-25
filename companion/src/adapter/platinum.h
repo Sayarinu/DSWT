@@ -20,7 +20,16 @@
  * A returned offer is put back exactly as the game does. A matched delivery
  * goes where the game puts it, with the game's effects on the Pokémon, the
  * Pokédex, the records, the Pokétch and the journal (adapter/platinum_receive.h),
- * read from the player's ROM through `data`. */
+ * read from the player's ROM through `data`.
+ *
+ * Between companion sessions the player may load and save the save in the
+ * stock game before an interrupted step could resume, so the save matches
+ * neither inventory the journal recorded. REMOVE and RECEIVE then decide by
+ * the Pokémon itself (its personality and trainer ID): an offer still in the
+ * party exactly as offered is removed from this save, one already gone is
+ * removed; a delivery or returned offer already in the save is applied, one
+ * not there yet is received into this save. Anything less certain fails
+ * closed and changes nothing. */
 struct WtGame {
     CpSaveImage *image;
     const CpFile *file;

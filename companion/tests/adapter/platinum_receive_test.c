@@ -2,7 +2,7 @@
  * placement through WtGame_Inventory, against a fake game-data table and
  * synthetic saves. Expected values are worked out here by hand from the
  * game's formulas, not by calling the code under test. */
-#include "save_fixture.h"
+#include "stock_game.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -633,6 +633,100 @@ static void Placement(void)
     puts("PASS placement: no game data, no matched delivery");
 }
 
+/* ---- LUNE-899: the stock game saved before an applying delivery resumed ---- */
+
+static void AddPartyMember(unsigned char *general, unsigned char *boxes)
+{
+    FxSpec extra = FxDefault(20);
+    unsigned count = Fx32(general + FX_PARTY + 4);
+    (void)boxes;
+    FxPartyMon(&extra, general + FX_PARTY + 8 + count * FX_MON);
+    FxPut32(general + FX_PARTY + 4, count + 1);
+}
+
+static void FillPc(unsigned char *general, unsigned char *boxes)
+{
+    unsigned i;
+    (void)general;
+    for (i = 0; i < 18 * 30; ++i) {
+        FxSpec filler = FxDefault(100 + i);
+        unsigned char canonical[136];
+        FxCanonical(&filler, canonical);
+        assert(WtPokemon_Encode(canonical, boxes + FX_PC + i * FX_BOX_MON) == 0);
+    }
+}
+
+/* A matched delivery prepared and recorded APPLYING, the RECEIVE cut at its
+ * `cut`th write (13: finished, the journal not yet APPLIED). */
+static void Applying(unsigned party, const Spec *spec, WtJournalEntry *journal, unsigned cut)
+{
+    WtJournalEntry entry;
+    Setup(party); Entry(journal, spec);
+    journal->globalCounter = image.globalCounter;
+    journal->generalCounter = image.blockCounters[0]; journal->boxCounter = image.blockCounters[1];
+    assert(WtGame_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, journal, 0) == 0);
+    entry = *journal;
+    file.failWrite = file.writes + cut;
+    assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == (cut <= 12 ? -1 : 0));
+    file.failWrite = 0;
+}
+
+static void StockSave(void)
+{
+    static unsigned char resumed[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    Spec spec = Basic(64, MODEST_ODD_LOW);
+    unsigned char incoming[136];
+    unsigned party, cut, saves, cases = 0;
+    Canonical(&spec, incoming);
+    for (party = 5; party <= 6; ++party) for (cut = 1; cut <= 13; ++cut)
+    for (saves = 1; saves <= 2; ++saves) {
+        unsigned full = saves == 2;
+        Applying(party, &spec, &journal, cut);
+        assert(FxStockPlay(&file, saves, (int)full, NULL));
+        assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+        entry = journal;
+        assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+        assert(WtGame_Inventory(&game, WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+        assert(FxStockCopies(&file, incoming) == 1);
+        /* Cut again before the journal recorded the recovery: done already. */
+        memcpy(resumed, file.bytes, sizeof(resumed));
+        assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+        entry = journal;
+        assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+        assert(WtGame_Inventory(&game, WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+        assert(memcmp(resumed, file.bytes, sizeof(resumed)) == 0 && FxStockCopies(&file, incoming) == 1);
+        ++cases;
+    }
+    printf("PASS stock save while applying: %u cuts of RECEIVE into the party and the PC, one copy each time\n", cases);
+
+    /* Not applied, and the player filled the party: it goes to the PC now,
+     * with the effects of a PC delivery. */
+    Applying(5, &spec, &journal, 1);
+    assert(journal.destination.kind == 1);
+    assert(FxStockPlay(&file, 1, 0, AddPartyMember));
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    entry = journal;
+    assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    assert(entry.destination.kind == 2 && entry.destination.box == 0 && entry.destination.slot == 0);
+    assert(WtGame_Inventory(&game, WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+    assert(FxStockCopies(&file, incoming) == 1 && FxImageCount(&image) == 6);
+    puts("PASS stock save while applying: a party filled since sends it to the PC");
+
+    /* No room left at all: refused, the delivery stays in the journal. */
+    {
+        static unsigned char before[CP_SAVE_FILE_SIZE];
+        Applying(6, &spec, &journal, 1);
+        assert(FxStockPlay(&file, 1, 0, FillPc));
+        assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+        memcpy(before, file.bytes, sizeof(before));
+        entry = journal;
+        assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == -1);
+        assert(memcmp(before, file.bytes, sizeof(before)) == 0 && FxStockCopies(&file, incoming) == 0);
+    }
+    puts("PASS stock save while applying: no room left keeps it in the journal");
+}
+
 int main(void)
 {
     Stats();
@@ -643,6 +737,7 @@ int main(void)
     JournalAndArceus();
     MailAndPc();
     Placement();
+    StockSave();
     puts("PASS platinum receive");
     return 0;
 }

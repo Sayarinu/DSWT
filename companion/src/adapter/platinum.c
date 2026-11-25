@@ -184,6 +184,58 @@ static void Counters(const CpSaveImage *image, WtJournalEntry *entry)
     entry->boxCounter = image->blockCounters[1];
 }
 
+/* A game saved this save since the entry recorded its counters: none is
+ * behind and one has moved on. The patched game settles before it can be
+ * played; the stock game, played between companion sessions, does not. */
+static int Moved(const CpSaveImage *image, const WtJournalEntry *entry)
+{
+    return !Behind(image, entry) && (image->globalCounter != entry->globalCounter
+        || image->blockCounters[0] != entry->generalCounter || image->blockCounters[1] != entry->boxCounter);
+}
+
+/* Where a save holds a Pokémon, by identity: its personality and original
+ * trainer ID, which neither the receive effects nor playing change. exact says
+ * whether its canonical form digests to `digest`. */
+typedef struct Found {
+    int party, exact;
+    unsigned box, slot;
+} Found;
+
+/* 1 found, 0 absent, -1 when a slot cannot be read as the game would, or the
+ * identity is held twice: a recovery decided on it could duplicate or lose. */
+static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], const unsigned char digest[32],
+    Found *found)
+{
+    unsigned char canonical[BOX_MON_SIZE], sum[32];
+    unsigned char *party = Party(image);
+    unsigned box, slot, i, n;
+    int count, matches = 0;
+    Mon mon;
+    if (!party || (count = Count(party, 1)) < 0) return -1;
+    n = (unsigned)count + BOXES * BOX_SLOTS;
+    for (i = 0; i < n; ++i) {
+        const unsigned char *stored;
+        int inParty = i < (unsigned)count;
+        box = inParty ? 0 : (i - (unsigned)count) / BOX_SLOTS;
+        slot = inParty ? i : (i - (unsigned)count) % BOX_SLOTS;
+        stored = inParty ? Slot(party, slot) : BoxMon(image, box, slot);
+        if (!inParty) {
+            ReadMon(stored, 0, &mon);
+            if (!Read16(mon.box + 0x08)) {
+                if (mon.decrypted || mon.mutates) return -1;
+                continue;
+            }
+        }
+        if (WtPokemon_Decode(stored, canonical) != 0) return -1;
+        if (memcmp(canonical, target, 4) != 0 || memcmp(canonical + 0x0C, target + 0x0C, 4) != 0) continue;
+        if (++matches > 1) return -1;
+        Sha(canonical, sizeof(canonical), sum);
+        found->party = inParty; found->box = box; found->slot = slot;
+        found->exact = memcmp(sum, digest, 32) == 0;
+    }
+    return matches;
+}
+
 static int Hash(const CpSaveImage *image, unsigned char digest[32])
 {
     return CpSaveImage_Hash(image, digest) == CP_SAVE_OK ? 0 : -1;
@@ -293,8 +345,8 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
     if (!party) return -1;
     if (prepare) {
         if ((count = Count(party, 1)) < 0) return -1;
-        /* A returned offer that is already back (a restore cut short, then a
-         * stock-game save) must never be added twice: fail closed. The game
+        /* A returned offer that is already back must never be added twice:
+         * fail closed (Back and ReceiveMoved settle that case first). The game
          * has no such check; RECEIVE only follows a PREPARE on the same image. */
         if (entry->deliveryKind == WT_DELIVERY_RETURN && Absent(image, entry->outgoing) != 0) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
@@ -371,6 +423,56 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
     return WtGame_Checkpoint(game);
 }
 
+/* The Pokémon a delivery brings, found by identity, with exact set when it is
+ * the one the delivery records: a returned offer as it left, a matched one as
+ * it was built. */
+static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
+{
+    unsigned char digest[32];
+    if (entry->deliveryKind == WT_DELIVERY_RETURN) {
+        Sha(entry->outgoing, BOX_MON_SIZE, digest);
+        return Locate(game->image, entry->outgoing, digest, found);
+    }
+    return Locate(game->image, entry->incoming, entry->appliedDigest, found);
+}
+
+/* PREPARE_RECEIVE of a returned offer that is already back: a restore that
+ * finished before the companion could record it, then a game save over both
+ * recorded inventories. 1 when it is back and RECEIVE need only checkpoint. */
+static int Back(WtGame *game, const WtJournalEntry *entry)
+{
+    Found found;
+    int where;
+    if (entry->deliveryKind != WT_DELIVERY_RETURN) return 0;
+    where = Delivered(game, entry, &found);
+    /* Back in a save no game wrote since: something else put it there. */
+    return where == 1 && !Moved(game->image, entry) ? -1 : where;
+}
+
+/* RECEIVE when a game saved over both recorded inventories (the stock game,
+ * played before the companion could finish). The patched game never gets
+ * here: it settles before it can be played. Decided by the Pokémon itself:
+ * present, the delivery was applied (or the offer restored) and the save is
+ * only checkpointed; absent, it is prepared again on this save, where
+ * PREPARE_RECEIVE would put it, and applied. Never twice, never dropped. */
+static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int *restore)
+{
+    Found found;
+    int where = Delivered(game, entry, &found);
+    if (where < 0) return -1;
+    if (where == 0) {
+        /* No room (1) fails too: the delivery stays in the journal. */
+        if (BuildReceived(game, entry, backup, 1) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
+        *restore = 0;
+        if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) return -1;
+    } else {
+        *restore = 0;
+        if (WtGame_Checkpoint(game) != 0) return -1;
+    }
+    Counters(game->image, entry);
+    return 0;
+}
+
 static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entry)
 {
     Backup *backup;
@@ -379,11 +481,18 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
     if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
     if (!(backup = Keep(game->image))) return -1;
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
-        result = BuildReceived(game, entry, backup, 1);
+        result = Back(game, entry);
+        if (result == 1) { result = 0; goto done; }
+        if (result == 0) result = BuildReceived(game, entry, backup, 1);
         if (result == 0) result = Hash(game->image, entry->inventoryAfter);
         goto done;
     }
     if (Hash(game->image, digest) != 0) goto done;
+    if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0
+        && Moved(game->image, entry)) {
+        result = ReceiveMoved(game, entry, backup, &restore);
+        goto done;
+    }
     if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
         if (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0) goto done;
     }
@@ -394,6 +503,42 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
 done:
     Release(backup, restore);
     return result;
+}
+
+/* REMOVE when a game saved over both recorded inventories (the stock game,
+ * played before the companion could finish an offer). Nothing was sent: an
+ * escrow's Submit goes out only once the removal is proven. The engine has no
+ * way back from an escrow, and the patched game would finish the removal, so
+ * this does too, decided by the Pokémon itself. Still in the party exactly as
+ * offered: removed from this save, with the escrow recorded again against it
+ * (its slot, image and both inventories), as PREPARE_REMOVE would record it
+ * now. Absent (the game loaded the removal): only a checkpoint. Anything else,
+ * a changed, moved or unreadable copy, fails closed and changes nothing. */
+static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
+{
+    CpSaveImage *image = game->image;
+    unsigned char digest[32];
+    Found found;
+    int where;
+    Sha(entry->outgoing, BOX_MON_SIZE, digest);
+    where = Locate(image, entry->outgoing, digest, &found);
+    if (where < 0) return -1;
+    if (where == 1) {
+        if (!found.party || !found.exact || !Eligible(party, found.slot)) return -1;
+        entry->source.slot = (unsigned char)found.slot;
+        memcpy(entry->original, Slot(party, found.slot), MON_SIZE);
+        Sha(entry->original, MON_SIZE, entry->originalDigest);
+        if (Hash(image, entry->inventoryBefore) != 0) return -1;
+        Remove(party, found.slot);
+        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) return -1;
+        *restore = 0;
+        if (SaveBoth(game, entry->inventoryAfter) != 0) return -1;
+    } else {
+        *restore = 0;
+        if (WtGame_Checkpoint(game) != 0) return -1;
+    }
+    Counters(image, entry);
+    return 0;
 }
 
 static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
@@ -418,6 +563,11 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= CP_SAVE_PARTY_CAPACITY
         || Hash(image, digest) != 0) goto done;
+    if (step == WT_INVENTORY_REMOVE && memcmp(digest, entry->inventoryBefore, 32) != 0
+        && memcmp(digest, entry->inventoryAfter, 32) != 0 && Moved(image, entry)) {
+        result = RemoveMoved(game, entry, party, &restore);
+        goto done;
+    }
     if (step == WT_INVENTORY_REMOVE) {
         if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
             count = Count(party, 1);

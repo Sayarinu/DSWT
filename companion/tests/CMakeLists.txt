@@ -136,3 +136,20 @@ foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
+
+# LUNE-899: a stock-game save between a cut companion step and its resume.
+# The sweeps build the adapter themselves at -O1 (still with the sanitizers):
+# every case hashes and checks whole saves, and must stay within CI's budget.
+set(STOCK_SOURCES "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/platinum_receive.c"
+    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${CLIENT}/src/wonder_trade/pokemon_codec.c")
+add_executable(stock_save_test adapter/stock_save_test.c ${STOCK_SOURCES})
+add_executable(stock_resume_test session/stock_resume_test.c ${STOCK_SOURCES} "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
+foreach(stock_test stock_save_test stock_resume_test)
+    target_include_directories(${stock_test} PRIVATE "${COMPANION_SRC}" "${CLIENT}/include" "${CLIENT}/tests")
+    target_compile_definitions(${stock_test} PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
+    target_compile_options(${stock_test} PRIVATE -O1 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+    target_link_options(${stock_test} PRIVATE -fsanitize=address,undefined)
+    add_test(NAME ${stock_test} COMMAND ${stock_test})
+endforeach()
