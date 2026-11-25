@@ -687,7 +687,7 @@ done:
  * WT_ABANDON_STEP past the one the escrow recorded (the counter the game
  * compares to pick its copies and adds one to at every save). A save holding
  * the removal, and every save a game writes over it, so keeps a counter at
- * least that far ahead; Abandonable takes only a save closer than
+ * least that far ahead; History takes only a save closer than
  * WT_ABANDON_SAVES for one a game wrote over the escrow's save before the
  * removal. A counter too near the top of its range is not moved, and its
  * escrow is never abandoned. Copies already holding the removal are kept. */
@@ -703,26 +703,29 @@ static int SaveRemoval(WtGame *game, const WtJournalEntry *entry, const unsigned
     return CpSaveImage_CommitBoth(image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
 }
 
-/* WT_INVENTORY_ABANDONABLE: 1 when a game saved over the escrow's save before
- * the removal reached what it loaded (neither recorded inventory, counters
- * moved on but none behind, and the counter less than WT_ABANDON_SAVES past
- * the recorded one: the removal would have put it WT_ABANDON_STEP past), and
- * the offer is not in the party exactly as offered, where REMOVE takes it as
- * before. The offer was in that save: wherever play has since put it, it is
- * the player's, and the escrow, never sent, may go. Writes nothing. */
-static int Abandonable(WtGame *game, const WtJournalEntry *entry)
+/* WT_INVENTORY_HISTORY (wonder_trade/engine.h enum WtEscrowHistory): what the
+ * loaded save's counter proves about the escrow's removal, judged against
+ * the counter the escrow recorded before it. The removal (SaveRemoval) wrote
+ * it WT_ABANDON_STEP ahead, so a save that has it, and every save a game
+ * writes over that, stays at least that far ahead; a save a game wrote over
+ * the save before the removal is fewer than WT_ABANDON_SAVES saves past it.
+ * The Pokémon the save holds is never proof either way. Writes nothing. */
+static int History(WtGame *game, const WtJournalEntry *entry)
 {
     CpSaveImage *image = game->image;
     unsigned char digest[32], digests[1][32], *party = Party(image);
+    uint32_t past = (uint32_t)(image->globalCounter - entry->globalCounter);
+    int ranged = entry->globalCounter <= WT_ABANDON_LIMIT && !Behind(image, entry);
     Found found;
-    int where;
-    if (!party || Hash(image, digest) != 0) return -1;
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0 || memcmp(digest, entry->inventoryAfter, 32) == 0
-        || !Moved(image, entry) || entry->globalCounter > WT_ABANDON_LIMIT
-        || (uint32_t)(image->globalCounter - entry->globalCounter) >= WT_ABANDON_SAVES) return 0;
+    if (!party || Hash(image, digest) != 0) return WT_HISTORY_UNPROVEN;
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0) return WT_HISTORY_UNCHANGED;
+    if (ranged && past >= WT_ABANDON_STEP && past - WT_ABANDON_STEP < WT_ABANDON_SAVES) return WT_HISTORY_REMOVED;
+    if (!ranged || past >= WT_ABANDON_SAVES) return WT_HISTORY_UNPROVEN;
+    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return WT_HISTORY_AFTER;
+    if (!Moved(image, entry)) return WT_HISTORY_UNPROVEN;
     Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
-    where = Locate(image, entry->outgoing, digests, 1, &found);
-    return where == 1 && found.party && Eligible(RulesOf(image), party, found.slot) ? 0 : 1;
+    return Locate(image, entry->outgoing, digests, 1, &found) == 1 && found.party
+        && Eligible(RulesOf(image), party, found.slot) ? WT_HISTORY_UNCHANGED : WT_HISTORY_LEFT;
 }
 #else
 #define SaveRemoval(game, entry, expected) SaveBoth(game, expected)
@@ -840,8 +843,8 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     case WT_INVENTORY_PREPARE_REMOVE: case WT_INVENTORY_REMOVE: case WT_INVENTORY_RESTORE:
         return PartyStep(game, step, entry, slot);
 #ifdef WT_ABANDON_UNSENT
-    case WT_INVENTORY_ABANDONABLE:
-        return Abandonable(game, entry);
+    case WT_INVENTORY_HISTORY:
+        return History(game, entry);
 #endif
     default:
         return -1;

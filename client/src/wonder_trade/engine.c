@@ -73,7 +73,7 @@ static int Random(WtEngine *engine, unsigned char *bytes, size_t size)
 #ifdef WT_ABANDON_UNSENT
 /* LUNE-902: which escrows the DS Companion may abandon, proved by the save's
  * history rather than by the Pokémon it holds (wonder_trade/engine.h
- * WT_INVENTORY_ABANDONABLE). Only a companion escrow qualifies, and its
+ * WT_INVENTORY_HISTORY). Only a companion escrow qualifies, and its
  * removal must be one that moved the save counter far ahead, so it must be
  * one only the companion can write:
  * - its Submit's request ID is 4 random bytes, then 12 bytes of SHA-256 over
@@ -228,15 +228,23 @@ static int Resume(WtEngine *engine)
     if (next.phase == WT_JOURNAL_ESCROW) {
 #ifdef WT_ABANDON_UNSENT
         /* The companion only. An escrow whose fence is recorded (Fence) is
-         * being abandoned whatever the save holds now. A companion escrow
-         * the save's history proves was never removed (ABANDONABLE) waits
-         * for WtEngine_Request to fence its counter and abandon it. Every
-         * other escrow is removed exactly as the games remove it. */
+         * being abandoned whatever the save holds now. Otherwise the save's
+         * history decides (WT_INVENTORY_HISTORY): REMOVE runs only on the
+         * escrow's own save, the offer still in the party as offered, or a
+         * save that provably descends from the removal. The companion's own
+         * escrow whose offer left the save through play, before any removal,
+         * waits for WtEngine_Request to fence its counter and abandon it: its
+         * Submit must never go out. Any other escrow then blocks, as does
+         * anything unproved: nothing written, nothing sent. */
         if (next.request[5] == WT_OP_CANCEL) { result = WT_INVENTORY_KEPT; goto done; }
-        if (CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore)) {
-            int abandonable = engine->io.inventory(engine->io.arg, WT_INVENTORY_ABANDONABLE, &next, next.source.slot);
-            if (abandonable == 1) { result = WT_INVENTORY_KEPT; goto done; }
-            if (abandonable != 0) { Block(engine); goto done; }
+        {
+            int companion = CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore);
+            int history = engine->io.inventory(engine->io.arg, WT_INVENTORY_HISTORY, &next, next.source.slot);
+            if (companion && (history == WT_HISTORY_LEFT || history == WT_HISTORY_AFTER)) {
+                result = WT_INVENTORY_KEPT; goto done;
+            }
+            if (history != WT_HISTORY_UNCHANGED && history != WT_HISTORY_REMOVED
+                && !(history == WT_HISTORY_AFTER && !companion)) { Block(engine); goto done; }
         }
         if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;

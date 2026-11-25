@@ -6,7 +6,9 @@
 #include "../adapter/gen5_stock.h"
 
 /* As retail_load.h: LUNE-902's changed offer, as offered or trained. */
-static int changedOffer, savedOver;
+/* goneByPlay: the player released or traded the offer away from a save that
+ * held it, so it may be in neither the save nor the journal. */
+static int changedOffer, savedOver, goneByPlay;
 static unsigned char trainedDigest[32];
 /* LUNE-913: the Day Care's two slots, the Dream World and the GTS: block,
  * party image offset, flag offset and size (adapter/gen5.c Held). */
@@ -86,7 +88,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         assert(memcmp(digest, digests[1], 32) == 0);
     }
     for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) > 1) return 1;
-    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1) return -1;
+    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1 && !(i == 1 && goneByPlay)) return -1;
     return 0;
 }
 

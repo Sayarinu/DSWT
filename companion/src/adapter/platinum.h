@@ -55,10 +55,10 @@
  *
  * LUNE-902: an offer's removal is written with the save counter moved
  * WT_ABANDON_STEP past the one its escrow recorded, and
- * WT_INVENTORY_ABANDONABLE answers 1 only for a save a game wrote over the
- * escrow's save before that removal reached it (wonder_trade/engine.h): then
- * the offer was in what it loaded, and the engine may abandon the escrow. The
- * Pokémon the save holds is never proof of that.
+ * WT_INVENTORY_HISTORY tells by that counter whether a save descends from the
+ * removal or from the save before it (wonder_trade/engine.h): only then may
+ * the engine send the offer as removed, or abandon it as left through play.
+ * The Pokémon the save holds is never proof either way.
  *
  * Known limit: a delivery the stock game loaded already applied and the
  * player then released or traded away looks exactly like one never applied,

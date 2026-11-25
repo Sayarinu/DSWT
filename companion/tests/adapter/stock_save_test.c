@@ -336,6 +336,14 @@ static void TwinInDayCare(unsigned char *general, unsigned char *boxes)
     assert(WtPokemon_Encode(canonical, general + FX_DAYCARE) == 0);
 }
 
+/* Traded away in the stock game: another Pokémon takes its party slot. */
+static void TradeOffered(unsigned char *general, unsigned char *boxes)
+{
+    FxSpec spec = FxDefault(30);
+    (void)boxes;
+    FxPartyMon(&spec, PartySlot(general, OFFERED_SLOT));
+}
+
 static void TwinAndTrain(unsigned char *general, unsigned char *boxes)
 {
     AddTwin(general, boxes);
@@ -364,15 +372,16 @@ static unsigned ExactCopies(void)
 
 /* The removal cut at each write, and after the last; the stock game loads,
  * the player plays (nothing, trains the offer, deposits it, releases it,
- * finds a twin, or both) and saves once or twice. ABANDONABLE writes nothing,
+ * finds a twin, or both) and saves once or twice. WT_INVENTORY_HISTORY writes nothing,
  * and answers 1 only when what the stock game loaded still held the offer;
  * when it did and play moved the offer from where REMOVE takes it, it always
  * answers 1. A save the removal reached, with a twin, is refused by REMOVE
  * too, untouched: never taken for the offer. */
 static void History(void)
 {
-    static const FxStockAction actions[] = { NULL, TrainOffered, DepositOffered, ReleaseOffered, AddTwin, TwinAndTrain,
-                                             TwinInDayCare };
+    static const FxStockAction actions[] = { NULL, TrainOffered, DepositOffered, ReleaseOffered, TradeOffered, AddTwin,
+                                             TwinAndTrain, TwinInDayCare };
+    enum { TWINS = 5 };
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
     unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
@@ -396,13 +405,16 @@ static void History(void)
             Load();
             memcpy(before, file.bytes, sizeof(before));
             entry = journal;
-            answer = Step(WT_INVENTORY_ABANDONABLE, &entry);
+            answer = Step(WT_INVENTORY_HISTORY, &entry);
             assert(memcmp(before, file.bytes, sizeof(before)) == 0);
-            assert(answer == 0 || answer == 1);
-            if (answer) assert(held);
-            if (held && action) assert(answer == 1);
-            abandoned += (unsigned)answer;
-            if (!held && action >= 4) {
+            /* Never abandoned unless what the stock game loaded held the
+             * offer; never taken as removed when it did. */
+            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
+            else assert(answer == WT_HISTORY_REMOVED);
+            /* Once play moved, released or traded it, it is left: never sent. */
+            if (held && action) assert(answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
+            abandoned += answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER;
+            if (!held && action >= TWINS) {
                 Load();
                 entry = journal;
                 assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
@@ -412,7 +424,7 @@ static void History(void)
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);
-    printf("PASS stock save after a cut removal: %u cuts x 2 stock plays x 7 plays, abandonable %u times, "
+    printf("PASS stock save after a cut removal: %u cuts x 2 stock plays x 8 plays, abandonable %u times, "
            "only from a save that held the offer; %u twins after the removal refused\n", writes + 1, abandoned, refused);
 }
 

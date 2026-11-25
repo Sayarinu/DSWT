@@ -58,11 +58,15 @@ enum { PARTY_BYTES = CP_ADAPTER_PARTY_SIZE, PC_BYTES = FX_PC_SPAN };
  * the save and nothing sent (IDLE), or sent and gone from the save (QUEUED).
  * In offer-twin the stock game also brings in a twin (the offer's identity,
  * another Pokémon) and trains the offer if it holds it: a save the removal
- * reached must then stay blocked, untouched, with the offer in the journal. */
+ * reached must then stay blocked, untouched, with the offer in the journal.
+ * In offer-released and offer-traded the player releases the offer, or trades
+ * it away, in the stock game: from a save that still held it the offer must
+ * never be sent (the escrow is abandoned, nothing sent); from one the removal
+ * reached it is sent as before. */
 enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, MUSICAL, OFFER_TRAINED,
-    OFFER_DEPOSITED, ABANDON, OFFER_TWIN, SCENARIOS };
+    OFFER_DEPOSITED, ABANDON, OFFER_TWIN, OFFER_RELEASED, OFFER_TRADED, SCENARIOS };
 static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint", "musical",
-    "offer-trained", "offer-deposited", "abandon", "offer-twin" };
+    "offer-trained", "offer-deposited", "abandon", "offer-twin", "offer-released", "offer-traded" };
 static const char *steps[] = { "checkpoint/network", "prepare-remove", "remove", "verify-removed",
     "prepare-receive", "receive", "verify-received", "restore", "prepare-restore" };
 enum CutKind { BEFORE_WRITE, LOST_WRITE, TORN_PREFIX, TAIL_FIRST, AFTER_WRITE, BEFORE_SYNC, AFTER_SYNC, CUT_KINDS };
@@ -111,7 +115,14 @@ static char path[sizeof(CP_FAULT_BINARY_DIR) + 32];
 /* The stock game changes the offered Pokémon in these scenarios. */
 static int Changing(void)
 {
-    return scenario == OFFER_TRAINED || scenario == OFFER_DEPOSITED || scenario == ABANDON || scenario == OFFER_TWIN;
+    return scenario == OFFER_TRAINED || scenario == OFFER_DEPOSITED || scenario == ABANDON || scenario == OFFER_TWIN
+        || scenario == OFFER_RELEASED || scenario == OFFER_TRADED;
+}
+
+/* The offer leaves the save through play in these scenarios. */
+static int Leaving(void)
+{
+    return scenario == OFFER_RELEASED || scenario == OFFER_TRADED;
 }
 
 /* The offer as offered (canonical), and as the stock game trains it. */
@@ -168,13 +179,26 @@ static void ChangeOffer(unsigned char *ram)
         if (memcmp(canonical, offerImage, 136) == 0) break;
     }
     if (slot == count) return;
-    if (scenario != OFFER_DEPOSITED) { assert(WtPokemon_Encode(trainedImage, party + slot * CHANGE_MON) == 0); return; }
+    if (scenario == OFFER_TRADED) {
+#ifdef FX_GEN5
+        Fx5Spec spec = Fx5Default(30);
+        Fx5PartyMon(&spec, party + slot * CHANGE_MON);
+#else
+        FxSpec spec = FxDefault(30);
+        FxPartyMon(&spec, party + slot * CHANGE_MON);
+#endif
+        return;
+    }
+    if (scenario != OFFER_DEPOSITED && scenario != OFFER_RELEASED) {
+        assert(WtPokemon_Encode(trainedImage, party + slot * CHANGE_MON) == 0);
+        return;
+    }
     for (i = 0; i < CHANGE_PC_SLOTS; ++i) {
         assert(WtPokemon_Decode(ChangePc(ram, i), canonical) == 0);
         if (!(canonical[8] | canonical[9])) break;
     }
     assert(i < CHANGE_PC_SLOTS && count > 1);
-    memcpy(ChangePc(ram, i), party + slot * CHANGE_MON, 136);
+    if (scenario != OFFER_RELEASED) memcpy(ChangePc(ram, i), party + slot * CHANGE_MON, 136);
     for (; slot + 1 < count; ++slot) memcpy(party + slot * CHANGE_MON, party + (slot + 1) * CHANGE_MON, CHANGE_MON);
     ChangeEmpty(party + slot * CHANGE_MON);
     FxPut32(ChangeParty(ram) + 4, count - 1);
@@ -795,12 +819,14 @@ static void Resume(void)
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
         offerHeld = OfferHeld(live);
+        goneByPlay = Leaving() && offerHeld;
         StockGameSave(NULL);
         load = LOAD(&image, &file);
     }
     /* LUNE-902: the player always plays the stock game after the cut. */
     else if (Changing() && load == CP_SAVE_OK) {
         offerHeld = OfferHeld(live);
+        goneByPlay = Leaving() && offerHeld;
         StockGameSave(NULL);
         load = LOAD(&image, &file);
     }
@@ -889,6 +915,8 @@ static void Resume(void)
         WtJournalEntry final = ReadEntry();
         int ownership = Ownership(live, &final, digests, stockPlayed);
         if (ownership > 0 || !Unsent(&final)) Finish(DUPLICATE);
+        /* Released or traded away from a save that held it: never sent. */
+        if (goneByPlay && (final.phase != WT_JOURNAL_IDLE || server.state != WT_TRADE_NONE)) Finish(DUPLICATE);
         if (ownership < 0) Finish(LOST);
         if (result != 0) Finish(STUCK);
     }
@@ -950,7 +978,7 @@ static void Setup(void)
 #endif
     Trained(offerImage, trainedImage, 100); Trained(offerImage, twinImage, 300);
     FxSha(trainedImage, 136, trainedDigest);
-    changedOffer = Changing(); savedOver = 0; stockPlayed = 0; refuseRemove = 0;
+    changedOffer = Changing(); savedOver = 0; goneByPlay = 0; stockPlayed = 0; refuseRemove = 0;
     OpenBytes(fixture.bytes); Bind();
     assert(LOAD(&image, &file) == CP_SAVE_OK);
     if (scenario != PROVISION && scenario != MUSICAL) Provision();
@@ -1020,7 +1048,7 @@ static void Setup(void)
 static void Run(void)
 {
     int offer = scenario == OFFER || scenario == REJECT_RESTORE || scenario == OFFER_TRAINED
-        || scenario == OFFER_DEPOSITED || scenario == OFFER_TWIN;
+        || scenario == OFFER_DEPOSITED || scenario == OFFER_TWIN || Leaving();
 #ifdef FX_GEN5
     if (scenario == MUSICAL) {
         assert(CpGen5_ReleaseMusical(&game) == 0);
@@ -1070,7 +1098,7 @@ int main(void)
         assert(!full || journalByteTears == expectedJournalByteTears);
         failures += distinct - tally[RECOVERED];
         if (scenario == OFFER || scenario == REJECT_RESTORE || scenario == OFFER_TRAINED || scenario == OFFER_DEPOSITED
-            || scenario == OFFER_TWIN) {
+            || scenario == OFFER_TWIN || Leaving()) {
             unsigned remove = (1u << WT_INVENTORY_PREPARE_REMOVE) | (1u << WT_INVENTORY_REMOVE)
                 | (1u << WT_INVENTORY_VERIFY_REMOVED);
             assert((stepMask & remove) == remove);

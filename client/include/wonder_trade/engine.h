@@ -18,20 +18,18 @@ enum WtInventoryStep {
      * unchanged since the escrow), 1 when the save has changed since. */
     WT_INVENTORY_PREPARE_RESTORE
 #ifdef WT_ABANDON_UNSENT
-    /* LUNE-902, DS Companion builds only: 1 when the loaded save provably
-     * descends from the escrow's save before its removal (a game saved over
-     * it, and the removal, which moves the save counter WT_ABANDON_STEP ahead,
-     * never reached what it loaded) and REMOVE would not remove the offer
-     * from it as offered; 0 otherwise, -1 when it cannot tell. Writes nothing. */
-    , WT_INVENTORY_ABANDONABLE
+    /* LUNE-902, DS Companion builds only: what the loaded save's history
+     * proves about an escrow's removal (enum WtEscrowHistory). Writes nothing. */
+    , WT_INVENTORY_HISTORY
 #endif
 };
 
 /* LUNE-902, DS Companion builds only (WT_ABANDON_UNSENT): Settle's and
  * Resume's answer for an escrow the companion abandons. Only the companion's
- * own escrow qualifies (engine.c CompanionEscrow), when ABANDONABLE proves
- * from the save's counters that its removal never reached the save a game
- * loaded and saved over: the offer was still there, as play then left it.
+ * own escrow qualifies (engine.c CompanionEscrow), when WT_INVENTORY_HISTORY
+ * proves from the save's counters that its removal never reached the save a
+ * game loaded and saved over: the offer was there, and play has since
+ * changed, moved, released or traded it; sending it now could duplicate it.
  * The engine fences the escrow's counter with a counted Cancel of a trade
  * nobody holds, recorded in the journal first (WtEngine_Request), and returns
  * to IDLE without touching the save. The games never define
@@ -40,11 +38,32 @@ enum WtInventoryStep {
 #ifdef WT_ABANDON_UNSENT
 /* How far the companion's removal moves the save counter ahead of the one the
  * escrow recorded, and the most a game may have saved over the save before
- * the removal for ABANDONABLE to accept it. Counters near the top of their
+ * the removal for WT_INVENTORY_HISTORY to accept it. Counters near the top of their
  * range are never moved (WT_ABANDON_LIMIT), and such escrows never abandoned. */
 #define WT_ABANDON_STEP UINT32_C(0x100000)
 #define WT_ABANDON_SAVES UINT32_C(0x80000)
 #define WT_ABANDON_LIMIT (UINT32_C(0xFFFFFFFF) - 4 * WT_ABANDON_STEP)
+/* WT_INVENTORY_HISTORY's answers. The companion's removal writes the save
+ * counter (the one the game compares to pick its copies and adds one to at
+ * every save) WT_ABANDON_STEP past the one the escrow recorded, so the
+ * counter tells which save a game saved over. */
+enum WtEscrowHistory {
+    /* Neither proved (an older copy, a counter between the two ranges, near
+     * the top of its range, or a save unchanged but neither inventory). */
+    WT_HISTORY_UNPROVEN = -1,
+    /* The escrow's own save, or one a game saved over it before the removal
+     * with the offer still in the party exactly as offered: REMOVE takes it. */
+    WT_HISTORY_UNCHANGED = 0,
+    /* A game saved over the save before the removal, and the offer is not
+     * where REMOVE takes it: play changed, moved, released or traded it. */
+    WT_HISTORY_LEFT = 1,
+    /* The save descends from the removal: REMOVE records it as removed. */
+    WT_HISTORY_REMOVED = 2,
+    /* Exactly the recorded removal, without the counter the companion's own
+     * removal writes: another writer's (a game's, an older companion's). */
+    WT_HISTORY_AFTER = 3
+};
+
 /* An ESCROW entry's true inventoryBefore (masked in the journal for the
  * companion's own escrows): 1 for the companion's escrow, 0 for any other,
  * -1 on bad arguments. For tests and tools. */

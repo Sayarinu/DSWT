@@ -26,7 +26,7 @@
  *   the GTS deposit, Black 2/White 2's DNA Splicers partner) with the
  *   identity a step decides by fails that step closed (LUNE-913);
  * - LUNE-902: the removal moves the save count WT_ABANDON_STEP ahead, and
- *   WT_INVENTORY_ABANDONABLE is decided by it, as adapter/platinum.h says.
+ *   WT_INVENTORY_HISTORY is decided by it, as adapter/platinum.h says.
  *
  * The journal banks lie in the musical distribution save
  * (save/musical_area.h), released before the journal's first write. */

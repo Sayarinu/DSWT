@@ -123,7 +123,9 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
  * twin that only shares its identity; once the stock game saved over an
  * escrow (savedOver), the save is neither of its inventories. The journal
  * keeps the companion's escrow inventoryBefore masked (engine.c). */
-static int changedOffer, savedOver;
+/* goneByPlay: the player released or traded the offer away from a save that
+ * held it, so it may be in neither the save nor the journal. */
+static int changedOffer, savedOver, goneByPlay;
 static unsigned char trainedDigest[32];
 
 /* Journal images retained after a save transition are replay evidence, not
@@ -193,7 +195,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         assert(memcmp(digest, digests[1], 32) == 0);
     }
     for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) > 1) return 1;
-    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1) return -1;
+    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1 && !(i == 1 && goneByPlay)) return -1;
     return 0;
 }
 
