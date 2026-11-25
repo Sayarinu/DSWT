@@ -662,7 +662,7 @@ int CpGen5_CanHold(const WtGame *game, const unsigned char pokemon[WT_POKEMON_SI
     limits.forms = rules->receive == CP_RECEIVE_BLACK2_WHITE2 ? FormsBlack2White2 : FormsBlackWhite;
     limits.holdable = Holdable; limits.arg = (void *)game;
     /* Black/White's Pokédex would write outside its block for language 0. */
-    if (pokemon[0x17] == 0) return 0;
+    if (rules->receive == CP_RECEIVE_BLACK_WHITE && pokemon[0x17] == 0) return 0;
     return WtPokemon_Fits(pokemon, &limits);
 }
 

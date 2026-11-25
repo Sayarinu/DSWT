@@ -9,7 +9,8 @@
  * save, as the patched game's ReceiveEffects (client/src/wonder_trade/bw/ and
  * bw2/ game_save.c) applies it with the game's own code (aletheia arm9
  * poke_tool.c, shinka_check.c, zukan_save.c; pokebw2 src/system poke_tool.c,
- * evolution_check.c, pokedex_savedata.c):
+ * evolution_check.c, pokedex_savedata.c), with the Pokédex registered as the
+ * retail games' own trades register it:
  * - the party Pokémon is built over 84 zero bytes of encrypted battle stats:
  *   its stats are calculated, it is healed, and its friendship becomes its
  *   species' base;
@@ -18,8 +19,13 @@
  *   all but Kadabra; a trade holding an item drops the item; an evolution
  *   takes its new ability and gender, and the species' name (in the
  *   cartridge's language) when it has no nickname, then its stats again;
- * - it is registered in the Pokédex: Black/White register it as caught, with
- *   its language; Black 2/White 2's patched game registers it as seen only;
+ * - it is registered in the Pokédex as caught, with its language, before the
+ *   evolution check, and once more as the species it evolved into: the
+ *   retail trades' ZUKAN_SAVE_RegisterCaught and addPkmToDex (aletheia ov119
+ *   pokemontrade_save.c and ov195 shinka_demo.c; pokebw2 pokemontrade_save.c
+ *   and evolution_demo.c). The patched clients register only the final
+ *   species, and Black 2/White 2's only as seen (LUNE-907): those are fixed
+ *   in the clients, and the companion already follows retail;
  * - a Pokémon going to the PC has every move's PP restored.
  * Every effect writes the bytes that code writes, so the companion's save and
  * the game's agree byte for byte. */
@@ -48,7 +54,8 @@ unsigned CpReceive5_Forms(CpReceive5Game, unsigned species);
 /* Pieces of the above, for tests. */
 /* An empty party Pokémon (POKE_TOOL_ClearPartyParam): zeros encrypted with seed 0. */
 void CpReceive5_Empty(unsigned char image[220]);
-/* ZUKAN_SAVE_RegisterCaught / PokeDex_RegistPkm on a canonical PK5. */
+/* ZUKAN_SAVE_RegisterCaught / addPkmToDex on a canonical PK5. -1 for
+ * Black/White and language 0, where the game would write outside the block. */
 int CpReceive5_Register(CpReceive5Game, const CpAdapterData *, unsigned char *pokedex, const unsigned char box[136]);
 
 #endif

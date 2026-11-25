@@ -372,20 +372,17 @@ static void PartyDelivery(void)
     /* Male (pid 0x78 >= ratio 127? no: 0x78 = 120 < 127, female), not shiny. */
     assert(Bit(dex + 0x5C + 0x54, 499) && !Bit(dex + 0x5C, 499));
     assert(Bit(dex + 0x1AC + 0x54, 499));
-    if (B2W2) {
-        assert(!Bit(dex + 0x008, 499));
-    } else {
-        /* Caught; languages are kept for the first 493 species only. */
-        assert(Bit(dex + 0x008, 499) && !Bit(dex + 0x320, (2 - 1) + 499 * 7));
-    }
+    /* Caught, as the retail trades register it; languages are kept for the
+     * first 493 species only. */
+    assert(Bit(dex + 0x008, 499) && !Bit(dex + (B2W2 ? 0x328 : 0x320), (2 - 1) + 499 * 7));
     assert(WtGame_CanLeave(&game, (entry.phase = WT_JOURNAL_APPLIED, &entry)) == 1);
     {
         WtReceivedPokemon received;
         assert(WtGame_Received(&entry, &received) == 0 && received.species == 500 && received.gender == 1);
         assert(received.nickname[0] == 'N' && received.originalTrainer[0] == 'T');
     }
-    printf("PASS %s party delivery: level, stats, heal, friendship and the Pokédex (%s) as the game's\n", FX5_NAME,
-           B2W2 ? "seen only" : "caught, seen and language");
+    printf("PASS %s party delivery: level, stats, heal, friendship and the Pokédex (caught, as retail) as the game's\n",
+           FX5_NAME);
 }
 
 static void BoxDelivery(void)
@@ -436,6 +433,15 @@ static void Evolutions(void)
         && Fx5R16(box + 0x48 + 20) == 0xFFFF && !(Fx5R32(box + 0x38) >> 31));
     /* Ability: PID bit 0 (origin before White) picks the second ability. */
     assert(box[0x15] == ((0x12345678u & 1) ? 39 : 28));
+    /* The trade registers Kadabra, the evolution Alakazam: both caught, with
+     * the language, as the retail trade and evolution scenes register them. */
+    {
+        const unsigned char *dex = CpSaveImage_Block(&image, FX5_POKEDEX);
+        unsigned languages = B2W2 ? 0x328 : 0x320;
+        assert(Bit(dex + 0x008, 63) && Bit(dex + 0x008, 64));
+        assert(Bit(dex + languages, 1 + 63 * 7) && Bit(dex + languages, 1 + 64 * 7));
+        assert((Bit(dex + 0x5C, 63) || Bit(dex + 0x5C + 0x54, 63)) && (Bit(dex + 0x5C, 64) || Bit(dex + 0x5C + 0x54, 64)));
+    }
     assert(Fx5R16(ext + 8) == Fx5R16(ext + 6) && box[0x14] == 70);
     /* Haunter holding an Everstone stays; Onix drops its Metal Coat as Steelix
      * and keeps its nickname. */
@@ -511,10 +517,22 @@ static void Pokedex(void)
     spec = Basic(25); spec.language = 7;
     Canonical(&spec, box);
     assert(CpReceive5_Register(which, &data, dex, box) == 0);
-    assert(Bit(dex + (B2W2 ? 0x328 : 0x320), 5 + 24 * 7) == !B2W2 && Bit(dex + 0x008, 24) == !B2W2);
+    assert(Bit(dex + (B2W2 ? 0x328 : 0x320), 5 + 24 * 7) && Bit(dex + 0x008, 24));
+    /* Language 0: Black/White refuse it (their game would write outside the
+     * block); Black 2/White 2 skip the language and register the rest. */
+    spec = Basic(26); spec.language = 0;
+    Canonical(&spec, box);
+    if (B2W2) {
+        unsigned i, any = 0;
+        assert(CpReceive5_Register(which, &data, dex, box) == 0 && Bit(dex + 0x008, 25));
+        for (i = 0; i < 7; ++i) any |= Bit(dex + 0x328, i + 25 * 7);
+        assert(!any);
+    } else {
+        assert(CpReceive5_Register(which, &data, dex, box) == -1);
+    }
     /* Only Black 2/White 2 know Kyurem's forms. */
     assert(CpReceive5_Forms(which, 646) == (B2W2 ? 3u : 1u) && CpReceive5_Forms(which, 493) == 1);
-    printf("PASS %s Pokédex: seen, shown, form and Spinda bits%s\n", FX5_NAME, B2W2 ? "" : ", language and caught");
+    printf("PASS %s Pokédex: seen, shown, form, Spinda, language and caught bits as the retail trades set them\n", FX5_NAME);
 }
 
 static void Returned(void)
@@ -591,7 +609,7 @@ static void Holding(void)
     spec.species = 650; Canonical(&spec, box); assert(!WtGame_CanHold(&game, box));
     spec = Basic(500); spec.item = B2W2 ? 639 : 627; Canonical(&spec, box); assert(!WtGame_CanHold(&game, box));
     spec = Basic(500); spec.item = 300; Canonical(&spec, box); assert(!WtGame_CanHold(&game, box));
-    spec = Basic(500); spec.language = 0; Canonical(&spec, box); assert(!WtGame_CanHold(&game, box));
+    spec = Basic(500); spec.language = 0; Canonical(&spec, box); assert(WtGame_CanHold(&game, box) == B2W2);
     spec = Basic(493); spec.form = 1; Canonical(&spec, box); assert(!WtGame_CanHold(&game, box));
     spec = Basic(646); spec.form = 2; Canonical(&spec, box); assert(WtGame_CanHold(&game, box) == B2W2);
     spec = Basic(479); spec.form = 5; Canonical(&spec, box); assert(WtGame_CanHold(&game, box));

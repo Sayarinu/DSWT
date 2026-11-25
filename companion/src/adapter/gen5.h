@@ -13,7 +13,8 @@
  *   offer; the PC (24 trays of 30, blocks 1..24) and the Battle Box (block
  *   0x31) must then hold no copy of it;
  * - a delivery goes to the end of the party, or the first empty PC slot,
- *   with the receive effects of adapter/gen5_receive.h;
+ *   with the receive effects of adapter/gen5_receive.h (the Pokédex as the
+ *   retail games' trades register it);
  * - an older save is judged by its one save count, which the journal records
  *   in all three counters;
  * - between companion sessions the stock game may have saved: REMOVE and

@@ -350,12 +350,13 @@ int CpReceive5_Register(CpReceive5Game game, const CpAdapterData *data, unsigned
             for (i = 0; i < 2; ++i) SetBit(forms, base + i);
         else SetBit(forms, base + (form < count ? form : 0));
     }
-    if (game == CP_RECEIVE_BLACK_WHITE) {
-        /* RegisterCaught also records the language and the catch. Language 0
-         * would make the game write outside the block: refused. */
+    {
+        /* The language and the catch. Black/White's ZUKAN_SAVE_SetLanguageFlag
+         * has no check for language 0 and would write outside the block:
+         * refused; Black 2/White 2's PokeDex_SetLanguageSeen skips it. */
         unsigned language = box[PK_LANGUAGE];
-        if (language == 0) return -1;
-        if (language <= 8 && language != 6 && species <= 493) {
+        if (language == 0 && game == CP_RECEIVE_BLACK_WHITE) return -1;
+        if (language != 0 && language <= 8 && language != 6 && species <= 493) {
             if (language >= 7) --language;
             SetBit(pokedex + dex->languages, (language - 1) + (species - 1) * 7);
         }
@@ -386,12 +387,14 @@ int CpReceive5_Apply(CpReceive5Game game, const CpAdapterData *data, unsigned ch
     if (Read16(mon.box + PK_FLAGS) != 0 || Recalc(&mon) != 0 || Heal(&mon) != 0
         || Personal(data, Species(&mon), Form(mon.box), &personal) != 0) return -1;
     mon.box[PK_FRIENDSHIP] = personal.baseFriendship;
+    /* The trade registers the Pokémon received, the evolution the species it became. */
+    if (CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
     if (TradeTarget(&mon, partner, &target, &method) != 0) return -1;
     if (target) {
         if (ChangeSpecies(&mon, target) != 0) return -1;
         if (method == EVO_TRADE_ITEM) Write16(mon.box + PK_ITEM, 0);
+        if (CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
     }
-    if (CpReceive5_Register(game, data, pokedex, mon.box) != 0) return -1;
     if (destination == CP_RECEIVE_BOX && RestorePp(&mon) != 0) return -1;
     for (i = 8; i < BOX; i += 2) sum += Read16(mon.box + i);
     Write16(mon.box + PK_CHECKSUM, sum & 0xFFFF);
