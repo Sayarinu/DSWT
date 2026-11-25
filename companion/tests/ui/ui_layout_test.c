@@ -85,12 +85,82 @@ static void TestWrap(void)
         }
 }
 
+/* LUNE-875: the Wi-Fi settings' messages, with the longest network names,
+ * fit where they are drawn in every language: under the network list and the
+ * password field (the three-line box), alone (box or full window) and on the
+ * failure page above its support code. */
+static void TestWifiMessages(void)
+{
+    static const char *const names[] = {
+        "Home", "12345678901234567890123456789012", "A network name with many words",
+        "\xe3\x83\x9d\xe3\x82\xb1\xe3\x83\xa2\xe3\x83\xb3\xe3\x82\xbb\xe3\x83\xb3\xe3\x82\xbf\xe3\x83\xbc 5G",
+    };
+    static const int listed[] = { Companion_Text_WifiScanning, Companion_Text_WifiChoose, Companion_Text_WifiChooseSaved,
+        Companion_Text_WifiSavedFailed, Companion_Text_WifiReasonTkip, Companion_Text_WifiReasonEnterprise,
+        Companion_Text_WifiReasonDsi };
+    static const int typed[] = { Companion_Text_WifiPassword, Companion_Text_WifiKeyRuleWpa, Companion_Text_WifiKeyRuleWep };
+    static const int alone[] = { Companion_Text_WifiJoinedSaved, Companion_Text_WifiJoinedOpen,
+        Companion_Text_WifiJoinedUnsaved, Companion_Text_WifiForgetConfirm, Companion_Text_WifiConnecting,
+        Companion_Text_WifiReasonTkip, Companion_Text_WifiReasonEnterprise, Companion_Text_WifiReasonDsi };
+    static const int failures[] = { Companion_Text_WifiFailed, Companion_Text_WifiNotFound,
+        Companion_Text_WifiNoAddress, Companion_Text_WifiTimedOut, Companion_Text_WifiForgetFailed };
+    static CpUiModel model;
+    CpUi ui;
+    char message[CP_RENDER_MESSAGE_MAX], wrapped[CP_RENDER_MESSAGE_MAX];
+    unsigned l, n, i;
+    for (l = 0; l < sizeof(kLanguages); l++)
+        for (n = 0; n < sizeof(names) / sizeof(*names); n++) {
+            memset(&model, 0, sizeof(model));
+            memset(&ui, 0, sizeof(ui));
+            model.systemLanguage = CpUi_GameLanguage(kLanguages[l], Companion_Language_en_US);
+            model.loadMessage = -1;
+            model.wifi.saved = 1;
+            snprintf(model.wifi.savedSsid, sizeof(model.wifi.savedSsid), "%s", names[n]);
+            snprintf(ui.wifiSsid, sizeof(ui.wifiSsid), "%s", names[n]);
+            ui.wifiReturn = CP_UI_SAVE_PICKER;
+            ui.state = CP_UI_WIFI_LIST;
+            for (i = 0; i < sizeof(listed) / sizeof(*listed); i++) {
+                ui.message = listed[i];
+                CpRender_Message(&ui, &model, message, sizeof(message));
+                assert(CpRender_MessageLines(message, NULL) <= WINDOW_H / 16);
+            }
+            ui.state = CP_UI_WIFI_KEYBOARD;
+            for (i = 0; i < sizeof(typed) / sizeof(*typed); i++) {
+                ui.message = typed[i];
+                CpRender_Message(&ui, &model, message, sizeof(message));
+                assert(CpRender_MessageLines(message, NULL) <= WINDOW_H / 16);
+            }
+            /* The plain-text notice: two lines under the password field. */
+            assert(CpText_Wrap(wrapped, sizeof(wrapped), Companion_Text[Companion_Text_WifiPasswordWarning]
+                [model.systemLanguage], 216) <= 2);
+            for (i = 0; i < sizeof(alone) / sizeof(*alone); i++) {
+                ui.state = alone[i] == Companion_Text_WifiForgetConfirm ? CP_UI_WIFI_FORGET
+                    : alone[i] == Companion_Text_WifiConnecting ? CP_UI_WIFI_JOINING : CP_UI_WIFI_JOINED;
+                if (alone[i] >= Companion_Text_WifiReasonTkip && alone[i] <= Companion_Text_WifiReasonDsi) {
+                    ui.state = CP_UI_MESSAGE;
+                    ui.messageReturn = CP_UI_WIFI_LIST;
+                }
+                ui.message = alone[i];
+                CpRender_Draw(&ui, &model, &sTop, &sBottom);
+                ExpectInside(&ui, &model, names[n], kLanguages[l]);
+            }
+            /* The failure page keeps its explanation above the code (line 7). */
+            ui.state = CP_UI_WIFI_FAILED;
+            for (i = 0; i < sizeof(failures) / sizeof(*failures); i++) {
+                ui.message = failures[i];
+                CpRender_Message(&ui, &model, message, sizeof(message));
+                assert(CpText_Wrap(wrapped, sizeof(wrapped), message, BODY_W - 8) <= 6);
+            }
+        }
+}
+
 int main(void)
 {
     static CpUiModel model;
     CpUi ui;
     unsigned v, l, n;
     TestWrap();
+    TestWifiMessages();
     for (l = 0; l < sizeof(kLanguages); l++) {
         for (v = 0; v < sizeof(kVersions); v++) {
             memset(&model, 0, sizeof(model));

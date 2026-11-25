@@ -16,6 +16,10 @@
 typedef struct Fake {
     CpUiModel model;
     int scans, loads, lastLoad, unloads, connects, trades, lastTrade, collects, lastCancel, closes, updates;
+    /* Wi-Fi settings (LUNE-875). */
+    int wifiScans, joins, forgets, leaves;
+    unsigned lastSecurity;
+    char lastSsid[CP_WIFI_SSID_MAX + 1], lastKey[CP_WIFI_KEY_MAX + 1];
 } Fake;
 
 static void Scan(void *c) { ((Fake *)c)->scans++; }
@@ -26,7 +30,39 @@ static void Trade(void *c, int slot) { ((Fake *)c)->trades++; ((Fake *)c)->lastT
 static void Collect(void *c, int cancel) { ((Fake *)c)->collects++; ((Fake *)c)->lastCancel = cancel; }
 static void Close(void *c) { ((Fake *)c)->closes++; }
 static void Update(void *c) { ((Fake *)c)->updates++; }
-static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update };
+static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update, NULL, NULL, NULL, NULL };
+
+static void WifiScan(void *c)
+{
+    Fake *fake = c;
+    fake->wifiScans++;
+    fake->model.wifi.state = CP_UI_NETWORK_SCANNING;
+    fake->model.wifi.count = 0;
+}
+static void WifiJoin(void *c, const char *ssid, unsigned security, const char *key)
+{
+    Fake *fake = c;
+    fake->joins++;
+    fake->lastSecurity = security;
+    snprintf(fake->lastSsid, sizeof(fake->lastSsid), "%s", ssid);
+    snprintf(fake->lastKey, sizeof(fake->lastKey), "%s", key);
+    fake->model.wifi.state = CP_UI_NETWORK_JOINING;
+}
+/* forgetFails: the card refuses the delete, as the model reports it. */
+static int sForgetFails;
+static void WifiForget(void *c)
+{
+    Fake *fake = c;
+    fake->forgets++;
+    fake->model.wifi.forgetFailed = sForgetFails;
+    if (sForgetFails) fake->model.wifi.code = -29;
+    else fake->model.wifi.saved = 0;
+}
+static void WifiLeave(void *c) { ((Fake *)c)->leaves++; ((Fake *)c)->model.wifi.state = CP_UI_NETWORK_IDLE; }
+static const CpUiOps kWifiOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
+    WifiScan, WifiJoin, WifiForget, WifiLeave };
+/* Reset gives the fake model Wi-Fi settings. */
+static int sWithWifi;
 
 static Fake sFake;
 static CpUi sUi;
@@ -35,12 +71,13 @@ static const CpUiInput kNone;
 static CpUiModel *Reset(void)
 {
     memset(&sFake, 0, sizeof(sFake));
-    sFake.model.ops = &kOps;
+    sFake.model.ops = sWithWifi ? &kWifiOps : &kOps;
     sFake.model.context = &sFake;
     sFake.model.loadMessage = -1;
     sFake.model.canLeave = 1;
     sFake.model.tradePhase = WT_JOURNAL_IDLE;
     sFake.model.systemLanguage = Companion_Language_de_DE;
+    sFake.model.wifi.wpa2 = 1;
     return &sFake.model;
 }
 
@@ -562,6 +599,340 @@ static void TestSaveCursorSurvivesThePicker(void)
     ExpectVisibleSave();
 }
 
+/* ---- Wi-Fi settings (LUNE-875) --------------------------------------------- */
+
+static void TapButton(int index)
+{
+    Tap(WT_MENU_LEFT + 8, WT_MENU_TOP + index * WT_MENU_SPACING + 8);
+}
+
+static void TapKey(int index)
+{
+    CpKey key;
+    CpKeyboard_Key(NULL, index, &key);
+    Tap(key.x * 8 + key.w * 4, key.y * 8 + key.h * 4);
+}
+
+/* Type ASCII on the keyboard with the stylus, switching layers as needed. */
+static void Type(const char *text)
+{
+    for (; *text; ++text) {
+        int layer, index = -1;
+        for (layer = 0; layer < 3 && index < 0; ++layer) {
+            int i;
+            while (sUi.keyboard.layer != layer) TapKey(sUi.keyboard.layer == CP_KEYS_SYMBOLS || layer == CP_KEYS_SYMBOLS
+                ? CP_KEY_INDEX_SYMBOLS : CP_KEY_INDEX_SHIFT);
+            for (i = 0; i < CP_KEY_CHARACTERS; ++i) {
+                CpKey key;
+                CpKeyboard_Key(&sUi.keyboard, i, &key);
+                if (key.character == *text) { index = i; break; }
+            }
+        }
+        if (*text == ' ') index = CP_KEY_INDEX_SPACE;
+        assert(index >= 0);
+        TapKey(index);
+    }
+    while (sUi.keyboard.layer != CP_KEYS_LOWER)
+        TapKey(sUi.keyboard.layer == CP_KEYS_SYMBOLS ? CP_KEY_INDEX_SYMBOLS : CP_KEY_INDEX_SHIFT);
+}
+
+static void AddNetworks(void)
+{
+    static const struct { const char *ssid; uint8_t security, bars; } networks[] = {
+        { "Home", CP_WIFI_SECURITY_WPA2, 3 }, { "Guest", CP_WIFI_SECURITY_OPEN, 2 },
+        { "Old", CP_WIFI_SECURITY_WPA, 2 }, { "Campus", CP_WIFI_SECURITY_ENTERPRISE, 1 },
+        { "Retro", CP_WIFI_SECURITY_WEP, 3 }, { "Far", CP_WIFI_SECURITY_WPA2, 0 },
+        { "Further", CP_WIFI_SECURITY_WPA2, 0 },
+    };
+    unsigned i;
+    for (i = 0; i < sizeof(networks) / sizeof(*networks); i++) {
+        snprintf(sFake.model.wifi.networks[i].ssid, sizeof(sFake.model.wifi.networks[i].ssid), "%s", networks[i].ssid);
+        sFake.model.wifi.networks[i].security = networks[i].security;
+        sFake.model.wifi.networks[i].bars = networks[i].bars;
+    }
+    sFake.model.wifi.count = i;
+    sFake.model.wifi.revision++;
+}
+
+static void TestWifiFromTheSaveList(void)
+{
+    CpUiModel *model;
+    unsigned i;
+    sWithWifi = 1;
+    model = Reset();
+    model->wifi.wpa2 = 1;
+    CpUi_Start(&sUi, model);
+    Frame();
+    /* Both save lists offer the settings between their two buttons. */
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_NoSaves);
+    ExpectActions(3, WonderTrade_Text_Retry, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    Press(CP_UI_KEY_A);
+    AddSaves(2);
+    Frame();
+    ExpectActions(3, WonderTrade_Text_ConfirmAction, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    /* Exit is still Exit, now the third button. */
+    TapButton(2);
+    Expect(CP_UI_EXIT, WonderTrade_Text_Disconnecting);
+
+    model = Reset();
+    model->wifi.wpa2 = 1;
+    CpUi_Start(&sUi, model);
+    AddSaves(2);
+    Frame();
+    TapButton(1);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
+    assert(sFake.wifiScans == 1 && CpUi_Busy(&sUi) && CpUi_Card(&sUi, model) == CP_UI_CARD_NETWORKS);
+    assert(CpUi_Language(&sUi, model) == Companion_Language_de_DE);
+    ExpectActions(1, WonderTrade_Text_Back, 0, 0);
+    /* Networks arrive while the list is shown. */
+    sUi.dirty = 0;
+    AddNetworks();
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
+    assert(sUi.dirty && !CpUi_Busy(&sUi));
+    ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
+
+    /* Networks that cannot be joined say why, on the list and when chosen. */
+    Press(CP_UI_KEY_DOWN);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
+    Press(CP_UI_KEY_DOWN);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiReasonTkip);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_MESSAGE, Companion_Text_WifiReasonTkip);
+    assert(CpUi_Language(&sUi, model) == Companion_Language_de_DE);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiReasonTkip);
+    assert(sUi.wifiCursor == 2 && sFake.joins == 0);
+    Press(CP_UI_KEY_DOWN);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiReasonEnterprise);
+    /* The list scrolls to keep the highlight visible, and wraps. */
+    for (i = 0; i < 4; i++) Press(CP_UI_KEY_DOWN);
+    assert(sUi.wifiCursor == 0 && sUi.wifiTop == 0);
+    Press(CP_UI_KEY_UP);
+    assert(sUi.wifiCursor == 6 && sUi.wifiTop == 6 - CP_UI_NETWORK_ROWS + 1);
+    Press(CP_UI_KEY_DOWN);
+    /* In DS mode WPA2 needs DSi mode. */
+    model->wifi.wpa2 = 0;
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiReasonDsi);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_MESSAGE, Companion_Text_WifiReasonDsi);
+    Press(CP_UI_KEY_A);
+    model->wifi.wpa2 = 1;
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
+
+    /* An open network is joined at once, without a password. */
+    Press(CP_UI_KEY_DOWN);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_JOINING, Companion_Text_WifiConnecting);
+    assert(sFake.joins == 1 && !strcmp(sFake.lastSsid, "Guest") && sFake.lastSecurity == CP_WIFI_SECURITY_OPEN
+        && sFake.lastKey[0] == 0 && CpUi_Busy(&sUi));
+    ExpectActions(1, WonderTrade_Text_Cancel, 0, 0);
+    Frame();
+    Expect(CP_UI_WIFI_JOINING, Companion_Text_WifiConnecting);
+    model->wifi.state = CP_UI_NETWORK_JOINED;
+    model->wifi.saved = 1;
+    snprintf(model->wifi.savedSsid, sizeof(model->wifi.savedSsid), "Guest");
+    Frame();
+    Expect(CP_UI_WIFI_JOINED, Companion_Text_WifiJoinedOpen);
+    ExpectActions(1, WonderTrade_Text_ConfirmAction, 0, 0);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    assert(sFake.leaves == 1);
+
+    /* A WPA2 network: the password keyboard. */
+    TapButton(1);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
+    assert(sFake.wifiScans == 2 && sUi.wifiCursor == 0);
+    AddNetworks();
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+    ExpectActions(3, WonderTrade_Text_ConfirmAction, Companion_Text_WifiForget, WonderTrade_Text_Back);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
+    assert(CpUi_Card(&sUi, model) == CP_UI_CARD_PASSWORD && !strcmp(sUi.wifiSsid, "Home"));
+    /* At most a 63-character passphrase: no raw 64-hex-digit key. */
+    assert(sUi.keyboard.max == CP_WIFI_PASSPHRASE_MAX);
+    ExpectActions(0, 0, 0, 0);
+    Type("Ab~ 1");
+    assert(!strcmp(sUi.keyboard.text, "Ab~ 1") && !sUi.keyboard.shown);
+    /* Too short: Connect says what a WPA2 password looks like. */
+    TapKey(CP_KEY_INDEX_JOIN);
+    Expect(CP_UI_WIFI_KEYBOARD, Companion_Text_WifiKeyRuleWpa);
+    assert(sFake.joins == 1);
+    /* Typing again brings the prompt back; B deletes. */
+    Type("234x");
+    Expect(CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
+    Press(CP_UI_KEY_B);
+    assert(!strcmp(sUi.keyboard.text, "Ab~ 1234"));
+    TapKey(CP_KEY_INDEX_SHOW);
+    assert(sUi.keyboard.shown);
+    /* The D-pad reaches Connect and A presses it. */
+    sUi.keyboard.cursor = CP_KEY_INDEX_SHIFT;
+    Press(CP_UI_KEY_DOWN);
+    assert(sUi.keyboard.cursor == CP_KEY_INDEX_JOIN);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_JOINING, Companion_Text_WifiConnecting);
+    assert(sFake.joins == 2 && !strcmp(sFake.lastSsid, "Home") && !strcmp(sFake.lastKey, "Ab~ 1234")
+        && sFake.lastSecurity == CP_WIFI_SECURITY_WPA2);
+
+    /* A wrong password: why, with the code; Retry keeps the text. */
+    model->wifi.state = CP_UI_NETWORK_FAILED;
+    model->wifi.failure = CP_WIFI_FAILURE_REJECTED;
+    model->wifi.code = -26;
+    Frame();
+    Expect(CP_UI_WIFI_FAILED, Companion_Text_WifiFailed);
+    assert(CpUi_Card(&sUi, model) == CP_UI_CARD_FULL_TEXT);
+    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Back, 0);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
+    assert(!strcmp(sUi.keyboard.text, "Ab~ 1234"));
+    /* Cancel while joining searches again. */
+    TapKey(CP_KEY_INDEX_JOIN);
+    Expect(CP_UI_WIFI_JOINING, Companion_Text_WifiConnecting);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
+    assert(sFake.wifiScans == 3);
+    /* Failed, then Back: the list again. */
+    AddNetworks();
+    Frame();
+    Press(CP_UI_KEY_A);
+    TapKey(CP_KEY_INDEX_BACK);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+    for (i = 0; i < sizeof(sUi.keyboard.text); i++) assert(sUi.keyboard.text[i] == 0);
+    Press(CP_UI_KEY_A);
+    Press(CP_UI_KEY_B); /* B on an empty password goes back too */
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+
+    /* Forget the stored network: Right reaches the button. */
+    Press(CP_UI_KEY_RIGHT);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_FORGET, Companion_Text_WifiForgetConfirm);
+    ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+    assert(sFake.forgets == 0);
+    /* A card that refuses the delete: the network stays, with a code and Retry. */
+    sForgetFails = 1;
+    Press(CP_UI_KEY_RIGHT);
+    Press(CP_UI_KEY_A);
+    Press(CP_UI_KEY_A);
+    assert(sFake.forgets == 1);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    assert(CpUi_Card(&sUi, model) == CP_UI_CARD_FULL_TEXT && model->wifi.saved);
+    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Back, 0);
+    Press(CP_UI_KEY_A);
+    assert(sFake.forgets == 2);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+    ExpectActions(3, WonderTrade_Text_ConfirmAction, Companion_Text_WifiForget, WonderTrade_Text_Back);
+    /* Retry once the card allows it. */
+    Press(CP_UI_KEY_RIGHT);
+    Press(CP_UI_KEY_A);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    sForgetFails = 0;
+    Press(CP_UI_KEY_A);
+    assert(sFake.forgets == 4);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
+    ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
+
+    /* Back leaves for the save list and joins automatically again. */
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    assert(sFake.leaves == 2);
+
+    /* Failures each have their own words. */
+    assert(CpUi_WifiFailureText(CP_WIFI_FAILURE_NOT_FOUND) == Companion_Text_WifiNotFound);
+    assert(CpUi_WifiFailureText(CP_WIFI_FAILURE_REJECTED) == Companion_Text_WifiFailed);
+    assert(CpUi_WifiFailureText(CP_WIFI_FAILURE_NO_ADDRESS) == Companion_Text_WifiNoAddress);
+    assert(CpUi_WifiFailureText(CP_WIFI_FAILURE_TIMEOUT) == Companion_Text_WifiTimedOut);
+    assert(CpUi_WifiReasonText(CP_WIFI_SUPPORTED) == -1);
+    sWithWifi = 0;
+}
+
+/* No saved network worked while connecting: the settings open by themselves,
+ * in the game's language; Back shows the error, which offers them again. */
+static void TestWifiAfterAFailedConnection(void)
+{
+    CpUiModel *model;
+    sWithWifi = 1;
+    model = Reset();
+    CpUi_Start(&sUi, model);
+    AddSaves(2);
+    Frame();
+    Press(CP_UI_KEY_A);
+    model->gameVersion = CP_VERSION_PLATINUM;
+    model->gameLanguage = CP_LANGUAGE_JAPANESE;
+    Frame();
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
+    model->net = CP_UI_NET_ERROR;
+    model->error = -20;
+    model->wifiError = 1;
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiSavedFailed);
+    assert(sFake.wifiScans == 1 && CpUi_Language(&sUi, model) == Companion_Language_ja_JP);
+    AddNetworks();
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiSavedFailed);
+    Press(CP_UI_KEY_DOWN);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_ERROR, WonderTrade_Text_ConnectionError);
+    assert(sFake.leaves == 1);
+    ExpectActions(3, WonderTrade_Text_Retry, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    model->canLeave = 0;
+    ExpectActions(2, WonderTrade_Text_Retry, Companion_Text_WifiSettings, 0);
+    TapButton(1);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
+    AddNetworks();
+    Frame();
+    /* Join the open network; then the session connects again. */
+    Press(CP_UI_KEY_DOWN);
+    Press(CP_UI_KEY_A);
+    model->wifi.state = CP_UI_NETWORK_JOINED;
+    Frame();
+    Expect(CP_UI_WIFI_JOINED, Companion_Text_WifiJoinedOpen);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_RESTART, WonderTrade_Text_Disconnecting);
+    assert(sFake.closes == 1 && sFake.leaves == 2);
+    model->net = CP_UI_NET_CLOSED;
+    Frame();
+    Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
+    assert(sFake.connects == 2);
+    /* A store that failed says so. */
+    model->net = CP_UI_NET_ERROR;
+    model->wifiError = 1;
+    Frame();
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiSavedFailed);
+    AddNetworks();
+    Frame();
+    Press(CP_UI_KEY_DOWN);
+    Press(CP_UI_KEY_A);
+    model->wifi.state = CP_UI_NETWORK_JOINED;
+    model->wifi.saveFailed = 1;
+    Frame();
+    Expect(CP_UI_WIFI_JOINED, Companion_Text_WifiJoinedUnsaved);
+
+    /* Any other connection error is the error screen, as before. */
+    model = Reset();
+    CpUi_Start(&sUi, model);
+    AddSaves(1);
+    Frame();
+    Press(CP_UI_KEY_A);
+    Frame();
+    Press(CP_UI_KEY_A);
+    model->net = CP_UI_NET_ERROR;
+    model->error = -21;
+    Frame();
+    Expect(CP_UI_ERROR, WonderTrade_Text_ConnectionError);
+    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Exit, 0);
+    sWithWifi = 0;
+}
+
 int main(void)
 {
     TestSaveCursorSurvivesThePicker();
@@ -574,6 +945,8 @@ int main(void)
     TestPicker();
     TestPickerTouch();
     TestTextIds();
+    TestWifiFromTheSaveList();
+    TestWifiAfterAFailedConnection();
     puts("ui_state_test: ok");
     return 0;
 }

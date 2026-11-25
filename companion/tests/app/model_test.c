@@ -60,6 +60,24 @@ typedef struct Fake {
     PosixReader roms[CP_APP_ROM_SLOTS];
     int romOpen[CP_APP_ROM_SLOTS];
     unsigned logLines;
+    /* Wi-Fi settings (LUNE-875): the networks in range, the one name and key
+     * that join, and what each attempt asked for. A join answers after a
+     * couple of polls. */
+    CpWifiNetwork networks[CP_UI_NETWORKS_MAX + 4];
+    unsigned networkCount;
+    char goodSsid[CP_WIFI_SSID_MAX + 1];
+    unsigned char goodKey[CP_WIFI_KEY_MAX];
+    size_t goodKeyLength;
+    int scanning, joining, joinPolls, joinWorks, joinFailure, noAddress, slotsActive;
+    /* The driver keeps reporting the old association after a scan (as DSWiFi
+     * does when Wifi_ScanMode is called without Wifi_DisconnectAP). */
+    int staleAfterScan;
+    unsigned scansStarted, joinsStarted, slotsStarted;
+    char joinedSsid[CP_WIFI_SSID_MAX + 1];
+    unsigned char joinedKey[CP_WIFI_KEY_MAX];
+    size_t joinedKeyLength;
+    char log[32768];
+    size_t logUsed;
 } Fake;
 
 static Fake fake;
@@ -185,16 +203,81 @@ static int Finished(void *arg, int *result)
 
 static void Cancel(void *arg) { (void)arg; fake.cancel = 1; }
 
-static int WifiConnect(void *arg) { (void)arg; fake.wifiPolls = 2; return 0; }
+static int WifiConnect(void *arg)
+{
+    (void)arg;
+    fake.slotsStarted++;
+    fake.slotsActive = 1;
+    fake.scanning = fake.joining = 0;
+    fake.wifiPolls = 2;
+    return 0;
+}
 
 static int WifiStatus(void *arg)
 {
     (void)arg;
     if (fake.wifiConnected) return CP_WIFI_CONNECTED;
+    if (fake.joining) {
+        if (--fake.joinPolls > 0) return CP_WIFI_CONNECTING;
+        fake.joining = 0;
+        if (!fake.joinWorks) return CP_WIFI_FAILED;
+        fake.wifiConnected = 1;
+        return CP_WIFI_CONNECTED;
+    }
+    /* Nothing started: not connected. */
+    if (fake.scanning || !fake.slotsActive) return CP_WIFI_IDLE;
     if (fake.wifiPolls && --fake.wifiPolls) return CP_WIFI_CONNECTING;
     if (fake.wifiFails) return CP_WIFI_FAILED;
     fake.wifiConnected = 1;
     return CP_WIFI_CONNECTED;
+}
+
+static int WifiScanFake(void *arg)
+{
+    (void)arg;
+    fake.scansStarted++;
+    fake.scanning = 1;
+    fake.joining = fake.slotsActive = 0;
+    if (!fake.staleAfterScan) fake.wifiConnected = 0;
+    fake.wifiPolls = 0;
+    return 0;
+}
+
+static unsigned WifiNetworks(void *arg, CpWifiNetwork *out, unsigned max)
+{
+    unsigned i;
+    (void)arg;
+    assert(fake.scanning);
+    for (i = 0; i < fake.networkCount && i < max; ++i) out[i] = fake.networks[i];
+    return i;
+}
+
+static int WifiJoinFake(void *arg, const char *ssid, const unsigned char *key, size_t length)
+{
+    unsigned i;
+    int found = 0;
+    (void)arg;
+    assert(strlen(ssid) <= CP_WIFI_SSID_MAX && length <= CP_WIFI_KEY_MAX);
+    fake.joinsStarted++;
+    snprintf(fake.joinedSsid, sizeof(fake.joinedSsid), "%s", ssid);
+    memcpy(fake.joinedKey, key, length);
+    fake.joinedKeyLength = length;
+    fake.scanning = fake.wifiConnected = fake.slotsActive = 0;
+    fake.wifiPolls = 0;
+    fake.joining = 1;
+    fake.joinPolls = 2;
+    for (i = 0; i < fake.networkCount; ++i) found |= !strcmp(fake.networks[i].ssid, ssid);
+    fake.joinWorks = found && !fake.noAddress && !strcmp(ssid, fake.goodSsid) && length == fake.goodKeyLength
+        && !memcmp(key, fake.goodKey, length);
+    fake.joinFailure = !found ? CP_WIFI_FAILURE_NOT_FOUND : fake.noAddress ? CP_WIFI_FAILURE_NO_ADDRESS
+        : CP_WIFI_FAILURE_REJECTED;
+    return 0;
+}
+
+static int WifiFailure(void *arg)
+{
+    (void)arg;
+    return fake.joinFailure;
 }
 
 /* psa_crypto_init on the DS: reads the NV seed from the open engine journal
@@ -254,6 +337,10 @@ static void LogLine(void *arg, const char *line)
 {
     (void)arg;
     ++fake.logLines;
+    if (fake.logUsed + strlen(line) < sizeof(fake.log)) {
+        memcpy(fake.log + fake.logUsed, line, strlen(line) + 1);
+        fake.logUsed += strlen(line);
+    }
     if (getenv("MODEL_TEST_LOG")) fputs(line, stdout);
 }
 
@@ -482,6 +569,11 @@ static void Setup(void)
     platform.backup.root = backupRoot;
     platform.backup.freeSpace = FreeSpace;
     platform.log = LogLine;
+    platform.wifiScan = WifiScanFake;
+    platform.wifiNetworks = WifiNetworks;
+    platform.wifiJoin = WifiJoinFake;
+    platform.wifiFailure = WifiFailure;
+    platform.wifiWpa2 = 1;
 }
 
 /* ---- Driving the model ------------------------------------------------------- */
@@ -1032,6 +1124,373 @@ static void JapaneseSaveBacksUp(void)
     puts("PASS model: a long Japanese save name backs up");
 }
 
+/* ---- Wi-Fi settings (LUNE-875) ------------------------------------------------ */
+
+static void AddNetwork(const char *ssid, unsigned security, unsigned bars)
+{
+    CpWifiNetwork *network = &fake.networks[fake.networkCount++];
+    memset(network, 0, sizeof(*network));
+    snprintf(network->ssid, sizeof(network->ssid), "%s", ssid);
+    network->security = (uint8_t)security;
+    network->bars = (uint8_t)bars;
+}
+
+static void Frames(unsigned count)
+{
+    while (count--) model->ops->update(model->context);
+}
+
+static int CfgExists(const char *suffix)
+{
+    char path[400];
+    FILE *file;
+    snprintf(path, sizeof(path), "%s_nds/dswt/wifi.cfg%s", fake.root, suffix);
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    fclose(file);
+    return 1;
+}
+
+static void ReadCfg(char *out, size_t size)
+{
+    char path[400];
+    FILE *file;
+    size_t used;
+    snprintf(path, sizeof(path), "%s_nds/dswt/wifi.cfg", fake.root);
+    file = fopen(path, "rb");
+    assert(file);
+    used = fread(out, 1, size - 1, file);
+    out[used] = 0;
+    fclose(file);
+}
+
+/* Join a listed network as the screens do, and let the attempt finish. */
+static void JoinListed(const char *ssid, unsigned security, const char *key)
+{
+    model->ops->wifiJoin(model->context, ssid, security, key);
+    assert(model->wifi.state == CP_UI_NETWORK_JOINING);
+    Frames(4);
+}
+
+static void WifiScanListsNetworks(void)
+{
+    unsigned i;
+    memset(&server, 0, sizeof(server));
+    fake.networkCount = 0;
+    fake.wifiConnected = 0;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    assert(model->ops->wifiScan && model->wifi.wpa2 && !model->wifi.saved);
+    AddNetwork("Home", CP_WIFI_SECURITY_WPA2, 2);
+    AddNetwork("", CP_WIFI_SECURITY_OPEN, 3);         /* hidden: not listed */
+    AddNetwork("Guest", CP_WIFI_SECURITY_OPEN, 1);
+    AddNetwork("Home", CP_WIFI_SECURITY_WPA2, 3);     /* a second access point */
+    AddNetwork("Old", CP_WIFI_SECURITY_WPA, 2);
+    model->ops->wifiScan(model->context);
+    assert(fake.scansStarted == 1 && model->wifi.state == CP_UI_NETWORK_SCANNING && model->wifi.count == 0);
+    Frames(1);
+    assert(model->wifi.count == 3);
+    assert(!strcmp(model->wifi.networks[0].ssid, "Home") && model->wifi.networks[0].bars == 3
+        && model->wifi.networks[0].security == CP_WIFI_SECURITY_WPA2);
+    assert(!strcmp(model->wifi.networks[1].ssid, "Guest") && !strcmp(model->wifi.networks[2].ssid, "Old")
+        && model->wifi.networks[2].security == CP_WIFI_SECURITY_WPA);
+    /* Later scans keep the order, add newcomers and follow the signal. */
+    {
+        unsigned revision = model->wifi.revision;
+        fake.networks[3].bars = 1;
+        fake.networks[0].bars = 1;
+        AddNetwork("New", CP_WIFI_SECURITY_WEP, 2);
+        Frames(40);
+        assert(model->wifi.count == 4 && !strcmp(model->wifi.networks[3].ssid, "New"));
+        assert(model->wifi.networks[0].bars == 1 && model->wifi.revision != revision);
+        revision = model->wifi.revision;
+        Frames(40);
+        assert(model->wifi.revision == revision);
+    }
+    /* No more rows than the list holds. */
+    for (i = 0; fake.networkCount < sizeof(fake.networks) / sizeof(*fake.networks); ++i) {
+        char name[16];
+        snprintf(name, sizeof(name), "Extra %u", i);
+        AddNetwork(name, CP_WIFI_SECURITY_WPA2, 1);
+    }
+    Frames(40);
+    assert(model->wifi.count == CP_UI_NETWORKS_MAX);
+    /* Leaving without joining goes back to the saved connections. */
+    i = fake.slotsStarted;
+    model->ops->wifiLeave(model->context);
+    assert(fake.slotsStarted == i + 1 && model->wifi.state == CP_UI_NETWORK_IDLE);
+    fake.wifiConnected = 1;
+    Frames(2);
+    puts("PASS model: the Wi-Fi list shows each named network once, in a stable order");
+}
+
+static void WifiJoinStoresAndForgets(void)
+{
+    char cfg[2048];
+    const char *pass = "correct horse 9";
+    memset(&server, 0, sizeof(server));
+    fake.networkCount = 0;
+    fake.wifiConnected = 0;
+    fake.logUsed = 0;
+    fake.log[0] = 0;
+    AddNetwork("Home", CP_WIFI_SECURITY_WPA2, 3);
+    AddNetwork("Guest", CP_WIFI_SECURITY_OPEN, 2);
+    snprintf(fake.goodSsid, sizeof(fake.goodSsid), "Home");
+    memcpy(fake.goodKey, pass, strlen(pass));
+    fake.goodKeyLength = strlen(pass);
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    model->ops->wifiScan(model->context);
+    Frames(1);
+
+    /* A wrong password: a clear failure, nothing stored. */
+    JoinListed("Home", CP_WIFI_SECURITY_WPA2, "wrong password");
+    assert(model->wifi.state == CP_UI_NETWORK_FAILED && model->wifi.failure == CP_WIFI_FAILURE_REJECTED
+        && model->wifi.code == CP_APP_ERROR_WIFI_REJECTED);
+    assert(fake.joinedKeyLength == 14 && !memcmp(fake.joinedKey, "wrong password", 14));
+    assert(!CfgExists("") && !model->wifi.saved);
+    /* A network out of range, and one that gives no address. */
+    JoinListed("Gone", CP_WIFI_SECURITY_WPA2, "whatever-pass");
+    assert(model->wifi.state == CP_UI_NETWORK_FAILED && model->wifi.code == CP_APP_ERROR_WIFI_NOT_FOUND);
+    fake.noAddress = 1;
+    JoinListed("Home", CP_WIFI_SECURITY_WPA2, pass);
+    assert(model->wifi.state == CP_UI_NETWORK_FAILED && model->wifi.code == CP_APP_ERROR_WIFI_NO_ADDRESS);
+    fake.noAddress = 0;
+    /* A key that does not suit the security never reaches the driver. */
+    {
+        unsigned joins = fake.joinsStarted;
+        model->ops->wifiJoin(model->context, "Home", CP_WIFI_SECURITY_WPA2, "short");
+        assert(model->wifi.state == CP_UI_NETWORK_FAILED && fake.joinsStarted == joins);
+    }
+
+    /* The right one: connected and stored, through a .tmp that is gone. */
+    JoinListed("Home", CP_WIFI_SECURITY_WPA2, pass);
+    assert(model->wifi.state == CP_UI_NETWORK_JOINED && !model->wifi.saveFailed);
+    assert(model->wifi.saved && !strcmp(model->wifi.savedSsid, "Home"));
+    assert(CfgExists("") && !CfgExists(".tmp"));
+    ReadCfg(cfg, sizeof(cfg));
+    assert(strstr(cfg, "ssid=Home\n") && strstr(cfg, "key=correct horse 9\n") && strstr(cfg, "security=wpa2\n"));
+    /* Connecting now finds Wi-Fi ready. */
+    model->ops->wifiLeave(model->context);
+    Connect();
+    model->ops->close(model->context);
+
+    /* The next launch joins the stored network first, before the console's
+     * saved connections. */
+    {
+        unsigned slots = fake.slotsStarted, joins = fake.joinsStarted;
+        fake.wifiConnected = 0;
+        memset(fake.joinedKey, 0, sizeof(fake.joinedKey));
+        CpApp_Init(&app, &platform, Companion_Language_en_US);
+        assert(model->wifi.saved && !strcmp(model->wifi.savedSsid, "Home"));
+        CpApp_StartWifi(&app);
+        assert(fake.joinsStarted == joins + 1 && fake.slotsStarted == slots);
+        assert(!strcmp(fake.joinedSsid, "Home") && fake.joinedKeyLength == strlen(pass)
+            && !memcmp(fake.joinedKey, pass, strlen(pass)));
+        Frames(4);
+        assert(fake.wifiConnected && fake.slotsStarted == slots);
+        /* connect finds it joined. */
+        Connect();
+        model->ops->close(model->context);
+    }
+
+    /* Out of range next time: the console's saved connections follow. */
+    {
+        unsigned slots = fake.slotsStarted;
+        fake.wifiConnected = 0;
+        fake.networkCount = 1;
+        snprintf(fake.networks[0].ssid, sizeof(fake.networks[0].ssid), "Elsewhere");
+        CpApp_Init(&app, &platform, Companion_Language_en_US);
+        model->ops->connect(model->context);
+        assert(model->net == CP_UI_NET_BUSY);
+        Pump();
+        assert(fake.slotsStarted == slots + 1 && model->net == CP_UI_NET_READY);
+        assert(strstr(fake.log, "the stored network failed (code -25)"));
+        model->ops->close(model->context);
+        /* And when those fail too, the screens are told to offer the settings. */
+        fake.wifiConnected = 0;
+        fake.wifiFails = 1;
+        model->ops->connect(model->context);
+        Pump();
+        assert(model->net == CP_UI_NET_ERROR && model->error == CP_APP_ERROR_WIFI && model->wifiError);
+        model->ops->close(model->context);
+        model->ops->unload(model->context);
+        fake.wifiFails = 0;
+    }
+
+    /* Forget deletes the file; the next launch uses the saved connections only. */
+    model->ops->wifiForget(model->context);
+    assert(!model->wifi.saved && !model->wifi.savedSsid[0] && !CfgExists("") && !CfgExists(".tmp"));
+    {
+        unsigned joins = fake.joinsStarted, slots = fake.slotsStarted;
+        fake.wifiConnected = 0;
+        CpApp_Init(&app, &platform, Companion_Language_en_US);
+        assert(!model->wifi.saved);
+        CpApp_StartWifi(&app);
+        assert(fake.joinsStarted == joins && fake.slotsStarted == slots + 1);
+        Frames(4);
+    }
+
+    /* An open network stores no key. */
+    fake.networkCount = 0;
+    AddNetwork("Guest", CP_WIFI_SECURITY_OPEN, 2);
+    snprintf(fake.goodSsid, sizeof(fake.goodSsid), "Guest");
+    fake.goodKeyLength = 0;
+    model->ops->wifiScan(model->context);
+    Frames(1);
+    JoinListed("Guest", CP_WIFI_SECURITY_OPEN, "");
+    assert(model->wifi.state == CP_UI_NETWORK_JOINED && fake.joinedKeyLength == 0);
+    ReadCfg(cfg, sizeof(cfg));
+    assert(strstr(cfg, "security=open\n") && strstr(cfg, "key=\n"));
+
+    /* A WEP key typed as hex digits reaches the driver as bytes. */
+    fake.networkCount = 0;
+    AddNetwork("Retro", CP_WIFI_SECURITY_WEP, 2);
+    snprintf(fake.goodSsid, sizeof(fake.goodSsid), "Retro");
+    memcpy(fake.goodKey, "\x01\x23\x45\x67\x89", 5);
+    fake.goodKeyLength = 5;
+    model->ops->wifiScan(model->context);
+    Frames(1);
+    JoinListed("Retro", CP_WIFI_SECURITY_WEP, "0123456789");
+    assert(model->wifi.state == CP_UI_NETWORK_JOINED);
+    ReadCfg(cfg, sizeof(cfg));
+    assert(strstr(cfg, "key=0123456789\n"));
+
+    /* The log names no network and no password. */
+    assert(fake.logUsed > 0);
+    assert(!strstr(fake.log, pass) && !strstr(fake.log, "wrong password") && !strstr(fake.log, "0123456789"));
+    assert(!strstr(fake.log, "Home") && !strstr(fake.log, "Retro"));
+    model->ops->wifiForget(model->context);
+    fake.wifiConnected = 1;
+    puts("PASS model: a joined network is stored, joined first next launch, and forgotten");
+}
+
+/* A damaged wifi.cfg is ignored; one left as .tmp by a power cut is used;
+ * no card means nothing is stored, but joining still works. */
+static void WifiConfigOnTheCard(void)
+{
+    char path[400];
+    FILE *file;
+    snprintf(path, sizeof(path), "%s_nds/dswt/wifi.cfg", fake.root);
+    file = fopen(path, "wb");
+    assert(file);
+    fputs("version=1\nsecurity=wpa2\nssid=Home\nkey=x\n", file);
+    fclose(file);
+    fake.logUsed = 0;
+    fake.log[0] = 0;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    assert(!model->wifi.saved && strstr(fake.log, "ignoring an unreadable wifi.cfg"));
+    remove(path);
+    snprintf(path, sizeof(path), "%s_nds/dswt/wifi.cfg.tmp", fake.root);
+    file = fopen(path, "wb");
+    assert(file);
+    fputs("version=1\nsecurity=wpa2\nssid=Home\nkey=12345678\n", file);
+    fclose(file);
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    assert(model->wifi.saved && !strcmp(model->wifi.savedSsid, "Home"));
+    model->ops->wifiForget(model->context);
+    assert(!CfgExists(".tmp"));
+
+    {
+        CpAppPlatform noCard = platform;
+        noCard.root = "";
+        fake.networkCount = 0;
+        AddNetwork("Guest", CP_WIFI_SECURITY_OPEN, 2);
+        snprintf(fake.goodSsid, sizeof(fake.goodSsid), "Guest");
+        fake.goodKeyLength = 0;
+        CpApp_Init(&app, &noCard, Companion_Language_en_US);
+        model->ops->wifiScan(model->context);
+        Frames(1);
+        JoinListed("Guest", CP_WIFI_SECURITY_OPEN, "");
+        assert(model->wifi.state == CP_UI_NETWORK_JOINED && model->wifi.saveFailed && !model->wifi.saved);
+    }
+    /* Without the platform's settings, the screens are offered none. */
+    {
+        CpAppPlatform plain = platform;
+        plain.wifiScan = NULL;
+        CpApp_Init(&app, &plain, Companion_Language_en_US);
+        assert(!model->ops->wifiScan);
+    }
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    fake.wifiConnected = 1;
+    puts("PASS model: wifi.cfg is read defensively, and joining works without a card");
+}
+
+/* A card that refuses to delete wifi.cfg: the network stays stored and
+ * shown, with a support code, until a forget succeeds. */
+static void WifiForgetFailureKeepsTheNetwork(void)
+{
+    char folder[400];
+    CpWifiConfig stored;
+    memset(&stored, 0, sizeof(stored));
+    stored.security = CP_WIFI_SECURITY_WPA2;
+    snprintf(stored.ssid, sizeof(stored.ssid), "Home");
+    snprintf(stored.key, sizeof(stored.key), "correct horse 9");
+    snprintf(folder, sizeof(folder), "%s_nds/dswt", fake.root);
+    {
+        char path[420];
+        snprintf(path, sizeof(path), "%s/wifi.cfg", folder);
+        assert(CpWifiConfig_Save(path, &stored) == 0);
+    }
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    assert(model->wifi.saved);
+    assert(chmod(folder, 0500) == 0);
+    model->ops->wifiForget(model->context);
+    assert(model->wifi.forgetFailed && model->wifi.code == CP_APP_ERROR_WIFI_FORGET);
+    assert(model->wifi.saved && !strcmp(model->wifi.savedSsid, "Home") && CfgExists(""));
+    assert(chmod(folder, 0700) == 0);
+    model->ops->wifiForget(model->context);
+    assert(!model->wifi.forgetFailed && !model->wifi.saved && !CfgExists(""));
+    puts("PASS model: a wifi.cfg the card will not delete stays stored and is reported");
+}
+
+/* Listing networks takes the radio off whatever network it was on, so
+ * leaving the settings without joining always reconnects, even when the
+ * driver still reports the old association; connect never trusts it. */
+static void WifiSettingsDropTheConnection(void)
+{
+    unsigned slots;
+    memset(&server, 0, sizeof(server));
+    fake.networkCount = 0;
+    AddNetwork("Home", CP_WIFI_SECURITY_WPA2, 3);
+
+    /* Opened while connected. */
+    fake.wifiConnected = 1;
+    fake.staleAfterScan = 1;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    slots = fake.slotsStarted;
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    assert(fake.slotsStarted == slots + 1);
+    Frames(4);
+
+    /* Opened, then a connect before any attempt finished: it waits for a
+     * real attempt instead of reporting the stale association as ready. */
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    slots = fake.slotsStarted;
+    fake.wifiPolls = 3;
+    model->ops->connect(model->context);
+    assert(model->net == CP_UI_NET_BUSY);
+    Pump();
+    assert(model->net == CP_UI_NET_READY && fake.slotsStarted == slots);
+    model->ops->close(model->context);
+
+    /* Opened while the boot's attempt was still under way. */
+    fake.staleAfterScan = 0;
+    fake.wifiConnected = 0;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    CpApp_StartWifi(&app);
+    slots = fake.slotsStarted;
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    assert(fake.slotsStarted == slots + 1);
+    Frames(4);
+    assert(fake.wifiConnected);
+    puts("PASS model: leaving the Wi-Fi settings reconnects, whatever the driver last reported");
+}
+
 int main(void)
 {
     Setup();
@@ -1049,6 +1508,11 @@ int main(void)
     ReturnAlreadyPresentFailsClosed();
     BackupStems();
     JapaneseSaveBacksUp();
+    WifiScanListsNetworks();
+    WifiJoinStoresAndForgets();
+    WifiConfigOnTheCard();
+    WifiSettingsDropTheConnection();
+    WifiForgetFailureKeepsTheNetwork();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

@@ -29,6 +29,12 @@ typedef struct CpUiDemo {
     int outcome;
     int failConnect; /* the next connect fails */
     int noSaves;     /* the next scan finds nothing */
+    /* Wi-Fi settings: made-up networks found over a second or two, and joins
+     * that succeed unless failJoin is set. failWifi makes the next connect
+     * find no saved network. */
+    int failWifi, failJoin, failForget;
+    unsigned scanStart, joinDue;
+    int joining;
     unsigned loading;
     /* The scripted tour (CpUiDemo_Tour). */
     unsigned step, stepFrame;
