@@ -6,6 +6,7 @@
 
 #include "game/reader.h"
 #include "platform/file.h"
+#include "platform/wifi_status.h"
 #include "save/backup_save.h"
 #include "session/visit.h"
 #include "wonder_trade/seed.h"
@@ -68,6 +69,21 @@ typedef struct CpAppPlatform {
     void (*frame)(void *arg);
     /* One line for the companion's log, without secrets. May be NULL. */
     void (*log)(void *arg, const char *line);
+
+    /* The Wi-Fi settings (LUNE-875). All NULL when the console offers none;
+     * the screens then show no Wi-Fi settings. */
+    /* List the networks in range, ending any connection attempt. Zero when
+     * it started. */
+    int (*wifiScan)(void *arg);
+    /* Copy up to max of the networks found so far; returns how many. */
+    unsigned (*wifiNetworks)(void *arg, CpWifiNetwork *out, unsigned max);
+    /* Join one network by name with its key's bytes (none for an open
+     * network); poll wifiStatus. Zero when it started. */
+    int (*wifiJoin)(void *arg, const char *ssid, const unsigned char *key, size_t keyLength);
+    /* Why the last wifiJoin failed: enum CpWifiFailure. */
+    int (*wifiFailure)(void *arg);
+    /* Nonzero when WPA2 networks can be joined (DSi mode). */
+    int wifiWpa2;
 } CpAppPlatform;
 
 #endif

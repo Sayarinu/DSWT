@@ -22,6 +22,11 @@
 
 /* melonDS's DS-mode Wi-Fi can take close to a minute to associate. */
 #define WIFI_TIMEOUT_MS 90000
+/* A network chosen in the Wi-Fi settings: a few seconds to find it, then the
+ * DSi driver associates in seconds; a wrong password should not keep the
+ * player waiting a minute and a half. */
+#define JOIN_SCAN_MS 8000
+#define JOIN_TIMEOUT_MS 45000
 #define LOG_LIMIT (256 * 1024)
 
 static struct {
@@ -219,13 +224,39 @@ static void Cancel(void *arg)
 
 /* ---- Wi-Fi and the network ------------------------------------------------- */
 
-/* The boot already started a connection; join it rather than restart it. */
+/* An attempt already under way is joined rather than restarted. */
 static int WifiConnect(void *arg)
 {
     int status = CpWifi_Status();
     (void)arg;
     if (status == CP_WIFI_CONNECTED || status == CP_WIFI_CONNECTING) return 0;
+    CpWifi_SetTimeout(WIFI_TIMEOUT_MS);
     return CpWifi_AutoConnect();
+}
+
+static int WifiJoin(void *arg, const char *ssid, const unsigned char *key, size_t keyLength)
+{
+    (void)arg;
+    CpWifi_SetTimeout(JOIN_TIMEOUT_MS);
+    return CpWifi_ConnectKey(ssid, key, keyLength, JOIN_SCAN_MS);
+}
+
+static int WifiScan(void *arg)
+{
+    (void)arg;
+    return CpWifi_Scan();
+}
+
+static unsigned WifiNetworks(void *arg, CpWifiNetwork *out, unsigned max)
+{
+    (void)arg;
+    return CpWifi_Networks(out, max);
+}
+
+static int WifiFailure(void *arg)
+{
+    (void)arg;
+    return CpWifi_LastFailure();
 }
 
 static int WifiStatus(void *arg)
@@ -318,9 +349,6 @@ void CpNdsApp_Run(void)
     CpNdsEntropy_Jitter();
     if (CpWifi_Init() != 0) Logf("wifi: driver failed to start\n");
     CpWifi_SetTimeout(WIFI_TIMEOUT_MS);
-    /* Join a saved network while the player chooses a save (DSWiFi can take a
-     * while); Connect then finds it ready or waits for it. */
-    if (CpWifi_AutoConnect() != 0) Logf("wifi: cannot start a connection\n");
     CpNdsEntropy_Wifi();
     if (CpNdsEntropy_Finish() != 0) Logf("entropy: pool failed to start\n");
     CpNdsEntropy_Report(&bytes, &microphone);
@@ -346,8 +374,17 @@ void CpNdsApp_Run(void)
     sPlatform.backup.readDurable = BackupDurable;
     sPlatform.frame = Frame;
     sPlatform.log = Log;
+    sPlatform.wifiScan = WifiScan;
+    sPlatform.wifiNetworks = WifiNetworks;
+    sPlatform.wifiJoin = WifiJoin;
+    sPlatform.wifiFailure = WifiFailure;
+    sPlatform.wifiWpa2 = CpWifi_DsiMode();
 
     CpApp_Init(&sApp, &sPlatform, CpUiApp_SystemLanguage());
+    /* Join Wi-Fi while the player chooses a save (DSWiFi can take a while):
+     * the network stored by the Wi-Fi settings, then the console's saved
+     * connections. Connect then finds it ready or waits for it. */
+    CpApp_StartWifi(&sApp);
     CpUiApp_Run(&sApp.model, NULL);
     Logf("exit\n");
     CpWifi_Disconnect();

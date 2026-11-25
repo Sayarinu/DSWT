@@ -158,14 +158,19 @@ static void SaveStem(char *out, size_t size, const char *name)
 
 void CpRender_Message(const CpUi *ui, const CpUiModel *model, char *out, size_t size)
 {
-    char game[512], language[512], stem[CP_UI_SAVE_NAME_MAX];
+    char game[512], language[512], named[512], stem[CP_UI_SAVE_NAME_MAX];
+    /* The stored network on the list and Forget, the chosen one elsewhere. */
+    const char *network = ui->state == CP_UI_WIFI_LIST || ui->state == CP_UI_WIFI_FORGET
+        ? model->wifi.savedSsid : ui->wifiSsid;
     int gameName = GameName(model->gameVersion), languageName = LanguageName(model->gameLanguage);
     stem[0] = 0;
     if (ui->listCursor >= 0 && ui->listCursor < (int)model->saveCount)
         SaveStem(stem, sizeof(stem), model->saves[ui->listCursor].name);
     CpText_Replace(game, sizeof(game), T(ui->message), "{game}", gameName >= 0 ? T(gameName) : "?");
     CpText_Replace(language, sizeof(language), game, "{language}", languageName >= 0 ? T(languageName) : "?");
-    CpText_Replace(out, size, language, "{name}", stem);
+    CpText_Replace(named, sizeof(named), language, "{name}", stem);
+    /* Last, so a network's name is never read as a placeholder. */
+    CpText_Replace(out, size, named, "{network}", network);
 }
 
 /* UTF-8 text cut to fit `width` pixels, ending in ".." when cut. */
@@ -309,6 +314,94 @@ static void DrawSaves(const CpUi *ui, const CpUiModel *model, CpScreen *top)
     CpCanvas_Unclip(&top->text);
 }
 
+/* ---- Wi-Fi settings ---------------------------------------------------------- */
+
+static const char *SecurityName(unsigned security)
+{
+    switch (security) {
+    case CP_WIFI_SECURITY_OPEN: return T(Companion_Text_WifiOpen);
+    case CP_WIFI_SECURITY_WEP: return "WEP";
+    case CP_WIFI_SECURITY_WPA2: return "WPA2";
+    case CP_WIFI_SECURITY_WPA: return "WPA";
+    default: return "802.1X";
+    }
+}
+
+/* Three signal bars ending at `right`, standing on `bottom`: the lit ones in
+ * the row's ink, the rest pale. Returns their width. */
+#define BARS_WIDTH 11
+static int Bars(CpScreen *screen, int right, int bottom, unsigned bars, CpInk ink)
+{
+    int i;
+    for (i = 0; i < 3; i++) {
+        int height = 4 + 3 * i;
+        CpCanvas_Fill(&screen->text, right - BARS_WIDTH + i * 4, bottom - height, 3, height,
+            (unsigned)i < bars ? ink.fg : CP_INK_GREY_SHADOW);
+    }
+    return BARS_WIDTH;
+}
+
+/* The networks in range, in the save list's window: name, security and
+ * signal; ones the companion cannot join in grey. */
+static void DrawNetworks(const CpUi *ui, const CpUiModel *model, CpScreen *top)
+{
+    int row, ox = LIST_X * 8, oy = LIST_Y * 8 + 4, right = (LIST_X + LIST_W) * 8 - 4;
+    Window(top, LIST_X, LIST_Y, LIST_W, LIST_H);
+    CpCanvas_Clip(&top->text, LIST_X * 8, LIST_Y * 8, LIST_W * 8, LIST_H * 8);
+    for (row = 0; row < CP_UI_NETWORK_ROWS; row++) {
+        int index = ui->wifiTop + row, labelWidth;
+        const CpWifiNetwork *network;
+        const char *label;
+        char name[CP_WIFI_SSID_MAX * 2 + 4];
+        CpInk ink;
+        if (index >= (int)model->wifi.count) break;
+        network = &model->wifi.networks[index];
+        ink = CpWifi_Unsupported(network->security, model->wifi.wpa2) == CP_WIFI_SUPPORTED ? kDark : kGrey;
+        if (index == ui->wifiCursor) Marker(top, ox, oy + row * 16 + 3);
+        Bars(top, right, oy + row * 16 + 13, network->bars, ink);
+        label = SecurityName(network->security);
+        labelWidth = CpText_Width(label);
+        CpCanvas_Text(&top->text, right - BARS_WIDTH - 6 - labelWidth, oy + row * 16, label, ink);
+        Fit(name, sizeof(name), network->ssid, right - BARS_WIDTH - 6 - labelWidth - (ox + 8) - 8);
+        CpCanvas_Text(&top->text, ox + 8, oy + row * 16, name, ink);
+    }
+    CpCanvas_Unclip(&top->text);
+}
+
+/* The chosen network, the password as typed (or as dots), how long it is,
+ * and where it will be kept. */
+static void DrawPassword(const CpUi *ui, CpScreen *top)
+{
+    const CpKeyboard *keyboard = &ui->keyboard;
+    int ox = LIST_X * 8 + 4, oy = LIST_Y * 8 + 4, right = (LIST_X + LIST_W) * 8 - 4;
+    int fieldTop = oy + 20, counterWidth, available, start = 0, width;
+    char shown[CP_KEYBOARD_TEXT_MAX + 1], counter[16], name[CP_WIFI_SSID_MAX * 2 + 4];
+    unsigned i, max = ui->wifiSecurity == CP_WIFI_SECURITY_WEP ? 26 : CP_WIFI_PASSPHRASE_MAX;
+    Window(top, LIST_X, LIST_Y, LIST_W, LIST_H);
+    CpCanvas_Clip(&top->text, LIST_X * 8, LIST_Y * 8, LIST_W * 8, LIST_H * 8);
+    Fit(name, sizeof(name), ui->wifiSsid, right - ox);
+    CpCanvas_Text(&top->text, ox, oy, name, kDark);
+    /* The field: the text's tail and the caret over an underline. */
+    snprintf(counter, sizeof(counter), "%u/%u", keyboard->length, max);
+    counterWidth = CpText_Width(counter);
+    CpCanvas_Text(&top->text, right - counterWidth, fieldTop + 2, counter, kGrey);
+    available = right - counterWidth - 8 - ox - 4;
+    CpCanvas_Fill(&top->text, ox, fieldTop + 17, right - counterWidth - 8 - ox, 1, CP_INK_GREY);
+    for (i = 0; i < keyboard->length && i < CP_KEYBOARD_TEXT_MAX; i++) shown[i] = keyboard->shown ? keyboard->text[i] : '*';
+    shown[i] = 0;
+    while (shown[start] && CpText_Width(shown + start) > available) start++;
+    width = CpCanvas_Text(&top->text, ox + 2, fieldTop + 2, shown + start, kDark);
+    CpCanvas_Fill(&top->text, ox + 3 + width, fieldTop + 3, 2, 12, CP_INK_CURSOR);
+    for (i = 0; i < sizeof(shown); i++) ((volatile char *)shown)[i] = 0;
+    /* Where the password goes once it works. */
+    {
+        char wrapped[CP_RENDER_MESSAGE_MAX];
+        CpText_Wrap(wrapped, sizeof(wrapped), T(Companion_Text_WifiPasswordWarning), right - ox);
+        CpCanvas_Text(&top->text, ox, fieldTop + 28, wrapped, kGrey);
+    }
+    CpCanvas_Unclip(&top->text);
+}
+
 static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
 {
     enum CpUiCard card = CpUi_Card(ui, model);
@@ -321,12 +414,12 @@ static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
     switch (card) {
     case CP_UI_CARD_FULL_TEXT:
         DrawBody(top, message);
-        if (ui->state == CP_UI_ERROR) {
+        if (ui->state == CP_UI_ERROR || ui->state == CP_UI_WIFI_FAILED || ui->state == CP_UI_WIFI_FORGET_FAILED) {
             char number[12];
             int right = (BODY_X + BODY_W) * 8 - 8;
             /* Under up to five lines of explanation, as in Diamond/Pearl. */
             CpCanvas_Text(&top->text, BODY_X * 8 + 4, BODY_Y * 8 + 112, T(WonderTrade_Text_ErrorCode), kDark);
-            Number(number, sizeof(number), model->error);
+            Number(number, sizeof(number), ui->state == CP_UI_ERROR ? model->error : model->wifi.code);
             CpCanvas_Text(&top->text, right - CpText_Width(number), BODY_Y * 8 + 112, number, kDark);
         }
         break;
@@ -337,6 +430,14 @@ static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
         break;
     case CP_UI_CARD_SAVES:
         DrawSaves(ui, model, top);
+        DrawMessage(top, message, MESSAGE_Y);
+        break;
+    case CP_UI_CARD_NETWORKS:
+        DrawNetworks(ui, model, top);
+        DrawMessage(top, message, MESSAGE_Y);
+        break;
+    case CP_UI_CARD_PASSWORD:
+        DrawPassword(ui, top);
         DrawMessage(top, message, MESSAGE_Y);
         break;
     default:
@@ -385,17 +486,57 @@ static void DrawParty(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
         T(WonderTrade_Text_Back), ui->partyCursor == CP_UI_PICKER_BACK ? CP_PAL_SELECTED : CP_PAL_BUTTON);
 }
 
+/* The password keyboard (ui/keyboard.h) in the buttons' tiles and palettes. */
+static void DrawKeyboard(const CpUi *ui, CpScreen *bottom)
+{
+    const CpKeyboard *keyboard = &ui->keyboard;
+    int index;
+    for (index = 0; index < CP_KEY_COUNT; index++) {
+        CpKey key;
+        char character[2] = { 0, 0 };
+        const char *label = character;
+        unsigned palette = CP_PAL_BUTTON;
+        CpKeyboard_Key(keyboard, index, &key);
+        switch (key.kind) {
+        case CP_KEY_CHARACTER:
+            character[0] = key.character;
+            if (!key.character) palette = CP_PAL_DISABLED;
+            break;
+        case CP_KEY_SHIFT: label = keyboard->layer == CP_KEYS_UPPER ? "abc" : "ABC"; break;
+        case CP_KEY_SYMBOLS: label = keyboard->layer == CP_KEYS_SYMBOLS ? "abc" : "#+="; break;
+        case CP_KEY_SPACE: label = T(Companion_Text_KeySpace); break;
+        case CP_KEY_DELETE: label = T(Companion_Text_KeyDelete); break;
+        case CP_KEY_SHOW: label = T(keyboard->shown ? Companion_Text_KeyHide : Companion_Text_KeyShow); break;
+        case CP_KEY_JOIN:
+            label = T(Companion_Text_WifiJoin);
+            /* Grey until the password could be right; pressing it says why. */
+            if (!CpWifi_KeyValid(ui->wifiSecurity, keyboard->text)) palette = CP_PAL_DISABLED;
+            break;
+        default: label = T(WonderTrade_Text_Back); break;
+        }
+        if (index == keyboard->cursor) palette = CP_PAL_SELECTED;
+        DrawButton(bottom, key.x * 8, key.y * 8, key.w * 8, key.h * 8, label, palette);
+    }
+}
+
 static void DrawBottom(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
 {
     int labels[CP_UI_MAX_ACTIONS], count, i;
     Clear(bottom);
     if (ui->state == CP_UI_PICKER) {
         DrawParty(ui, model, bottom);
+    } else if (ui->state == CP_UI_WIFI_KEYBOARD) {
+        DrawKeyboard(ui, bottom);
     } else {
         count = CpUi_Actions(ui, model, labels);
         for (i = 0; i < count; i++)
             DrawButton(bottom, WT_MENU_LEFT, WT_MENU_TOP + i * WT_MENU_SPACING, WT_MENU_WIDTH, WT_MENU_HEIGHT,
                 T(labels[i]), i == ui->cursor ? CP_PAL_SELECTED : CP_PAL_BUTTON);
+    }
+    if (ui->state == CP_UI_MESSAGE && ui->message == WonderTrade_Text_Explanation) {
+        /* Info's top screen is full; keep the repair warning below Back. */
+        Window(bottom, 2, 10, 28, 13);
+        WindowText(bottom, 2, 10, 28, 13, 4, T(Companion_Text_BackupWarning));
     }
     if (CpUi_Busy(ui)) {
         for (i = 0; i < 4; i++)

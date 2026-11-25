@@ -689,25 +689,288 @@ static void Load(void *context, unsigned index)
     if (Start(app, JOB_LOAD, LoadJob, NULL) != 0) model->busy = 0;
 }
 
+/* ---- Wi-Fi ------------------------------------------------------------------ */
+
+enum { WIFI_IDLE, WIFI_STORED, WIFI_SLOTS, WIFI_SCAN, WIFI_JOIN };
+/* Frames between refreshes of the network list. */
+#define WIFI_LIST_FRAMES 20
+
+static int HasSetup(const CpAppPlatform *platform)
+{
+    return platform->wifiScan && platform->wifiNetworks && platform->wifiJoin;
+}
+
+/* Start joining one named network with its key. */
+static int JoinNetwork(CpApp *app, const CpWifiConfig *network)
+{
+    unsigned char key[CP_WIFI_KEY_MAX];
+    int length = CpWifi_KeyBytes(network->security, network->key, key), result;
+    if (length < 0) return -1;
+    result = app->platform->wifiJoin(app->platform->arg, network->ssid, key, (size_t)length);
+    CpWifiConfig_Wipe(key, sizeof(key));
+    return result;
+}
+
+/* Join automatically: the stored network first, then the console's saved
+ * connections (CpApp_StartWifi says why). */
+static int StartAuto(CpApp *app)
+{
+    const CpAppPlatform *platform = app->platform;
+    if (app->wifi.haveConfig && HasSetup(platform) && JoinNetwork(app, &app->wifi.config) == 0) {
+        Log(app, "wifi: joining the network stored in the Wi-Fi settings\n");
+        app->wifi.phase = WIFI_STORED;
+        return 0;
+    }
+    if (platform->wifiConnect(platform->arg) != 0) {
+        app->wifi.phase = WIFI_IDLE;
+        return -1;
+    }
+    Log(app, "wifi: connecting with the console's saved connections\n");
+    app->wifi.phase = WIFI_SLOTS;
+    return 0;
+}
+
+void CpApp_StartWifi(CpApp *app)
+{
+    if (StartAuto(app) != 0) Log(app, "wifi: cannot start\n");
+}
+
+static int FailureCode(unsigned failure)
+{
+    switch (failure) {
+    case CP_WIFI_FAILURE_NOT_FOUND: return CP_APP_ERROR_WIFI_NOT_FOUND;
+    case CP_WIFI_FAILURE_REJECTED: return CP_APP_ERROR_WIFI_REJECTED;
+    case CP_WIFI_FAILURE_NO_ADDRESS: return CP_APP_ERROR_WIFI_NO_ADDRESS;
+    default: return CP_APP_ERROR_WIFI_TIMEOUT;
+    }
+}
+
+static unsigned LastFailure(const CpApp *app)
+{
+    const CpAppPlatform *platform = app->platform;
+    return platform->wifiFailure ? (unsigned)platform->wifiFailure(platform->arg) : CP_WIFI_FAILURE_TIMEOUT;
+}
+
+/* Merge what the scan found into the list: in the order first seen, one row
+ * per name (several access points may share one) with the strongest signal. */
+static void PublishNetworks(CpApp *app)
+{
+    static CpWifiNetwork found[CP_UI_NETWORKS_MAX * 2];
+    CpUiModel *model = &app->model;
+    unsigned count = app->platform->wifiNetworks(app->platform->arg, found, sizeof(found) / sizeof(*found));
+    unsigned i, j, bars[CP_UI_NETWORKS_MAX];
+    int seen[CP_UI_NETWORKS_MAX] = { 0 }, changed = 0;
+    if (count > sizeof(found) / sizeof(*found)) count = sizeof(found) / sizeof(*found);
+    for (i = 0; i < count; ++i) {
+        found[i].ssid[CP_WIFI_SSID_MAX] = 0;
+        if (!found[i].ssid[0]) continue; /* a hidden network has no name to choose */
+        for (j = 0; j < model->wifi.count; ++j) if (!strcmp(model->wifi.networks[j].ssid, found[i].ssid)) break;
+        if (j == model->wifi.count) {
+            if (j == CP_UI_NETWORKS_MAX) continue;
+            model->wifi.networks[j] = found[i];
+            model->wifi.count++;
+            bars[j] = found[i].bars;
+            seen[j] = 1;
+            changed = 1;
+        } else if (!seen[j] || found[i].bars > bars[j]) {
+            bars[j] = found[i].bars;
+            seen[j] = 1;
+        }
+    }
+    for (j = 0; j < model->wifi.count; ++j)
+        if (seen[j] && model->wifi.networks[j].bars != bars[j]) {
+            model->wifi.networks[j].bars = (uint8_t)bars[j];
+            changed = 1;
+        }
+    if (changed) model->wifi.revision++;
+}
+
+static void Joined(CpApp *app)
+{
+    CpUiModel *model = &app->model;
+    model->wifi.saveFailed = !app->wifi.path[0] || CpWifiConfig_Save(app->wifi.path, &app->wifi.joining) != 0;
+    if (!model->wifi.saveFailed) {
+        app->wifi.config = app->wifi.joining;
+        app->wifi.haveConfig = 1;
+        model->wifi.saved = 1;
+        memcpy(model->wifi.savedSsid, app->wifi.config.ssid, sizeof(model->wifi.savedSsid));
+    }
+    Log(app, model->wifi.saveFailed ? "wifi: joined the chosen network; storing it failed\n"
+        : "wifi: joined the chosen network and stored it\n");
+    CpWifiConfig_Wipe(&app->wifi.joining, sizeof(app->wifi.joining));
+    model->wifi.state = CP_UI_NETWORK_JOINED;
+}
+
+static void JoinFailed(CpApp *app, int status)
+{
+    CpUiModel *model = &app->model;
+    model->wifi.failure = status == CP_WIFI_OFF ? CP_WIFI_FAILURE_TIMEOUT : LastFailure(app);
+    model->wifi.code = status == CP_WIFI_OFF ? CP_APP_ERROR_WIFI_OFF : FailureCode(model->wifi.failure);
+    Log(app, "wifi: joining the chosen network failed (code %d)\n", model->wifi.code);
+    CpWifiConfig_Wipe(&app->wifi.joining, sizeof(app->wifi.joining));
+    model->wifi.state = CP_UI_NETWORK_FAILED;
+}
+
+/* Once per frame: follow the attempt under way. */
+static void WifiUpdate(CpApp *app)
+{
+    const CpAppPlatform *platform = app->platform;
+    CpUiModel *model = &app->model;
+    int status;
+    switch (app->wifi.phase) {
+    case WIFI_STORED:
+    case WIFI_SLOTS:
+        status = platform->wifiStatus(platform->arg);
+        if (status == CP_WIFI_CONNECTING) return;
+        if (status == CP_WIFI_CONNECTED) {
+            app->wifi.phase = WIFI_IDLE;
+            app->wifi.dropped = 0;
+            Log(app, "wifi: connected\n");
+            if (app->connecting) {
+                app->connecting = 0;
+                model->net = CP_UI_NET_READY;
+            }
+            return;
+        }
+        if (app->wifi.phase == WIFI_STORED) {
+            Log(app, "wifi: the stored network failed (code %d); trying the console's saved connections\n",
+                FailureCode(LastFailure(app)));
+            if (platform->wifiConnect(platform->arg) == 0) {
+                app->wifi.phase = WIFI_SLOTS;
+                return;
+            }
+        }
+        app->wifi.phase = WIFI_IDLE;
+        Log(app, "wifi: no saved connection worked (%d)\n", status);
+        if (app->connecting) {
+            app->connecting = 0;
+            model->net = CP_UI_NET_ERROR;
+            model->error = status == CP_WIFI_OFF ? CP_APP_ERROR_WIFI_OFF : CP_APP_ERROR_WIFI;
+            /* The screens offer the Wi-Fi settings. */
+            model->wifiError = status != CP_WIFI_OFF;
+        }
+        return;
+    case WIFI_SCAN:
+        if (app->wifi.frames++ % WIFI_LIST_FRAMES == 0) PublishNetworks(app);
+        return;
+    case WIFI_JOIN:
+        status = platform->wifiStatus(platform->arg);
+        if (status == CP_WIFI_CONNECTING) return;
+        app->wifi.phase = WIFI_IDLE;
+        if (status == CP_WIFI_CONNECTED) {
+            app->wifi.dropped = 0;
+            Joined(app);
+        } else {
+            JoinFailed(app, status);
+        }
+        return;
+    default:
+        return;
+    }
+}
+
+static void WifiScan(void *context)
+{
+    CpApp *app = context;
+    CpUiModel *model = &app->model;
+    CpWifiConfig_Wipe(&app->wifi.joining, sizeof(app->wifi.joining));
+    model->wifi.state = CP_UI_NETWORK_SCANNING;
+    model->wifi.count = 0;
+    model->wifi.revision++;
+    model->wifi.wpa2 = app->platform->wifiWpa2;
+    app->wifi.frames = 0;
+    /* The scan ends any attempt and leaves any network: the next connect, or
+     * leaving the settings, must connect again. */
+    app->wifi.phase = WIFI_IDLE;
+    app->wifi.dropped = 1;
+    app->connecting = 0;
+    if (app->platform->wifiScan(app->platform->arg) != 0) {
+        Log(app, "wifi: cannot list networks\n");
+        return;
+    }
+    Log(app, "wifi: listing networks\n");
+    app->wifi.phase = WIFI_SCAN;
+}
+
+static void WifiJoin(void *context, const char *ssid, unsigned security, const char *key)
+{
+    CpApp *app = context;
+    CpUiModel *model = &app->model;
+    CpWifiConfig *joining = &app->wifi.joining;
+    CpWifiConfig_Wipe(joining, sizeof(*joining));
+    model->wifi.state = CP_UI_NETWORK_JOINING;
+    model->wifi.saveFailed = 0;
+    app->wifi.phase = WIFI_IDLE;
+    joining->security = security;
+    if (!ssid || !key || strlen(ssid) > CP_WIFI_SSID_MAX || strlen(key) > CP_WIFI_KEY_MAX) {
+        JoinFailed(app, CP_WIFI_FAILED);
+        return;
+    }
+    memcpy(joining->ssid, ssid, strlen(ssid) + 1);
+    memcpy(joining->key, key, strlen(key) + 1);
+    if (JoinNetwork(app, joining) != 0) {
+        JoinFailed(app, CP_WIFI_OFF);
+        return;
+    }
+    Log(app, "wifi: joining the chosen network\n");
+    app->wifi.phase = WIFI_JOIN;
+}
+
+static void WifiForget(void *context)
+{
+    CpApp *app = context;
+    CpUiModel *model = &app->model;
+    model->wifi.forgetFailed = 0;
+    if (app->wifi.path[0] && CpWifiConfig_Forget(app->wifi.path) != 0) {
+        /* The password is still on the card and would be joined next launch:
+         * keep showing it as stored, so the player can retry or delete it. */
+        Log(app, "wifi: cannot delete wifi.cfg\n");
+        model->wifi.forgetFailed = 1;
+        model->wifi.code = CP_APP_ERROR_WIFI_FORGET;
+        return;
+    }
+    Log(app, "wifi: forgot the stored network\n");
+    CpWifiConfig_Wipe(&app->wifi.config, sizeof(app->wifi.config));
+    app->wifi.haveConfig = 0;
+    model->wifi.saved = 0;
+    model->wifi.savedSsid[0] = 0;
+}
+
+static void WifiLeave(void *context)
+{
+    CpApp *app = context;
+    const CpAppPlatform *platform = app->platform;
+    CpWifiConfig_Wipe(&app->wifi.joining, sizeof(app->wifi.joining));
+    app->model.wifi.state = CP_UI_NETWORK_IDLE;
+    if (app->wifi.phase == WIFI_SCAN || app->wifi.phase == WIFI_JOIN) app->wifi.phase = WIFI_IDLE;
+    if (app->wifi.phase == WIFI_IDLE && (app->wifi.dropped || platform->wifiStatus(platform->arg) != CP_WIFI_CONNECTED))
+        CpApp_StartWifi(app);
+}
+
 static void Connect(void *context)
 {
     CpApp *app = context;
     CpUiModel *model = &app->model;
     const CpAppPlatform *platform = app->platform;
     ClearOutcome(model);
+    model->wifiError = 0;
     app->closing = 0;
     /* Only what the last check proved: a reconnect never grants leave. */
     model->canLeave = app->leaveProven && !model->recovery;
-    if (platform->wifiStatus(platform->arg) == CP_WIFI_CONNECTED) { model->net = CP_UI_NET_READY; return; }
-    model->net = CP_UI_NET_BUSY;
-    if (platform->wifiConnect(platform->arg) != 0) {
-        Log(app, "wifi: cannot start\n");
-        model->net = CP_UI_NET_ERROR;
-        model->error = CP_APP_ERROR_WIFI_OFF;
+    if (!app->wifi.dropped && platform->wifiStatus(platform->arg) == CP_WIFI_CONNECTED) {
+        model->net = CP_UI_NET_READY;
         return;
     }
-    Log(app, "wifi: connecting with the console's saved connections\n");
+    model->net = CP_UI_NET_BUSY;
     app->connecting = 1;
+    /* Join the attempt already under way, such as the one started at boot. */
+    if (app->wifi.phase == WIFI_STORED || app->wifi.phase == WIFI_SLOTS) return;
+    if (StartAuto(app) != 0) {
+        Log(app, "wifi: cannot start\n");
+        app->connecting = 0;
+        model->net = CP_UI_NET_ERROR;
+        model->error = CP_APP_ERROR_WIFI_OFF;
+    }
 }
 
 static void Visit(CpApp *app, int slot, unsigned action)
@@ -793,7 +1056,8 @@ static void Finish(CpApp *app, int job, int result)
         model->hasReceived = app->result.hasReceived;
         model->received = app->result.received;
         model->canLeave = app->leaveProven = app->visitCanLeave;
-        model->error = result;
+        /* Match WT_NET_ERROR_ROLLED_BACK without changing the visit's result. */
+        model->error = result == CP_VISIT_ERROR_ROLLED_BACK ? -41 : result;
         if (result == 0) model->recovery = 0;
         if (app->closing) {
             app->closing = 0;
@@ -817,22 +1081,14 @@ static void Update(void *context)
         app->job = JOB_NONE;
         Finish(app, job, result);
     }
-    if (app->connecting) {
-        int status = platform->wifiStatus(platform->arg);
-        if (status == CP_WIFI_CONNECTED) {
-            app->connecting = 0;
-            app->model.net = CP_UI_NET_READY;
-            Log(app, "wifi: connected\n");
-        } else if (status != CP_WIFI_CONNECTING) {
-            app->connecting = 0;
-            app->model.net = CP_UI_NET_ERROR;
-            app->model.error = status == CP_WIFI_OFF ? CP_APP_ERROR_WIFI_OFF : CP_APP_ERROR_WIFI;
-            Log(app, "wifi: no saved connection worked (%d)\n", status);
-        }
-    }
+    WifiUpdate(app);
 }
 
-static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update };
+static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
+    WifiScan, WifiJoin, WifiForget, WifiLeave };
+/* Without the platform's Wi-Fi settings the screens offer none. */
+static const CpUiOps kOpsWithoutSettings = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
+    NULL, NULL, NULL, NULL };
 
 void CpApp_Init(CpApp *app, const CpAppPlatform *platform, CompanionLanguage systemLanguage)
 {
@@ -844,11 +1100,27 @@ void CpApp_Init(CpApp *app, const CpAppPlatform *platform, CompanionLanguage sys
     app->file.writeAt = FileWrite;
     app->file.sync = FileSync;
     app->file.size = FileSize;
-    app->model.ops = &kOps;
+    app->model.ops = HasSetup(platform) ? &kOps : &kOpsWithoutSettings;
     app->model.context = app;
     app->model.systemLanguage = systemLanguage;
     app->model.loadMessage = -1;
     app->model.canLeave = 1;
     app->model.tradePhase = WT_JOURNAL_IDLE;
     app->model.net = CP_UI_NET_CLOSED;
+    app->model.wifi.wpa2 = platform->wifiWpa2;
+    /* The network the Wi-Fi settings stored, for StartWifi to join. */
+    if (platform->root && platform->root[0]
+        && (size_t)snprintf(app->wifi.path, sizeof(app->wifi.path), "%s%s", platform->root, CP_WIFI_CONFIG_PATH)
+            < sizeof(app->wifi.path)) {
+        int result = CpWifiConfig_Load(app->wifi.path, &app->wifi.config);
+        if (result == 0) {
+            app->wifi.haveConfig = 1;
+            app->model.wifi.saved = 1;
+            memcpy(app->model.wifi.savedSsid, app->wifi.config.ssid, sizeof(app->model.wifi.savedSsid));
+        } else if (result < 0) {
+            Log(app, "wifi: ignoring an unreadable wifi.cfg\n");
+        }
+    } else {
+        app->wifi.path[0] = 0;
+    }
 }

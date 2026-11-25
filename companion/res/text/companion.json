@@ -361,6 +361,236 @@
       "es_ES": "Coreano",
       "ja_JP": "かんこくご",
       "ko_KR": "한국어"
+    },
+    {
+      "id": "Companion_Text_WifiSettings",
+      "en_US": "Wi-Fi settings",
+      "fr_FR": "Paramètres Wi-Fi",
+      "de_DE": "Wi-Fi-Einstellungen",
+      "it_IT": "Impostazioni Wi-Fi",
+      "es_ES": "Ajustes de Wi-Fi",
+      "ja_JP": "Wi-Fiせってい",
+      "ko_KR": "Wi-Fi 설정"
+    },
+    {
+      "id": "Companion_Text_WifiSavedFailed",
+      "en_US": "Couldn’t join a saved network.\nChoose a Wi-Fi network to join.",
+      "fr_FR": "Impossible de rejoindre un réseau\nenregistré. Choisissez un réseau\nWi-Fi.",
+      "de_DE": "Kein gespeichertes Netzwerk\nerreichbar. Wähle ein\nWi-Fi-Netzwerk.",
+      "it_IT": "Impossibile connettersi a una rete\nsalvata. Scegli una rete Wi-Fi.",
+      "es_ES": "No se ha podido conectar a una red\nguardada. Elige una red Wi-Fi.",
+      "ja_JP": "ほぞんした　ネットワークに\nせつぞく　できませんでした\nWi-Fiネットワークを　えらんでください",
+      "ko_KR": "저장된 네트워크에\n접속할 수 없었습니다\nWi-Fi 네트워크를 선택해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiChooseSaved",
+      "en_US": "Choose a Wi-Fi network.\nSaved: {network}",
+      "fr_FR": "Choisissez un réseau Wi-Fi.\nEnregistré : {network}",
+      "de_DE": "Wähle ein Wi-Fi-Netzwerk.\nGespeichert: {network}",
+      "it_IT": "Scegli una rete Wi-Fi.\nSalvata: {network}",
+      "es_ES": "Elige una red Wi-Fi.\nGuardada: {network}",
+      "ja_JP": "Wi-Fiネットワークを　えらんでください\nほぞんずみ：{network}",
+      "ko_KR": "Wi-Fi 네트워크를 선택해 주십시오\n저장됨: {network}"
+    },
+    {
+      "id": "Companion_Text_WifiOpen",
+      "en_US": "Open",
+      "fr_FR": "Ouvert",
+      "de_DE": "Offen",
+      "it_IT": "Aperta",
+      "es_ES": "Abierta",
+      "ja_JP": "オープン",
+      "ko_KR": "개방"
+    },
+    {
+      "id": "Companion_Text_WifiReasonTkip",
+      "en_US": "This network uses WPA (TKIP),\nwhich isn’t supported. Set the\nrouter to WPA2 (AES) to join it.",
+      "fr_FR": "Ce réseau utilise WPA (TKIP), non\npris en charge. Réglez le routeur\nsur WPA2 (AES).",
+      "de_DE": "Dieses Netzwerk nutzt WPA (TKIP),\ndas nicht unterstützt wird. Stelle\nden Router auf WPA2 (AES).",
+      "it_IT": "Questa rete usa WPA (TKIP), che\nnon è supportato. Imposta il\nrouter su WPA2 (AES).",
+      "es_ES": "Esta red usa WPA (TKIP), que no es\ncompatible. Configura el router\nen WPA2 (AES).",
+      "ja_JP": "この　ネットワークは　WPA（TKIP）の\nため　つかえません　ルーターを\nWPA2（AES）に　してください",
+      "ko_KR": "이 네트워크는 WPA(TKIP)를 사용하여\n지원되지 않습니다 공유기를\nWPA2(AES)로 설정해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiReasonEnterprise",
+      "en_US": "This network needs an 802.1X\n(enterprise) login, which isn’t\nsupported.",
+      "fr_FR": "Ce réseau demande une connexion\n802.1X (entreprise), non prise\nen charge.",
+      "de_DE": "Dieses Netzwerk verlangt eine\n802.1X-Anmeldung (Enterprise),\ndie nicht unterstützt wird.",
+      "it_IT": "Questa rete richiede un accesso\n802.1X (aziendale), che non è\nsupportato.",
+      "es_ES": "Esta red pide un inicio de sesión\n802.1X (empresarial), que no es\ncompatible.",
+      "ja_JP": "この　ネットワークは　802.1Xの\nログインが　ひつようなため\nつかえません",
+      "ko_KR": "이 네트워크는 802.1X(엔터프라이즈)\n로그인이 필요하여\n지원되지 않습니다"
+    },
+    {
+      "id": "Companion_Text_WifiReasonDsi",
+      "en_US": "WPA2 networks can be joined only\nin DSi mode. Start the companion\nin DSi mode.",
+      "fr_FR": "Les réseaux WPA2 ne sont accessibles\nqu’en mode DSi. Lancez l’application\nen mode DSi.",
+      "de_DE": "WPA2-Netzwerke gehen nur im\nDSi-Modus. Starte die App\nim DSi-Modus.",
+      "it_IT": "Le reti WPA2 funzionano solo in\nmodalità DSi. Avvia l’app in\nmodalità DSi.",
+      "es_ES": "Las redes WPA2 solo funcionan en\nmodo DSi. Inicia la aplicación\nen modo DSi.",
+      "ja_JP": "WPA2の　ネットワークは　DSiモードで\nのみ　つかえます　DSiモードで\nきどう　してください",
+      "ko_KR": "WPA2 네트워크는 DSi 모드에서만\n사용할 수 있습니다\nDSi 모드로 실행해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiKeyRuleWpa",
+      "en_US": "WPA2 passwords have 8 to 63\ncharacters. Type the password,\nnot a 64-digit hex key.",
+      "fr_FR": "Les mots de passe WPA2 ont de 8 à\n63 caractères. Saisissez le mot de\npasse, pas une clé hexa de 64 chiffres.",
+      "de_DE": "WPA2-Passwörter haben 8 bis 63\nZeichen. Gib das Passwort ein,\nnicht einen 64-stelligen Hex-Schlüssel.",
+      "it_IT": "Le password WPA2 hanno da 8 a 63\ncaratteri. Inserisci la password,\nnon una chiave esadecimale di 64 cifre.",
+      "es_ES": "Las contraseñas WPA2 tienen de 8 a\n63 caracteres. Escribe la contraseña,\nno una clave hex de 64 dígitos.",
+      "ja_JP": "WPA2の　パスワードは　8～63もじです\n64けたの　16しんすうキーでは　なく\nパスワードを　いれてください",
+      "ko_KR": "WPA2 비밀번호는 8~63자입니다\n64자리 16진수 키가 아닌\n비밀번호를 입력해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiKeyRuleWep",
+      "en_US": "WEP keys have 5 or 13 characters,\nor 10 or 26 hex digits.",
+      "fr_FR": "Les clés WEP ont 5 ou 13 caractères,\nou 10 ou 26 chiffres hexa.",
+      "de_DE": "WEP-Schlüssel haben 5 oder 13\nZeichen oder 10 oder 26 Hex-Ziffern.",
+      "it_IT": "Le chiavi WEP hanno 5 o 13 caratteri,\no 10 o 26 cifre esadecimali.",
+      "es_ES": "Las claves WEP tienen 5 o 13\ncaracteres, o 10 o 26 dígitos hex.",
+      "ja_JP": "WEPキーは　5か13もじ　または\n16しんすう　10か26もじです",
+      "ko_KR": "WEP 키는 5자나 13자\n또는 16진수 10자나 26자입니다"
+    },
+    {
+      "id": "Companion_Text_WifiNotFound",
+      "en_US": "The network wasn’t found.\nMove closer to it and try again.",
+      "fr_FR": "Réseau introuvable.\nRapprochez-vous et réessayez.",
+      "de_DE": "Netzwerk nicht gefunden.\nGeh näher heran und versuche\nes erneut.",
+      "it_IT": "Rete non trovata.\nAvvicinati e riprova.",
+      "es_ES": "No se ha encontrado la red.\nAcércate e inténtalo de nuevo.",
+      "ja_JP": "ネットワークが　みつかりません\nちかづいて　もういちど\nためしてください",
+      "ko_KR": "네트워크를 찾을 수 없습니다\n가까이 가서 다시 시도해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiNoAddress",
+      "en_US": "Joined the network, but it gave\nno IP address. Check the router’s\nDHCP settings and try again.",
+      "fr_FR": "Connecté au réseau, mais aucune\nadresse IP reçue. Vérifiez le DHCP\ndu routeur et réessayez.",
+      "de_DE": "Mit dem Netzwerk verbunden, aber\nkeine IP-Adresse erhalten. Prüfe\nDHCP am Router.",
+      "it_IT": "Connesso alla rete, ma nessun\nindirizzo IP ricevuto. Controlla\nil DHCP del router.",
+      "es_ES": "Conectado a la red, pero no se ha\nrecibido una dirección IP. Revisa\nel DHCP del router.",
+      "ja_JP": "せつぞく　しましたが　IPアドレスを\nもらえませんでした　ルーターの\nDHCPを　かくにんしてください",
+      "ko_KR": "네트워크에 접속했지만\nIP 주소를 받지 못했습니다\n공유기의 DHCP를 확인해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiTimedOut",
+      "en_US": "The network didn’t answer.\nMove closer to it and try again.",
+      "fr_FR": "Le réseau ne répond pas.\nRapprochez-vous et réessayez.",
+      "de_DE": "Das Netzwerk antwortet nicht.\nGeh näher heran und versuche\nes erneut.",
+      "it_IT": "La rete non risponde.\nAvvicinati e riprova.",
+      "es_ES": "La red no responde.\nAcércate e inténtalo de nuevo.",
+      "ja_JP": "ネットワークが　こたえません\nちかづいて　もういちど\nためしてください",
+      "ko_KR": "네트워크가 응답하지 않습니다\n가까이 가서 다시 시도해 주십시오"
+    },
+    {
+      "id": "Companion_Text_WifiJoinedSaved",
+      "en_US": "Connected to {network}.\nThe password is stored as plain\ntext on the SD card.",
+      "fr_FR": "Connecté à {network}.\nLe mot de passe est enregistré en\nclair sur la carte SD.",
+      "de_DE": "Mit {network} verbunden.\nDas Passwort wird im Klartext auf\nder SD-Karte gespeichert.",
+      "it_IT": "Connesso a {network}.\nLa password viene salvata in chiaro\nsulla scheda SD.",
+      "es_ES": "Conectado a {network}.\nLa contraseña se guarda sin cifrar\nen la tarjeta SD.",
+      "ja_JP": "{network}に　せつぞく　しました\nパスワードは　あんごうか　されずに\nSDカードに　ほぞん　されます",
+      "ko_KR": "{network}에 접속했습니다\n비밀번호는 일반 텍스트로\nSD 카드에 저장됩니다"
+    },
+    {
+      "id": "Companion_Text_WifiJoinedOpen",
+      "en_US": "Connected to {network}.\nIt will be joined automatically\nnext time.",
+      "fr_FR": "Connecté à {network}.\nIl sera rejoint automatiquement\nla prochaine fois.",
+      "de_DE": "Mit {network} verbunden.\nBeim nächsten Mal wird es\nautomatisch verwendet.",
+      "it_IT": "Connesso a {network}.\nVerrà usata automaticamente\nla prossima volta.",
+      "es_ES": "Conectado a {network}.\nSe usará automáticamente\nla próxima vez.",
+      "ja_JP": "{network}に　せつぞく　しました\nつぎからは　じどうで\nせつぞく　します",
+      "ko_KR": "{network}에 접속했습니다\n다음부터 자동으로\n접속합니다"
+    },
+    {
+      "id": "Companion_Text_WifiJoinedUnsaved",
+      "en_US": "Connected to {network}, but it\ncouldn’t be saved on the SD card.",
+      "fr_FR": "Connecté à {network}, mais il n’a\npas pu être enregistré sur la\ncarte SD.",
+      "de_DE": "Mit {network} verbunden, aber es\nkonnte nicht auf der SD-Karte\ngespeichert werden.",
+      "it_IT": "Connesso a {network}, ma non è\nstato possibile salvarla sulla\nscheda SD.",
+      "es_ES": "Conectado a {network}, pero no se\nha podido guardar en la tarjeta SD.",
+      "ja_JP": "{network}に　せつぞく　しましたが\nSDカードに　ほぞん　できませんでした",
+      "ko_KR": "{network}에 접속했지만\nSD 카드에 저장할 수 없었습니다"
+    },
+    {
+      "id": "Companion_Text_WifiForget",
+      "en_US": "Forget network",
+      "fr_FR": "Oublier le réseau",
+      "de_DE": "Netzwerk vergessen",
+      "it_IT": "Dimentica rete",
+      "es_ES": "Olvidar red",
+      "ja_JP": "ネットワークを　わすれる",
+      "ko_KR": "네트워크 삭제"
+    },
+    {
+      "id": "Companion_Text_WifiForgetConfirm",
+      "en_US": "Forget {network}?\nIts password will be deleted\nfrom the SD card.",
+      "fr_FR": "Oublier {network} ?\nSon mot de passe sera effacé\nde la carte SD.",
+      "de_DE": "{network} vergessen?\nSein Passwort wird von der\nSD-Karte gelöscht.",
+      "it_IT": "Dimenticare {network}?\nLa sua password verrà cancellata\ndalla scheda SD.",
+      "es_ES": "¿Olvidar {network}?\nSu contraseña se borrará\nde la tarjeta SD.",
+      "ja_JP": "{network}を　わすれますか？\nパスワードは　SDカードから\nけされます",
+      "ko_KR": "{network}을(를) 삭제하시겠습니까?\n비밀번호가 SD 카드에서\n삭제됩니다"
+    },
+    {
+      "id": "Companion_Text_WifiJoin",
+      "en_US": "Connect",
+      "fr_FR": "Connexion",
+      "de_DE": "Verbinden",
+      "it_IT": "Connetti",
+      "es_ES": "Conectar",
+      "ja_JP": "せつぞく",
+      "ko_KR": "접속"
+    },
+    {
+      "id": "Companion_Text_KeySpace",
+      "en_US": "Space",
+      "fr_FR": "Espace",
+      "de_DE": "Leertaste",
+      "it_IT": "Spazio",
+      "es_ES": "Espacio",
+      "ja_JP": "スペース",
+      "ko_KR": "스페이스"
+    },
+    {
+      "id": "Companion_Text_KeyDelete",
+      "en_US": "Delete",
+      "fr_FR": "Effacer",
+      "de_DE": "Löschen",
+      "it_IT": "Cancella",
+      "es_ES": "Borrar",
+      "ja_JP": "けす",
+      "ko_KR": "지우기"
+    },
+    {
+      "id": "Companion_Text_KeyShow",
+      "en_US": "Show",
+      "fr_FR": "Afficher",
+      "de_DE": "Zeigen",
+      "it_IT": "Mostra",
+      "es_ES": "Mostrar",
+      "ja_JP": "みせる",
+      "ko_KR": "보기"
+    },
+    {
+      "id": "Companion_Text_KeyHide",
+      "en_US": "Hide",
+      "fr_FR": "Masquer",
+      "de_DE": "Verbergen",
+      "it_IT": "Nascondi",
+      "es_ES": "Ocultar",
+      "ja_JP": "かくす",
+      "ko_KR": "숨기기"
+    },
+    {
+      "id": "Companion_Text_WifiForgetFailed",
+      "en_US": "Couldn’t delete the saved network\nfrom the SD card. Check that the\ncard isn’t locked and try again,\nor delete _nds/dswt/wifi.cfg\non a computer.",
+      "fr_FR": "Impossible d’effacer le réseau\nenregistré de la carte SD. Vérifiez\nque la carte n’est pas verrouillée\net réessayez, ou effacez\n_nds/dswt/wifi.cfg sur un ordinateur.",
+      "de_DE": "Das gespeicherte Netzwerk konnte\nnicht von der SD-Karte gelöscht\nwerden. Prüfe, ob die Karte gesperrt\nist, oder lösche _nds/dswt/wifi.cfg\nam Computer.",
+      "it_IT": "Impossibile cancellare la rete\nsalvata dalla scheda SD. Controlla\nche la scheda non sia bloccata e\nriprova, o cancella\n_nds/dswt/wifi.cfg da un computer.",
+      "es_ES": "No se ha podido borrar la red\nguardada de la tarjeta SD. Comprueba\nque no esté bloqueada e inténtalo\nde nuevo, o borra _nds/dswt/wifi.cfg\nen un ordenador.",
+      "ja_JP": "ほぞんした　ネットワークを\nSDカードから　けせませんでした\nカードの　ロックを　かくにんして\nもういちど　ためすか　パソコンで\n_nds/dswt/wifi.cfgを　けしてください",
+      "ko_KR": "저장된 네트워크를\nSD 카드에서 삭제할 수 없었습니다\n카드 잠금을 확인하고 다시 시도하거나\n컴퓨터에서 _nds/dswt/wifi.cfg를\n삭제해 주십시오"
     }
   ]
 }
