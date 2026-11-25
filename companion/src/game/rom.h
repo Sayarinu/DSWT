@@ -8,13 +8,16 @@ typedef enum CpFamily {
     CP_FAMILY_NONE = 0,
     CP_FAMILY_DP = 1,
     CP_FAMILY_PLATINUM = 2,
-    CP_FAMILY_HGSS = 3
+    CP_FAMILY_HGSS = 3,
+    CP_FAMILY_BW = 4,
+    CP_FAMILY_B2W2 = 5
 } CpFamily;
 
 /* The games' own version and language IDs. Language 6 is unused. */
 enum {
     CP_VERSION_HEARTGOLD = 7, CP_VERSION_SOULSILVER = 8,
-    CP_VERSION_DIAMOND = 10, CP_VERSION_PEARL = 11, CP_VERSION_PLATINUM = 12
+    CP_VERSION_DIAMOND = 10, CP_VERSION_PEARL = 11, CP_VERSION_PLATINUM = 12,
+    CP_VERSION_WHITE = 20, CP_VERSION_BLACK = 21, CP_VERSION_WHITE2 = 22, CP_VERSION_BLACK2 = 23
 };
 enum {
     CP_LANGUAGE_JAPANESE = 1, CP_LANGUAGE_ENGLISH = 2, CP_LANGUAGE_FRENCH = 3,
@@ -48,11 +51,12 @@ typedef struct CpRomInfo {
 uint32_t CpBuildCode(CpFamily, unsigned version, unsigned language, unsigned revision);
 
 /* The trade family of an enroll build code, CP_FAMILY_NONE for one the server
- * would refuse or a Generation V code. Code 1 is Platinum. */
+ * would refuse. Code 1 is Platinum. */
 CpFamily CpBuildCode_Family(uint32_t code);
 
-/* Identify a Diamond, Pearl, Platinum, HeartGold or SoulSilver game code and
- * header revision. CP_ERR_UNSUPPORTED for any other game. */
+/* Identify a Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black, White,
+ * Black 2 or White 2 game code and header revision. CP_ERR_UNSUPPORTED for any
+ * other game. */
 int CpRom_FromCode(const char gameCode[4], uint8_t revision, CpRomInfo *out);
 
 /* Read and identify the header of a ROM. */
@@ -65,8 +69,8 @@ typedef struct CpSaveFingerprint {
     uint32_t footerMagic;
 } CpSaveFingerprint;
 
-/* The general block size every language of a family uses: DP 0xC100,
- * Platinum 0xCF2C, HGSS 0xF628; 0 for none. */
+/* The general block size every language of a Generation IV family uses: DP
+ * 0xC100, Platinum 0xCF2C, HGSS 0xF628; 0 for none (and for Generation V). */
 uint32_t CpRom_GeneralBlockSize(CpFamily);
 
 /* 1 if the save can belong to this ROM: the same family's block size and the

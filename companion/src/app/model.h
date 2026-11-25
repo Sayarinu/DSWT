@@ -15,7 +15,8 @@
 
 /* The screens' real model: CpUiOps over the saves on the SD card, the
  * player's ROMs, the game adapter (Diamond/Pearl, Platinum and HeartGold/
- * SoulSilver, adapter/platinum.h) and the visit driver (session/visit.h).
+ * SoulSilver, adapter/platinum.h; Black/White and Black 2/White 2,
+ * adapter/gen5.h) and the visit driver (session/visit.h).
  * A save the paired game would not load (it never saved there, or its
  * LoadCheck refuses both copies) asks the player to save in the game first.
  * Every op returns at once; scans, loads and visits run on the worker and
@@ -134,7 +135,8 @@ void CpApp_StartWifi(CpApp *);
 size_t CpApp_BackupStem(const char *name, char out[CP_APP_BACKUP_STEM_MAX + 1]);
 
 /* The save layout of a family the companion trades for, NULL for any other:
- * Diamond/Pearl, Platinum and HeartGold/SoulSilver. */
+ * Diamond/Pearl, Platinum, HeartGold/SoulSilver, Black/White and Black 2/
+ * White 2. */
 const CpSaveLayout *CpApp_Layout(CpFamily);
 
 #endif

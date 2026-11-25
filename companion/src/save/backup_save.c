@@ -2,6 +2,7 @@
 #include "backup_save.h"
 #include "journal_save.h"
 #include "save_image.h"
+#include "core/journal_family.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -124,6 +125,8 @@ typedef struct {
     const CpBackupConfig *config;
     const char *path;
     int fd, error;
+    /* The journal area of the layout the backup loaded with. */
+    const CpJournalArea *area;
 } BackupReader;
 
 static int BackupSize(void *context, uint64_t *size)
@@ -158,7 +161,8 @@ static int BackupRead(void *context, uint32_t offset, void *bytes, size_t size)
 
 static int ReadBank(void *context, int bank, unsigned char *record)
 {
-    return BackupRead(context, bank ? 0x70000 : 0x30000, record, WT_JOURNAL_RECORD_SIZE);
+    const BackupReader *reader = context;
+    return BackupRead(context, reader->area->bank[bank ? 1 : 0], record, WT_JOURNAL_RECORD_SIZE);
 }
 
 static int NoWrite(void *context, int bank, const unsigned char *record)
@@ -170,7 +174,8 @@ static int NoWrite(void *context, int bank, const unsigned char *record)
 /* A plausible filename/size alone cannot establish a retained backup. */
 static int ValidBackup(const CpBackupConfig *config, const char *path, const unsigned char *saveID)
 {
-    BackupReader reader = { config, path, -1, 0 };
+    BackupReader reader = { config, path, -1, 0, &CpJournalArea_Gen4 };
+    CpCoreFamily family = CpCore_Family();
     CpFile file = { &reader, BackupRead, NULL, NULL, BackupSize };
     WtJournalIO io = { &reader, ReadBank, NoWrite, CpSaveJournal_Hash };
     WtJournal journal;
@@ -191,15 +196,21 @@ static int ValidBackup(const CpBackupConfig *config, const char *path, const uns
     image = malloc(sizeof(*image));
     if (!image) { close(reader.fd); return -1; }
     loaded = CpSaveImage_LoadAny(image, &file);
+    if (loaded == CP_SAVE_OK) {
+        reader.area = CpSaveJournal_Area(image->layout);
+        /* The journal of the backup's own game family, whatever save is open. */
+        CpCore_SelectFamily(image->layout->footer == CP_SAVE_FOOTER_GEN5 ? CP_CORE_GEN5 : CP_CORE_GEN4);
+    }
     free(image);
     if (loaded == CP_SAVE_IO_ERROR) result = -1;
-    if (loaded == CP_SAVE_OK && CpSaveJournal_Detect(&file) == CP_SAVE_JOURNAL_HAS_JOURNAL
+    if (loaded == CP_SAVE_OK && CpSaveJournal_DetectArea(&file, reader.area) == CP_SAVE_JOURNAL_HAS_JOURNAL
         && WtJournal_Open(&journal, io) == 0) {
         result = WtJournal_Read(&journal, &state) == 0 && state.phase != WT_JOURNAL_EMPTY
             && (!saveID || !memcmp(state.saveID, saveID, 16));
         WtJournal_Close(&journal);
         memset(&state, 0, sizeof(state));
     }
+    CpCore_SelectFamily(family);
     if (close(reader.fd) != 0 || reader.error) result = -1;
     return result;
 }
@@ -264,7 +275,7 @@ CpBackupResult CpBackup_Create(const CpBackupConfig *config, const CpFile *save,
     unsigned char bytes[4096];
     uint64_t size, available;
     uint32_t offset;
-    BackupReader reader = { config, temp, -1, 0 };
+    BackupReader reader = { config, temp, -1, 0, &CpJournalArea_Gen4 };
     int fd = -1, n;
     CpBackupResult result = CP_BACKUP_IO_ERROR;
     if (!config || !config->freeSpace || !save || !save->readAt || !save->size

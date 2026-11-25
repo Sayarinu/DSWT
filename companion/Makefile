@@ -30,10 +30,14 @@ ARM7ELF			:= $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf
 # The game-independent client core, compiled in place. The Nitro-only
 # flash.c, network.c and entropy_game.c and the per-game folders stay out;
 # src/platform/nds supplies what they would (boot_glue.c, net.c, worker.c).
+# journal.c, the one family-dependent source, is built once per family with
+# renamed symbols (src/core/journal_family.h); family-check proves the rest
+# preprocess to the same text for every family.
 CLIENT			:= ../client
 CORE_SOURCES		:= $(addprefix $(CLIENT)/src/wonder_trade/,\
-			   engine.c journal.c wire.c http.c tls.c seed.c \
+			   engine.c wire.c http.c tls.c seed.c \
 			   recovery.c entropy.c pokemon_codec.c boot.c session.c)
+JOURNAL_SOURCE		:= $(CLIENT)/src/wonder_trade/journal.c
 
 # The same Mbed TLS sources and include paths as the ROM builds
 # (client/src/wonder_trade/meson.build).
@@ -75,7 +79,9 @@ LDFLAGS			:= $(ARCH) -specs=$(SPECS) -L$(BLOCKSDS)/libs/libnds/lib \
 LDLIBS			:= -Wl,--start-group $(BUILDDIR)/libwt_tls.a -ldswifi9 -lnds9 -lc -Wl,--end-group
 
 APP_OBJS		:= $(patsubst %.c,$(BUILDDIR)/app/%.o,$(APP_SOURCES))
-CORE_OBJS		:= $(patsubst $(CLIENT)/src/wonder_trade/%.c,$(BUILDDIR)/core/%.o,$(CORE_SOURCES))
+CORE_OBJS		:= $(patsubst $(CLIENT)/src/wonder_trade/%.c,$(BUILDDIR)/core/%.o,$(CORE_SOURCES)) \
+			   $(BUILDDIR)/core/journal_gen4.o $(BUILDDIR)/core/journal_gen5.o
+FAMILY_CHECK		:= $(BUILDDIR)/core/family-check.stamp
 TLS_OBJS		:= $(patsubst $(TLS_DIR)/%.c,$(BUILDDIR)/tls/%.o,$(TLS_SOURCES))
 TLS_LIB			:= $(BUILDDIR)/libwt_tls.a
 ELF			:= $(BUILDDIR)/$(NAME).elf
@@ -128,6 +134,38 @@ $(BUILDDIR)/core/%.o: $(CLIENT)/src/wonder_trade/%.c | check-inputs
 	@echo "  CC      $<"
 	@mkdir -p $(@D)
 	$(V)$(CC) $(BASE_CFLAGS) -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
+
+# journal.c for Generation IV and for Generation V (Black/White and Black
+# 2/White 2 build the same journal).
+$(BUILDDIR)/core/journal_gen4.o: $(JOURNAL_SOURCE) src/core/journal_rename.h | check-inputs
+	@echo "  CC      $< (Gen 4)"
+	@mkdir -p $(@D)
+	$(V)$(CC) $(BASE_CFLAGS) -DWT_GAME_FAMILY=WT_FAMILY_GEN4 -DCP_JOURNAL_PREFIX=CpJournalGen4 \
+		-include src/core/journal_rename.h -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
+
+$(BUILDDIR)/core/journal_gen5.o: $(JOURNAL_SOURCE) src/core/journal_rename.h | check-inputs
+	@echo "  CC      $< (Gen 5)"
+	@mkdir -p $(@D)
+	$(V)$(CC) $(filter-out -DWT_GAME_FAMILY=%,$(BASE_CFLAGS)) -DWT_GAME_FAMILY=WT_FAMILY_BW \
+		-DCP_JOURNAL_PREFIX=CpJournalGen5 -include src/core/journal_rename.h -Wall -Wextra -Werror -MMD -MP \
+		-c -o $@ $<
+
+# Every other core source is family-independent: its preprocessed text is the
+# same for each family, so the one build serves every game.
+$(FAMILY_CHECK): $(CORE_SOURCES) | check-inputs
+	@echo "  CHECK   core family independence"
+	@mkdir -p $(@D)
+	$(V)for source in $(CORE_SOURCES); do \
+		for family in WT_FAMILY_BW WT_FAMILY_B2W2; do \
+			$(CC) $(BASE_CFLAGS) -E -P $$source -o $(@D)/gen4.i && \
+			$(CC) $(filter-out -DWT_GAME_FAMILY=%,$(BASE_CFLAGS)) -DWT_GAME_FAMILY=$$family -E -P $$source \
+				-o $(@D)/gen5.i && cmp -s $(@D)/gen4.i $(@D)/gen5.i || \
+				{ echo "$$source depends on the game family" >&2; exit 1; }; \
+		done; \
+	done
+	$(V)touch $@
+
+$(ELF) $(LINK_CHECK): $(FAMILY_CHECK)
 
 $(BUILDDIR)/tls/%.o: $(TLS_DIR)/%.c | check-inputs
 	@echo "  CC      $<"

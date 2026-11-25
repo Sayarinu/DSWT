@@ -23,6 +23,10 @@ static void TestBuildCodes(void)
         { "CPUF", 0, 0x020C0300 }, { "CPUI", 0, 0x020C0400 }, { "CPUD", 0, 0x020C0500 },
         { "CPUS", 0, 0x020C0700 }, { "CPUK", 0, 0x020C0800 }, { "ADAE", 5, 0x010A0205 },
         { "APAJ", 6, 0x010B0106 }, { "IPKE", 0, 0x03070200 }, { "IPGK", 0, 0x03080800 },
+        /* LUNE-881: Generation V, whose English cartridges end in O. */
+        { "IRBO", 0, 0x04150200 }, { "IRAO", 1, 0x04140201 }, { "IREO", 0, 0x05170200 },
+        { "IRDO", 0, 0x05160200 }, { "IRBJ", 0, 0x04150100 }, { "IRDK", 0, 0x05160800 },
+        { "IRAF", 0, 0x04140300 },
     };
     size_t i;
 
@@ -33,16 +37,19 @@ static void TestBuildCodes(void)
         assert(CpBuildCode_Family(info.buildCode) == info.family);
     }
     assert(CpRom_FromCode("CPUP", 0, &info) == CP_ERR_UNSUPPORTED);
-    assert(CpRom_FromCode("IRBO", 0, &info) == CP_ERR_UNSUPPORTED);
+    assert(CpRom_FromCode("IRBE", 0, &info) == CP_ERR_UNSUPPORTED);
+    assert(CpRom_FromCode("CPUO", 0, &info) == CP_ERR_UNSUPPORTED);
     assert(CpRom_FromCode("XXXE", 0, &info) == CP_ERR_UNSUPPORTED);
 
-    /* As the server reads codes: the legacy alias is Platinum; language 6,
-     * unknown versions and Generation V are not trade families here. */
+    /* As the server reads codes: the legacy alias is Platinum; language 6
+     * and unknown versions are not trade families. */
     assert(CpBuildCode_Family(CP_BUILD_CODE_LEGACY_PLATINUM) == CP_FAMILY_PLATINUM);
     assert(CpBuildCode_Family(0x020C0600) == CP_FAMILY_NONE);
     assert(CpBuildCode_Family(0x020D0200) == CP_FAMILY_NONE);
     assert(CpBuildCode_Family(0x02070200) == CP_FAMILY_NONE);
-    assert(CpBuildCode_Family(0x04140200) == CP_FAMILY_NONE);
+    assert(CpBuildCode_Family(0x04140200) == CP_FAMILY_BW);
+    assert(CpBuildCode_Family(0x05170200) == CP_FAMILY_B2W2);
+    assert(CpBuildCode_Family(0x04160200) == CP_FAMILY_NONE && CpBuildCode_Family(0x05150200) == CP_FAMILY_NONE);
     assert(CpBuildCode(CP_FAMILY_HGSS, 8, 5, 0x10) == 0x03080510);
 }
 
@@ -312,6 +319,58 @@ static void TestFont(void)
     free(rom.data);
 }
 
+/* LUNE-881: Generation V data from a synthetic Black and Black 2. */
+static void TestGen5Data(void)
+{
+    static const char *const codes[2] = { "IRBO", "IREO" };
+    unsigned g;
+    for (g = 0; g < 2; ++g) {
+        Bytes rom = SyntheticGen5(codes[g], 0);
+        MemoryReader memory;
+        CpGame game;
+        CpPersonal personal;
+        CpEvolution rows[CP_EVOLUTIONS];
+        CpItem item;
+        CpFont font;
+        CpGlyph glyph;
+        uint16_t name[16];
+        uint8_t pp;
+        uint32_t table[CP_MAX_LEVEL + 1];
+
+        MemoryReader_Init(&memory, &rom);
+        assert(CpGame_Open(&memory.reader, &game) == CP_OK && game.table->gen5PersonalSize == (g ? 0x4C : 0x3C));
+        /* A form reads the record the species' record names; form 0 and
+         * forms past its count read the species' own. */
+        assert(CpGame_Personal(&game, 479, 2, &personal) == CP_OK && personal.baseStats[0] == 661 % 200 + 20);
+        assert(CpGame_Personal(&game, 479, 0, &personal) == CP_OK && personal.baseStats[0] == 479 % 200 + 20);
+        assert(CpGame_Personal(&game, 479, 6, &personal) == CP_OK && personal.baseStats[0] == 479 % 200 + 20);
+        assert(personal.baseFriendship == 70 && personal.genderRatio == 127 && personal.growthRate == 3);
+        assert(personal.abilities[0] == 80 && personal.abilities[1] == 81 && personal.hiddenAbility == 82);
+        /* Eggs read record 0. */
+        assert(CpGame_Personal(&game, 650, 0, &personal) == CP_OK && personal.baseStats[0] == 20);
+        assert(CpGame_ExpTable(&game, 3, table) == CP_OK && table[10] == 1000);
+        assert(CpGame_Evolutions(&game, 588, rows) == CP_OK && rows[0].method == 7 && rows[0].target == 589);
+        assert(CpGame_Item(&game, 229, &item) == CP_OK && item.holdEffect == 64 && item.holdable);
+        assert(CpGame_Item(&game, 328, &item) == CP_OK && !item.holdable && item.fieldPocket == 2);
+        assert(CpGame_Item(&game, 428, &item) == CP_OK && !item.holdable);
+        /* Black 2/White 2's lists: the Data Cards are dummies, holdable in Black/White. */
+        assert(CpGame_Item(&game, 510, &item) == CP_OK && item.holdable == !g);
+        assert(CpGame_Item(&game, g ? 639 : 627, &item) == CP_ERR_NOT_FOUND);
+        assert(CpGame_MovePp(&game, 33, &pp) == CP_OK && pp == 38);
+        assert(CpGame_SpeciesName(&game, 495, name, 16, NULL) == CP_OK && name[0] == 'S' && name[4] == 'y'
+            && name[5] == CP_CHAR_EOS);
+        assert(CpGame_SpeciesName(&game, 495, name, 5, NULL) == CP_ERR_RANGE);
+        assert(CpGame_ItemName(&game, 1, name, 16, NULL) == CP_OK && name[0] == 'M' && name[11] == CP_CHAR_EOS);
+        assert(CpGame_SpeciesName(&game, 700, name, 16, NULL) == CP_ERR_NOT_FOUND);
+        assert(CpGame_Font(&game, CP_FONT_SYSTEM, &font) == CP_OK && font.nftr && font.cellWidth == 8);
+        assert(CpFont_Glyph(&font, 'A', &glyph) == CP_OK && glyph.width == 3 && CpGlyph_Pixel(&glyph, 0, 0) == 1
+            && CpGlyph_Pixel(&glyph, 1, 0) == 0);
+        /* A code no map holds draws the alternate glyph (0). */
+        assert(CpFont_Glyph(&font, 0x246D, &glyph) == CP_OK && CpGlyph_Pixel(&glyph, 0, 0) == 1);
+        free(rom.data);
+    }
+}
+
 static void TestPairing(void)
 {
     char out[CP_PAIR_CANDIDATES][CP_PATH_MAX];
@@ -359,6 +418,7 @@ int main(void)
     TestFamilyData();
     TestMessageCipher();
     TestFont();
+    TestGen5Data();
     TestPairing();
     TestPosixReader();
     puts("game_data_test: all checks passed");

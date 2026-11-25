@@ -48,7 +48,9 @@
  *
  * Known limit: a delivery the stock game loaded already applied and the
  * player then released or traded away looks exactly like one never applied,
- * and is received again. */
+ * and is received again.
+ *
+ * A Black/White or Black 2/White 2 image goes to adapter/gen5.h instead. */
 struct WtGame {
     CpSaveImage *image;
     const CpFile *file;

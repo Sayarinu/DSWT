@@ -133,6 +133,16 @@
       "ko_KR": "먼저 게임에서 이 리포트를 불러온 뒤\n한 번 저장해 주십시오"
     },
     {
+      "id": "Companion_Text_MusicalSaved",
+      "en_US": "This save holds a downloaded musical.\nTrading would erase it.",
+      "fr_FR": "Cette sauvegarde contient une comédie\nmusicale téléchargée. Un échange l’effacerait.",
+      "de_DE": "Dieser Spielstand enthält ein geladenes\nMusical. Ein Tausch würde es löschen.",
+      "it_IT": "Questo salvataggio contiene un musical\nscaricato. Uno scambio lo cancellerebbe.",
+      "es_ES": "Esta partida contiene un musical\ndescargado. Un intercambio lo borraría.",
+      "ja_JP": "ダウンロードした　ミュージカルが\nきえてしまうため　こうかん　できません",
+      "ko_KR": "다운로드한 뮤지컬이 있습니다\n교환하면 지워집니다"
+    },
+    {
       "id": "Companion_Text_MatchingRomMissing",
       "en_US": "Matching ROM not found.\nPut {name}.nds next to its save file.",
       "fr_FR": "ROM correspondante introuvable.\nPlacez {name}.nds à côté de sa sauvegarde.",

@@ -30,6 +30,11 @@ static int Size(void *context, uint32_t *size)
 
 WtJournalIO CpJournalHostIO(CpJournalHostStore *store, const CpFile *file)
 {
+    return CpJournalHostIOArea(store, file, NULL);
+}
+
+WtJournalIO CpJournalHostIOArea(CpJournalHostStore *store, const CpFile *file, const CpJournalArea *area)
+{
     store->file = file;
     store->platform.arg = store;
     store->platform.readAt = Read;
@@ -40,6 +45,7 @@ WtJournalIO CpJournalHostIO(CpJournalHostStore *store, const CpFile *file)
     store->store.file = &store->platform;
     store->store.hold = NULL;
     store->store.error = 0;
+    store->store.area = area;
     return CpJournal_IO(&store->store, CpSaveJournal_Hash);
 }
 #endif

@@ -35,6 +35,11 @@ static int SpeciesName(void *game, uint16_t species, uint16_t *out, size_t capac
     return CpGame_SpeciesName(game, species, out, capacity, length);
 }
 
+static int Evolutions(void *game, uint16_t species, CpEvolution out[CP_EVOLUTIONS])
+{
+    return CpGame_Evolutions(game, species, out);
+}
+
 void CpAdapter_RomData(CpAdapterData *out, const CpGame *game)
 {
     out->arg = (void *)game;
@@ -45,4 +50,5 @@ void CpAdapter_RomData(CpAdapterData *out, const CpGame *game)
     out->movePp = MovePp;
     out->speciesName = SpeciesName;
     out->language = game->rom.language;
+    out->evolutions = Evolutions;
 }

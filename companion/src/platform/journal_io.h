@@ -11,6 +11,15 @@
 #define CP_JOURNAL_BANK_1 0x70000u
 #define CP_JOURNAL_RESERVED_SIZE 0x10000u
 
+/* Where a game keeps its journal banks, and the flash reserved from each
+ * bank's start. Black/White and Black 2/White 2 keep two adjacent 4 KiB banks
+ * in the musical distribution save (protocol/save-layout-bw.json, -b2w2). */
+typedef struct CpJournalArea {
+    uint32_t bank[2], reserved;
+} CpJournalArea;
+
+extern const CpJournalArea CpJournalArea_Gen4, CpJournalArea_BlackWhite, CpJournalArea_Black2White2;
+
 enum CpJournalError {
     CP_JOURNAL_ERROR_SIZE = -50,     /* the file is not a 512 KiB save */
     CP_JOURNAL_ERROR_READ = -51,
@@ -23,12 +32,14 @@ enum CpJournalError {
 
 /* WtJournalIO's argument. hold, when set, keeps the console awake (nonzero)
  * while a bank is written. error keeps the first failure. hash, set by
- * CpJournal_IO, lets a read recognise a cut first enrollment write. */
+ * CpJournal_IO, lets a read recognise a cut first enrollment write. area is
+ * the game's journal area; NULL is Generation IV's. */
 typedef struct CpJournalStore {
     const CpPlatformFile *file;
     void (*hold)(int);
     int error;
     WtJournalHash hash;
+    const CpJournalArea *area;
 } CpJournalStore;
 
 /* The WtJournalIO read and write callbacks over a save file. With a hash,

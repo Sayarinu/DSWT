@@ -122,7 +122,7 @@ static int FakeName(void *arg, uint16_t species, uint16_t *out, size_t capacity,
 }
 
 /* An English cartridge. */
-static CpAdapterData data = { NULL, FakePersonal, FakeExp, FakeEvolution, FakeHoldEffect, FakeMovePp, FakeName, 2 };
+static CpAdapterData data = { NULL, FakePersonal, FakeExp, FakeEvolution, FakeHoldEffect, FakeMovePp, FakeName, 2, NULL };
 
 static int FakeHoldable(void *arg, unsigned item)
 {

@@ -4,7 +4,9 @@
 #include "game/gamedata.h"
 
 /* Game-encoded text: 16-bit character codes the game's fonts draw, ended by
- * CP_CHAR_EOS. The codes depend on the cartridge's language. */
+ * CP_CHAR_EOS. Generation IV's codes depend on the cartridge's language;
+ * Generation V's are UTF-16, with its own codes for symbols such as the
+ * gender signs (0x246D male, 0x246E female). */
 #define CP_CHAR_EOS 0xFFFFu
 #define CP_CHAR_QUESTION 0x01ACu
 
@@ -12,17 +14,31 @@
  * most capacity - 1 codes and CP_CHAR_EOS; `length` (optional) gets the code
  * count before the end. CP_ERR_RANGE when the text does not fit. */
 int CpMessage_Read(const CpRomFile *bank, uint16_t entry, uint16_t *out, size_t capacity, size_t *length);
+/* The same for a Generation V message bank: its first language block, each
+ * entry XORed with a key from its number that turns as it is read. */
+int CpMessage_Read5(const CpRomFile *bank, uint16_t entry, uint16_t *out, size_t capacity, size_t *length);
+
+/* Entry `entry` of message bank `bank` of the game's message archive, in its format. */
+int CpGame_Message(const CpGame *, uint16_t bank, uint16_t entry, uint16_t *out, size_t capacity, size_t *length);
 
 /* A species name in the cartridge's language, from its message archive. */
 int CpGame_SpeciesName(const CpGame *, uint16_t species, uint16_t *out, size_t capacity, size_t *length);
+/* An item name in the cartridge's language. */
+int CpGame_ItemName(const CpGame *, uint16_t item, uint16_t *out, size_t capacity, size_t *length);
 
 /* Fonts of the font archive. */
 enum { CP_FONT_SYSTEM = 0, CP_FONT_MESSAGE = 1 };
 
+/* Generation IV: NFGR. Generation V (nftr set): Game Freak's NFTR, its glyph
+ * cells (a left offset, width and advance, then 2-bit pixels row by row) at
+ * headerSize, its character maps from widthOffset; glyphs larger than 16x16
+ * are refused. */
 typedef struct CpFont {
     CpRomFile file;
     uint32_t headerSize, widthOffset, glyphCount;
     uint8_t maxWidth, maxHeight, tilesWide, tilesHigh;
+    uint8_t nftr, cellWidth, cellHeight;
+    uint16_t cellSize, alternate;
 } CpFont;
 
 int CpGame_Font(const CpGame *, unsigned font, CpFont *out);

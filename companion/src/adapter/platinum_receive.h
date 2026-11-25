@@ -29,6 +29,8 @@ typedef struct CpAdapterData {
     int (*speciesName)(void *arg, uint16_t species, uint16_t *out, size_t capacity, size_t *length);
     /* The cartridge's language (gGameLanguage), which new mail records. */
     uint8_t language;
+    /* Generation V: the species' evolution entries (CpGame_Evolutions). */
+    int (*evolutions)(void *arg, uint16_t species, CpEvolution out[CP_EVOLUTIONS]);
 } CpAdapterData;
 
 enum { CP_RECEIVE_PARTY = 1, CP_RECEIVE_BOX = 2 };

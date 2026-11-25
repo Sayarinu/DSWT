@@ -412,4 +412,153 @@ static inline Bytes SyntheticPlatinum(const char code[4], uint8_t revision)
     return SyntheticGame(code, revision);
 }
 
+/* ---- LUNE-881: a synthetic Black/White or Black 2/White 2 ------------------ */
+
+/* A Generation V message bank: one block of {offset, length, 0} entries,
+ * each text XORed with (n + 3) * 0x2983 turning left by 3 bits per code. */
+static inline Bytes MessageBank5(const char *const *texts, uint16_t count)
+{
+    Bytes bank = { 0 }, text = { 0 };
+    uint32_t i, j, entries = 4 + (uint32_t)count * 8;
+
+    for (i = 0; i < count; ++i) {
+        uint16_t key = (uint16_t)((i + 3u) * 0x2983u);
+        uint32_t length = (uint32_t)strlen(texts[i]) + 1;
+
+        for (j = 0; j < length; ++j) {
+            unsigned code = j + 1 < length ? (unsigned char)texts[i][j] : 0xFFFF;
+            Put16(&text, code ^ key);
+            key = (uint16_t)(key << 3 | key >> 13);
+        }
+    }
+    Put16(&bank, 1);
+    Put16(&bank, count);
+    Put32(&bank, entries + text.size);
+    Put32(&bank, 0);
+    Put32(&bank, 16);
+    Put32(&bank, entries + text.size);
+    for (i = 0, j = entries; i < count; ++i) {
+        uint32_t length = (uint32_t)strlen(texts[i]) + 1;
+        Put32(&bank, j);
+        Put16(&bank, length);
+        Put16(&bank, 0);
+        j += length * 2;
+    }
+    Put(&bank, text.data, text.size);
+    free(text.data);
+    return bank;
+}
+
+/* An NFTR font of 95 glyphs (codes 0x20..0x7E), 8x8 cells of a 3-pixel
+ * advance, each with its top-left pixel set. */
+static inline Bytes Nftr5(void)
+{
+    Bytes font = { 0 };
+    uint32_t i, glyphs = 0x34, cell = 3 + 8 * 8 * 2 / 8, map;
+
+    Put(&font, "RTFN", 4); Put32(&font, 0xFEFF0100); Put32(&font, 0); Put32(&font, 0x00030010);
+    Put(&font, "FINF", 4); Put32(&font, 0x1C);
+    Put8(&font, 0); Put8(&font, 8); Put16(&font, 0); Put8(&font, 0); Put8(&font, 8); Put8(&font, 8); Put8(&font, 1);
+    Put32(&font, glyphs); Put32(&font, 0); Put32(&font, 0); /* glyph, width and map offsets, set below */
+    while (font.size < glyphs - 8) Put8(&font, 0);
+    Put(&font, "PLGC", 4); Put32(&font, 8 + 8 + 95 * cell);
+    Put8(&font, 8); Put8(&font, 8); Put16(&font, cell); Put8(&font, 7); Put8(&font, 8); Put8(&font, 2); Put8(&font, 0);
+    for (i = 0; i < 95; ++i) {
+        Put8(&font, 0); Put8(&font, 3); Put8(&font, 3);
+        Put8(&font, 0x40);
+        while ((font.size - (glyphs + 8)) % cell) Put8(&font, 0);
+    }
+    Put(&font, "PAMC", 4); Put32(&font, 8 + 12 + 2 + 2);
+    map = font.size;
+    Put16(&font, 0x20); Put16(&font, 0x7E); Put16(&font, 0); Put16(&font, 0); Put32(&font, 0);
+    Put16(&font, 0); Put16(&font, 0);
+    Set32(&font, 0x18 + 8, glyphs);
+    Set32(&font, 0x18 + 16, map);
+    Set32(&font, 8, font.size);
+    return font;
+}
+
+#define GEN5_PERSONAL 669
+#define GEN5_EVOLUTIONS 650
+#define GEN5_MOVES 100
+
+/* A synthetic Generation V game at its archive paths (gamedata.c): every
+ * species' record names its species' number in its first base stat, Kadabra
+ * trades into Alakazam, Karrablast for Shelmet into Escavalier. */
+static inline Bytes SyntheticGen5(const char code[4], uint8_t revision)
+{
+    static Bytes personal[GEN5_PERSONAL], evo[GEN5_EVOLUTIONS], items[639], moves[GEN5_MOVES];
+    static Bytes banks[91];
+    static const char *names[652], *itemNames[639];
+    Bytes growth[8], fonts[1], rom;
+    RomFile files[7];
+    uint32_t i, level, itemCount, size;
+    CpRomInfo info;
+    const CpGameTable *table;
+
+    assert(CpRom_FromCode(code, revision, &info) == CP_OK && (table = CpGame_Table(info.family)) != NULL);
+    assert(table->gen5PersonalSize != 0 && table->itemCount <= 639 && table->speciesNames.international < 91);
+    size = table->gen5PersonalSize;
+    itemCount = table->itemCount;
+    for (i = 0; i < GEN5_PERSONAL; ++i) {
+        personal[i] = Filled(size, 0);
+        memset(personal[i].data, 50, 6);
+        personal[i].data[0] = (uint8_t)(i % 200 + 20);
+        personal[i].data[0x12] = 127;
+        personal[i].data[0x14] = 70;
+        personal[i].data[0x15] = 3;
+        personal[i].data[0x18] = (uint8_t)(i % 100 + 1);
+        personal[i].data[0x19] = (uint8_t)(i % 100 + 2);
+        personal[i].data[0x1A] = (uint8_t)(i % 100 + 3);
+    }
+    /* Rotom's forms 1..5 in records 660..664. */
+    personal[479].data[0x1C] = 660 & 0xFF; personal[479].data[0x1D] = 660 >> 8; personal[479].data[0x20] = 6;
+    for (i = 0; i < 8; ++i) {
+        growth[i] = (Bytes){ 0 };
+        for (level = 0; level <= 100; ++level) Put32(&growth[i], level < 2 ? 0 : level * level * level);
+    }
+    for (i = 0; i < GEN5_EVOLUTIONS; ++i) evo[i] = Filled(42, 0);
+    evo[64].data[0] = 5; evo[64].data[4] = 65;
+    evo[588].data[0] = 7; evo[588].data[4] = 589 & 0xFF; evo[588].data[5] = 589 >> 8;
+    for (i = 0; i < itemCount; ++i) {
+        unsigned pocket = i >= 328 && i <= 427 ? 2 : i == 428 ? 4 : 0;
+        items[i] = Filled(36, 0);
+        items[i].data[2] = i == 229 ? 64 : 0;
+        items[i].data[8] = (uint8_t)(pocket << 7);
+        items[i].data[9] = (uint8_t)(pocket >> 1);
+        itemNames[i] = i == 1 ? "Master Ball" : "Item";
+    }
+    for (i = 0; i < GEN5_MOVES; ++i) {
+        moves[i] = Filled(36, 0);
+        moves[i].data[5] = (uint8_t)(i % 40 + 5);
+    }
+    for (i = 0; i < 652; ++i) names[i] = "Other";
+    names[495] = "Snivy"; names[496] = "Servine"; names[497] = "Serperior"; names[65] = "Alakazam";
+    for (i = 0; i < 91; ++i) banks[i] = Filled(4, 0);
+    free(banks[table->speciesNames.international].data);
+    banks[table->speciesNames.international] = MessageBank5(names, 652);
+    free(banks[table->itemNames.international].data);
+    banks[table->itemNames.international] = MessageBank5(itemNames, (uint16_t)itemCount);
+    fonts[0] = Nftr5();
+
+    files[0] = (RomFile){ table->personal, Narc(personal, GEN5_PERSONAL) };
+    files[1] = (RomFile){ table->growth, Narc(growth, 8) };
+    files[2] = (RomFile){ table->evolution, Narc(evo, GEN5_EVOLUTIONS) };
+    files[3] = (RomFile){ table->items, Narc(items, itemCount) };
+    files[4] = (RomFile){ table->messages, Narc(banks, 91) };
+    files[5] = (RomFile){ table->font, Narc(fonts, 1) };
+    files[6] = (RomFile){ table->moves, Narc(moves, GEN5_MOVES) };
+    rom = Rom(code, revision, files, 7);
+
+    FreeMembers(personal, GEN5_PERSONAL);
+    FreeMembers(growth, 8);
+    FreeMembers(evo, GEN5_EVOLUTIONS);
+    FreeMembers(items, itemCount);
+    FreeMembers(banks, 91);
+    FreeMembers(fonts, 1);
+    FreeMembers(moves, GEN5_MOVES);
+    for (i = 0; i < 7; ++i) free(files[i].data.data);
+    return rom;
+}
+
 #endif
