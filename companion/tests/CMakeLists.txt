@@ -21,8 +21,38 @@ add_test(NAME core_smoke_test COMMAND core_smoke_test)
 
 # The portable part of the DSi platform layer (src/platform).
 set(COMPANION "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# LUNE-881: the client journal, built once per family with renamed symbols,
+# behind the companion's runtime family selection (src/core/journal_family.h).
+foreach(journal_family GEN4 GEN5)
+    if(journal_family STREQUAL "GEN4")
+        set(journal_define WT_FAMILY_GEN4)
+    else()
+        set(journal_define WT_FAMILY_BW)
+    endif()
+    add_library(companion_journal_${journal_family} OBJECT "${CLIENT}/src/wonder_trade/journal.c")
+    target_include_directories(companion_journal_${journal_family} PRIVATE "${CLIENT}/include" "${COMPANION}/src")
+    target_compile_definitions(companion_journal_${journal_family} PRIVATE WT_GAME_FAMILY=${journal_define})
+    string(REPLACE "GEN" "Gen" journal_prefix "CpJournal${journal_family}")
+    target_compile_definitions(companion_journal_${journal_family} PRIVATE CP_JOURNAL_PREFIX=${journal_prefix})
+    target_compile_options(companion_journal_${journal_family} PRIVATE -include
+        "${COMPANION}/src/core/journal_rename.h" -Wall -Wextra -Werror -fsanitize=address,undefined)
+endforeach()
+add_library(companion_core_journal STATIC "${COMPANION}/src/core/journal_family.c"
+    $<TARGET_OBJECTS:companion_journal_GEN4> $<TARGET_OBJECTS:companion_journal_GEN5>)
+target_include_directories(companion_core_journal PUBLIC "${CLIENT}/include" "${COMPANION}/src")
+target_compile_options(companion_core_journal PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+target_link_options(companion_core_journal PUBLIC -fsanitize=address,undefined)
+add_executable(core_family_test core_family_test.c)
+target_link_libraries(core_family_test PRIVATE companion_core_journal)
+target_compile_options(core_family_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+add_test(NAME core_family_test COMMAND core_family_test)
+# Every other core source the companion builds preprocesses the same for each family.
+add_test(NAME core_family_independence_test
+    COMMAND "${CMAKE_COMMAND}" -DCC=${CMAKE_C_COMPILER} -DCLIENT=${CLIENT} -DOUT=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/core_family_independence.cmake")
 add_executable(journal_io_test journal_io_test.c "${COMPANION}/src/platform/journal_io.c"
-    "${CLIENT}/src/wonder_trade/journal.c" "${CLIENT}/src/wonder_trade/wire.c")
+    "${CLIENT}/src/wonder_trade/wire.c")
 add_executable(entropy_pool_test entropy_pool_test.c "${COMPANION}/src/platform/entropy_pool.c")
 add_executable(wifi_status_test wifi_status_test.c "${COMPANION}/src/platform/wifi_status.c")
 foreach(test journal_io_test entropy_pool_test wifi_status_test)
@@ -32,6 +62,7 @@ foreach(test journal_io_test entropy_pool_test wifi_status_test)
     target_link_options(${test} PRIVATE -fsanitize=address,undefined)
     add_test(NAME ${test} COMMAND ${test})
 endforeach()
+target_link_libraries(journal_io_test PRIVATE companion_core_journal)
 
 # LUNE-866: portable Platinum save image and host file adapter.
 set(COMPANION_SAVE "${CMAKE_CURRENT_SOURCE_DIR}/../src/save")
@@ -82,11 +113,11 @@ add_library(companion_journal STATIC
     "${COMPANION_SAVE}/journal_host_io.c"
     "${COMPANION_SAVE}/backup_save.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/platform/journal_io.c"
-    "${CLIENT}/src/wonder_trade/journal.c")
+   )
 target_include_directories(companion_journal PUBLIC "${CLIENT}/include")
 target_compile_definitions(companion_journal PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_compile_options(companion_journal PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
-target_link_libraries(companion_journal PUBLIC companion_save)
+target_link_libraries(companion_journal PUBLIC companion_save companion_core_journal)
 # LUNE-901: a first enrollment write cut in any SD sector order.
 add_executable(torn_enrollment_test journal/torn_enrollment_test.c "${CLIENT}/src/wonder_trade/wire.c")
 target_link_libraries(torn_enrollment_test PRIVATE companion_journal)
@@ -141,18 +172,18 @@ target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN
 target_link_libraries(companion_adapter PUBLIC companion_save)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
 add_executable(platinum_receive_test adapter/platinum_receive_test.c "${COMPANION_SRC}/session/visit.c"
-    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/engine.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
 target_include_directories(platinum_receive_test PRIVATE "${CLIENT}/tests")
 add_executable(visit_test session/visit_test.c "${COMPANION_SRC}/session/visit.c"
-    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/engine.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
 target_include_directories(visit_test PRIVATE "${CLIENT}/tests")
 foreach(adapter_target companion_adapter platinum_adapter_test platinum_receive_test visit_test)
     target_compile_options(${adapter_target} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 endforeach()
 foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
-    target_link_libraries(${adapter_test} PRIVATE companion_adapter)
+    target_link_libraries(${adapter_test} PRIVATE companion_adapter companion_core_journal)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
 
@@ -173,13 +204,14 @@ set(STOCK_SOURCES "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapte
     "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${CLIENT}/src/wonder_trade/pokemon_codec.c")
 add_executable(stock_save_test adapter/stock_save_test.c ${STOCK_SOURCES})
 add_executable(stock_resume_test session/stock_resume_test.c ${STOCK_SOURCES} "${COMPANION_SRC}/session/visit.c"
-    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/engine.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
 foreach(stock_test stock_save_test stock_resume_test)
     target_include_directories(${stock_test} PRIVATE "${COMPANION_SRC}" "${CLIENT}/include" "${CLIENT}/tests")
     target_compile_definitions(${stock_test} PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
     target_compile_options(${stock_test} PRIVATE -O1 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
     target_link_options(${stock_test} PRIVATE -fsanitize=address,undefined)
+    target_link_libraries(${stock_test} PRIVATE companion_core_journal)
     add_test(NAME ${stock_test} COMMAND ${stock_test})
 endforeach()
 
