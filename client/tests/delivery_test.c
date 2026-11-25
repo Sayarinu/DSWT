@@ -158,7 +158,7 @@ static unsigned char *Slot(void *arg, void *data, WtJournalLocator where)
     if (where.kind == 1 && where.box == 0 && where.slot < 6 && where.length == PARTY) return save->party[where.slot];
     if (where.kind == 2 && where.box < WT_GAME_BOX_COUNT && where.slot < WT_GAME_BOX_SLOTS && where.length == BOX)
         return save->boxes[where.box][where.slot];
-    if (kBattleBox && where.kind == 3 && where.box == 0 && where.slot < WT_GAME_BATTLE_BOX_SLOTS
+    if (kBattleBox && where.kind == 3 && where.box == 0 && where.slot < kBattleBox
         && where.length == BOX) return save->battle[where.slot];
     return NULL;
 }
@@ -359,7 +359,7 @@ static unsigned Copies(const Save *save, const unsigned char target[BOX])
     unsigned n = 0, i, copies = 0;
     for (i = 0; i < save->count; ++i) images[n++] = save->party[i];
     for (i = 0; i < WT_GAME_BOX_COUNT * WT_GAME_BOX_SLOTS; ++i) images[n++] = save->boxes[i / WT_GAME_BOX_SLOTS][i % WT_GAME_BOX_SLOTS];
-    for (i = 0; i < (unsigned)WT_GAME_BATTLE_BOX_SLOTS; ++i) images[n++] = save->battle[i];
+    for (i = 0; i < kBattleBox; ++i) images[n++] = save->battle[i];
     images[n++] = save->daycare;
     for (i = 0; i < n; ++i) {
         CHECK(WtPokemon_Decode(images[i], canonical) == 0);
