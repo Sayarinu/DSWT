@@ -482,8 +482,8 @@ static void Resume(void)
      * directly, the second after one stock save. */
     else if (load == CP_SAVE_OK && scenario != PROVISION) {
         if (stockSaves == 1) {
-            /* CI plays the stock game after every other distinct cut. */
-            stockNext = full || (distinct & 1);
+            /* CI plays the stock game after every fourth distinct cut. */
+            stockNext = full || distinct % 4 == 1;
         } else {
             stockSaves = 1;
             StockGameSave();
