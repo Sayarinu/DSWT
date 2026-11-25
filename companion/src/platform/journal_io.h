@@ -22,19 +22,32 @@ enum CpJournalError {
 };
 
 /* WtJournalIO's argument. hold, when set, keeps the console awake (nonzero)
- * while a bank is written. error keeps the first failure. */
+ * while a bank is written. error keeps the first failure. hash, set by
+ * CpJournal_IO, lets a read recognise a cut first enrollment write. */
 typedef struct CpJournalStore {
     const CpPlatformFile *file;
     void (*hold)(int);
     int error;
+    WtJournalHash hash;
 } CpJournalStore;
 
-/* The WtJournalIO read and write callbacks over a save file. A write zeroes
+/* The WtJournalIO read and write callbacks over a save file. With a hash,
+ * a read shows a bank as blank when it holds only what a cut first
+ * enrollment write can leave next to the other, valid bank (see
+ * CpJournal_CutFirstEnrollment), so the journal opens on that valid bank.
+ * A write zeroes
  * the bank's 4-byte commit tag, syncs, writes the body, syncs, writes the
  * tag, syncs, then reads the whole record back from the card, bypassing
  * every cache. The file must be exactly 512 KiB before and after. */
 int CpJournal_ReadBank(void *store, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE]);
 int CpJournal_WriteBank(void *store, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE]);
 WtJournalIO CpJournal_IO(CpJournalStore *, WtJournalHash);
+/* Nonzero when torn, which is not a valid record, holds bytes of only two
+ * records: an EMPTY record and the initial ENROLLING record that follows it,
+ * one of which valid is. Only the companion can leave this: an SD card may
+ * persist a multi-sector write's sectors in any order, so the header can stay
+ * EMPTY while the tail already holds the enrollment packet. */
+int CpJournal_CutFirstEnrollment(const unsigned char torn[WT_JOURNAL_RECORD_SIZE],
+                                 const unsigned char valid[WT_JOURNAL_RECORD_SIZE], WtJournalHash);
 
 #endif
