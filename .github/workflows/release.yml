@@ -10,6 +10,10 @@ on:
       version:
         description: Release version, such as 0.1.0, of an existing draft release
         required: true
+      companion:
+        description: Attach the DS Companion (requires hardware testing and translation review)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -141,10 +145,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  companion:
+    name: Build the DS Companion
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build with the public production profile
+        env:
+          CONNECTION_PROFILE: companion/production-connection-profile.json
+        run: scripts/build-companion.sh
+      - name: Inspect and package the DS and DSi ROM
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+          python3 scripts/package-companion.py --version "$VERSION" --output game/apps
+      - name: Keep the companion only when requested
+        if: inputs.companion
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-companion
+          path: game/apps/dswt-companion-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish the release
     if: github.ref == 'refs/heads/main'
-    needs: [linux, macos, windows]
+    needs: [linux, macos, windows, companion]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -163,4 +196,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
-        run: python3 tools/patcher-app/release.py --repo "$GITHUB_REPOSITORY" publish --version "$VERSION" --directory game/release
+          COMPANION: ${{ inputs.companion }}
+        run: python3 tools/patcher-app/release.py --repo "$GITHUB_REPOSITORY" publish --version "$VERSION" --directory game/release --companion "$COMPANION"

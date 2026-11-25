@@ -138,6 +138,21 @@ class WorkflowTests(unittest.TestCase):
                                                           "env": {"GH_TOKEN": "${{ github.token }}"}}),
             lambda d: jobs(d)["publish"]["steps"].append({"run": "true", "env": {"KEY": "${{ secrets.PERSONAL_TOKEN }}"}}),
             lambda d: jobs(d)["fetch"]["steps"][0].update(uses="actions/checkout@v4"),
+            lambda d: d["on"]["workflow_dispatch"]["inputs"]["companion"].update(default="true"),
+            lambda d: d["on"]["workflow_dispatch"]["inputs"]["companion"].update(type="string"),
+            lambda d: jobs(d)["publish"].update(needs=["linux", "macos", "windows"]),
+            lambda d: jobs(d)["companion"].update({"if": "inputs.companion"}),
+            lambda d: jobs(d)["companion"].pop("needs"),
+            lambda d: jobs(d)["companion"].update(permissions={"contents": "write"}),
+            lambda d: jobs(d)["companion"].update(container="ubuntu:24.04"),
+            lambda d: jobs(d)["companion"]["steps"][0]["with"].update({"persist-credentials": "true"}),
+            lambda d: jobs(d)["companion"]["steps"][-1].pop("if"),
+            lambda d: jobs(d)["companion"]["steps"][1]["env"].update(GH_TOKEN="${{ github.token }}"),
+            lambda d: jobs(d)["companion"]["steps"][1]["env"].update(PROFILE="${{ secrets.PROFILE }}"),
+            lambda d: jobs(d)["companion"]["steps"][1]["env"].update(CONNECTION_PROFILE="companion/connection-profile.json"),
+            lambda d: jobs(d)["companion"]["steps"][1].update({"if": "inputs.companion"}),
+            lambda d: jobs(d)["publish"]["steps"][-1]["env"].update(COMPANION="true"),
+            lambda d: jobs(d)["publish"]["steps"][-1].update(run="publish --version x --companion true"),
         ]
         for index, change in enumerate(changes):
             with self.subTest(case=index):

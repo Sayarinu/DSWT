@@ -289,10 +289,51 @@ class ReleaseTests(AppFixture):
         self.assertEqual(github.calls[-1][:3], ("release", "edit", "v0.1.0"))
         sums = (directory / "SHA256SUMS").read_text().splitlines()
         self.assertEqual(sorted(line.split()[1] for line in sums), sorted(apps))
+        self.assertEqual((directory / "SHA256SUMS").read_bytes(),
+                         "".join(f"{hashlib.sha256(name.encode()).hexdigest()}  dswt-patcher-0.1.0-{name}.zip\n"
+                                 for name in sorted(release.PLATFORMS)).encode())
+        for name in release.PLATFORMS:
+            self.assertEqual((directory / f"dswt-patcher-0.1.0-{name}.zip").read_bytes(), name.encode())
         (directory / "SHA256SUMS").unlink()
         (directory / "dswt-patcher-0.1.0-linux.zip").unlink()
         with patch.object(release, "gh", FakeGitHub()), self.assertRaisesRegex(ValueError, "differ"):
             release.publish("0.1.0", "owner/repo", directory)
+
+    def test_companion_is_uploaded_and_hashed_only_with_explicit_opt_in(self):
+        directory = self.root / "game/publish"
+        directory.mkdir()
+        (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())
+        for name in release.PLATFORMS:
+            (directory / f"dswt-patcher-0.1.0-{name}.zip").write_bytes(name.encode())
+        companion = directory / "dswt-companion-0.1.0.zip"
+        with patch.object(release, "gh", FakeGitHub()) as github, self.assertRaisesRegex(ValueError, "differ"):
+            release.publish("0.1.0", "owner/repo", directory, companion=True)
+        self.assertEqual(github.calls, [])
+        companion.write_bytes(b"companion zip")
+        for opt_in in (None, False):
+            with self.subTest(companion=opt_in):
+                github = FakeGitHub()
+                kwargs = {} if opt_in is None else {"companion": opt_in}
+                with patch.object(release, "gh", github), self.assertRaisesRegex(ValueError, "differ"):
+                    release.publish("0.1.0", "owner/repo", directory, **kwargs)
+                self.assertEqual(github.calls, [])
+                self.assertFalse((directory / "SHA256SUMS").exists())
+        github = FakeGitHub()
+        with patch.object(release, "gh", github):
+            result = release.publish("0.1.0", "owner/repo", directory, companion=True)
+        expected = {"SHA256SUMS", companion.name, *(f"dswt-patcher-0.1.0-{p}.zip" for p in release.PLATFORMS)}
+        self.assertEqual(set(result["files"]), expected)
+        self.assertEqual(set(github.assets), expected)
+        sums = (directory / "SHA256SUMS").read_text()
+        self.assertIn(f"{hashlib.sha256(companion.read_bytes()).hexdigest()}  {companion.name}\n", sums)
+        self.assertEqual(len(sums.splitlines()), 4)
+
+    def test_publish_cli_defaults_companion_to_false_and_passes_explicit_boolean(self):
+        for flag, expected in (([], False), (["--companion", "false"], False), (["--companion", "true"], True)):
+            with self.subTest(flag=flag), patch.object(release, "publish", return_value={}) as publish:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(release.main(["publish", "--version", "0.1.0", "--directory", "x", *flag]), 0)
+                publish.assert_called_once_with("0.1.0", "Sayarinu/DSWT", Path("x"), companion=expected)
 
     def test_cli_validates_version_and_repository(self):
         for arguments in (["fetch", "--version", "v1", "--output", "x"],
