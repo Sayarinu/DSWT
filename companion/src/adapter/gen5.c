@@ -1,4 +1,5 @@
 #include "adapter/gen5.h"
+#include "adapter/same_pokemon.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -252,8 +253,10 @@ static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_S
 }
 
 /* Pokémon with the target's identity in the party, the PC and the Battle
- * Box; -1 when a slot cannot be read as the game would. */
-static int Identities(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+ * Box, the last of them in `found` (canonical); -1 when a slot cannot be read
+ * as the game would. */
+static int Identities(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE],
+                      unsigned char found[BOX_MON_SIZE])
 {
     unsigned char canonical[BOX_MON_SIZE], *party = Party(image);
     unsigned box, slot;
@@ -261,13 +264,17 @@ static int Identities(const CpSaveImage *image, const unsigned char target[BOX_M
     if ((members = Count(party, 1)) < 0) return -1;
     for (i = 0; i < members; ++i) {
         if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0) return -1;
-        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+        if (memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
+            memcpy(found, canonical, BOX_MON_SIZE); ++count;
+        }
     }
     for (box = 0; box <= BOXES; ++box) for (slot = 0; slot < BOX_SLOTS; ++slot) {
         if (box == BOXES && slot >= BATTLE_BOX_SLOTS) break;
         kind = Stored(box == BOXES ? BattleBoxMon(image, slot) : BoxMon(image, box, slot), canonical);
         if (kind < 0) return -1;
-        count += kind == 1 && memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+        if (kind == 1 && memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
+            memcpy(found, canonical, BOX_MON_SIZE); ++count;
+        }
     }
     return count;
 }
@@ -536,12 +543,14 @@ done:
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
-    unsigned char digest[1][32];
+    unsigned char digest[1][32], other[BOX_MON_SIZE];
     Found found;
     int where;
     Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
     where = Locate(image, entry->outgoing, digest, 1, &found);
-    if (where < 0) return Identities(image, entry->outgoing) == 1 ? WT_INVENTORY_KEPT : -1;
+    if (where < 0)
+        return Identities(image, entry->outgoing, other) == 1 && CpSamePokemon(game->data, 1, entry->outgoing, other)
+            ? WT_INVENTORY_KEPT : -1;
     if (where == 1) {
         if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return WT_INVENTORY_KEPT;
         entry->source.slot = (unsigned char)found.slot;
@@ -580,7 +589,8 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
         Remove(party, slot);
-        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
+        /* No other Pokémon with its identity stays (LUNE-902), as the games' WtDelivery_Unique. */
+        if (Identities(image, entry->outgoing, canonical) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= PARTY_CAPACITY
@@ -662,7 +672,7 @@ int CpGen5_Eligible(const CpSaveImage *image, unsigned slot)
 
 int CpGen5_Unique(CpSaveImage *image, unsigned slot)
 {
-    unsigned char *party, canonical[BOX_MON_SIZE];
+    unsigned char *party, canonical[BOX_MON_SIZE], other[BOX_MON_SIZE];
     Backup *backup;
     int count, unique;
     if (!CpGen5_Is(image) || !image->loaded) return 1;
@@ -671,7 +681,7 @@ int CpGen5_Unique(CpSaveImage *image, unsigned slot)
         return 1;
     if (!(backup = Keep(image))) return 1;
     Remove(party, slot);
-    unique = Absent(image, canonical) == 0;
+    unique = Identities(image, canonical, other) == 0;
     Release(backup, 1);
     return unique;
 }

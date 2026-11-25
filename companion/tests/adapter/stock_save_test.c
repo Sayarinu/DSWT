@@ -253,6 +253,22 @@ static void Impostor(unsigned char *general, unsigned char *boxes)
     assert(WtPokemon_Encode(canonical, boxes + FX_PC + 7 * FX_BOX_MON) == 0);
 }
 
+/* Another Pokémon with the offered one's identity and species, differing in
+ * one field play never changes (impostorField; the IVs at 0x38). */
+static unsigned impostorField;
+static void Lookalike(unsigned char *general, unsigned char *boxes)
+{
+    FxSpec spec = FxDefault(OFFERED_SLOT);
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    (void)general;
+    FxCanonical(&spec, canonical);
+    canonical[impostorField] ^= 0x01;
+    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
+    FxPut16(canonical + 6, sum & 65535);
+    assert(WtPokemon_Encode(canonical, boxes + FX_PC + 7 * FX_BOX_MON) == 0);
+}
+
 static void IdentityCollisions(void)
 {
     static unsigned char before[CP_SAVE_FILE_SIZE];
@@ -276,11 +292,10 @@ static void IdentityCollisions(void)
     entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
     assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry) == -1);
     assert(memcmp(before, file.bytes, sizeof(before)) == 0);
-    /* An escrow, removed or not, never removes anything. Not removed: two
-     * Pokémon with the identity, refused. Removed: the save's only one is
-     * taken as the offer as play left it (wonder_trade/delivery.h), so
-     * REMOVE answers KEPT and the escrow, never sent, may be abandoned; the
-     * identity then stays in exactly one place. */
+    /* An escrow, removed or not, never removes anything and is never kept
+     * (LUNE-902): not removed, two Pokémon with the identity; removed, the
+     * only one is another Pokémon (here another species, which the offer
+     * cannot evolve into), so the offer is in the journal alone. */
     for (cut = 1; cut <= 13; cut += 12) {
         Arrange(ESCROW, &journal);
         entry = journal;
@@ -291,10 +306,38 @@ static void IdentityCollisions(void)
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : WT_INVENTORY_KEPT));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
         assert(FxStockCopies(&file, offered) == (cut <= 12 ? 2u : 1u));
     }
+    /* Removed, and the only Pokémon with the identity is the same species
+     * but differs where play never reaches: not the offer either. */
+    {
+        static const unsigned fields[] = { 0x17, 0x38, 0x5F, 0x68, 0x78, 0x7B, 0x80, 0x83, 0x84 };
+        unsigned i;
+        for (i = 0; i < sizeof(fields) / sizeof(*fields); ++i) {
+            Arrange(ESCROW, &journal);
+            entry = journal;
+            file.failWrite = file.writes + 13;
+            assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+            file.failWrite = 0;
+            impostorField = fields[i];
+            assert(FxStockPlay(&file, 1, 0, Lookalike));
+            Load();
+            memcpy(before, file.bytes, sizeof(before));
+            entry = journal;
+            assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+            assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+        }
+    }
+    /* A deposit needs the offer's identity to be unique, not only its image. */
+    Setup(4);
+    assert(FxStockPlay(&file, 1, 0, Lookalike));
+    Load();
+    memset(&entry, 0, sizeof(entry));
+    entry.source.slot = OFFERED_SLOT;
+    assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry) == -1);
+    assert(!CpAdapter_Unique(&image, OFFERED_SLOT));
     puts("PASS stock save: another Pokemon with the same identity is never taken as the offer");
 }
 

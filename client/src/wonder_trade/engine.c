@@ -41,7 +41,13 @@ static int StateKnown(const WtJournalEntry *entry, WtWireHash hash)
     case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_RECEIVED:
     case WT_JOURNAL_APPLYING: case WT_JOURNAL_RESTORING: return operation == 0;
     case WT_JOURNAL_ENROLLING: return operation == WT_OP_ENROLL;
+#ifdef WT_ABANDON_UNSENT
+    /* An escrow being abandoned holds the Cancel that fences its counter (Fence). */
+    case WT_JOURNAL_ESCROW: return operation == WT_OP_SUBMIT || operation == WT_OP_CANCEL;
+    case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
+#else
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
+#endif
     case WT_JOURNAL_QUEUED: return operation == 0 || operation == WT_OP_CANCEL;
     /* A delivery finished at boot waits for its ACK until the next visit. */
     case WT_JOURNAL_APPLIED: return operation == 0 || operation == WT_OP_ACKNOWLEDGE;
@@ -153,8 +159,11 @@ static int Resume(WtEngine *engine)
 #ifdef WT_ABANDON_UNSENT
         /* The companion only (WT_INVENTORY_KEPT): the offer is still in the
          * save, nothing was written, and the escrow waits for
-         * WtEngine_Request to abandon it. Any other failure blocks. */
-        int removed = engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, &next, next.source.slot);
+         * WtEngine_Request to fence its counter and abandon it. An escrow
+         * whose fence is recorded is abandoned whatever the save holds now.
+         * Any other failure blocks. */
+        int removed = next.request[5] == WT_OP_CANCEL ? WT_INVENTORY_KEPT
+            : engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, &next, next.source.slot);
         if (removed == WT_INVENTORY_KEPT) { result = WT_INVENTORY_KEPT; goto done; }
         if (removed != 0) { Block(engine); goto done; }
         if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
@@ -285,21 +294,41 @@ done:
 }
 
 #ifdef WT_ABANDON_UNSENT
-/* An escrow REMOVE found kept: ask the server, with an uncounted Reconcile
- * from the journal's cursor, whether it holds anything past it. Nothing is
- * recorded; the Submit stays unsent. WtEngine_Reply abandons the escrow only
- * on an empty page at this escrow's own counter (Abandon). */
-static int AskUnsent(WtEngine *engine)
+/* LUNE-902: an escrow REMOVE found kept is abandoned by fencing its counter.
+ * An empty reconcile page is no proof: another copy of the save may have sent
+ * this Submit, which the server checks against the counter, then validates
+ * without holding it, then checks again before accepting it. So instead the
+ * escrow sends a counted Cancel at the Submit's own counter, of a trade
+ * nobody holds (a random ID). The server checks and records both under the
+ * save's lock: if the Cancel is recorded first it is rejected NOT_FOUND and
+ * uses the counter, and a Submit at that counter can never be accepted;
+ * otherwise the Cancel finds the counter used and the escrow blocks.
+ * The Cancel replaces the Submit in the journal before it is sent (journal.c
+ * allows exactly that change), so a lost reply resends the same Cancel and a
+ * cut never forgets it; from then on the escrow is being abandoned whatever
+ * the save holds. The Submit was never sent from this journal: it leaves only
+ * from SUBMIT_READY, committed once the removal is proven. */
+static int Fence(WtEngine *engine)
 {
+    WtJournalEntry next = engine->entry;
     WtWireRequest request;
     int result = -1;
-    if (engine->entry.phase != WT_JOURNAL_ESCROW || !engine->entry.requestLength
-        || engine->entry.operationCounter != engine->entry.nextCounter) return Block(engine);
-    if (RequestIdentity(engine, &request, WT_OP_RECONCILE) != 0) goto done;
-    request.body.reconcile.after = engine->entry.eventCursor; request.body.reconcile.limit = 8;
-    result = Encode(engine, &request, NULL);
+    if (next.phase != WT_JOURNAL_ESCROW || !next.requestLength || next.operationCounter != next.nextCounter
+        || next.nextCounter == UINT64_MAX) { Block(engine); goto done; }
+    if (next.request[5] == WT_OP_SUBMIT) {
+        if (RequestIdentity(engine, &request, WT_OP_CANCEL) != 0 || Random(engine, request.body.trade, 16) != 0) goto done;
+        request.counter = next.nextCounter;
+        /* The journal keeps a Cancel's trade beside it. */
+        memcpy(next.operation, request.requestID, 16); memcpy(next.trade, request.body.trade, 16);
+        if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
+    } else if (next.request[5] != WT_OP_CANCEL) { Block(engine); goto done; }
+    /* Sent from the journal, as every counted request. */
+    memcpy(engine->frame, engine->entry.request, engine->entry.requestLength);
+    engine->frameSize = engine->entry.requestLength;
+    engine->lastResult = 0;
+    result = 0;
 done:
-    Clear(&request, sizeof(request));
+    Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
     return result;
 }
 #endif
@@ -312,7 +341,7 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     if (Refresh(engine) != 0 || engine->frameSize) return -1;
     result = Resume(engine);
 #ifdef WT_ABANDON_UNSENT
-    if (result == WT_INVENTORY_KEPT) return AskUnsent(engine);
+    if (result == WT_INVENTORY_KEPT) return Fence(engine);
 #endif
     if (result != 0) return result;
     if (engine->entry.phase == WT_JOURNAL_APPLIED && !engine->entry.requestLength && Acknowledge(engine) != 0) return -1;
@@ -369,27 +398,31 @@ static int ContextMatches(WtEngine *engine, const WtWireReply *reply, int finali
 #define WT_RECONCILE_FOREIGN (-2)
 
 #ifdef WT_ABANDON_UNSENT
-/* LUNE-902: the escrow AskUnsent asked about, abandoned when REMOVE still
- * finds it kept and the server holds nothing past the journal's cursor, its
- * next counter still this escrow's. The Submit's frame only ever leaves from
- * SUBMIT_READY, which is committed after the removal is proven, so this copy
- * of the save never sent it; another copy that did would have moved that
- * counter. Nothing else is ever abandoned. The save is not touched: it keeps
- * the Pokémon as the stock game left it, and the journal returns to IDLE with
- * its counter and cursor as they were (journal.c allows exactly this). A cut
- * while IDLE is recorded leaves the escrow, which the next visit asks about
- * again. */
+/* LUNE-902: the fence's answer. NOT_FOUND at the next counter proves the
+ * server recorded this Cancel at the escrow's counter: the Submit can never be
+ * accepted, and the escrow returns to IDLE with the Cancel as its last
+ * operation, the save untouched. The cursor stays behind the Cancel's
+ * REJECTED event, which the next Reconcile reads as this journal's own.
+ * Anything else that is not worth retrying blocks: COUNTER_MISMATCH means
+ * another copy used the counter, perhaps for this very Submit. */
 static int Abandon(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
 {
-    if (next->phase != WT_JOURNAL_ESCROW || !next->requestLength || next->request[5] != WT_OP_SUBMIT
-        || next->operationCounter != next->nextCounter || reply->nextCounter != next->nextCounter
-        || reply->highwater != next->eventCursor || reply->body.page.count || reply->body.page.hasMore
-        || reply->body.page.end != next->eventCursor
-        || engine->io.inventory(engine->io.arg, WT_INVENTORY_REMOVE, next, next->source.slot) != WT_INVENTORY_KEPT) return -1;
+    if (reply->result != WT_RESULT_NOT_FOUND || next->request[5] != WT_OP_CANCEL
+        || next->operationCounter != next->nextCounter || !ContextMatches(engine, reply, 1)) return -1;
+    memcpy(next->lastOperation, next->operation, 16); next->lastOperationCounter = next->operationCounter;
+    next->nextCounter = reply->nextCounter;
     Idle(next);
     if (Commit(engine, next) != 0) return -1;
-    engine->synchronized = 1;
+    engine->synchronized = 0;
     return 0;
+}
+
+/* The fence's own REJECTED event, read by an IDLE journal after Abandon. */
+static int OwnFence(const WtJournalEntry *entry, const WtWireEvent *event)
+{
+    return entry->phase == WT_JOURNAL_IDLE && event->kind == WT_EVENT_REJECTED && entry->lastOperationCounter
+        && memcmp(event->operation, entry->lastOperation, 16) == 0 && Zero(event->trade, 16)
+        && Zero(event->digest, 32) && event->state == WT_TRADE_NONE;
 }
 #endif
 
@@ -419,6 +452,9 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     for (i = 0; i < reply->body.page.count; ++i) {
         const WtWireEvent *event = &reply->body.page.events[i];
         if (event->kind == WT_EVENT_ENROLLED && next->phase == WT_JOURNAL_IDLE && next->nextCounter == 1) continue;
+#ifdef WT_ABANDON_UNSENT
+        if (OwnFence(next, event)) continue;
+#endif
         if (next->phase == WT_JOURNAL_SUBMIT_READY && event->kind == WT_EVENT_REJECTED
             && memcmp(event->operation, next->operation, 16) == 0
             && memcmp(event->digest, outgoingDigest, 32) == 0 && Zero(event->trade, 16)
@@ -491,6 +527,15 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
     Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
     engine->lastResult = reply.result; engine->refused = 0;
     next = engine->entry;
+#ifdef WT_ABANDON_UNSENT
+    /* Only Fence sends a Cancel while the journal is in ESCROW. */
+    if (operation == WT_OP_CANCEL && next.phase == WT_JOURNAL_ESCROW && reply.result != WT_RESULT_PROCESSING
+        && reply.result != WT_RESULT_UNAVAILABLE) {
+        engine->synchronized = 0;
+        if (Abandon(engine, &reply, &next) != 0) goto blocked;
+        result = 0; goto done;
+    }
+#endif
     if (reply.result != WT_RESULT_OK) {
         /* An error, including a validator verdict, is not restoration proof.
          * Reconcile the retained Submit's exact REJECTED event instead. */
@@ -514,13 +559,6 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
         memcpy(next.saveID, reply.body.saveID, 16); next.phase = WT_JOURNAL_IDLE; ClearRequest(&next);
         result = Commit(engine, &next); goto done;
     }
-#ifdef WT_ABANDON_UNSENT
-    /* Only AskUnsent sends a Reconcile while the journal is in ESCROW. */
-    if (operation == WT_OP_RECONCILE && next.phase == WT_JOURNAL_ESCROW) {
-        if (Abandon(engine, &reply, &next) != 0) goto blocked;
-        result = 0; goto done;
-    }
-#endif
     if (operation == WT_OP_RECONCILE) {
         result = Reconcile(engine, &reply, &next);
         foreign = result == WT_RECONCILE_FOREIGN;

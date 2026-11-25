@@ -1,4 +1,5 @@
 #include "adapter/platinum.h"
+#include "adapter/same_pokemon.h"
 
 #include "adapter/gen5.h"
 
@@ -311,9 +312,9 @@ static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], 
     return matches;
 }
 
-/* Pokémon with the target's identity in the party and PC; -1 when a slot
- * cannot be read as the game would. */
-static int Identities(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE])
+/* Pokémon with the target's identity in the party and PC, the last of them
+ * in `found` (canonical); -1 when a slot cannot be read as the game would. */
+static int Identities(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char found[BOX_MON_SIZE])
 {
     unsigned char canonical[BOX_MON_SIZE];
     unsigned char *party = Party(image);
@@ -323,7 +324,9 @@ static int Identities(CpSaveImage *image, const unsigned char target[BOX_MON_SIZ
     if (!party || (members = Count(party, 1)) < 0) return -1;
     for (i = 0; i < members; ++i) {
         if (WtPokemon_Decode(Slot(party, (unsigned)i), canonical) != 0) return -1;
-        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+        if (memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
+            memcpy(found, canonical, BOX_MON_SIZE); ++count;
+        }
     }
     for (box = 0; box < BOXES; ++box) for (slot = 0; slot < BOX_SLOTS; ++slot) {
         const unsigned char *stored = BoxMon(image, box, slot);
@@ -333,7 +336,9 @@ static int Identities(CpSaveImage *image, const unsigned char target[BOX_MON_SIZ
             continue;
         }
         if (WtPokemon_Decode(stored, canonical) != 0) return -1;
-        count += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0;
+        if (memcmp(canonical, target, 4) == 0 && memcmp(canonical + 0x0C, target + 0x0C, 4) == 0) {
+            memcpy(found, canonical, BOX_MON_SIZE); ++count;
+        }
     }
     return count;
 }
@@ -659,18 +664,21 @@ done:
  * but changed by play, deposited in the PC or no longer one the party may
  * offer: WT_INVENTORY_KEPT, nothing written; the offer is still in this save,
  * as play left it (wonder_trade/delivery.h: play never changes the identity),
- * and the engine abandons the escrow once the server proves it never received
- * it. Anything else, two such Pokémon or an unreadable slot, fails closed and
+ * and the engine abandons the escrow by fencing its counter on the server.
+ * The found Pokémon must match the offer where play never reaches
+ * (adapter/same_pokemon.h). Anything else, two such Pokémon or an unreadable slot, fails closed and
  * changes nothing. */
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
-    unsigned char digest[1][32];
+    unsigned char digest[1][32], other[BOX_MON_SIZE];
     Found found;
     int where;
     Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
     where = Locate(image, entry->outgoing, digest, 1, &found);
-    if (where < 0) return Identities(image, entry->outgoing) == 1 ? WT_INVENTORY_KEPT : -1;
+    if (where < 0)
+        return Identities(image, entry->outgoing, other) == 1 && CpSamePokemon(game->data, 0, entry->outgoing, other)
+            ? WT_INVENTORY_KEPT : -1;
     if (where == 1) {
         if (!found.party || !Eligible(RulesOf(image), party, found.slot)) return WT_INVENTORY_KEPT;
         entry->source.slot = (unsigned char)found.slot;
@@ -706,7 +714,8 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
         Remove(RulesOf(image), party, slot);
-        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
+        /* No other Pokémon with its identity stays (LUNE-902), as the games' WtDelivery_Unique. */
+        if (Identities(image, entry->outgoing, canonical) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= CP_SAVE_PARTY_CAPACITY
@@ -820,7 +829,7 @@ int CpAdapter_Eligible(const CpSaveImage *image, unsigned slot)
 
 int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
 {
-    unsigned char *party, canonical[BOX_MON_SIZE];
+    unsigned char *party, canonical[BOX_MON_SIZE], other[BOX_MON_SIZE];
     Backup *backup;
     int count, unique;
     if (CpGen5_Is(image)) return CpGen5_Unique(image, slot);
@@ -830,7 +839,7 @@ int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
     /* Anything uncertain falls through to the deposit's own fail-closed check. */
     if (!(backup = Keep(image))) return 1;
     Remove(RulesOf(image), party, slot);
-    unique = Absent(image, canonical) == 0;
+    unique = Identities(image, canonical, other) == 0;
     Release(backup, 1);
     return unique;
 }

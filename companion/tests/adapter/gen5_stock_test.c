@@ -350,11 +350,20 @@ static void IdentityCollisions(void)
         Load();
         memcpy(before, file.bytes, sizeof(before));
         entry = journal;
-        /* Not removed: two Pokémon with the identity, refused. Removed: the
-         * save's only one is taken as the offer as play left it (LUNE-902). */
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 8 ? -1 : WT_INVENTORY_KEPT));
+        /* Not removed: two Pokémon with the identity. Removed: the only one
+         * is another species, which the offer cannot evolve into, so the
+         * offer is in the journal alone. Refused either way (LUNE-902). */
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
+    /* A deposit needs the offer's identity to be unique, not only its image. */
+    Setup(4);
+    StockPlay(1, Impostor);
+    Load();
+    memset(&entry, 0, sizeof(entry));
+    entry.source.slot = OFFERED_SLOT;
+    assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry) == -1);
+    assert(!CpGen5_Unique(&image, OFFERED_SLOT));
     printf("PASS %s stock save: another Pokemon with the same identity is never taken as the offer\n", FX5_NAME);
 }
 

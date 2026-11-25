@@ -113,6 +113,14 @@ static int PostOnce(const unsigned char *request, size_t size, unsigned char rep
         break;
     case WT_OP_CANCEL:
         if (counter != server.nextCounter) { result = WT_RESULT_COUNTER_MISMATCH; break; }
+        if (server.state == WT_TRADE_NONE || memcmp(body, server.trade, 16) != 0) {
+            /* As the server: a trade this save does not hold is rejected and
+             * recorded, using the counter (LUNE-902's fence relies on it). */
+            ++server.nextCounter; result = WT_RESULT_NOT_FOUND;
+            AddEvent(WT_EVENT_REJECTED, NULL, request + WT_WIRE_REQUEST_ID, NULL, NULL, WT_TRADE_NONE);
+            memset(server.events[server.eventCount - 1].bytes + WT_WIRE_EVENT_DIGEST, 0, 32);
+            break;
+        }
         if (server.state != WT_TRADE_QUEUED) { result = WT_RESULT_CONFLICT; break; }
         ++server.nextCounter; memset(server.receipt, 0x73, 16); server.state = WT_TRADE_RETURN_READY;
         AddEvent(WT_EVENT_CANCELLED, server.trade, request + WT_WIRE_REQUEST_ID, server.asset, server.receipt, WT_TRADE_RETURN_READY);
@@ -499,9 +507,29 @@ static void UnsentOffer(void)
         WtEngine_Close(&engine);
         assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave);
         assert(memcmp(live.bytes, played.bytes, sizeof(live.bytes)) == 0);
-        assert(!server.requests[WT_OP_SUBMIT] && server.state == WT_TRADE_NONE);
+        /* The fence: a Cancel of a trade nobody holds used the Submit's counter. */
+        assert(!server.requests[WT_OP_SUBMIT] && server.requests[WT_OP_CANCEL] == 1 && server.state == WT_TRADE_NONE);
+        assert(server.nextCounter == 2);
         memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
         assert(FxStockCopies(&stock, offered) == 1);
+        {
+            /* Another copy of the save still holding the escrow (the one cut
+             * before play) can never have its Submit accepted now: it is
+             * refused at the fenced counter, and that copy restores its
+             * Pokémon; the server holds nothing. */
+            static World kept;
+            kept = live;
+            live = escrow;
+            Bind(&liveGame, &liveImage, &liveFile);
+            Open(&engine, &live, &liveGame);
+            assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+            WtEngine_Close(&engine);
+            assert(visit.phase == WT_JOURNAL_IDLE && server.state == WT_TRADE_NONE);
+            assert(server.requests[WT_OP_SUBMIT] == 1);
+            memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+            assert(FxStockCopies(&stock, offered) == 1);
+            live = kept;
+        }
         /* The save trades again: the changed Pokémon is offered and leaves it. */
         Bind(&liveGame, &liveImage, &liveFile);
         Open(&engine, &live, &liveGame);
@@ -524,7 +552,12 @@ static void UnsentOffer(void)
         assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0);
         assert(engine.blocked && engine.entry.phase == WT_JOURNAL_ESCROW && !visit.canLeave);
         WtEngine_Close(&engine);
-        assert(memcmp(live.banks, played.banks, sizeof(live.banks)) == 0);
+        /* The fence found the counter used: the escrow stays, the save untouched. */
+        assert(memcmp(live.bytes, before, sizeof(before)) == 0 && server.state == WT_TRADE_QUEUED);
+        Open(&engine, &live, &liveGame);
+        assert(engine.entry.phase == WT_JOURNAL_ESCROW && engine.entry.request[5] == WT_OP_CANCEL);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0 && engine.blocked);
+        WtEngine_Close(&engine);
         assert(memcmp(live.bytes, before, sizeof(before)) == 0 && server.state == WT_TRADE_QUEUED);
         printf("PASS unsent offer %s in the stock game: a server holding it is never abandoned\n", kActions[action]);
     }

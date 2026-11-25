@@ -680,6 +680,66 @@ TEST_F(TradeTest, CopiedSaveConcurrentSubmissionsHaveOneAuthoritativeWinner) {
   EXPECT_EQ(Submit(retry).outcome().SerializeAsString(), Status().trade().SerializeAsString());
 }
 
+// LUNE-902: the DS Companion abandons an escrow it never sent by fencing the
+// Submit's counter with a Cancel of a trade nobody holds. The Cancel is
+// rejected NOT_FOUND and still uses the counter, under the save's lock, so a
+// copy of the save whose Submit at that counter is waiting on the validator
+// can never be accepted afterwards; replaying the Cancel answers the same.
+TEST_F(TradeTest, CancelOfAnUnknownTradeFencesAnInFlightSubmissionsCounter) {
+  std::promise<void> entered, release;
+  auto released = release.get_future().share();
+  TradeService waiting("", [&](const auto &, auto) {
+    entered.set_value();
+    released.wait();
+    return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
+  }, [](auto) { return true; });
+  const auto submission = Submission(auth, 1);
+  auto pending = std::async(std::launch::async, [&] {
+    v1::MutationReply reply;
+    EXPECT_TRUE(waiting.Submit(nullptr, &submission, &reply).ok());
+    return reply;
+  });
+  ASSERT_EQ(entered.get_future().wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  // The Submit passed its first counter check and now waits, holding no lock.
+  v1::CancelRequest fence;
+  *fence.mutable_context() = Mutation(auth, 1);
+  fence.set_trade_id(Identifier());
+  const auto fenced = Cancel(fence);
+  release.set_value();
+  const auto submitted = pending.get();
+  EXPECT_EQ(fenced.context().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_EQ(fenced.context().next_counter(), 2U);
+  EXPECT_EQ(submitted.context().result(), v1::RESULT_COUNTER_MISMATCH);
+  EXPECT_EQ(Status().trade().state(), v1::TRADE_NONE);
+  EXPECT_EQ(Status().context().next_counter(), 2U);
+  // A lost reply: the same Cancel replays its outcome and uses nothing more.
+  const auto replayed = Cancel(fence);
+  EXPECT_EQ(replayed.context().result(), v1::RESULT_NOT_FOUND);
+  EXPECT_EQ(replayed.context().next_counter(), 2U);
+  // Its event is the journal's own: no trade, no payload, state NONE.
+  const auto page = Reconcile(1);
+  ASSERT_EQ(page.events_size(), 1);
+  EXPECT_EQ(page.events(0).kind(), v1::EVENT_REJECTED);
+  EXPECT_EQ(page.events(0).operation_id(), fence.context().operation_id());
+  EXPECT_TRUE(page.events(0).trade_id().empty());
+  EXPECT_TRUE(page.events(0).payload_sha256().empty());
+  EXPECT_EQ(page.events(0).state(), v1::TRADE_NONE);
+  // The copy's Submit is never accepted later either.
+  EXPECT_EQ(Submit(submission).context().result(), v1::RESULT_COUNTER_MISMATCH);
+  EXPECT_EQ(Status().trade().state(), v1::TRADE_NONE);
+}
+
+// The other order: a Submit recorded first leaves the fence nothing to take.
+TEST_F(TradeTest, CancelOfAnUnknownTradeAfterAnAcceptedSubmissionFindsTheCounterUsed) {
+  ASSERT_EQ(Submit(Submission(auth, 1)).context().result(), v1::RESULT_OK);
+  v1::CancelRequest fence;
+  *fence.mutable_context() = Mutation(auth, 1);
+  fence.set_trade_id(Identifier());
+  EXPECT_EQ(Cancel(fence).context().result(), v1::RESULT_COUNTER_MISMATCH);
+  EXPECT_EQ(Status().trade().state(), v1::TRADE_QUEUED);
+  EXPECT_EQ(Status().context().next_counter(), 2U);
+}
+
 TEST_F(TradeTest, ConcurrentIdenticalSubmissionAndAcknowledgementReplayExactlyOnce) {
   const auto request = Submission(auth);
   auto one = std::async(std::launch::async, [&] { return Submit(request); });

@@ -426,16 +426,21 @@ static int TornIdentityKnown(const unsigned char *partial, const unsigned char *
 }
 
 #ifdef WT_ABANDON_UNSENT
-/* LUNE-902, the DS Companion only (wonder_trade/engine.h WT_INVENTORY_KEPT):
- * an escrow whose Submit was never sent returns to IDLE without consuming
- * its counter. Its request is the Submit at the next counter, and the
- * progress (counter, cursor, last receipt and operation) stays as it was. */
-static int Abandoned(const unsigned char *before, const unsigned char *after)
+/* LUNE-902, the DS Companion only (wonder_trade/engine.c Fence): an escrow
+ * whose Submit was never sent replaces it with the Cancel that fences the same
+ * counter, before sending it. Both stay in ESCROW with the progress (counter,
+ * cursor, last receipt and operation) unchanged; the Cancel is the escrow's
+ * operation. The Cancel is then finalized like any counted request. */
+static int Fencing(const unsigned char *before, const unsigned char *after)
 {
-    return Get(before + WT_REC_PHASE, 2) == WT_JOURNAL_ESCROW && Get(after + WT_REC_PHASE, 2) == WT_JOURNAL_IDLE
+    uint64_t counter = Get(before + WT_REC_NEXT_COUNTER, 8);
+    return Get(before + WT_REC_PHASE, 2) == WT_JOURNAL_ESCROW && Get(after + WT_REC_PHASE, 2) == WT_JOURNAL_ESCROW
         && before[WT_REC_REQUEST + WT_WIRE_REQUEST_OPERATION] == WT_OP_SUBMIT
-        && Get(before + WT_REC_REQUEST + WT_WIRE_REQUEST_COUNTER, 8) == Get(before + WT_REC_NEXT_COUNTER, 8)
-        && Get(after + WT_REC_PENDING_REQUEST, 2) == 0
+        && after[WT_REC_REQUEST + WT_WIRE_REQUEST_OPERATION] == WT_OP_CANCEL
+        && Get(before + WT_REC_REQUEST + WT_WIRE_REQUEST_COUNTER, 8) == counter
+        && Get(after + WT_REC_REQUEST + WT_WIRE_REQUEST_COUNTER, 8) == counter
+        && Get(after + WT_REC_OPERATION_COUNTER, 8) == counter
+        && memcmp(after + WT_REC_OPERATION, after + WT_REC_REQUEST + WT_WIRE_REQUEST_ID, 16) == 0
         && memcmp(before + WT_REC_NEXT_COUNTER, after + WT_REC_NEXT_COUNTER,
             WT_REC_RESERVED_PROGRESS_TAIL - WT_REC_NEXT_COUNTER) == 0;
 }
@@ -453,7 +458,7 @@ static int Follows(const unsigned char *before, const unsigned char *after)
         && (Get(before + 6, 2) != WT_JOURNAL_APPLYING || Get(after + 6, 2) != WT_JOURNAL_APPLIED
             || memcmp(before + 200, after + 200, 16) != 0 || memcmp(after + 112, after + 200, 16) != 0)) return 0;
 #ifdef WT_ABANDON_UNSENT
-    if (Get(before + 1952, 2) != 0 && memcmp(before + 1952, after + 1952, 264) != 0 && !Abandoned(before, after)) {
+    if (Get(before + 1952, 2) != 0 && memcmp(before + 1952, after + 1952, 264) != 0 && !Fencing(before, after)) {
 #else
     if (Get(before + 1952, 2) != 0 && memcmp(before + 1952, after + 1952, 264) != 0) {
 #endif

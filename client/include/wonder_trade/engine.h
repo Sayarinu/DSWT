@@ -25,8 +25,8 @@ enum WtInventoryStep {
  * trained it, moved it to the PC, or made it the party's last. The save holds
  * the only Pokémon with its identity, so the offer is still there but cannot
  * be removed as offered; nothing is written. The engine then abandons the
- * escrow, which was never sent, once the server proves it holds nothing of it
- * (WtEngine_Request). The games never define WT_ABANDON_UNSENT: their boot
+ * escrow, which was never sent, by fencing its counter with a counted Cancel
+ * of a trade nobody holds, recorded in the journal first (WtEngine_Request). The games never define WT_ABANDON_UNSENT: their boot
  * settle runs before play, their REMOVE answers only 0 or -1, and their
  * engine and journal compile exactly as before. */
 #define WT_INVENTORY_KEPT 2
@@ -83,9 +83,10 @@ int WtEngine_Deposit(WtEngine *, unsigned slot);
 /* Zero selects the recovery request. Pending mutation bytes always take
  * precedence. Returned frame belongs to the engine and contains a credential.
  * With WT_ABANDON_UNSENT, an escrow REMOVE finds kept is never submitted: the
- * request is a Reconcile, and the escrow returns to IDLE, the save untouched,
- * only when its answer shows the server holds nothing past the journal's
- * cursor or counter. Any other answer blocks. */
+ * request is a Cancel of a trade nobody holds at the Submit's counter, and the
+ * escrow returns to IDLE, the save untouched, only when the server rejects it
+ * NOT_FOUND at the next counter, having used the counter, so no copy's Submit
+ * at it can be accepted later. Any other answer, but a retry, blocks. */
 int WtEngine_Request(WtEngine *, unsigned operation);
 /* Finish what needs no network or randomness, before gameplay: complete an
  * interrupted deposit's removal (its Submit is sent on the next visit),
