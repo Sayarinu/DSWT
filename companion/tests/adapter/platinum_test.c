@@ -281,14 +281,17 @@ static void Refusals(void)
 
 /* A cancelled or rejected offer after the game saved: it returns like a
  * delivery, to the end of the party or the first empty PC slot. */
-/* LUNE-897: a RETURN whose Pokémon is already present (a restore cut short,
- * then a stock-game save) never duplicates it, in the party or the PC. */
+/* LUNE-897, LUNE-899: a RETURN whose Pokémon is already present (a restore
+ * cut short, then a stock-game save) never duplicates it, in the party or the
+ * PC: it counts as restored. Present in a save no game wrote since the journal
+ * recorded its counters, it is refused. */
 static void ReturnAlreadyPresent(void)
 {
     FxSpec specs[6];
     WtJournalEntry entry, saved;
-    unsigned where;
-    for (where = 0; where < 2; ++where) {
+    unsigned char canonical[136];
+    unsigned where, i, copies;
+    for (where = 0; where < 3; ++where) {
         Defaults(specs, 3); Setup(specs, 3);
         assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry, 0) == 0 && Step(WT_INVENTORY_REMOVE, &entry, 0) == 0);
         saved = entry;
@@ -297,12 +300,27 @@ static void ReturnAlreadyPresent(void)
         } else {
             memcpy(FxImageBox(&image, 3, 7), entry.original, 136); /* or moved to the PC */
         }
-        GameSaves(5100);
+        if (where < 2) GameSaves(5100);
         entry = saved;
         entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
         expected = image; memcpy(fileBefore, file.bytes, sizeof(fileBefore));
-        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+        if (where == 2) {
+            assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+            Unchanged(&expected);
+            continue;
+        }
+        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
         Unchanged(&expected);
+        /* RECEIVE finds it back and only checkpoints. */
+        assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+        Reload();
+        copies = 0;
+        for (i = 0; i < FxImageCount(&image) + 540; ++i) {
+            const unsigned char *slot = i < FxImageCount(&image) ? FxImageParty(&image, i)
+                : FxImageBox(&image, (i - FxImageCount(&image)) / 30, (i - FxImageCount(&image)) % 30);
+            if (WtPokemon_Decode(slot, canonical) == 0 && memcmp(canonical, entry.outgoing, 136) == 0) ++copies;
+        }
+        assert(copies == 1);
     }
     puts("PASS return: a Pokémon already back in the party or PC is never added twice");
 }

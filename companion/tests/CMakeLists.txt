@@ -82,6 +82,11 @@ target_include_directories(companion_journal PUBLIC "${CLIENT}/include")
 target_compile_definitions(companion_journal PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_compile_options(companion_journal PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_libraries(companion_journal PUBLIC companion_save)
+# LUNE-901: a first enrollment write cut in any SD sector order.
+add_executable(torn_enrollment_test journal/torn_enrollment_test.c "${CLIENT}/src/wonder_trade/wire.c")
+target_link_libraries(torn_enrollment_test PRIVATE companion_journal)
+target_compile_options(torn_enrollment_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+add_test(NAME torn_enrollment_test COMMAND torn_enrollment_test)
 foreach(cp_journal_test journal_save_test backup_save_test)
     add_executable(${cp_journal_test} "journal/${cp_journal_test}.c")
     target_link_libraries(${cp_journal_test} PRIVATE companion_journal)
@@ -130,7 +135,10 @@ target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
-add_executable(platinum_receive_test adapter/platinum_receive_test.c)
+add_executable(platinum_receive_test adapter/platinum_receive_test.c "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
+target_include_directories(platinum_receive_test PRIVATE "${CLIENT}/tests")
 add_executable(visit_test session/visit_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
@@ -141,6 +149,23 @@ endforeach()
 foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
+endforeach()
+
+# LUNE-899: a stock-game save between a cut companion step and its resume.
+# The sweeps build the adapter themselves at -O1 (still with the sanitizers):
+# every case hashes and checks whole saves, and must stay within CI's budget.
+set(STOCK_SOURCES "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/platinum_receive.c"
+    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${CLIENT}/src/wonder_trade/pokemon_codec.c")
+add_executable(stock_save_test adapter/stock_save_test.c ${STOCK_SOURCES})
+add_executable(stock_resume_test session/stock_resume_test.c ${STOCK_SOURCES} "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
+foreach(stock_test stock_save_test stock_resume_test)
+    target_include_directories(${stock_test} PRIVATE "${COMPANION_SRC}" "${CLIENT}/include" "${CLIENT}/tests")
+    target_compile_definitions(${stock_test} PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
+    target_compile_options(${stock_test} PRIVATE -O1 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+    target_link_options(${stock_test} PRIVATE -fsanitize=address,undefined)
+    add_test(NAME ${stock_test} COMMAND ${stock_test})
 endforeach()
 
 # --- Session model (LUNE-895): saves, ROMs, adapter and visits together ----
