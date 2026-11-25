@@ -78,6 +78,9 @@ typedef struct CpApp {
      * wifi.cfg and the one being joined. Passwords stay out of the log. */
     struct {
         int phase;
+        /* Listing networks took the radio off any network: until an attempt
+         * connects again, the driver's last status is not trusted. */
+        int dropped;
         int haveConfig;
         CpWifiConfig config, joining;
         unsigned frames;

@@ -69,6 +69,9 @@ typedef struct Fake {
     unsigned char goodKey[CP_WIFI_KEY_MAX];
     size_t goodKeyLength;
     int scanning, joining, joinPolls, joinWorks, joinFailure, noAddress, slotsActive;
+    /* The driver keeps reporting the old association after a scan (as DSWiFi
+     * does when Wifi_ScanMode is called without Wifi_DisconnectAP). */
+    int staleAfterScan;
     unsigned scansStarted, joinsStarted, slotsStarted;
     char joinedSsid[CP_WIFI_SSID_MAX + 1];
     unsigned char joinedKey[CP_WIFI_KEY_MAX];
@@ -234,7 +237,8 @@ static int WifiScanFake(void *arg)
     (void)arg;
     fake.scansStarted++;
     fake.scanning = 1;
-    fake.joining = fake.wifiConnected = fake.slotsActive = 0;
+    fake.joining = fake.slotsActive = 0;
+    if (!fake.staleAfterScan) fake.wifiConnected = 0;
     fake.wifiPolls = 0;
     return 0;
 }
@@ -1393,6 +1397,55 @@ static void WifiConfigOnTheCard(void)
     puts("PASS model: wifi.cfg is read defensively, and joining works without a card");
 }
 
+/* Listing networks takes the radio off whatever network it was on, so
+ * leaving the settings without joining always reconnects, even when the
+ * driver still reports the old association; connect never trusts it. */
+static void WifiSettingsDropTheConnection(void)
+{
+    unsigned slots;
+    memset(&server, 0, sizeof(server));
+    fake.networkCount = 0;
+    AddNetwork("Home", CP_WIFI_SECURITY_WPA2, 3);
+
+    /* Opened while connected. */
+    fake.wifiConnected = 1;
+    fake.staleAfterScan = 1;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    slots = fake.slotsStarted;
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    assert(fake.slotsStarted == slots + 1);
+    Frames(4);
+
+    /* Opened, then a connect before any attempt finished: it waits for a
+     * real attempt instead of reporting the stale association as ready. */
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    slots = fake.slotsStarted;
+    fake.wifiPolls = 3;
+    model->ops->connect(model->context);
+    assert(model->net == CP_UI_NET_BUSY);
+    Pump();
+    assert(model->net == CP_UI_NET_READY && fake.slotsStarted == slots);
+    model->ops->close(model->context);
+
+    /* Opened while the boot's attempt was still under way. */
+    fake.staleAfterScan = 0;
+    fake.wifiConnected = 0;
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    CpApp_StartWifi(&app);
+    slots = fake.slotsStarted;
+    model->ops->wifiScan(model->context);
+    Frames(2);
+    model->ops->wifiLeave(model->context);
+    assert(fake.slotsStarted == slots + 1);
+    Frames(4);
+    assert(fake.wifiConnected);
+    puts("PASS model: leaving the Wi-Fi settings reconnects, whatever the driver last reported");
+}
+
 int main(void)
 {
     Setup();
@@ -1413,6 +1466,7 @@ int main(void)
     WifiScanListsNetworks();
     WifiJoinStoresAndForgets();
     WifiConfigOnTheCard();
+    WifiSettingsDropTheConnection();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

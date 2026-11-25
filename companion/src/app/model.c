@@ -824,6 +824,7 @@ static void WifiUpdate(CpApp *app)
         if (status == CP_WIFI_CONNECTING) return;
         if (status == CP_WIFI_CONNECTED) {
             app->wifi.phase = WIFI_IDLE;
+            app->wifi.dropped = 0;
             Log(app, "wifi: connected\n");
             if (app->connecting) {
                 app->connecting = 0;
@@ -856,8 +857,12 @@ static void WifiUpdate(CpApp *app)
         status = platform->wifiStatus(platform->arg);
         if (status == CP_WIFI_CONNECTING) return;
         app->wifi.phase = WIFI_IDLE;
-        if (status == CP_WIFI_CONNECTED) Joined(app);
-        else JoinFailed(app, status);
+        if (status == CP_WIFI_CONNECTED) {
+            app->wifi.dropped = 0;
+            Joined(app);
+        } else {
+            JoinFailed(app, status);
+        }
         return;
     default:
         return;
@@ -874,7 +879,11 @@ static void WifiScan(void *context)
     model->wifi.revision++;
     model->wifi.wpa2 = app->platform->wifiWpa2;
     app->wifi.frames = 0;
+    /* The scan ends any attempt and leaves any network: the next connect, or
+     * leaving the settings, must connect again. */
     app->wifi.phase = WIFI_IDLE;
+    app->wifi.dropped = 1;
+    app->connecting = 0;
     if (app->platform->wifiScan(app->platform->arg) != 0) {
         Log(app, "wifi: cannot list networks\n");
         return;
@@ -926,7 +935,8 @@ static void WifiLeave(void *context)
     CpWifiConfig_Wipe(&app->wifi.joining, sizeof(app->wifi.joining));
     app->model.wifi.state = CP_UI_NETWORK_IDLE;
     if (app->wifi.phase == WIFI_SCAN || app->wifi.phase == WIFI_JOIN) app->wifi.phase = WIFI_IDLE;
-    if (app->wifi.phase == WIFI_IDLE && platform->wifiStatus(platform->arg) != CP_WIFI_CONNECTED) CpApp_StartWifi(app);
+    if (app->wifi.phase == WIFI_IDLE && (app->wifi.dropped || platform->wifiStatus(platform->arg) != CP_WIFI_CONNECTED))
+        CpApp_StartWifi(app);
 }
 
 static void Connect(void *context)
@@ -939,7 +949,10 @@ static void Connect(void *context)
     app->closing = 0;
     /* Only what the last check proved: a reconnect never grants leave. */
     model->canLeave = app->leaveProven && !model->recovery;
-    if (platform->wifiStatus(platform->arg) == CP_WIFI_CONNECTED) { model->net = CP_UI_NET_READY; return; }
+    if (!app->wifi.dropped && platform->wifiStatus(platform->arg) == CP_WIFI_CONNECTED) {
+        model->net = CP_UI_NET_READY;
+        return;
+    }
     model->net = CP_UI_NET_BUSY;
     app->connecting = 1;
     /* Join the attempt already under way, such as the one started at boot. */

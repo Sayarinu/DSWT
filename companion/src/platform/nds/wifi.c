@@ -81,6 +81,8 @@ int CpWifi_ConnectKey(const char *ssid, const unsigned char *key, size_t keyLeng
     Begin();
     sWifi.scanning = 1;
     sWifi.scanMs = scanMs;
+    /* No old attempt may resume while the network is looked up (CpWifi_Scan). */
+    Wifi_DisconnectAP();
     Wifi_ScanModeFilter(WSCAN_LIST_AP_ALL);
     return 0;
 }
@@ -120,6 +122,13 @@ int CpWifi_Scan(void)
     if (!sWifi.started) return -1;
     sWifi.scanning = sWifi.pending = sWifi.failed = 0;
     WipeKey();
+    /* Leave any network and end any attempt first: Wifi_ScanMode alone keeps
+     * DSWiFi's connect state, so Wifi_AssocStatus would resume the old
+     * attempt (stopping the scan) or keep reporting ASSOCIATED on a radio
+     * that has left the network. Wifi_DisconnectAP puts the ARM7 back in
+     * normal mode and the state machine in CANNOTCONNECT, as
+     * Wifi_ConnectSecureAP does before its own scan (access_point.c, 84d91e8). */
+    Wifi_DisconnectAP();
     Wifi_ScanMode();
     return 0;
 }
