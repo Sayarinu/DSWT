@@ -32,9 +32,12 @@ enum CpWifiStatus CpWifi_Decide(const CpWifiPoll *);
 /* ---- Networks the Wi-Fi setup screen lists (LUNE-875) --------------------- */
 
 #define CP_WIFI_SSID_MAX 32
-/* A WPA2 passphrase has 8 to 63 printable ASCII characters; 64 hexadecimal
- * digits are the raw pre-shared key. */
+/* The longest key buffer: a WPA2 passphrase has 8 to 63 printable ASCII
+ * characters. A raw 64-hex-digit pre-shared key is not accepted: DSWiFi's DSi
+ * driver (wpa_calc_pmk at the pinned 84d91e8) runs PBKDF2 on every key it is
+ * given through Wifi_ConnectSecureAP, so such a key could never authenticate. */
 #define CP_WIFI_KEY_MAX 64
+#define CP_WIFI_PASSPHRASE_MAX 63
 
 enum CpWifiSecurity {
     CP_WIFI_SECURITY_OPEN,
@@ -68,8 +71,8 @@ unsigned CpWifi_Bars(int rssi, int dsiMode);
 enum CpWifiUnsupported CpWifi_Unsupported(unsigned security, int wpa2Capable);
 
 /* A key the player typed, for a network of this security: WPA2 8-63
- * printable ASCII characters or 64 hex digits; WEP 5 or 13 characters, or
- * 10 or 26 hex digits; open networks take none. */
+ * printable ASCII characters (no raw 64-hex-digit key, see above); WEP 5 or
+ * 13 characters, or 10 or 26 hex digits; open networks take none. */
 int CpWifi_KeyValid(unsigned security, const char *key);
 /* The bytes DSWiFi takes for that key (Wifi_ConnectSecureAP): WEP hex digits
  * become 5 or 13 bytes, anything else is passed as typed. Returns the length,

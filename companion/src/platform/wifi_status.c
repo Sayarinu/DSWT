@@ -71,7 +71,7 @@ int CpWifi_KeyValid(unsigned security, const char *key)
     switch (security) {
     case CP_WIFI_SECURITY_OPEN: return length == 0;
     case CP_WIFI_SECURITY_WEP: return length == 5 || length == 13 || ((length == 10 || length == 26) && AllHex(key));
-    case CP_WIFI_SECURITY_WPA2: return (length >= 8 && length <= 63) || (length == 64 && AllHex(key));
+    case CP_WIFI_SECURITY_WPA2: return length >= 8 && length <= CP_WIFI_PASSPHRASE_MAX;
     default: return 0;
     }
 }

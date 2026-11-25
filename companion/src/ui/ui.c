@@ -372,7 +372,7 @@ static void PickNetwork(CpUi *ui, CpUiModel *model)
     memcpy(ui->wifiSsid, network->ssid, sizeof(ui->wifiSsid));
     ui->wifiSsid[CP_WIFI_SSID_MAX] = 0;
     ui->wifiSecurity = network->security;
-    CpKeyboard_Reset(&ui->keyboard, network->security == CP_WIFI_SECURITY_WEP ? 26 : CP_WIFI_KEY_MAX);
+    CpKeyboard_Reset(&ui->keyboard, network->security == CP_WIFI_SECURITY_WEP ? 26 : CP_WIFI_PASSPHRASE_MAX);
     if (network->security == CP_WIFI_SECURITY_OPEN) Join(ui, model);
     else Show(ui, CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
 }

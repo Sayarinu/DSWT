@@ -52,7 +52,7 @@ int main(void)
     assert(CpWifi_Bars(0, 1) == 0 && CpWifi_Bars(0, 0) == 0);
     assert(CpWifi_Bars(60, 0) == 3 && CpWifi_Bars(30, 0) == 2 && CpWifi_Bars(15, 0) == 1 && CpWifi_Bars(5, 0) == 0);
 
-    /* Keys: WPA2 8-63 printable characters or 64 hex digits; WEP 5/13
+    /* Keys: WPA2 8-63 printable characters; WEP 5/13
      * characters or 10/26 hex digits; open none. */
     {
         unsigned char bytes[CP_WIFI_KEY_MAX];
@@ -64,9 +64,13 @@ int main(void)
         longest[63] = 'x';
         longest[64] = 0;
         assert(!CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, longest));
+        /* DSWiFi runs PBKDF2 on whatever it is given (wpa_calc_pmk), so a raw
+         * 64-hex-digit key could never authenticate: refused. */
         memset(longest, 'A', 64);
-        assert(CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, longest));
-        assert(CpWifi_KeyBytes(CP_WIFI_SECURITY_WPA2, longest, bytes) == 64 && bytes[0] == 'A');
+        assert(!CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, longest));
+        assert(CpWifi_KeyBytes(CP_WIFI_SECURITY_WPA2, longest, bytes) == -1);
+        longest[63] = 0;
+        assert(CpWifi_KeyBytes(CP_WIFI_SECURITY_WPA2, longest, bytes) == 63 && bytes[0] == 'A');
         assert(CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, "with space ~!"));
         assert(!CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, "caf\xc3\xa9-pass") && !CpWifi_KeyValid(CP_WIFI_SECURITY_WPA2, "tab\tpass"));
         assert(CpWifi_KeyValid(CP_WIFI_SECURITY_WEP, "abcde") && CpWifi_KeyValid(CP_WIFI_SECURITY_WEP, "abcdefghijklm"));

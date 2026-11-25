@@ -743,6 +743,8 @@ static void TestWifiFromTheSaveList(void)
     Press(CP_UI_KEY_A);
     Expect(CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
     assert(CpUi_Card(&sUi, model) == CP_UI_CARD_PASSWORD && !strcmp(sUi.wifiSsid, "Home"));
+    /* At most a 63-character passphrase: no raw 64-hex-digit key. */
+    assert(sUi.keyboard.max == CP_WIFI_PASSPHRASE_MAX);
     ExpectActions(0, 0, 0, 0);
     Type("Ab~ 1");
     assert(!strcmp(sUi.keyboard.text, "Ab~ 1") && !sUi.keyboard.shown);

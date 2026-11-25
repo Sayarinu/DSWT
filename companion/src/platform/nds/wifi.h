@@ -28,7 +28,8 @@ int CpWifi_AutoConnect(void);
  * up to scanMs milliseconds. */
 int CpWifi_ConnectPassphrase(const char *ssid, const char *passphrase, unsigned scanMs);
 /* The same with the key's bytes (Wifi_ConnectSecureAP): a WEP key as 5 or
- * 13 bytes, a WPA2 passphrase or 64 hex digits, none for an open network.
+ * 13 bytes, a WPA2 passphrase (always run through PBKDF2 by the driver),
+ * none for an open network.
  * Of several access points with the name, the strongest is joined. */
 int CpWifi_ConnectKey(const char *ssid, const unsigned char *key, size_t keyLength, unsigned scanMs);
 

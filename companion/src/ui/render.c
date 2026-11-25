@@ -376,7 +376,7 @@ static void DrawPassword(const CpUi *ui, CpScreen *top)
     int ox = LIST_X * 8 + 4, oy = LIST_Y * 8 + 4, right = (LIST_X + LIST_W) * 8 - 4;
     int fieldTop = oy + 20, counterWidth, available, start = 0, width;
     char shown[CP_KEYBOARD_TEXT_MAX + 1], counter[16], name[CP_WIFI_SSID_MAX * 2 + 4];
-    unsigned i, max = ui->wifiSecurity == CP_WIFI_SECURITY_WEP ? 26 : keyboard->length > 63 ? 64 : 63;
+    unsigned i, max = ui->wifiSecurity == CP_WIFI_SECURITY_WEP ? 26 : CP_WIFI_PASSPHRASE_MAX;
     Window(top, LIST_X, LIST_Y, LIST_W, LIST_H);
     CpCanvas_Clip(&top->text, LIST_X * 8, LIST_Y * 8, LIST_W * 8, LIST_H * 8);
     Fit(name, sizeof(name), ui->wifiSsid, right - ox);

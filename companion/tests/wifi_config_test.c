@@ -134,8 +134,11 @@ static void TestFormat(void)
         hex = Network(CP_WIFI_SECURITY_WPA2, "Hex", key);
         assert(CpWifiConfig_Format(&open, text, sizeof(text)) > 0 && CpWifiConfig_Parse(text, strlen(text), &out) == 0);
         assert(out.security == CP_WIFI_SECURITY_OPEN);
-        assert(CpWifiConfig_Format(&hex, text, sizeof(text)) > 0 && CpWifiConfig_Parse(text, strlen(text), &out) == 0);
-        assert(!strcmp(out.key, key));
+        /* A raw 64-hex-digit WPA2 key is neither stored nor read back:
+         * DSWiFi treats every key as a passphrase. */
+        assert(CpWifiConfig_Format(&hex, text, sizeof(text)) == 0);
+        snprintf(text, sizeof(text), "version=1\nsecurity=wpa2\nssid=Hex\nkey=%s\n", key);
+        assert(CpWifiConfig_Parse(text, strlen(text), &out) != 0);
     }
     {
         /* What cannot be stored is refused, not written half. */

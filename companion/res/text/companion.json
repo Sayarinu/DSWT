@@ -434,13 +434,13 @@
     },
     {
       "id": "Companion_Text_WifiKeyRuleWpa",
-      "en_US": "WPA2 passwords have 8 to 63\ncharacters, or 64 hex digits.",
-      "fr_FR": "Les mots de passe WPA2 ont de 8 à 63\ncaractères, ou 64 chiffres hexa.",
-      "de_DE": "WPA2-Passwörter haben 8 bis 63\nZeichen oder 64 Hex-Ziffern.",
-      "it_IT": "Le password WPA2 hanno da 8 a 63\ncaratteri, o 64 cifre esadecimali.",
-      "es_ES": "Las contraseñas WPA2 tienen de 8 a\n63 caracteres, o 64 dígitos hex.",
-      "ja_JP": "WPA2の　パスワードは　8～63もじ\nまたは　16しんすう　64もじです",
-      "ko_KR": "WPA2 비밀번호는 8~63자\n또는 16진수 64자입니다"
+      "en_US": "WPA2 passwords have 8 to 63\ncharacters. Type the password,\nnot a 64-digit hex key.",
+      "fr_FR": "Les mots de passe WPA2 ont de 8 à\n63 caractères. Saisissez le mot de\npasse, pas une clé hexa de 64 chiffres.",
+      "de_DE": "WPA2-Passwörter haben 8 bis 63\nZeichen. Gib das Passwort ein,\nnicht einen 64-stelligen Hex-Schlüssel.",
+      "it_IT": "Le password WPA2 hanno da 8 a 63\ncaratteri. Inserisci la password,\nnon una chiave esadecimale di 64 cifre.",
+      "es_ES": "Las contraseñas WPA2 tienen de 8 a\n63 caracteres. Escribe la contraseña,\nno una clave hex de 64 dígitos.",
+      "ja_JP": "WPA2の　パスワードは　8～63もじです\n64けたの　16しんすうキーでは　なく\nパスワードを　いれてください",
+      "ko_KR": "WPA2 비밀번호는 8~63자입니다\n64자리 16진수 키가 아닌\n비밀번호를 입력해 주십시오"
     },
     {
       "id": "Companion_Text_WifiKeyRuleWep",
