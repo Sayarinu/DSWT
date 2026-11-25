@@ -25,8 +25,7 @@ static int Hash(const unsigned char *bytes, size_t size, unsigned char digest[32
  * returned to the interrupted writer, so its cleanup/retry cannot hide a bug.
  * _exit also discards allocations abandoned by the simulated power cut.
  *
- * Every recovery must pass or match an exact known failure below; a passing or
- * unexercised exception fails too. CP_FAULT_REQUIRE_RESUME=1 disallows exceptions.
+ * Every recovery must pass: there are no known failures.
  * CP_FAULT_FULL=1 sweeps every journal byte, sector boundaries and odd save
  * offsets in both persistence orders; CI uses a deterministic smaller sample.
  * CP_FAULT_SCENARIO selects one of names[] for a focused reproduction. */
@@ -48,35 +47,7 @@ static unsigned char digests[4][32];
 static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[540 * FX_BOX_MON];
 enum Outcome { RECOVERED, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST, OUTCOMES };
 static const char *outcomes[] = { "recovered", "journal-blocked", "save-blocked", "stuck", "duplicate", "lost" };
-/* Each stock save count is a separate recovery attempt for the same cut. */
-static const struct KnownFailure {
-    enum Scenario scenario;
-    unsigned event;
-    const char *kind;
-    size_t tear;
-    unsigned stockSaves; /* 0: before stock play; 1/2: after that many stock saves. */
-    enum Outcome outcome;
-    const char *ticket;
-} knownFailures[] = {
-    { OFFER, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { OFFER, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { OFFER, 107, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { OFFER, 107, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 83, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 83, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { CANCEL_RETURN, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 95, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 95, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 107, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 107, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 143, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 143, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 155, "torn-prefix", 1, 1, STUCK, "LUNE-899" },
-    { REJECT_RESTORE, 155, "torn-prefix", 1, 2, STUCK, "LUNE-899" },
-};
-#define KNOWN_FAILURES (sizeof(knownFailures) / sizeof(knownFailures[0]))
-static unsigned knownSeen[KNOWN_FAILURES], unexpected;
+static unsigned unexpected;
 static unsigned randomCounter, eventCount, saveWrites, journalWrites, syncs;
 static unsigned attempts, duplicates, distinct, tally[OUTCOMES];
 static unsigned prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered;
@@ -90,30 +61,16 @@ static unsigned lastEvent;
 static unsigned step, stepMask, stockSaves;
 static uint32_t stopOffset;
 static size_t stopSize;
-static int inject, counting, full, requireResume, stockPlayed;
+static int inject, counting, full, stockPlayed;
 static char path[sizeof(CP_FAULT_BINARY_DIR) + 32];
 
+/* Every distinct cut must recover; there are no known failures. */
 static void CheckOutcome(const char *kind, size_t tear, unsigned stock, unsigned outcome)
 {
-    size_t i;
-    for (i = 0; i < KNOWN_FAILURES; ++i) {
-        const struct KnownFailure *known = &knownFailures[i];
-        if (known->scenario != scenario || known->event != eventCount
-            || strcmp(known->kind, kind) != 0 || known->tear != tear || known->stockSaves != stock) continue;
-        ++knownSeen[i];
-        if (outcome == (unsigned)known->outcome && !requireResume) {
-            printf("KNOWN FAILURE %s event=%u kind=%s tear=%zu stock-saves=%u outcome=%s ticket=%s\n",
-                names[scenario], eventCount, kind, tear, stock, outcomes[outcome], known->ticket);
-            return;
-        }
-        break;
-    }
-    if (outcome != RECOVERED || i < KNOWN_FAILURES) {
-        ++unexpected;
-        printf("FAIL %s %s event=%u kind=%s tear=%zu stock-saves=%u outcome=%s\n",
-            i < KNOWN_FAILURES && outcome == RECOVERED ? "stale-known-failure" : "unexpected-recovery",
-            names[scenario], eventCount, kind, tear, stock, outcomes[outcome]);
-    }
+    if (outcome == RECOVERED) return;
+    ++unexpected;
+    printf("FAIL unexpected-recovery %s event=%u kind=%s tear=%zu stock-saves=%u outcome=%s\n",
+        names[scenario], eventCount, kind, tear, stock, outcomes[outcome]);
 }
 
 static int Random(void *arg, unsigned char *bytes, size_t size)
@@ -563,7 +520,6 @@ int main(void)
     const char *only = getenv("CP_FAULT_SCENARIO");
     unsigned ran = 0, failures = 0;
     full = getenv("CP_FAULT_FULL") != NULL;
-    requireResume = getenv("CP_FAULT_REQUIRE_RESUME") && strcmp(getenv("CP_FAULT_REQUIRE_RESUME"), "1") == 0;
     if (setjmp(reboot)) Resume();
     for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) {
         unsigned checkpoints;
@@ -593,15 +549,6 @@ int main(void)
                 | (1u << WT_INVENTORY_VERIFY_RECEIVED);
             assert((stepMask & receive) == receive);
         }
-        {
-            size_t i;
-            for (i = 0; i < KNOWN_FAILURES; ++i) if (knownFailures[i].scenario == scenario && knownSeen[i] != 1) {
-                const struct KnownFailure *known = &knownFailures[i];
-                ++unexpected;
-                printf("FAIL stale-known-failure %s event=%u kind=%s tear=%zu stock-saves=%u ticket=%s seen=%u\n",
-                    names[scenario], known->event, known->kind, known->tear, known->stockSaves, known->ticket, knownSeen[i]);
-            }
-        }
         printf("%s: checkpoints=%u save-writes=%u journal-writes=%u syncs=%u attempts=%u "
             "identical-states=%u distinct-states=%u prefix-attempts=%u tail-attempts=%u "
             "distinct-prefix=%u distinct-tail=%u stock-save-cases=%u stock-save-recovered=%u journal-byte-tears=%u\n",
@@ -613,7 +560,7 @@ int main(void)
     }
     assert(ran != 0);
     free(seen);
-    printf("%s recovery expectations: %u mismatches; %u distinct known failures remain (LUNE-899)\n",
+    printf("%s recovery: %u unexpected outcomes, %u distinct cuts not recovered\n",
         unexpected ? "FAIL" : "PASS", unexpected, failures);
     return unexpected ? 1 : 0;
 }
