@@ -4,8 +4,8 @@
 #include "game/nitrofs.h"
 #include "game/rom.h"
 
-/* Generation IV game data, read from the player's own ROM. Nothing here ships
- * with the companion: the table below only names where each game keeps it. */
+/* Generation IV and V game data, read from the player's own ROM. Nothing here
+ * ships with the companion: the table below only names where each game keeps it. */
 
 /* Species whose forms have their own personal record: form f (1..count) is
  * record firstIndex + f - 1. Other forms share their species' record. */
@@ -40,6 +40,11 @@ typedef struct CpGameTable {
     uint8_t itemGapCount;
     const CpGameForms *forms;
     uint8_t formCount;
+    /* Generation V: personal records of this many bytes, whose form records
+     * the species' own record names (formFile at 0x1C, form count at 0x20);
+     * Generation V messages and NFTR fonts; items 0..itemCount - 1 without
+     * gaps, holdable by the game's own rule. 0 for Generation IV. */
+    uint8_t gen5PersonalSize;
 } CpGameTable;
 
 /* The table for a family, NULL for one the companion does not read. */
@@ -66,6 +71,7 @@ typedef struct CpPersonal {
     uint8_t baseFriendship;
     uint8_t growthRate; /* the experience curve, an index for CpGame_ExpTable */
     uint8_t abilities[2];
+    uint8_t hiddenAbility; /* Generation V; 0 in Generation IV */
 } CpPersonal;
 
 int CpGame_Personal(const CpGame *, uint16_t species, uint8_t form, CpPersonal *out);
@@ -90,6 +96,16 @@ typedef struct CpTradeEvolution {
  * Whether an Everstone or similar stops it is the caller's rule. */
 int CpGame_TradeEvolution(const CpGame *, uint16_t species, uint16_t heldItem, CpTradeEvolution *out);
 
+/* The evolution archive's record of a species: seven {method, parameter,
+ * target} entries; an entry with target 0 is unused. Methods 5 (trade) and
+ * 6 (trade holding the parameter item) in both generations, and in
+ * Generation V 7 (traded for Karrablast or Shelmet). */
+enum { CP_EVO_TRADE_FOR_SPECIES = 7, CP_EVOLUTIONS = 7 };
+typedef struct CpEvolution {
+    uint16_t method, parameter, target;
+} CpEvolution;
+int CpGame_Evolutions(const CpGame *, uint16_t species, CpEvolution out[CP_EVOLUTIONS]);
+
 /* What the item data says about an item. */
 #define CP_POCKET_KEY_ITEMS 7
 typedef struct CpItem {
@@ -98,13 +114,16 @@ typedef struct CpItem {
     uint8_t fieldPocket; /* the bag pocket; CP_POCKET_KEY_ITEMS for key items */
     uint8_t preventToss;
     uint8_t holdable; /* a Pokémon may hold it: the game lets nothing it refuses to
-                       * toss (key items, HMs) be held, as the client's Holdable does */
+                       * toss (key items, HMs) be held, as the client's Holdable does;
+                       * Black/White: no TM, HM or key item; Black 2/White 2: no ID
+                       * their PML_ItemIsUnholdable or PML_ItemIsDummy lists */
 } CpItem;
 
 /* CP_ERR_NOT_FOUND for item 0, an unused ID or one past the game's items. */
 int CpGame_Item(const CpGame *, uint16_t item, CpItem *out);
 
-/* A move's base PP from the move data (MoveTable_LoadParam's MOVEATTRIBUTE_PP). */
+/* A move's base PP from the move data (MoveTable_LoadParam's MOVEATTRIBUTE_PP,
+ * byte 6; Generation V byte 5). */
 int CpGame_MovePp(const CpGame *, uint16_t move, uint8_t *out);
 
 #endif

@@ -23,6 +23,10 @@ static void TestBuildCodes(void)
         { "CPUF", 0, 0x020C0300 }, { "CPUI", 0, 0x020C0400 }, { "CPUD", 0, 0x020C0500 },
         { "CPUS", 0, 0x020C0700 }, { "CPUK", 0, 0x020C0800 }, { "ADAE", 5, 0x010A0205 },
         { "APAJ", 6, 0x010B0106 }, { "IPKE", 0, 0x03070200 }, { "IPGK", 0, 0x03080800 },
+        /* LUNE-881: Generation V, whose English cartridges end in O. */
+        { "IRBO", 0, 0x04150200 }, { "IRAO", 1, 0x04140201 }, { "IREO", 0, 0x05170200 },
+        { "IRDO", 0, 0x05160200 }, { "IRBJ", 0, 0x04150100 }, { "IRDK", 0, 0x05160800 },
+        { "IRAF", 0, 0x04140300 },
     };
     size_t i;
 
@@ -33,16 +37,19 @@ static void TestBuildCodes(void)
         assert(CpBuildCode_Family(info.buildCode) == info.family);
     }
     assert(CpRom_FromCode("CPUP", 0, &info) == CP_ERR_UNSUPPORTED);
-    assert(CpRom_FromCode("IRBO", 0, &info) == CP_ERR_UNSUPPORTED);
+    assert(CpRom_FromCode("IRBE", 0, &info) == CP_ERR_UNSUPPORTED);
+    assert(CpRom_FromCode("CPUO", 0, &info) == CP_ERR_UNSUPPORTED);
     assert(CpRom_FromCode("XXXE", 0, &info) == CP_ERR_UNSUPPORTED);
 
-    /* As the server reads codes: the legacy alias is Platinum; language 6,
-     * unknown versions and Generation V are not trade families here. */
+    /* As the server reads codes: the legacy alias is Platinum; language 6
+     * and unknown versions are not trade families. */
     assert(CpBuildCode_Family(CP_BUILD_CODE_LEGACY_PLATINUM) == CP_FAMILY_PLATINUM);
     assert(CpBuildCode_Family(0x020C0600) == CP_FAMILY_NONE);
     assert(CpBuildCode_Family(0x020D0200) == CP_FAMILY_NONE);
     assert(CpBuildCode_Family(0x02070200) == CP_FAMILY_NONE);
-    assert(CpBuildCode_Family(0x04140200) == CP_FAMILY_NONE);
+    assert(CpBuildCode_Family(0x04140200) == CP_FAMILY_BW);
+    assert(CpBuildCode_Family(0x05170200) == CP_FAMILY_B2W2);
+    assert(CpBuildCode_Family(0x04160200) == CP_FAMILY_NONE && CpBuildCode_Family(0x05150200) == CP_FAMILY_NONE);
     assert(CpBuildCode(CP_FAMILY_HGSS, 8, 5, 0x10) == 0x03080510);
 }
 
