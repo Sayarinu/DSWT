@@ -46,6 +46,13 @@
  * Pokémon, or this one trained in the stock game) is never proof either way:
  * the step fails closed and changes nothing.
  *
+ * The stock game can also move a Pokémon where no journal locator reaches:
+ * the Day Care, the GTS deposit, the HeartGold/SoulSilver Pokéwalker (and
+ * Pal Park's migrated Pokémon are held there too). A Pokémon there with the
+ * identity a step decides by is never proof either way (LUNE-913): the step
+ * fails closed and writes nothing until the player takes it back. Deliveries
+ * still go only to the party or the PC.
+ *
  * Known limit: a delivery the stock game loaded already applied and the
  * player then released or traded away looks exactly like one never applied,
  * and is received again.

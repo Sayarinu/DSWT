@@ -287,6 +287,21 @@ static void IdentityCollisions(void)
     puts("PASS stock save: another Pokemon with the same identity is never taken as the offer");
 }
 
+/* ---- LUNE-913: held where no locator reaches ------------------------------- */
+
+static void HeldArrange(int returning, WtJournalEntry *journal) { Arrange(returning ? APPLYING_RETURN : ESCROW, journal); }
+static int HeldStep(enum WtInventoryStep step, WtJournalEntry *entry) { return Step(step, entry); }
+static unsigned HeldCopies(void) { return FxStockCopies(&file, offered); }
+static void (*heldAction)(unsigned char *general);
+static void HeldAct(unsigned char *general, unsigned char *boxes) { (void)boxes; if (heldAction) heldAction(general); }
+static void HeldStock(void (*action)(unsigned char *general))
+{
+    heldAction = action;
+    assert(FxStockPlay(&file, 1, 0, HeldAct));
+    Load();
+}
+#include "gen4_held.h"
+
 int main(void)
 {
     Sweep(ESCROW);
@@ -295,6 +310,8 @@ int main(void)
     EscrowAfterPlay();
     SubmitReadyAfterPlay();
     IdentityCollisions();
+    cases += FxHeldSweep();
+    FxHeldUnique();
     printf("PASS stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", cases);
     return 0;
 }

@@ -32,6 +32,11 @@ enum { FX5_BACKUP = 0x26000, FX5_USED = 0x25FA4, FX5_BLOCKS = 73, FX5_POKEDEX = 
 #endif
 enum { FX5_PARTY = 0x1A, FX5_TRAINER = 0x1B, FX5_MUSICAL_SAVE = 0x2A, FX5_BATTLE_BOX = 0x31, FX5_MON = 220,
        FX5_BOX_MON = 136 };
+/* LUNE-913: the other places the save holds a Pokémon. The Day Care: two
+ * {BOOL used; party Pokémon; u32 steps} slots 0xE4 apart; the Dream World's
+ * tucked-in Pokémon at 8, asleep at 0x1A3; the GTS deposit at 0, its flag
+ * (u16) at 0xEC; Black 2/White 2's DNA Splicers partner at 4. */
+enum { FX5_DAYCARE = 0x32, FX5_DAYCARE_SLOT = 0xE4, FX5_DREAM_WORLD = 0x23, FX5_GTS = 0x2E, FX5_FUSION = 0x2B };
 
 typedef struct Fx5File {
     unsigned char bytes[CP_SAVE_FILE_SIZE];
@@ -202,6 +207,14 @@ static inline void Fx5Build(Fx5File *file, const Fx5Spec *specs, unsigned count,
             else Fx5Empty(party + 8 + i * FX5_MON, FX5_MON);
         }
     }
+    /* LUNE-913: nothing in the Day Care, the Dream World, the GTS or (Black
+     * 2/White 2) fused into Kyurem: blocks zeroed as their inits leave them. */
+    memset(Fx5Block(file, 0, FX5_DAYCARE), 0, Fx5Size_(FX5_DAYCARE));
+    memset(Fx5Block(file, 0, FX5_DREAM_WORLD), 0, Fx5Size_(FX5_DREAM_WORLD));
+    memset(Fx5Block(file, 0, FX5_GTS), 0, Fx5Size_(FX5_GTS));
+#if FX5_GAME == 1
+    memset(Fx5Block(file, 0, FX5_FUSION), 0, Fx5Size_(FX5_FUSION));
+#endif
     memset(Fx5Block(file, 0, FX5_POKEDEX), 0, FX5_POKEDEX_SIZE);
     Fx5W32(Fx5Block(file, 0, FX5_POKEDEX), 0xBEEFCAFE);
     memset(Fx5Block(file, 0, FX5_TRAINER) + 0x2C, 0, Fx5Size_(FX5_TRAINER) - 0x2C);

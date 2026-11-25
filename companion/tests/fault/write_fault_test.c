@@ -98,13 +98,39 @@ static int inject, counting, full, stockPlayed;
 static int stockNext;
 static char path[sizeof(CP_FAULT_BINARY_DIR) + 32];
 
+/* LUNE-913: OFFER, CANCEL_RETURN and REJECT_RESTORE run again with `held`
+ * set: after every cut the stock game moves the offered Pokémon, wherever the
+ * save it loaded holds it in the party, to the Day Care (or, HeartGold/
+ * SoulSilver, on a Pokéwalker walk) and saves. The companion must refuse
+ * whatever step would decide by it, writing nothing; once the player takes it
+ * back (one more stock save) everything recovers: never sent or added twice,
+ * never lost. heldMoves picks the place in retail_load*.h's table. */
+#ifdef FX_GEN5
+static const unsigned heldMoves[] = { 0 };
+#elif FX_GAME == 2
+static const unsigned heldMoves[] = { 0, 3 };
+#else
+static const unsigned heldMoves[] = { 0 };
+#endif
+static const char *const heldNames[] = { "daycare", "pokewalker" };
+enum { HELD_MOVES = sizeof(heldMoves) / sizeof(heldMoves[0]) };
+static unsigned held;
+static unsigned char offerCanonical[136], heldParty[PARTY_BYTES];
+
+static const char *Name(void)
+{
+    static char name[48];
+    snprintf(name, sizeof(name), "%s%s%s", names[scenario], held ? "+" : "", held ? heldNames[held - 1] : "");
+    return name;
+}
+
 /* Every distinct cut must recover; there are no known failures. */
 static void CheckOutcome(const char *kind, size_t tear, unsigned stock, unsigned outcome)
 {
     if (outcome == RECOVERED) return;
     ++unexpected;
     printf("FAIL unexpected-recovery %s event=%u kind=%s tear=%zu stock-saves=%u outcome=%s\n",
-        names[scenario], eventCount, kind, tear, stock, outcomes[outcome]);
+        Name(), eventCount, kind, tear, stock, outcomes[outcome]);
 }
 
 static int Random(void *arg, unsigned char *bytes, size_t size)
@@ -255,7 +281,7 @@ static void Cut(enum CutKind kind, int losePending, uint32_t offset, const void 
         assert(waitpid(child, &status, 0) == child);
         if (!WIFEXITED(status) || WEXITSTATUS(status) >= 2 * OUTCOMES) {
             fprintf(stderr, "FAIL %s event=%u model=%s step=%s offset=%u size=%zu tear=%zu stock-saves=%u status=%d\n",
-                names[scenario], eventCount, model, steps[step], stopOffset, stopSize, tear, plan, status);
+                Name(), eventCount, model, steps[step], stopOffset, stopSize, tear, plan, status);
             CloseFile();
             exit(1);
         }
@@ -403,21 +429,107 @@ static WtJournalEntry ReadEntry(void)
  * stock save writes both blocks to their alternate halves. A second save, when
  * requested by Cut, refreshes the other halves too. No companion load/commit
  * implementation or rejected image participates in this recovery model. */
+/* LUNE-913: the player's moves with the offered Pokémon, on the RAM the stock
+ * game loaded. */
+typedef void (*StockAction)(unsigned char *ram);
+#ifdef FX_GEN5
+enum { MON = FX5_MON };
+static unsigned char *RamParty(unsigned char *ram) { return ram + Rl5Offset(FX5_PARTY); }
+static unsigned char *RamPlace(unsigned char *ram, unsigned place) { return ram + Rl5Offset(kFx5Held[place].block); }
+#else
+enum { MON = FX_MON };
+static unsigned char *RamParty(unsigned char *ram) { return ram + FX_GENERAL + FX_PARTY; }
+#endif
+
+static int IsOffer(const unsigned char *stored)
+{
+    unsigned char canonical[136];
+    return WtPokemon_Decode(stored, canonical) == 0 && memcmp(canonical, offerCanonical, 4) == 0
+        && memcmp(canonical + 12, offerCanonical + 12, 4) == 0;
+}
+
+/* From the party to the place, as the game moves it (adapter tests'
+ * gen4_held.h and gen5_stock_test.c), the party closing up behind it. */
+static void HoldOffered(unsigned char *ram)
+{
+    unsigned char *party = RamParty(ram);
+    unsigned count = Fx32(party + 4), slot, i, place = heldMoves[held - 1];
+    for (slot = 0; slot < count && !IsOffer(party + 8 + slot * MON); ++slot) {}
+    if (slot == count) return;
+    memcpy(heldParty, party + 8 + slot * MON, MON);
+#ifdef FX_GEN5
+    memcpy(RamPlace(ram, place) + kFx5Held[place].mon, heldParty, MON);
+    Fx5W32(RamPlace(ram, place) + kFx5Held[place].flag, 1);
+#else
+    memcpy(ram + FX_GENERAL + kFxHeld[place].mon, heldParty, kFxHeld[place].size);
+#endif
+    for (i = slot; i + 1 < count; ++i) {
+        memcpy(party + 8 + i * MON, party + 8 + (i + 1) * MON, MON);
+#if !defined(FX_GEN5) && FX_GAME == 2
+        memcpy(ram + FX_GENERAL + FX_APRIJUICE + 5 * i, ram + FX_GENERAL + FX_APRIJUICE + 5 * (i + 1), 5);
+#endif
+    }
+#ifdef FX_GEN5
+    Fx5Empty(party + 8 + (count - 1) * MON, MON);
+#else
+    FxEmpty(party + 8 + (count - 1) * MON, MON);
+#if FX_GAME == 2
+    memset(ram + FX_GENERAL + FX_APRIJUICE + 5 * (count - 1), 0, 5);
+#endif
+#endif
+    FxPut32(party + 4, count - 1);
+}
+
+/* Taken back to the end of the party unchanged (no steps walked). */
+static void WithdrawOffered(unsigned char *ram)
+{
+    unsigned char *party = RamParty(ram);
+    unsigned count = Fx32(party + 4), place = heldMoves[held - 1];
+    assert(count < 6);
+    memcpy(party + 8 + count * MON, heldParty, MON);
+    FxPut32(party + 4, count + 1);
+#ifdef FX_GEN5
+    Fx5W32(RamPlace(ram, place) + kFx5Held[place].flag, 0); /* the image stays */
+#else
+    if (kFxHeld[place].flag) FxPut16(ram + FX_GENERAL + kFxHeld[place].flag, 0);
+    else if (place == 3) memset(ram + FX_GENERAL + kFxHeld[place].mon, 0, FX_BOX_MON); /* the Pokéwalker */
+    else FxEmpty(ram + FX_GENERAL + kFxHeld[place].mon, FX_BOX_MON);
+#endif
+}
+
+/* Whether the save the stock game loads holds the offer in the place. */
+static int Holding(const unsigned char *bytes)
+{
+    unsigned place = heldMoves[held - 1];
+#ifdef FX_GEN5
+    static unsigned char ram[0x26000];
+    RetailLoad5(bytes, ram);
+    return Fx5HeldOccupied(ram, place) && IsOffer(RamPlace(ram, place) + kFx5Held[place].mon);
+#else
+    unsigned selected[2];
+    const unsigned char *general;
+    RetailLoad(bytes, selected);
+    general = bytes + selected[0] * CP_SAVE_HALF_SIZE + FX_GENERAL;
+    return FxHeldOccupied(general, place) && IsOffer(general + kFxHeld[place].mon);
+#endif
+}
+
 #ifdef FX_GEN5
 /* Black/White and Black 2/White 2: the stock load builds RAM block by block
  * (retail_load5.h), the player plays, and each stock save writes it to both
  * copies with a new count. */
-static void StockGameSave(void)
+static void StockGameSave(StockAction action)
 {
     static unsigned char ram[0x26000];
     unsigned pass;
     RetailLoad5(live, ram);
+    if (action) action(ram);
     for (pass = 0; pass < stockSaves; ++pass) StockSave5(live, ram);
     stockPlayed = 1;
     CloseFile(); OpenBytes(live); Bind();
 }
 #else
-static void StockGameSave(void)
+static void StockGameSave(StockAction action)
 {
     unsigned selected[2], block, pass;
     uint32_t global, counters[2];
@@ -431,6 +543,7 @@ static void StockGameSave(void)
     }
     global = Fx32(ram + FX_GENERAL_SIZE - FX_FOOTER);
     ram[0x10] ^= 0x5a; /* The player plays: play time changes. */
+    if (action) action(ram);
     for (pass = 0; pass < stockSaves; ++pass) {
         ++global;
         for (block = 0; block < 2; ++block) {
@@ -492,6 +605,21 @@ static void CheckFinal(int capture)
     assert(entry.phase == (scenario == OFFER ? WT_JOURNAL_QUEUED : WT_JOURNAL_IDLE));
 }
 
+/* The offered Pokémon's party slot in the loaded save: 1 unless the stock
+ * game moved it (LUNE-913's held runs take it back to the party's end). */
+static int OfferSlot(void)
+{
+#ifdef FX_GEN5
+    unsigned char *party = CpSaveImage_Block(&image, FX5_PARTY);
+#else
+    unsigned char *party = CpSaveImage_Block(&image, 0) + FX_PARTY;
+#endif
+    unsigned count = Fx32(party + 4), slot;
+    for (slot = 0; slot < count && !IsOffer(party + 8 + slot * MON); ++slot) {}
+    assert(slot < count);
+    return (int)slot;
+}
+
 static void Resume(void)
 {
     WtEngine engine;
@@ -531,10 +659,14 @@ static void Resume(void)
         WtJournal_Close(&journal);
     }
     Conservation(live, &entry, digests);
-    if (load == CP_SAVE_NEEDS_GAME_SAVE) {
+    if (held) {
+        /* The stock game loads any cut save, moves the offer and saves. */
+        StockGameSave(HoldOffered);
+        load = LOAD(&image, &file);
+    } else if (load == CP_SAVE_NEEDS_GAME_SAVE) {
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
-        StockGameSave();
+        StockGameSave(NULL);
         load = LOAD(&image, &file);
     }
 #if FX_SHARED || defined(FX_GEN5)
@@ -548,7 +680,7 @@ static void Resume(void)
             stockNext = full || distinct % 4 == 1;
         } else {
             stockSaves = 1;
-            StockGameSave();
+            StockGameSave(NULL);
             load = LOAD(&image, &file);
         }
     }
@@ -557,10 +689,30 @@ static void Resume(void)
     OpenEngine(&engine);
     /* This is the local boot path used by WtBoot_Check, without DS glue/TLS. */
     {
-        int result = WtEngine_Settle(&engine);
-        int ownership = Ownership(live, &engine.entry, digests, stockPlayed);
+        static unsigned char opened[CP_SAVE_FILE_SIZE];
+        int result, ownership;
+        memcpy(opened, live, sizeof(opened));
+        result = WtEngine_Settle(&engine);
+        ownership = Ownership(live, &engine.entry, digests, stockPlayed);
         if (ownership > 0) Finish(DUPLICATE);
         if (ownership < 0) Finish(LOST);
+        if (held && Holding(live)) {
+            /* LUNE-913: a refusal while the offer is held there writes
+             * nothing; the player takes it back and the companion settles. */
+            if ((result != 0 || engine.entry.phase == WT_JOURNAL_ESCROW || engine.entry.phase == WT_JOURNAL_RESTORING
+                    || engine.entry.phase == WT_JOURNAL_APPLYING) && memcmp(opened, live, sizeof(opened)) != 0)
+                Finish(STUCK);
+            WtEngine_Close(&engine);
+            stockSaves = 1;
+            StockGameSave(WithdrawOffered);
+            assert(!Holding(live));
+            if (LOAD(&image, &file) != CP_SAVE_OK) Finish(SAVE_BLOCKED);
+            OpenEngine(&engine);
+            result = WtEngine_Settle(&engine);
+            ownership = Ownership(live, &engine.entry, digests, stockPlayed);
+            if (ownership > 0) Finish(DUPLICATE);
+            if (ownership < 0) Finish(LOST);
+        }
         if (result != 0 || engine.entry.phase == WT_JOURNAL_ESCROW
             || engine.entry.phase == WT_JOURNAL_RESTORING || engine.entry.phase == WT_JOURNAL_APPLYING)
             Finish(STUCK);
@@ -574,7 +726,7 @@ static void Resume(void)
     assert(memcmp(after, live, sizeof(after)) == 0);
     assert(Ownership(live, &engine.entry, digests, stockPlayed) == 0);
     if ((scenario == OFFER || scenario == REJECT_RESTORE)
-        && engine.entry.phase <= WT_JOURNAL_IDLE && server.eventCount <= 1) slot = 1;
+        && engine.entry.phase <= WT_JOURNAL_IDLE && server.eventCount <= 1) slot = OfferSlot();
     WtEngine_Close(&engine);
     if (scenario == CHECKPOINT) assert(WtGame_Checkpoint(&game) == 0);
     {
@@ -608,6 +760,7 @@ static void Setup(void)
         specs[i] = FxDefault(i); FxCanonical(&specs[i], canonical);
 #endif
         FxSha(canonical, sizeof(canonical), digests[i]);
+        if (i == 1) memcpy(offerCanonical, canonical, sizeof(canonical));
     }
 #ifdef FX_GEN5
     Fx5Build(&fixture, specs, 4, 40);
@@ -681,13 +834,14 @@ int main(void)
     CpCore_SelectFamily(CP_CORE_GEN5);
 #endif
     if (setjmp(reboot)) Resume();
-    for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) {
+    for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) for (held = 0; held <= HELD_MOVES; ++held) {
         unsigned checkpoints;
-        if (only && strcmp(only, names[scenario]) != 0) continue;
+        if (held && scenario != OFFER && scenario != CANCEL_RETURN && scenario != REJECT_RESTORE) continue;
+        if (only && strcmp(only, Name()) != 0) continue;
 #ifndef FX_GEN5
         if (scenario == MUSICAL) continue;
 #endif
-        ++ran;
+        ran += !held;
         Setup(); Run(); CheckFinal(1); checkpoints = eventCount; CloseFile();
         Setup(); inject = 1; Run(); inject = 0; CheckFinal(0);
         assert(eventCount == checkpoints && eventCount == saveWrites + journalWrites + syncs);
@@ -718,13 +872,13 @@ int main(void)
         printf("%s: checkpoints=%u save-writes=%u journal-writes=%u syncs=%u attempts=%u "
             "identical-states=%u distinct-states=%u prefix-attempts=%u tail-attempts=%u "
             "distinct-prefix=%u distinct-tail=%u stock-save-cases=%u stock-save-recovered=%u journal-byte-tears=%u cut-kinds=%#x\n",
-            names[scenario], checkpoints, saveWrites, journalWrites, syncs, attempts, duplicates, distinct,
+            Name(), checkpoints, saveWrites, journalWrites, syncs, attempts, duplicates, distinct,
             prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered, journalByteTears, cutMask);
         printf("  recovered=%u journal-blocked=%u save-blocked=%u stuck=%u duplicate=%u lost=%u\n",
             tally[RECOVERED], tally[JOURNAL_BLOCKED], tally[SAVE_BLOCKED], tally[STUCK], tally[DUPLICATE], tally[LOST]);
         CloseFile();
     }
-    assert(ran != 0);
+    assert(ran != 0 || only);
 #ifdef FX_GEN5
     assert(only || ran == SCENARIOS);
 #else
