@@ -193,31 +193,32 @@ static int Moved(const CpSaveImage *image, const WtJournalEntry *entry)
         || image->blockCounters[0] != entry->generalCounter || image->blockCounters[1] != entry->boxCounter);
 }
 
-/* Where a save holds a Pokémon, by identity: its personality and original
- * trainer ID, which neither the receive effects nor playing change. exact says
- * whether its canonical form digests to `digest`. */
+/* Where a save holds a Pokémon: the slot whose canonical form digests to one
+ * of `digests`, the images the step can have left. */
 typedef struct Found {
-    int party, exact;
+    int party;
     unsigned box, slot;
 } Found;
 
-/* 1 found, 0 absent, -1 when a slot cannot be read as the game would, or the
- * identity is held twice: a recovery decided on it could duplicate or lose. */
-static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], const unsigned char digest[32],
-    Found *found)
+/* 1 found, 0 absent. -1 when a slot cannot be read as the game would, or when
+ * a Pokémon shares the identity (personality and original trainer ID) without
+ * being one of those images, or two do: another Pokémon, or this one changed
+ * by play, is never proof either way. */
+static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
+    unsigned count, Found *found)
 {
     unsigned char canonical[BOX_MON_SIZE], sum[32];
     unsigned char *party = Party(image);
-    unsigned box, slot, i, n;
-    int count, matches = 0;
+    unsigned box, slot, i, j, n;
+    int members, matches = 0;
     Mon mon;
-    if (!party || (count = Count(party, 1)) < 0) return -1;
-    n = (unsigned)count + BOXES * BOX_SLOTS;
+    if (!party || (members = Count(party, 1)) < 0) return -1;
+    n = (unsigned)members + BOXES * BOX_SLOTS;
     for (i = 0; i < n; ++i) {
         const unsigned char *stored;
-        int inParty = i < (unsigned)count;
-        box = inParty ? 0 : (i - (unsigned)count) / BOX_SLOTS;
-        slot = inParty ? i : (i - (unsigned)count) % BOX_SLOTS;
+        int inParty = i < (unsigned)members;
+        box = inParty ? 0 : (i - (unsigned)members) / BOX_SLOTS;
+        slot = inParty ? i : (i - (unsigned)members) % BOX_SLOTS;
         stored = inParty ? Slot(party, slot) : BoxMon(image, box, slot);
         if (!inParty) {
             ReadMon(stored, 0, &mon);
@@ -228,10 +229,10 @@ static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], 
         }
         if (WtPokemon_Decode(stored, canonical) != 0) return -1;
         if (memcmp(canonical, target, 4) != 0 || memcmp(canonical + 0x0C, target + 0x0C, 4) != 0) continue;
-        if (++matches > 1) return -1;
         Sha(canonical, sizeof(canonical), sum);
+        for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
+        if (j == count || ++matches > 1) return -1;
         found->party = inParty; found->box = box; found->slot = slot;
-        found->exact = memcmp(sum, digest, 32) == 0;
     }
     return matches;
 }
@@ -423,17 +424,30 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
     return WtGame_Checkpoint(game);
 }
 
-/* The Pokémon a delivery brings, found by identity, with exact set when it is
- * the one the delivery records: a returned offer as it left, a matched one as
- * it was built. */
+/* The Pokémon a delivery brings, where the save holds it. Proof is its exact
+ * image: a returned offer as it left, a matched one as the receive effects
+ * build it for the party or for the PC (they depend only on the Pokémon and
+ * the ROM), or as recorded when it was prepared. */
 static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
 {
-    unsigned char digest[32];
+    unsigned char digests[3][32], image[MON_SIZE], canonical[BOX_MON_SIZE], *general, *scratch;
+    const size_t size = CP_SAVE_GENERAL_SIZE - CP_SAVE_FOOTER_SIZE;
+    unsigned count = 1, i;
     if (entry->deliveryKind == WT_DELIVERY_RETURN) {
-        Sha(entry->outgoing, BOX_MON_SIZE, digest);
-        return Locate(game->image, entry->outgoing, digest, found);
+        Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
+        return Locate(game->image, entry->outgoing, digests, 1, found);
     }
-    return Locate(game->image, entry->incoming, entry->appliedDigest, found);
+    if (entry->deliveryKind != WT_DELIVERY_MATCH || !game->data || !(general = CpSaveImage_Block(game->image, 0))
+        || !(scratch = malloc(size))) return -1;
+    memcpy(digests[0], entry->appliedDigest, 32);
+    for (i = 0; i < 2; ++i) {
+        memcpy(scratch, general, size);
+        if (CpReceive_Apply(game->data, scratch, entry->incoming, i ? CP_RECEIVE_BOX : CP_RECEIVE_PARTY, NULL, image) != 0
+            || WtPokemon_Decode(image, canonical) != 0) { free(scratch); return -1; }
+        Sha(canonical, sizeof(canonical), digests[count++]);
+    }
+    free(scratch);
+    return Locate(game->image, entry->incoming, digests, count, found);
 }
 
 /* PREPARE_RECEIVE of a returned offer that is already back: a restore that
@@ -451,10 +465,10 @@ static int Back(WtGame *game, const WtJournalEntry *entry)
 
 /* RECEIVE when a game saved over both recorded inventories (the stock game,
  * played before the companion could finish). The patched game never gets
- * here: it settles before it can be played. Decided by the Pokémon itself:
- * present, the delivery was applied (or the offer restored) and the save is
- * only checkpointed; absent, it is prepared again on this save, where
- * PREPARE_RECEIVE would put it, and applied. Never twice, never dropped. */
+ * here: it settles before it can be played. Decided by the Pokémon's exact
+ * image (Delivered): present, the delivery was applied (or the offer
+ * restored) and the save is only checkpointed; absent, it is prepared again on this save, where PREPARE_RECEIVE would
+ * put it, and applied. Never twice, never dropped. */
 static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int *restore)
 {
     Found found;
@@ -517,14 +531,14 @@ done:
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
-    unsigned char digest[32];
+    unsigned char digest[1][32];
     Found found;
     int where;
-    Sha(entry->outgoing, BOX_MON_SIZE, digest);
-    where = Locate(image, entry->outgoing, digest, &found);
+    Sha(entry->outgoing, BOX_MON_SIZE, digest[0]);
+    where = Locate(image, entry->outgoing, digest, 1, &found);
     if (where < 0) return -1;
     if (where == 1) {
-        if (!found.party || !found.exact || !Eligible(party, found.slot)) return -1;
+        if (!found.party || !Eligible(party, found.slot)) return -1;
         entry->source.slot = (unsigned char)found.slot;
         memcpy(entry->original, Slot(party, found.slot), MON_SIZE);
         Sha(entry->original, MON_SIZE, entry->originalDigest);

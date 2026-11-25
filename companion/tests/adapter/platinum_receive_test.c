@@ -727,6 +727,33 @@ static void StockSave(void)
     puts("PASS stock save while applying: no room left keeps it in the journal");
 }
 
+static unsigned char impostor[136];
+
+static void PlaceImpostor(unsigned char *general, unsigned char *boxes)
+{
+    (void)general;
+    assert(WtPokemon_Encode(impostor, boxes + FX_PC + 3 * FX_BOX_MON) == 0);
+}
+
+/* An identity collision is not a delivery. */
+static void StockSaveCollision(void)
+{
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    Spec spec = Basic(64, MODEST_ODD_LOW), other = Basic(25, MODEST_ODD_LOW);
+    /* Another species with the incoming personality and trainer ID is in the
+     * PC: the delivery is not there, and is not received over the doubt. */
+    Canonical(&other, impostor);
+    Applying(5, &spec, &journal, 1);
+    assert(FxStockPlay(&file, 1, 0, PlaceImpostor));
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    memcpy(before, file.bytes, sizeof(before));
+    entry = journal;
+    assert(WtGame_Inventory(&game, WT_INVENTORY_RECEIVE, &entry, 0) == -1);
+    assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    puts("PASS stock save while applying: a Pokemon sharing the identity is not taken for the delivery");
+}
+
 int main(void)
 {
     Stats();
@@ -738,6 +765,7 @@ int main(void)
     MailAndPc();
     Placement();
     StockSave();
+    StockSaveCollision();
     puts("PASS platinum receive");
     return 0;
 }

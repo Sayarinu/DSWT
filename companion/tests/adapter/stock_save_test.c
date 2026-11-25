@@ -235,6 +235,58 @@ static void SubmitReadyAfterPlay(void)
     puts("PASS stock save once submitted: still proven removed");
 }
 
+/* Another Pokémon that shares the offered one's personality and trainer ID
+ * (a different species): never proof that the offer is back or gone. */
+static void Impostor(unsigned char *general, unsigned char *boxes)
+{
+    FxSpec spec = FxDefault(OFFERED_SLOT);
+    unsigned char canonical[136];
+    (void)general;
+    spec.species = 300;
+    FxCanonical(&spec, canonical);
+    assert(WtPokemon_Encode(canonical, boxes + FX_PC + 7 * FX_BOX_MON) == 0);
+}
+
+static void IdentityCollisions(void)
+{
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned cut;
+    /* A returned offer not back yet: refused, nothing written, not counted as restored. */
+    Arrange(APPLYING_RETURN, &journal);
+    assert(FxStockPlay(&file, 1, 0, Impostor));
+    Load();
+    memcpy(before, file.bytes, sizeof(before));
+    entry = journal;
+    assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
+    assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    /* A restore cut before it wrote: PREPARE_RECEIVE refuses too. */
+    Arrange(RESTORING, &journal);
+    assert(FxStockPlay(&file, 1, 0, Impostor));
+    Load();
+    memcpy(before, file.bytes, sizeof(before));
+    entry = journal;
+    assert(Step(WT_INVENTORY_PREPARE_RESTORE, &entry) == 1);
+    entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry) == -1);
+    assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    /* An escrow, removed or not: refused either way. */
+    for (cut = 1; cut <= 13; cut += 12) {
+        Arrange(ESCROW, &journal);
+        entry = journal;
+        file.failWrite = file.writes + cut;
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : 0));
+        file.failWrite = 0;
+        assert(FxStockPlay(&file, 1, 0, Impostor));
+        Load();
+        memcpy(before, file.bytes, sizeof(before));
+        entry = journal;
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
+        assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    }
+    puts("PASS stock save: another Pokemon with the same identity is never taken as the offer");
+}
+
 int main(void)
 {
     Sweep(ESCROW);
@@ -242,6 +294,7 @@ int main(void)
     Sweep(APPLYING_RETURN);
     EscrowAfterPlay();
     SubmitReadyAfterPlay();
+    IdentityCollisions();
     printf("PASS stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", cases);
     return 0;
 }
