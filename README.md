@@ -51,7 +51,7 @@ Your Pokémon stays safe. The game finishes what it can when it starts, and the 
 Please don't. The server tracks each save's progress, so an older copy can lose its pending trade.
 
 **Does it work on a real DS?**
-Not yet. melonDS 1.1 is the tested emulator.
+On a DSi or 3DS, yes: the **[DS Companion](https://github.com/Sayarinu/DSWT/wiki/DS-Companion)** trades from your Platinum save over normal Wi-Fi, with more games to come. The patched game itself is tested in melonDS 1.1.
 
 **Can I run my own server or build it myself?**
 Yes. See [Build from Source](https://github.com/Sayarinu/DSWT/wiki/Build-from-Source) and [Deployment](https://github.com/Sayarinu/DSWT/wiki/Deployment).
