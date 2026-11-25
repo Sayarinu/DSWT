@@ -628,6 +628,17 @@ static void Placement(void)
     assert(memcmp(before, image.bytes, sizeof(before)) == 0);
     puts("PASS placement: no room keeps the delivery pending");
 
+    /* The offer still in the save: a matched delivery is refused and nothing
+     * changes, then prepared once the offer is gone. */
+    Setup(5); Entry(&entry, &spec);
+    assert(WtPokemon_Encode(entry.outgoing, FxImageBox(&image, 4, 4)) == 0);
+    memcpy(before, image.bytes, sizeof(before));
+    assert(WtGame_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+    assert(memcmp(before, image.bytes, sizeof(before)) == 0);
+    FxEmpty(FxImageBox(&image, 4, 4), 136);
+    assert(WtGame_Inventory(&game, WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
+    puts("PASS placement: a matched delivery waits while its offer is still in the save");
+
     /* Without game data a matched delivery is refused and nothing changes. */
     Setup(5); Entry(&entry, &spec); game.data = NULL;
     memcpy(before, image.bytes, sizeof(before));
