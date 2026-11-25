@@ -1,7 +1,9 @@
 #ifndef COMPANION_ADAPTER_PLATINUM_H
 #define COMPANION_ADAPTER_PLATINUM_H
 
+/* save_image.h first: game/rom.h keeps its save magic definitions. */
 #include "save/save_image.h"
+#include "adapter/platinum_receive.h"
 #include "wonder_trade/game_adapter.h"
 
 /* The companion's Platinum game adapter: WtGame_Inventory, WtGame_Checkpoint,
@@ -15,8 +17,10 @@
  * and verifies them. After a failed write the image is unloaded (save_image.h):
  * load the file again before anything else.
  *
- * Received deliveries of a matched trade (LUNE-873) are refused for now; a
- * returned offer is put back exactly as the game does. */
+ * A returned offer is put back exactly as the game does. A matched delivery
+ * goes where the game puts it, with the game's effects on the Pokémon, the
+ * Pokédex, the records, the Pokétch and the journal (adapter/platinum_receive.h),
+ * read from the player's ROM through `data`. */
 struct WtGame {
     CpSaveImage *image;
     const CpFile *file;
@@ -24,6 +28,9 @@ struct WtGame {
      * (adapter/holdable.h) with the player's CpGame. NULL refuses every held item. */
     int (*holdable)(void *arg, unsigned item);
     void *holdableArg;
+    /* The player's game data for matched deliveries: CpAdapter_RomData
+     * (adapter/rom_data.h). NULL refuses them; returned offers need none. */
+    const CpAdapterData *data;
 };
 
 /* Party layout and limits of the game, as game_save.c uses them. */

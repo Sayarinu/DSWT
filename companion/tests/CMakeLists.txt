@@ -116,6 +116,7 @@ endforeach()
 
 # --- Platinum offer adapter and visit driver (LUNE-871) ---------------------
 add_library(companion_adapter STATIC "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
+    "${COMPANION_SRC}/adapter/platinum_receive.c" "${COMPANION_SRC}/adapter/rom_data.c"
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
     "${COMPANION_SRC}/game/text.c" "${COMPANION_SRC}/game/pairing.c"
     "${CLIENT}/src/wonder_trade/pokemon_codec.c")
@@ -123,14 +124,15 @@ target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
+add_executable(platinum_receive_test adapter/platinum_receive_test.c)
 add_executable(visit_test session/visit_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
 target_include_directories(visit_test PRIVATE "${CLIENT}/tests")
-foreach(adapter_target companion_adapter platinum_adapter_test visit_test)
+foreach(adapter_target companion_adapter platinum_adapter_test platinum_receive_test visit_test)
     target_compile_options(${adapter_target} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 endforeach()
-foreach(adapter_test platinum_adapter_test visit_test)
+foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
