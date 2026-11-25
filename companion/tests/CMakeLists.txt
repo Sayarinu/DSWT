@@ -227,6 +227,15 @@ foreach(adapter_game 0 1)
     add_test(NAME gen5_adapter_test_game${adapter_game} COMMAND gen5_adapter_test_game${adapter_game})
 endforeach()
 
+foreach(adapter_game 0 1)
+    add_executable(gen5_stock_test_game${adapter_game} adapter/gen5_stock_test.c)
+    target_compile_definitions(gen5_stock_test_game${adapter_game} PRIVATE FX5_GAME=${adapter_game})
+    target_compile_options(gen5_stock_test_game${adapter_game} PRIVATE -O1 -Wall -Wextra -Werror -pedantic
+        -fsanitize=address,undefined)
+    target_link_libraries(gen5_stock_test_game${adapter_game} PRIVATE companion_adapter)
+    add_test(NAME gen5_stock_test_game${adapter_game} COMMAND gen5_stock_test_game${adapter_game})
+endforeach()
+
 # LUNE-899: a stock-game save between a cut companion step and its resume.
 # The sweeps build the adapter themselves at -O1 (still with the sanitizers):
 # every case hashes and checks whole saves, and must stay within CI's budget.
