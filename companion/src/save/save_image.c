@@ -93,10 +93,17 @@ CpSaveResult CpSaveImage_Load(CpSaveImage *image, const CpFile *file, uint32_t m
             image->currentHalf[block] = valid[block] == 2;
         }
     }
-    if (inconsistent
-        || globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]]
-        || (valid[0] != 3 && valid[1] == 3)
-        || (valid[0] != 3 && valid[1] != 3 && image->currentHalf[0] != image->currentHalf[1]))
+    if (inconsistent) return CP_SAVE_NEEDS_GAME_SAVE;
+    image->firstBlock = 0;
+    if (globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]]) {
+        /* LoadCheck falls back to stale general first, or stale boxes if general is partial. */
+        if (valid[0] == 3) image->currentHalf[0] ^= 1;
+        else if (valid[1] == 3) {
+            image->currentHalf[1] ^= 1;
+            image->firstBlock = 1;
+        }
+    }
+    if (globals[0][image->currentHalf[0]] != globals[1][image->currentHalf[1]])
         return CP_SAVE_NEEDS_GAME_SAVE;
     image->globalCounter = globals[0][image->currentHalf[0]];
     for (block = 0; block < 2; ++block)
@@ -165,7 +172,7 @@ CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
 CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
                                   const unsigned char expected[CP_SAVE_HASH_SIZE])
 {
-    unsigned pass, block;
+    unsigned pass, index;
     unsigned char digest[CP_SAVE_HASH_SIZE];
     CpSaveResult result = CpSaveImage_Hash(image, digest);
     if (result != CP_SAVE_OK || expected == NULL) return CP_SAVE_INVALID;
@@ -173,7 +180,9 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
     if (!FileSize(file) || file->writeAt == NULL || file->sync == NULL) return CP_SAVE_IO_ERROR;
     for (pass = 0; pass < 2; ++pass) {
         uint32_t global = image->globalCounter + 1;
-        for (block = 0; block < 2; ++block) {
+        /* Overwrite the discarded newer block before its counter can match an edit. */
+        for (index = 0; index < 2; ++index) {
+            unsigned block = image->firstBlock ^ index;
             unsigned target = 1 - image->currentHalf[block];
             uint32_t address = target * CP_SAVE_HALF_SIZE + offsets[block];
             uint32_t bodySize = sizes[block] - CP_SAVE_FOOTER_SIZE;
@@ -205,6 +214,7 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
             image->blockCounters[block]++;
         }
         image->globalCounter = global;
+        image->firstBlock = 0;
     }
     result = CpSaveImage_Verify(image, file, expected);
     if (result != CP_SAVE_OK) image->loaded = 0;

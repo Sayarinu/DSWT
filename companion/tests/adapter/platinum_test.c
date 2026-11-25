@@ -281,6 +281,32 @@ static void Refusals(void)
 
 /* A cancelled or rejected offer after the game saved: it returns like a
  * delivery, to the end of the party or the first empty PC slot. */
+/* LUNE-897: a RETURN whose Pokémon is already present (a restore cut short,
+ * then a stock-game save) never duplicates it, in the party or the PC. */
+static void ReturnAlreadyPresent(void)
+{
+    FxSpec specs[6];
+    WtJournalEntry entry, saved;
+    unsigned where;
+    for (where = 0; where < 2; ++where) {
+        Defaults(specs, 3); Setup(specs, 3);
+        assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry, 0) == 0 && Step(WT_INVENTORY_REMOVE, &entry, 0) == 0);
+        saved = entry;
+        if (where == 0) {
+            assert(Step(WT_INVENTORY_RESTORE, &entry, 0) == 0); /* back in the party */
+        } else {
+            memcpy(FxImageBox(&image, 3, 7), entry.original, 136); /* or moved to the PC */
+        }
+        GameSaves(5100);
+        entry = saved;
+        entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
+        expected = image; memcpy(fileBefore, file.bytes, sizeof(fileBefore));
+        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+        Unchanged(&expected);
+    }
+    puts("PASS return: a Pokémon already back in the party or PC is never added twice");
+}
+
 static void ReturnAfterChange(void)
 {
     FxSpec specs[6];
@@ -388,6 +414,7 @@ int main(void)
     Prepare();
     ShiftDownAndRestore();
     Refusals();
+    ReturnAlreadyPresent();
     ReturnAfterChange();
     CanHold();
     puts("PASS platinum adapter");

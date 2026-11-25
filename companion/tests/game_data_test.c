@@ -124,6 +124,7 @@ static void TestPlatinumData(void)
     CpItem item;
     uint32_t table[CP_MAX_LEVEL + 1];
     uint16_t name[8];
+    uint8_t pp;
     size_t length;
 
     MemoryReader_Init(&memory, &rom);
@@ -165,6 +166,9 @@ static void TestPlatinumData(void)
     assert(!item.holdable && item.preventToss);
     assert(CpGame_Item(&game, 467, &item) == CP_OK && item.price == 445 * 10);
     assert(CpGame_Item(&game, 0, &item) == CP_ERR_NOT_FOUND && CpGame_Item(&game, 468, &item) == CP_ERR_NOT_FOUND);
+
+    assert(CpGame_MovePp(&game, 33, &pp) == CP_OK && pp == 33);
+    assert(CpGame_MovePp(&game, 0, &pp) == CP_ERR_NOT_FOUND && CpGame_MovePp(&game, 40, &pp) != CP_OK);
 
     assert(CpGame_SpeciesName(&game, 25, name, 8, &length) == CP_OK && length == 4);
     assert(memcmp(name, kWesternName, sizeof kWesternName) == 0);

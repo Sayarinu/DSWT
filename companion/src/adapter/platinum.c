@@ -206,19 +206,21 @@ int WtGame_Checkpoint(WtGame *game)
     return CpSaveImage_Verify(game->image, game->file, digest) == CP_SAVE_OK ? 0 : SaveBoth(game, digest);
 }
 
-/* What a step may change, kept to put the image back when it fails or only prepares. */
+/* What a step may change, kept to put the image back when it fails or only
+ * prepares: the general block (the party and everything a delivery's effects
+ * reach) and the one PC slot a delivery may fill. */
 typedef struct Backup {
-    unsigned char party[CP_ADAPTER_PARTY_SIZE], box[BOX_MON_SIZE];
-    unsigned char *partyAt, *boxAt;
+    unsigned char general[CP_SAVE_GENERAL_SIZE - CP_SAVE_FOOTER_SIZE], box[BOX_MON_SIZE];
+    unsigned char *generalAt, *boxAt;
 } Backup;
 
 static Backup *Keep(CpSaveImage *image)
 {
     Backup *backup = malloc(sizeof(*backup));
     if (!backup) return NULL;
-    backup->partyAt = Party(image); backup->boxAt = NULL;
-    if (!backup->partyAt) { free(backup); return NULL; }
-    memcpy(backup->party, backup->partyAt, sizeof(backup->party));
+    backup->generalAt = CpSaveImage_Block(image, 0); backup->boxAt = NULL;
+    if (!backup->generalAt) { free(backup); return NULL; }
+    memcpy(backup->general, backup->generalAt, sizeof(backup->general));
     return backup;
 }
 
@@ -231,7 +233,7 @@ static void KeepBox(Backup *backup, unsigned char *box)
 static void Release(Backup *backup, int restore)
 {
     if (restore) {
-        memcpy(backup->partyAt, backup->party, sizeof(backup->party));
+        memcpy(backup->generalAt, backup->general, sizeof(backup->general));
         if (backup->boxAt) memcpy(backup->boxAt, backup->box, sizeof(backup->box));
     }
     memset(backup, 0, sizeof(*backup));
@@ -265,18 +267,36 @@ static unsigned char *Destination(CpSaveImage *image, WtJournalLocator where)
     return NULL;
 }
 
-/* game_save.c BuildReceived for a returned offer: the original image goes to
- * the end of the party, or the first empty PC slot when the party is full.
- * 1 when there is no room. A matched delivery's effects are LUNE-873's. */
-static int BuildReceived(CpSaveImage *image, WtJournalEntry *entry, Backup *backup, int prepare)
+/* The mail sentence IDs of a prepared party image, which the game keeps when
+ * it applies the delivery (its mail constructor leaves them unset). */
+static void KeptSentences(const unsigned char image[MON_SIZE], uint16_t kept[3])
 {
-    unsigned char *party = Party(image), *destination, canonical[BOX_MON_SIZE];
+    unsigned char extension[EXTENSION_SIZE];
+    unsigned i;
+    memcpy(extension, image + BOX_MON_SIZE, EXTENSION_SIZE);
+    Crypt(extension, EXTENSION_SIZE, Read32(image));
+    for (i = 0; i < 3; ++i) kept[i] = (uint16_t)Read16(extension + 54 + 8 * i);
+}
+
+/* game_save.c BuildReceived: the Pokémon goes to the end of the party, or the
+ * first empty PC slot when the party is full; 1 when there is no room. A
+ * returned offer is its original image; a matched one is built with the
+ * game's receive effects, which also change the rest of the general block. */
+static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, int prepare)
+{
+    CpSaveImage *image = game->image;
+    unsigned char *party = Party(image), *destination, canonical[BOX_MON_SIZE], built[MON_SIZE];
+    uint16_t kept[3];
     unsigned box, slot;
     int count, found;
     Mon mon;
     if (!party) return -1;
     if (prepare) {
         if ((count = Count(party, 1)) < 0) return -1;
+        /* A returned offer that is already back (a restore cut short, then a
+         * stock-game save) must never be added twice: fail closed. The game
+         * has no such check; RECEIVE only follows a PREPARE on the same image. */
+        if (entry->deliveryKind == WT_DELIVERY_RETURN && Absent(image, entry->outgoing) != 0) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (count < CP_SAVE_PARTY_CAPACITY) {
             entry->destination.kind = 1; entry->destination.slot = (unsigned char)count;
@@ -304,16 +324,26 @@ static int BuildReceived(CpSaveImage *image, WtJournalEntry *entry, Backup *back
     destination = Destination(image, entry->destination);
     if (!destination || memcmp(destination, entry->destinationBefore, entry->destination.length) != 0
         || (entry->destination.kind == 1 && Read32(party + 4) != entry->destination.slot)) return -1;
-    if (entry->deliveryKind != WT_DELIVERY_RETURN
-        || memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
-    if (WtPokemon_Decode(entry->original, canonical) != 0) return -1;
+    if (entry->deliveryKind == WT_DELIVERY_RETURN) {
+        if (memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
+        memcpy(built, entry->original, MON_SIZE);
+    } else if (entry->deliveryKind == WT_DELIVERY_MATCH && game->data) {
+        if (!prepare && entry->destination.kind == 1) {
+            if (WtPokemon_Decode(entry->destinationAfter, canonical) != 0) return -1;
+            KeptSentences(entry->destinationAfter, kept);
+        }
+        if (CpReceive_Apply(game->data, CpSaveImage_Block(image, 0), entry->incoming,
+                entry->destination.kind == 1 ? CP_RECEIVE_PARTY : CP_RECEIVE_BOX,
+                !prepare && entry->destination.kind == 1 ? kept : NULL, built) != 0) return -1;
+    } else return -1;
+    if (WtPokemon_Decode(built, canonical) != 0) return -1;
     if (prepare) {
         memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
-        memcpy(entry->destinationAfter, entry->original, entry->destination.length);
+        memcpy(entry->destinationAfter, built, entry->destination.length);
         Sha(canonical, sizeof(canonical), entry->appliedDigest);
-    } else if (memcmp(entry->destinationAfter, entry->original, entry->destination.length) != 0) return -1;
+    } else if (memcmp(entry->destinationAfter, built, entry->destination.length) != 0) return -1;
     if (entry->destination.kind == 2) KeepBox(backup, destination);
-    memcpy(destination, entry->original, entry->destination.length);
+    memcpy(destination, built, entry->destination.length);
     if (entry->destination.kind == 1) Write32(party + 4, Read32(party + 4) + 1);
     return 0;
 }
@@ -349,13 +379,13 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
     if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
     if (!(backup = Keep(game->image))) return -1;
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
-        result = BuildReceived(game->image, entry, backup, 1);
+        result = BuildReceived(game, entry, backup, 1);
         if (result == 0) result = Hash(game->image, entry->inventoryAfter);
         goto done;
     }
     if (Hash(game->image, digest) != 0) goto done;
     if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
-        if (BuildReceived(game->image, entry, backup, 0) != 0 || Hash(game->image, digest) != 0) goto done;
+        if (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0) goto done;
     }
     if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
     restore = 0;
@@ -434,6 +464,31 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     default:
         return -1;
     }
+}
+
+/* game_save.c WtGame_Received: the matched Pokémon as saved, for display. The
+ * gender is the one saved with it, which the game computes from the same
+ * species and personality (every trade evolution keeps the gender ratio). */
+int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
+{
+    unsigned char canonical[BOX_MON_SIZE];
+    uint32_t otId;
+    unsigned i;
+    if (!entry || !received || entry->deliveryKind != WT_DELIVERY_MATCH || entry->destination.length < BOX_MON_SIZE
+        || WtPokemon_Decode(entry->destinationAfter, canonical) != 0) return -1;
+    received->species = (uint16_t)Read16(canonical + 0x08);
+    received->gender = (canonical[0x40] >> 1) & 3;
+    received->form = canonical[0x40] >> 3;
+    received->personality = Read32(canonical);
+    otId = Read32(canonical + 0x0C);
+    received->shiny = ((otId >> 16) ^ (otId & 65535) ^ (received->personality >> 16) ^ (received->personality & 65535)) < 8;
+    received->hasNickname = (int)(Read32(canonical + 0x38) >> 31);
+    for (i = 0; i < WT_GAME_NAME_LENGTH; ++i) received->nickname[i] = (uint16_t)Read16(canonical + 0x48 + 2 * i);
+    received->nickname[i] = 0xFFFF;
+    for (i = 0; i < WT_GAME_TRAINER_NAME_LENGTH; ++i) received->originalTrainer[i] = (uint16_t)Read16(canonical + 0x68 + 2 * i);
+    received->originalTrainer[i] = 0xFFFF;
+    received->originalTrainerGender = canonical[0x84] >> 7;
+    return 0;
 }
 
 int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
