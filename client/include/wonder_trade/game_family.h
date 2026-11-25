@@ -16,12 +16,15 @@
 
 /* WT_GAME_PARTY_SIZE: bytes of one party Pokémon, the box image and its battle stats.
  * WT_GAME_BOX_COUNT: PC boxes of WT_GAME_BOX_SLOTS each.
+ * WT_GAME_BATTLE_BOX_SLOTS: slots of the Battle Box (journal locator kind 3), 0
+ * where the game has none.
  * WT_GAME_SAVE_MAGIC: the international save footer magic.
  * WT_GAME_BANK_RESERVED_SIZE: flash reserved from each journal bank's start;
  * every byte after the 4 KiB record must stay blank. */
 #if WT_GAME_FAMILY == WT_FAMILY_GEN4
 #define WT_GAME_PARTY_SIZE WT_POKEMON_PK4_PARTY_SIZE
 #define WT_GAME_BOX_COUNT 18
+#define WT_GAME_BATTLE_BOX_SLOTS 0
 #define WT_GAME_SAVE_MAGIC 0x20060623
 #define WT_GAME_BANK_RESERVED_SIZE 0x10000
 #ifndef WT_PERSISTENCE_ADDRESS
@@ -30,6 +33,7 @@
 #elif WT_GAME_FAMILY == WT_FAMILY_BW || WT_GAME_FAMILY == WT_FAMILY_B2W2
 #define WT_GAME_PARTY_SIZE WT_POKEMON_PK5_PARTY_SIZE
 #define WT_GAME_BOX_COUNT 24
+#define WT_GAME_BATTLE_BOX_SLOTS 6
 #define WT_GAME_SAVE_MAGIC 0x31053527
 /* The two banks are adjacent 4 KiB in the musical distribution area. */
 #define WT_GAME_BANK_RESERVED_SIZE 0x1000

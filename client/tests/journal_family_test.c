@@ -42,6 +42,44 @@ static int Box(unsigned box, unsigned slot, unsigned char record[WT_JOURNAL_RECO
     return WtJournal_Encode(&entry, Hash, record);
 }
 
+/* An applied delivery recovered where the game put it: any locator. */
+static int Located(unsigned kind, unsigned box, unsigned slot, unsigned length, unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    WtJournalEntry entry;
+    assert(WtTest_JournalEntry(WT_JOURNAL_APPLIED, Hash, &entry) == 0);
+    Source(&entry, WT_GAME_PARTY_SIZE);
+    entry.destination.kind = (unsigned char)kind; entry.destination.box = (unsigned char)box;
+    entry.destination.slot = (unsigned char)slot; entry.destination.length = (unsigned char)length;
+    memset(entry.destinationBefore, 0, sizeof(entry.destinationBefore)); memset(entry.destinationBefore, 13, length);
+    memset(entry.destinationAfter, 0, sizeof(entry.destinationAfter)); memset(entry.destinationAfter, 14, length);
+    return WtJournal_Encode(&entry, Hash, record);
+}
+
+/* Locator kind 3 names a Battle Box slot (box 0, a Pokémon without battle
+ * stats) and exists only where the game has one; other kinds keep their rules. */
+static void BattleBox(void)
+{
+    unsigned char record[WT_JOURNAL_RECORD_SIZE];
+    WtJournalEntry decoded;
+    unsigned slot;
+    for (slot = 0; slot < 6; ++slot) {
+        int result = Located(3, 0, slot, WT_POKEMON_SIZE, record);
+        assert(WT_GAME_BATTLE_BOX_SLOTS ? result == 0 : result != 0);
+        if (result == 0) {
+            assert(WtJournal_Decode(record, Hash, &decoded) == 0 && decoded.destination.kind == 3);
+            assert(decoded.destination.box == 0 && decoded.destination.slot == slot && decoded.destination.length == 136);
+        }
+    }
+    assert(Located(3, 0, WT_GAME_BATTLE_BOX_SLOTS ? WT_GAME_BATTLE_BOX_SLOTS : 0, WT_POKEMON_SIZE, record) != 0);
+    assert(Located(3, 1, 0, WT_POKEMON_SIZE, record) != 0);
+    assert(Located(3, 0, 0, WT_GAME_PARTY_SIZE, record) != 0);
+    assert(Located(4, 0, 0, WT_POKEMON_SIZE, record) != 0);
+    /* The party and the PC are unchanged. */
+    assert(Located(1, 0, 5, WT_GAME_PARTY_SIZE, record) == 0 && Located(1, 0, 6, WT_GAME_PARTY_SIZE, record) != 0);
+    assert(Located(1, 1, 0, WT_GAME_PARTY_SIZE, record) != 0 && Located(2, 0, 0, WT_GAME_PARTY_SIZE, record) != 0);
+    assert(Located(2, WT_GAME_BOX_COUNT - 1, WT_GAME_BOX_SLOTS - 1, WT_POKEMON_SIZE, record) == 0);
+}
+
 static unsigned char banks[2][WT_JOURNAL_RECORD_SIZE];
 static int writes, cutWrite, cutAt, tagFirst;
 
@@ -141,13 +179,16 @@ int main(void)
     WtJournalEntry entry, decoded;
 #if WT_GAME_FAMILY == WT_FAMILY_GEN4
     assert(WT_GAME_PARTY_SIZE == 236 && WT_GAME_BOX_COUNT == 18 && WT_GAME_SAVE_MAGIC == 0x20060623);
+    assert(WT_GAME_BATTLE_BOX_SLOTS == 0);
     assert(WT_GAME_BANK_RESERVED_SIZE == 0x10000 && WT_PERSISTENCE_ADDRESS == 0x2FF00);
 #elif WT_GAME_FAMILY == WT_FAMILY_BW
     assert(WT_GAME_PARTY_SIZE == 220 && WT_GAME_BOX_COUNT == 24 && WT_GAME_SAVE_MAGIC == 0x31053527);
     assert(WT_GAME_BANK_RESERVED_SIZE == 0x1000 && WT_PERSISTENCE_ADDRESS == 0x47FC0);
+    assert(WT_GAME_BATTLE_BOX_SLOTS == 6);
 #else
     assert(WT_GAME_PARTY_SIZE == 220 && WT_GAME_BOX_COUNT == 24 && WT_GAME_SAVE_MAGIC == 0x31053527);
     assert(WT_GAME_BANK_RESERVED_SIZE == 0x1000 && WT_PERSISTENCE_ADDRESS == 0x4BFC0);
+    assert(WT_GAME_BATTLE_BOX_SLOTS == 6);
 #endif
     assert(Party(WT_GAME_PARTY_SIZE, record) == 0);
     assert(WtJournal_Decode(record, Hash, &decoded) == 0 && decoded.source.length == WT_GAME_PARTY_SIZE);
@@ -162,6 +203,7 @@ int main(void)
         assert(Hash(entry.original, WT_GAME_PARTY_SIZE, entry.originalDigest) == 0);
         assert(WtJournal_Encode(&entry, Hash, record) != 0);
     }
+    BattleBox();
     FirstWriteTears();
     CommittedTears();
     return 0;

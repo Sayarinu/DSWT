@@ -22,6 +22,7 @@
 #include "wonder_trade/flash.h"
 #include "wonder_trade/pokemon_codec.h"
 #include "wonder_trade/recovery.h"
+#include "wonder_trade/delivery.h"
 
 /* Accessors the integration patch adds to src/gfl/backup_system.c. */
 SaveDataTable *SaveData_GetTablePtr(SaveData *sv);
@@ -273,51 +274,10 @@ static void RemoveSlot(PokeParty *party, unsigned slot)
     --party->count;
 }
 
-/* No copy of the outgoing Pokémon remains in the party, the PC or the
- * Battle Box, and every Pokémon there can be read. */
-static int Absent(const Image *image, unsigned char *data, const unsigned char outgoing[WT_POKEMON_SIZE])
-{
-    unsigned char canonical[WT_POKEMON_SIZE];
-    PokeParty *party = Party(image, data);
-    BattleBoxSave *battleBox = Block(image, data, SAVE_BLOCK_BATTLE_BOX);
-    unsigned box, i;
-    if (party->capacity != PARTY_SIZE || party->count < 1 || party->count > PARTY_SIZE) return -1;
-    for (i = 0; i < (unsigned)party->count; ++i) {
-        if (WtPokemon_Decode((const unsigned char *)&party->pkms[i], canonical) != 0
-            || memcmp(canonical, outgoing, WT_POKEMON_SIZE) == 0) return -1;
-    }
-    for (box = 0; box <= BOX_MAX_TRAY; ++box) for (i = 0; i < BOX_MAX_POS; ++i) {
-        const BoxPkm *pkm;
-        if (box == BOX_MAX_TRAY) {
-            if (i >= BATTLE_BOX_SLOTS) break;
-            pkm = &battleBox->pkm[0][i];
-        } else {
-            pkm = BoxSlot(image, data, box, i);
-        }
-        if (WtPokemon_Decode((const unsigned char *)pkm, canonical) != 0) return -1;
-        if (Read16(canonical + 8) == 0) continue;
-        if (memcmp(canonical, outgoing, WT_POKEMON_SIZE) == 0) return -1;
-    }
-    return 0;
-}
-
-/* Nonzero when the loaded save is older than the one recorded in the entry. */
-static int Behind(const WtGame *game, const WtJournalEntry *entry)
-{
-    return (u32)(SaveData_GetSaveCount(game->save->sv) - entry->globalCounter) >= 0x80000000;
-}
-
-static int Removed(WtGame *game, const WtJournalEntry *entry)
-{
-    Image image;
-    unsigned char canonical[WT_POKEMON_SIZE];
-    if (Open(game, &image) != 0 || entry->source.kind != 1 || entry->source.length != sizeof(PartyPkm)
-        || WtPokemon_Decode(entry->original, canonical) != 0
-        || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0) return -1;
-    /* A selected older retail copy cannot be promoted to a new checkpoint. */
-    if (Behind(game, entry) || Absent(&image, image.data, entry->outgoing) != 0) return -1;
-    return WtGame_Checkpoint(game);
-}
+/* Every slot a journal locator names is one of the game's (Destination): the
+ * shared decisions scan each one. */
+typedef char WtLocatorsMatchGame[BOX_MAX_TRAY == WT_GAME_BOX_COUNT && BOX_MAX_POS == WT_GAME_BOX_SLOTS
+    && BATTLE_BOX_SLOTS == WT_GAME_BATTLE_BOX_SLOTS ? 1 : -1];
 
 static unsigned char *Destination(const Image *image, unsigned char *data, WtJournalLocator where)
 {
@@ -325,6 +285,9 @@ static unsigned char *Destination(const Image *image, unsigned char *data, WtJou
         return (unsigned char *)&Party(image, data)->pkms[where.slot];
     if (where.kind == 2 && where.box < BOX_MAX_TRAY && where.slot < BOX_MAX_POS && where.length == sizeof(BoxPkm))
         return (unsigned char *)BoxSlot(image, data, where.box, where.slot);
+    /* Only a delivery found there after another game's save is recorded in the Battle Box. */
+    if (where.kind == 3 && where.box == 0 && where.slot < BATTLE_BOX_SLOTS && where.length == sizeof(BoxPkm))
+        return (unsigned char *)&((BattleBoxSave *)Block(image, data, SAVE_BLOCK_BATTLE_BOX))->pkm[0][where.slot];
     return NULL;
 }
 
@@ -415,32 +378,6 @@ static int BuildReceived(WtGame *game, const Image *image, unsigned char *data, 
     return 0;
 }
 
-static int VerifyReceived(WtGame *game, const WtJournalEntry *entry)
-{
-    Image image;
-    unsigned char digest[32], canonical[WT_POKEMON_SIZE];
-    unsigned char *destination;
-    if (Open(game, &image) != 0) return -1;
-    destination = Destination(&image, image.data, entry->destination);
-    if (!destination || memcmp(destination, entry->destinationAfter, entry->destination.length) != 0
-        || WtPokemon_Decode(destination, canonical) != 0
-        || WtFlash_Hash(canonical, sizeof(canonical), digest) != 0 || memcmp(digest, entry->appliedDigest, 32) != 0
-        || Hash(&image, image.data, digest) != 0 || memcmp(digest, entry->inventoryAfter, 32) != 0) return -1;
-    return Verify(&image, entry->inventoryAfter);
-}
-
-/* A delivery applied earlier: either the save recorded with it, or one the
- * game saved after it while the ACK waited. An older copy is refused. */
-static int Applied(WtGame *game, const WtJournalEntry *entry)
-{
-    Image image;
-    unsigned char digest[32];
-    if (Open(game, &image) != 0 || Hash(&image, image.data, digest) != 0) return -1;
-    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return VerifyReceived(game, entry);
-    if (Behind(game, entry)) return -1;
-    return WtGame_Checkpoint(game);
-}
-
 /* A copy of the save image to change; the live save takes it only once its
  * hash is the one the journal recorded. */
 static unsigned char *Candidate(WtGame *game, const Image *image)
@@ -462,50 +399,115 @@ static int Commit(WtGame *game, const Image *image, const unsigned char *candida
     return SaveBoth(game, image, digest);
 }
 
-static int Receive(WtGame *game, const Image *image, enum WtInventoryStep step, WtJournalEntry *entry)
+/* The save as the shared delivery decisions see it (wonder_trade/delivery.h):
+ * a save is the image's data, the live one or a candidate. */
+typedef struct Context {
+    WtGame *game;
+    Image image;
+} Context;
+
+static int PartyCount(void *arg, void *data)
 {
-    unsigned char *candidate, digest[32];
-    int result = -1;
-    if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
-    candidate = Candidate(game, image);
-    if (!candidate) return -1;
-    if (step == WT_INVENTORY_PREPARE_RECEIVE) {
-        result = BuildReceived(game, image, candidate, entry, 1);
-        if (result == 0) result = Hash(image, candidate, entry->inventoryAfter);
-        goto done;
-    }
-    if (Hash(image, candidate, digest) != 0) goto done;
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
-        if (BuildReceived(game, image, candidate, entry, 0) != 0 || Hash(image, candidate, digest) != 0) goto done;
-    }
-    if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
-    if (Commit(game, image, candidate, digest) != 0 || VerifyReceived(game, entry) != 0) goto done;
-    Counters(game, entry); result = 0;
-done:
-    Discard(game, image, candidate);
-    return result;
+    const PokeParty *party = Party(&((Context *)arg)->image, data);
+    return party->capacity == PARTY_SIZE ? party->count : -1;
+}
+
+static unsigned char *Slot(void *arg, void *data, WtJournalLocator where)
+{
+    return Destination(&((Context *)arg)->image, data, where);
+}
+
+/* Every PC and Battle Box slot must decode, as the game reads them; an empty
+ * one has no species. */
+static int Occupied(void *arg, void *data, WtJournalLocator where)
+{
+    unsigned char canonical[WT_POKEMON_SIZE];
+    const unsigned char *stored = Slot(arg, data, where);
+    if (!stored || WtPokemon_Decode(stored, canonical) != 0) return -1;
+    return Read16(canonical + 8) != 0;
+}
+
+static int SaveHash(void *arg, void *data, unsigned char digest[32])
+{
+    return Hash(&((Context *)arg)->image, data, digest);
+}
+
+static int SaveVerify(void *arg, const unsigned char digest[32])
+{
+    return Verify(&((Context *)arg)->image, digest);
+}
+
+static int SaveCheckpoint(void *arg)
+{
+    return WtGame_Checkpoint(((Context *)arg)->game);
+}
+
+static void *Copy(void *arg)
+{
+    Context *context = arg;
+    return Candidate(context->game, &context->image);
+}
+
+static void Drop(void *arg, void *candidate)
+{
+    Context *context = arg;
+    if (candidate) Discard(context->game, &context->image, candidate);
+}
+
+static int Install(void *arg, void *candidate, const unsigned char digest[32])
+{
+    Context *context = arg;
+    return Commit(context->game, &context->image, candidate, digest);
+}
+
+static void SaveCounters(void *arg, uint32_t counters[3])
+{
+    WtGame *game = ((Context *)arg)->game;
+    counters[0] = counters[1] = counters[2] = SaveData_GetSaveCount(game->save->sv);
+}
+
+static int Build(void *arg, void *data, WtJournalEntry *entry, int prepare)
+{
+    Context *context = arg;
+    return BuildReceived(context->game, &context->image, data, entry, prepare);
+}
+
+/* The game's empty party Pokémon; its box prefix is the empty box Pokémon. */
+static void Empty(void *arg, unsigned char *image, unsigned length)
+{
+    PartyPkm empty;
+    (void)arg;
+    PokeParty_ClearPkm(&empty);
+    memcpy(image, &empty, length);
+}
+
+/* Zero when the save's layout is known. */
+static int Ops(WtGame *game, Context *context, WtDeliveryOps *ops)
+{
+    const WtDeliveryOps ops0 = {
+        NULL, NULL, WtFlash_Hash, PartyCount, Slot, Occupied, SaveHash, SaveVerify, SaveCheckpoint,
+        Copy, Drop, Install, SaveCounters, Build, Empty
+    };
+    context->game = game;
+    if (Open(game, &context->image) != 0) return -1;
+    *ops = ops0; ops->arg = context; ops->live = context->image.data;
+    return 0;
 }
 
 int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
     WtGame *game = arg;
+    Context context;
+    WtDeliveryOps ops;
     Image image;
     unsigned char *candidate, digest[32], canonical[WT_POKEMON_SIZE];
     PokeParty *copy;
     int result = -1, i;
-    if (Open(game, &image) != 0) return -1;
-    if (step != WT_INVENTORY_PREPARE_REMOVE
-        && (entry->source.kind != 1 || entry->source.length != sizeof(PartyPkm)
-            || WtPokemon_Decode(entry->original, canonical) != 0
-            || memcmp(canonical, entry->outgoing, sizeof(canonical)) != 0)) return -1;
-    if (step == WT_INVENTORY_VERIFY_REMOVED) return Removed(game, entry);
-    if (step == WT_INVENTORY_PREPARE_RESTORE) {
-        if (Hash(&image, image.data, digest) != 0) return -1;
-        return memcmp(digest, entry->inventoryBefore, 32) == 0 || memcmp(digest, entry->inventoryAfter, 32) == 0 ? 0 : 1;
-    }
-    if (step == WT_INVENTORY_PREPARE_RECEIVE || step == WT_INVENTORY_RECEIVE || step == WT_INVENTORY_VERIFY_RECEIVED)
-        return Receive(game, &image, step, entry);
-    if (step != WT_INVENTORY_PREPARE_REMOVE && step != WT_INVENTORY_REMOVE && step != WT_INVENTORY_RESTORE) return -1;
+    if (Ops(game, &context, &ops) != 0) return -1;
+    image = context.image;
+    if (step != WT_INVENTORY_PREPARE_REMOVE && !WtDelivery_Bound(entry)) return -1;
+    if (step != WT_INVENTORY_PREPARE_REMOVE && step != WT_INVENTORY_REMOVE && step != WT_INVENTORY_RESTORE)
+        return WtDelivery_Step(&ops, step, entry);
     candidate = Candidate(game, &image);
     if (!candidate) return -1;
     copy = Party(&image, candidate);
@@ -517,7 +519,7 @@ int WtGame_Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         if (WtFlash_Hash(entry->original, sizeof(PartyPkm), entry->originalDigest) != 0
             || Hash(&image, candidate, entry->inventoryBefore) != 0) goto done;
         RemoveSlot(copy, slot);
-        if (Absent(&image, candidate, entry->outgoing) != 0 || Hash(&image, candidate, entry->inventoryAfter) != 0) goto done;
+        if (WtDelivery_Unique(&ops, candidate, entry->outgoing) != 0 || Hash(&image, candidate, entry->inventoryAfter) != 0) goto done;
         Counters(game, entry); result = 0; goto done;
     }
     if (slot >= PARTY_SIZE || Hash(&image, candidate, digest) != 0) goto done;
@@ -546,20 +548,21 @@ done:
 
 BOOL WtGameSave_Unique(WtGame *game, unsigned slot)
 {
-    Image image;
+    Context context;
+    WtDeliveryOps ops;
     unsigned char *candidate, canonical[WT_POKEMON_SIZE];
     PokeParty *party;
     BOOL unique = TRUE;
-    if (Open(game, &image) != 0) return TRUE;
-    party = Party(&image, image.data);
+    if (Ops(game, &context, &ops) != 0) return TRUE;
+    party = Party(&context.image, context.image.data);
     if (slot >= (unsigned)party->count
         || WtPokemon_Decode((const unsigned char *)&party->pkms[slot], canonical) != 0) return TRUE;
     /* Anything uncertain falls through to the deposit's own fail-closed check. */
-    candidate = Candidate(game, &image);
+    candidate = Candidate(game, &context.image);
     if (!candidate) return TRUE;
-    RemoveSlot(Party(&image, candidate), slot);
-    unique = Absent(&image, candidate, canonical) == 0;
-    Discard(game, &image, candidate);
+    RemoveSlot(Party(&context.image, candidate), slot);
+    unique = WtDelivery_Unique(&ops, candidate, canonical) == 0;
+    Discard(game, &context.image, candidate);
     return unique;
 }
 
@@ -600,11 +603,7 @@ int WtGame_CanHold(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
 
 int WtGame_CanLeave(WtGame *game, const WtJournalEntry *entry)
 {
-    switch (entry->phase) {
-    case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_ENROLLING: return 1;
-    case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED: case WT_JOURNAL_RESTORING:
-        return Removed(game, entry) == 0;
-    case WT_JOURNAL_APPLIED: return Applied(game, entry) == 0;
-    default: return 0;
-    }
+    Context context;
+    WtDeliveryOps ops;
+    return Ops(game, &context, &ops) == 0 && WtDelivery_CanLeave(&ops, entry);
 }
