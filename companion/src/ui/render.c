@@ -533,6 +533,11 @@ static void DrawBottom(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
             DrawButton(bottom, WT_MENU_LEFT, WT_MENU_TOP + i * WT_MENU_SPACING, WT_MENU_WIDTH, WT_MENU_HEIGHT,
                 T(labels[i]), i == ui->cursor ? CP_PAL_SELECTED : CP_PAL_BUTTON);
     }
+    if (ui->state == CP_UI_MESSAGE && ui->message == WonderTrade_Text_Explanation) {
+        /* Info's top screen is full; keep the repair warning below Back. */
+        Window(bottom, 2, 10, 28, 13);
+        WindowText(bottom, 2, 10, 28, 13, 4, T(Companion_Text_BackupWarning));
+    }
     if (CpUi_Busy(ui)) {
         for (i = 0; i < 4; i++)
             Put(bottom, CP_SPINNER_X + i % 2, CP_SPINNER_Y + i / 2, ENTRY(CP_TILE_SPINNER + i, CP_PAL_SPINNER));
