@@ -190,8 +190,7 @@ static int ValidBackup(const CpBackupConfig *config, const char *path, const uns
     }
     image = malloc(sizeof(*image));
     if (!image) { close(reader.fd); return -1; }
-    loaded = CpSaveImage_Load(image, &file, CP_SAVE_MAGIC_INTERNATIONAL);
-    if (loaded == CP_SAVE_INVALID) loaded = CpSaveImage_Load(image, &file, CP_SAVE_MAGIC_KOREAN);
+    loaded = CpSaveImage_LoadAny(image, &file);
     free(image);
     if (loaded == CP_SAVE_IO_ERROR) result = -1;
     if (loaded == CP_SAVE_OK && CpSaveJournal_Detect(&file) == CP_SAVE_JOURNAL_HAS_JOURNAL

@@ -55,6 +55,11 @@ foreach(save_target save_image_test posix_file_test save_sha256_probe)
     target_compile_options(${save_target} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 endforeach()
 add_test(NAME save_image_test COMMAND save_image_test)
+# LUNE-880: the Diamond/Pearl and HeartGold/SoulSilver layouts.
+add_executable(save_layout_test save/save_layout_test.c)
+target_link_libraries(save_layout_test PRIVATE companion_save)
+target_compile_options(save_layout_test PRIVATE -O1 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+add_test(NAME save_layout_test COMMAND save_layout_test)
 add_test(NAME posix_file_test COMMAND posix_file_test)
 find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
 add_test(NAME save_image_integration_test

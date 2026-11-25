@@ -47,7 +47,7 @@ CpBackupResult CpBackup_Create(const CpBackupConfig *config, const CpFile *save,
 /* 1: a complete backup with this enrolled journal saveID exists; 0: absent;
  * -1: invalid arguments or an I/O error. EMPTY/zero identities are invalid.
  * Malformed/truncated backups and temporary files do not satisfy the check.
- * Validation uses the current Platinum retail loader (international/Korean)
+ * Validation uses the retail loader of any supported layout (international/Korean)
  * and a committed enrolled journal, with 512 KiB of temporary heap storage. */
 int CpBackup_HasIdentity(const CpBackupConfig *config, const char *saveName,
                          const unsigned char saveID[16]);
