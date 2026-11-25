@@ -107,6 +107,17 @@ if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
     exit 2
 fi
 
+# Docker stays the default, including on macOS. Native Windows-tool execution
+# is opt-in for the games that cannot run under Docker's Apple Silicon emulation.
+case "${ROM_BUILD_HOST:-docker}" in
+    docker) ;;
+    macos)
+        source "$repo_root/scripts/build-rom-macos.sh"
+        check_macos_build
+        ;;
+    *) echo "ROM_BUILD_HOST must be docker or macos" >&2; exit 2 ;;
+esac
+
 workspace="$("$python" "$repo_root/scripts/prepare-game.py" ${prepare_args[@]+"${prepare_args[@]}"} "$@")"
 if [[ "$game" == platinum && "$revision" == 10 ]]; then
     "$python" "$repo_root/scripts/prepare-europe.py" "$DSWT_EUROPE_ROM" "$workspace" >/dev/null
@@ -128,6 +139,10 @@ if [[ "$build_mode" == modified ]]; then
         # The port tool and the client sources, read-only.
         docker_args+=(-v "$repo_root:/dswt:ro")
     fi
+fi
+if [[ "${ROM_BUILD_HOST:-docker}" == macos ]]; then
+    build_macos_rom
+    exit
 fi
 docker build --platform linux/amd64 -f "$builder/Dockerfile" -t "$image" "$builder"
 
