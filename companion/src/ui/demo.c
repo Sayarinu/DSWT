@@ -1,5 +1,6 @@
 #include "ui/demo.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "game/rom.h"
@@ -16,6 +17,25 @@ enum { JOB_NONE, JOB_SCAN, JOB_LOAD, JOB_CONNECT, JOB_RESUME, JOB_TRADE, JOB_COL
 #define EXCHANGE_FRAMES 90
 #define CLOSE_FRAMES 45
 #define DEMO_ERROR_CODE (-12)
+/* The real model's codes for "no saved network worked" and a rejected join. */
+#define DEMO_WIFI_CODE (-20)
+#define DEMO_JOIN_CODE (-26)
+#define WIFI_FIRST_FRAMES 45
+#define WIFI_ALL_FRAMES 90
+#define JOIN_FRAMES 90
+
+static const struct {
+    const char *ssid;
+    uint8_t security, bars;
+} kNetworks[] = {
+    { "Lune Home", CP_WIFI_SECURITY_WPA2, 3 },
+    { "Lune Guest", CP_WIFI_SECURITY_OPEN, 2 },
+    { "OldRouter-TKIP", CP_WIFI_SECURITY_WPA, 2 },
+    { "Campus-Secure", CP_WIFI_SECURITY_ENTERPRISE, 1 },
+    { "Retro DS", CP_WIFI_SECURITY_WEP, 3 },
+    { "Caf\xc3\xa9 Wi-Fi", CP_WIFI_SECURITY_WPA2, 1 },
+    { "Neighbours-5G-Extended-Network", CP_WIFI_SECURITY_WPA2, 0 },
+};
 
 static const struct {
     const char *name;
@@ -75,7 +95,79 @@ static void Connect(void *context)
 {
     CpUiDemo *demo = context;
     demo->model.canLeave = 1;
+    demo->model.wifiError = 0;
     Begin(demo, JOB_CONNECT, CONNECT_FRAMES);
+}
+
+/* ---- Wi-Fi settings ---------------------------------------------------------- */
+
+static void WifiScan(void *context)
+{
+    CpUiDemo *demo = context;
+    demo->joining = 0;
+    demo->model.wifi.state = CP_UI_NETWORK_SCANNING;
+    demo->model.wifi.count = 0;
+    demo->model.wifi.revision++;
+    demo->scanStart = demo->frame;
+}
+
+static void WifiJoin(void *context, const char *ssid, unsigned security, const char *key)
+{
+    CpUiDemo *demo = context;
+    (void)security;
+    (void)key;
+    snprintf(demo->model.wifi.savedSsid, sizeof(demo->model.wifi.savedSsid), "%s", ssid);
+    demo->model.wifi.state = CP_UI_NETWORK_JOINING;
+    demo->joining = 1;
+    demo->joinDue = demo->frame + JOIN_FRAMES;
+}
+
+static void WifiForget(void *context)
+{
+    CpUiDemo *demo = context;
+    demo->model.wifi.saved = 0;
+    demo->model.wifi.savedSsid[0] = 0;
+}
+
+static void WifiLeave(void *context)
+{
+    CpUiDemo *demo = context;
+    demo->joining = 0;
+    demo->model.wifi.state = CP_UI_NETWORK_IDLE;
+}
+
+static void WifiUpdate(CpUiDemo *demo)
+{
+    CpUiModel *model = &demo->model;
+    if (model->wifi.state == CP_UI_NETWORK_SCANNING) {
+        unsigned elapsed = demo->frame - demo->scanStart, count = 0, i;
+        if (elapsed >= WIFI_ALL_FRAMES) count = sizeof(kNetworks) / sizeof(*kNetworks);
+        else if (elapsed >= WIFI_FIRST_FRAMES) count = 3;
+        if (count != model->wifi.count) {
+            for (i = 0; i < count; i++) {
+                memset(&model->wifi.networks[i], 0, sizeof(model->wifi.networks[i]));
+                snprintf(model->wifi.networks[i].ssid, sizeof(model->wifi.networks[i].ssid), "%s", kNetworks[i].ssid);
+                model->wifi.networks[i].security = kNetworks[i].security;
+                model->wifi.networks[i].bars = kNetworks[i].bars;
+            }
+            model->wifi.count = count;
+            model->wifi.revision++;
+        }
+    }
+    if (demo->joining && (int)(demo->frame - demo->joinDue) >= 0) {
+        demo->joining = 0;
+        if (demo->failJoin) {
+            demo->failJoin = 0;
+            model->wifi.state = CP_UI_NETWORK_FAILED;
+            model->wifi.failure = CP_WIFI_FAILURE_REJECTED;
+            model->wifi.code = DEMO_JOIN_CODE;
+            model->wifi.saved = 0;
+        } else {
+            model->wifi.state = CP_UI_NETWORK_JOINED;
+            model->wifi.saved = 1;
+            model->wifi.saveFailed = 0;
+        }
+    }
 }
 
 static void ClearOutcome(CpUiModel *model)
@@ -203,6 +295,7 @@ static void Update(void *context)
     unsigned i;
     int job = demo->job;
     demo->frame++;
+    WifiUpdate(demo);
     if (job == JOB_NONE || (int)(demo->frame - demo->due) < 0) return;
     demo->job = JOB_NONE;
     switch (job) {
@@ -222,7 +315,12 @@ static void Update(void *context)
         LoadSave(demo);
         break;
     case JOB_CONNECT:
-        if (demo->failConnect) {
+        if (demo->failWifi) {
+            demo->failWifi = 0;
+            model->net = CP_UI_NET_ERROR;
+            model->error = DEMO_WIFI_CODE;
+            model->wifiError = 1;
+        } else if (demo->failConnect) {
             demo->failConnect = 0;
             model->net = CP_UI_NET_ERROR;
             model->error = DEMO_ERROR_CODE;
@@ -244,7 +342,8 @@ static void Update(void *context)
     }
 }
 
-static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update };
+static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
+    WifiScan, WifiJoin, WifiForget, WifiLeave };
 
 void CpUiDemo_Init(CpUiDemo *demo, CompanionLanguage systemLanguage)
 {
@@ -255,6 +354,8 @@ void CpUiDemo_Init(CpUiDemo *demo, CompanionLanguage systemLanguage)
     demo->model.loadMessage = -1;
     demo->model.canLeave = 1;
     demo->model.tradePhase = WT_JOURNAL_IDLE;
+    /* The demo pretends DSi mode, so WPA2 networks can be joined. */
+    demo->model.wifi.wpa2 = 1;
 }
 
 void CpUiDemo_SetOutcome(CpUiDemo *demo, enum CpUiDemoOutcome outcome)
@@ -264,13 +365,52 @@ void CpUiDemo_SetOutcome(CpUiDemo *demo, enum CpUiDemoOutcome outcome)
 
 /* The walk: press a key (or nothing), optionally pick the next outcome, then
  * wait `hold` frames for the screens to settle and be seen. */
-enum { NONE = -1, FAIL_CONNECT = -2 };
+enum { NONE = -1, FAIL_CONNECT = -2, FAIL_WIFI = -3, FAIL_JOIN = -4 };
+/* A tap on a key of the password keyboard, in place of buttons. */
+#define TAP_FLAG 0x10000u
+#define TAP(index) (TAP_FLAG | (unsigned)(index))
+enum { KEY_P = 19, KEY_O = 18, KEY_K = 27, KEY_E = 12, KEY_M = 36, KEY_N = 35, KEY_1 = 0, KEY_2 = 1 };
 static const struct {
     unsigned keys;
     int outcome;
     unsigned hold;
 } kTour[] = {
     { 0, NONE, 240 },                   /* BOOT, then the empty save list */
+    /* Wi-Fi settings (LUNE-875). */
+    { CP_UI_KEY_DOWN, NONE, 60 },       /* the Wi-Fi settings button */
+    { CP_UI_KEY_A, NONE, 150 },         /* searching, then the networks */
+    { CP_UI_KEY_DOWN, NONE, 60 },       /* an open network */
+    { CP_UI_KEY_DOWN, NONE, 150 },      /* WPA (TKIP): grey, with its reason */
+    { CP_UI_KEY_A, NONE, 150 },         /* the reason, in full */
+    { CP_UI_KEY_B, NONE, 30 },
+    { CP_UI_KEY_DOWN, NONE, 150 },      /* 802.1X */
+    { CP_UI_KEY_DOWN, NONE, 30 },
+    { CP_UI_KEY_DOWN, NONE, 30 },
+    { CP_UI_KEY_DOWN, NONE, 150 },      /* the last rows scroll into view */
+    { CP_UI_KEY_DOWN, NONE, 60 },       /* back to the first network */
+    { CP_UI_KEY_A, NONE, 150 },         /* the password keyboard */
+    { TAP(KEY_P), NONE, 8 }, { TAP(KEY_O), NONE, 8 }, { TAP(KEY_K), NONE, 8 },
+    { TAP(KEY_E), NONE, 8 }, { TAP(KEY_M), NONE, 8 }, { TAP(KEY_O), NONE, 8 },
+    { TAP(KEY_N), NONE, 150 },       /* seven characters: Connect is grey */
+    { TAP(CP_KEY_INDEX_JOIN), NONE, 150 }, /* "WPA2 passwords have 8 to 63 characters" */
+    { TAP(KEY_1), NONE, 8 },
+    { TAP(CP_KEY_INDEX_SHOW), NONE, 150 }, /* the password shown */
+    { TAP(CP_KEY_INDEX_SHIFT), NONE, 60 },
+    { TAP(CP_KEY_INDEX_SYMBOLS), NONE, 150 }, /* the symbols */
+    { TAP(CP_KEY_INDEX_SYMBOLS), NONE, 30 },
+    { CP_UI_KEY_UP, NONE, 60 },         /* the D-pad moves the highlight */
+    { TAP(CP_KEY_INDEX_JOIN), FAIL_JOIN, 150 }, /* JOINING */
+    { 0, NONE, 150 },                   /* WIFI_FAILED: a wrong password, with its code */
+    { CP_UI_KEY_A, NONE, 30 },          /* Retry: the keyboard keeps the text */
+    { TAP(KEY_2), NONE, 8 },
+    { TAP(CP_KEY_INDEX_JOIN), NONE, 240 }, /* JOINING, then JOINED */
+    { CP_UI_KEY_A, NONE, 60 },          /* back to the save list */
+    { CP_UI_KEY_DOWN, NONE, 30 },
+    { CP_UI_KEY_A, NONE, 150 },         /* the list, with the saved network */
+    { CP_UI_KEY_RIGHT, NONE, 60 },      /* Forget network */
+    { CP_UI_KEY_A, NONE, 150 },         /* "Forget Lune Home?" */
+    { CP_UI_KEY_A, NONE, 60 },
+    { CP_UI_KEY_B, NONE, 60 },          /* back to the save list */
     { CP_UI_KEY_A, NONE, 240 },         /* Retry: BOOT, then three saves */
     { CP_UI_KEY_DOWN, NONE, 120 },      /* a save without its ROM */
     { CP_UI_KEY_A, NONE, 240 },         /* "Matching ROM not found" */
@@ -336,6 +476,8 @@ static const struct {
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_A, NONE, 210 },         /* a Japanese HeartGold save */
     { CP_UI_KEY_A, NONE, 240 },         /* RECOVERY, in Japanese */
+    { CP_UI_KEY_A, FAIL_WIFI, 330 },    /* no saved network: the Wi-Fi settings, in Japanese */
+    { CP_UI_KEY_B, NONE, 240 },         /* ERROR with Retry and Wi-Fi settings */
 };
 
 int CpUiDemo_Tour(CpUiDemo *demo, CpUiInput *input)
@@ -345,8 +487,18 @@ int CpUiDemo_Tour(CpUiDemo *demo, CpUiInput *input)
     if (demo->stepFrame == 0) {
         if (demo->step == 0) demo->noSaves = 1;
         if (kTour[demo->step].outcome == FAIL_CONNECT) demo->failConnect = 1;
+        else if (kTour[demo->step].outcome == FAIL_WIFI) demo->failWifi = 1;
+        else if (kTour[demo->step].outcome == FAIL_JOIN) demo->failJoin = 1;
         else if (kTour[demo->step].outcome >= 0) demo->outcome = kTour[demo->step].outcome;
         input->pressed = kTour[demo->step].keys;
+        if (input->pressed & TAP_FLAG) {
+            CpKey key;
+            CpKeyboard_Key(NULL, (int)(input->pressed & 0xFF), &key);
+            input->pressed = 0;
+            input->touchPressed = input->touchHeld = 1;
+            input->touchX = key.x * 8 + key.w * 4;
+            input->touchY = key.y * 8 + key.h * 4;
+        }
     }
     if (++demo->stepFrame >= kTour[demo->step].hold) {
         demo->step++;

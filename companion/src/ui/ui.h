@@ -1,6 +1,7 @@
 #ifndef COMPANION_UI_UI_H
 #define COMPANION_UI_UI_H
 
+#include "ui/keyboard.h"
 #include "ui/model.h"
 
 /* The companion's screens as a state machine, after the patched game's
@@ -27,6 +28,13 @@ typedef enum CpUiState {
     CP_UI_RESTART,       /* closing the session before Retry reconnects */
     CP_UI_CLOSING,       /* closing the session before the save list */
     CP_UI_EXIT,          /* the companion should return to the loader */
+    /* Wi-Fi settings (LUNE-875). */
+    CP_UI_WIFI_LIST,     /* the networks in range */
+    CP_UI_WIFI_KEYBOARD, /* typing the chosen network's password */
+    CP_UI_WIFI_JOINING,
+    CP_UI_WIFI_JOINED,   /* "Connected to ..." and where its password is kept */
+    CP_UI_WIFI_FAILED,   /* why the network could not be joined, with a support code */
+    CP_UI_WIFI_FORGET,   /* "Forget ...?" */
     CP_UI_STATE_COUNT
 } CpUiState;
 
@@ -62,6 +70,8 @@ typedef struct CpUiInput {
 
 /* Rows of the save list that fit its window. */
 #define CP_UI_SAVE_ROWS 5
+/* Rows of the Wi-Fi network list, in the same window. */
+#define CP_UI_NETWORK_ROWS 5
 
 typedef struct CpUi {
     CpUiState state;
@@ -87,6 +97,19 @@ typedef struct CpUi {
     /* Counts confirm sounds the front end should play (the game's SE on
      * every action). */
     unsigned sounds;
+
+    /* Wi-Fi settings: where they were opened from (SAVE_PICKER, or ERROR
+     * after a connection found no network), whether that was because no
+     * saved network worked, the highlighted network and first row shown, the
+     * network being joined and the password keyboard. */
+    CpUiState wifiReturn;
+    int wifiFromFailure;
+    int wifiCursor, wifiTop;
+    unsigned wifiRevision;
+    int wifiSearching; /* the list is still empty: the spinner shows */
+    char wifiSsid[CP_WIFI_SSID_MAX + 1];
+    unsigned wifiSecurity;
+    CpKeyboard keyboard;
 } CpUi;
 
 /* Start at BOOT and ask the model for its saves. */
@@ -110,7 +133,9 @@ enum CpUiCard {
     CP_UI_CARD_PARTY,    /* the card of party[partyCursor] or party[selectedSlot] */
     CP_UI_CARD_RECEIVED, /* the received Pokémon's card */
     CP_UI_CARD_SAVES,    /* the save list */
-    CP_UI_CARD_FULL_TEXT /* one framed body of text (errors, recovery, Info) */
+    CP_UI_CARD_FULL_TEXT, /* one framed body of text (errors, recovery, Info) */
+    CP_UI_CARD_NETWORKS,  /* the Wi-Fi network list */
+    CP_UI_CARD_PASSWORD   /* the network's name, the typed password and where it is kept */
 };
 enum CpUiCard CpUi_Card(const CpUi *, const CpUiModel *);
 
@@ -122,5 +147,13 @@ int CpUi_IneligibleText(unsigned reason);
 
 /* The party panel or Back button under a touch, or -1. */
 int CpUi_PickerTouch(int x, int y, unsigned partyCount);
+
+/* The model offers Wi-Fi settings. */
+int CpUi_HasWifi(const CpUiModel *);
+/* The CompanionTextId explaining why a network cannot be joined
+ * (enum CpWifiUnsupported), or -1 when it can. */
+int CpUi_WifiReasonText(unsigned unsupported);
+/* The CompanionTextId of a failed join (enum CpWifiFailure). */
+int CpUi_WifiFailureText(unsigned failure);
 
 #endif

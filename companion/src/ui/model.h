@@ -5,6 +5,7 @@
 
 #include "companion_text.h"
 #include "game/text.h"
+#include "platform/wifi_status.h"
 
 /* What the screens show and what they can ask for. The UI never touches the
  * save, the ROM or the network itself: a model owns them, publishes their
@@ -103,7 +104,30 @@ typedef struct CpUiOps {
     void (*close)(void *context);
     /* Once per frame, before the UI reads the fields. */
     void (*update)(void *context);
+
+    /* Wi-Fi settings (LUNE-875). A model without them leaves these NULL and
+     * the screens offer no Wi-Fi settings. */
+    /* List the networks in range (wifi.networks), stopping any attempt. */
+    void (*wifiScan)(void *context);
+    /* Join a listed network with the key the player typed; on success the
+     * model stores it for the next launch (wifi.state JOINED). */
+    void (*wifiJoin)(void *context, const char *ssid, unsigned security, const char *key);
+    /* Delete the stored network. */
+    void (*wifiForget)(void *context);
+    /* The settings closed: join automatically again, in the background. */
+    void (*wifiLeave)(void *context);
 } CpUiOps;
+
+/* The Wi-Fi settings' progress (CpUiModel.wifi.state). */
+enum CpUiWifi {
+    CP_UI_NETWORK_IDLE,
+    CP_UI_NETWORK_SCANNING, /* listing networks; the list grows as they are found */
+    CP_UI_NETWORK_JOINING,
+    CP_UI_NETWORK_JOINED,   /* connected; saved says whether it was stored */
+    CP_UI_NETWORK_FAILED    /* failure and code say why */
+};
+
+#define CP_UI_NETWORKS_MAX 24
 
 typedef struct CpUiModel {
     const CpUiOps *ops;
@@ -137,6 +161,25 @@ typedef struct CpUiModel {
     unsigned char refusal; /* enum WtWireRefusal */
     int hasReceived;
     CpUiReceived received;
+
+    /* The last connect failed because no Wi-Fi network could be joined: the
+     * screens offer the Wi-Fi settings. */
+    int wifiError;
+    struct {
+        unsigned state; /* enum CpUiWifi */
+        /* Networks in range, in the order they were found; one per name. */
+        unsigned count;
+        CpWifiNetwork networks[CP_UI_NETWORKS_MAX];
+        unsigned revision; /* changes whenever networks[] does */
+        int wpa2;       /* WPA2 networks can be joined (DSi mode) */
+        unsigned failure; /* enum CpWifiFailure of a FAILED join */
+        int code;       /* its support code */
+        /* The network stored for the next launch, if any. */
+        int saved;
+        char savedSsid[CP_WIFI_SSID_MAX + 1];
+        /* JOINED, but the network could not be written to the SD card. */
+        int saveFailed;
+    } wifi;
 } CpUiModel;
 
 #endif

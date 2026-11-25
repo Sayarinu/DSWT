@@ -14,7 +14,8 @@ static CpScreen sTop = { .text = { .tiles = sTopText } }, sBottom = { .text = { 
 
 static const char *kNames[CP_UI_STATE_COUNT] = {
     "BOOT", "SAVE_PICKER", "GAME_CONFIRM", "RECOVERY", "CONNECTING", "MENU", "PICKER", "CONFIRM",
-    "COLLECT_CONFIRM", "CANCEL_CONFIRM", "PINGING", "RECEIVED", "MESSAGE", "ERROR", "RESTART", "CLOSING", "EXIT"
+    "COLLECT_CONFIRM", "CANCEL_CONFIRM", "PINGING", "RECEIVED", "MESSAGE", "ERROR", "RESTART", "CLOSING", "EXIT",
+    "WIFI_LIST", "WIFI_KEYBOARD", "WIFI_JOINING", "WIFI_JOINED", "WIFI_FAILED", "WIFI_FORGET"
 };
 
 static void Dump(const char *directory, unsigned index, const CpUi *ui)
