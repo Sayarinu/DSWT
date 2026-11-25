@@ -25,6 +25,13 @@ enum WtInventoryStep {
  * VERIFY checks both persistent copies, not merely the game's RAM. Nonzero
  * never authorizes a network mutation or gameplay. A full destination returns
  * 1 from PREPARE_RECEIVE and retains the received payload without an ACK.
+ * The one exception is a save another game wrote after PREPARE_RECEIVE or
+ * PREPARE_RESTORE recorded its counters (neither inventory, counters moved on,
+ * none behind): a write cut short may or may not have reached it, so RECEIVE
+ * never adds the Pokémon again. It accepts and checkpoints that save, and
+ * records the Pokémon where it is when exactly one has its identity. A RETURN
+ * without a destination is a restore to the offer's own slot, recorded before
+ * RESTORE writes it; RECEIVE is used for it only on such a save.
  * canHold returns nonzero when the game can hold a matched delivery's
  * canonical PK4 or PK5; zero refuses it before the journal records it.
  * Serialize the entire engine operation with transport and ordinary saves. */

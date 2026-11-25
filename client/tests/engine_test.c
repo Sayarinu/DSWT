@@ -9,7 +9,7 @@
 typedef struct Fixture {
     unsigned char banks[2][4096], pokemon[136], delivered[136], checked[136];
     unsigned random, writes, failWrite, failStep, removed, received, restored, full, cannotHold, holdChecks, changed;
-    unsigned reads, failRead;
+    unsigned reads, failRead, prepares;
     unsigned char id;
     int rotateSeed;
     WtEngine engine;
@@ -62,6 +62,17 @@ static void Mirrored(Fixture *fixture, unsigned phase)
     assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0 && entry.phase == phase);
 }
 
+/* A restore to the offer's own slot is in the journal, as a return without a
+ * destination, before RESTORE writes it. */
+static void RecordedInPlace(Fixture *fixture)
+{
+    WtJournalEntry entry;
+    Mirrored(fixture, WT_JOURNAL_RESTORING);
+    assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0);
+    assert(entry.deliveryKind == WT_DELIVERY_RETURN && entry.destination.kind == 0);
+    assert(memcmp(entry.incoming, entry.outgoing, 136) == 0);
+}
+
 static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
     Fixture *fixture = arg;
@@ -80,6 +91,7 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         return 0;
     case WT_INVENTORY_VERIFY_REMOVED: return fixture->removed ? 0 : -1;
     case WT_INVENTORY_PREPARE_RECEIVE:
+        ++fixture->prepares;
         if (fixture->full) return 1;
         /* A delivery, or a returned offer the save no longer has room for in place. */
         assert(entry->phase == WT_JOURNAL_RECEIVED || entry->phase == WT_JOURNAL_RESTORING);
@@ -98,7 +110,7 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
     case WT_INVENTORY_PREPARE_RESTORE: return fixture->changed ? 1 : 0;
     case WT_INVENTORY_RESTORE:
         assert(!fixture->changed);
-        Mirrored(fixture, WT_JOURNAL_RESTORING);
+        RecordedInPlace(fixture);
         fixture->removed = 0; fixture->restored = 1; return 0;
     }
     return -1;
@@ -832,8 +844,33 @@ static void LocalSettlement(void)
     Mirrored(&fixture, WT_JOURNAL_APPLIED); assert(fixture.engine.entry.request[5] == WT_OP_ACKNOWLEDGE);
 }
 
+/* A restore in place is recorded first. Cut short, the next boot finishes it
+ * in place while the save is the escrow's; after another game saved over it,
+ * RECEIVE settles it without preparing a second delivery. */
+static void InPlaceRestoreRecorded(void)
+{
+    Fixture fixture;
+    unsigned changed, writes;
+    for (changed = 0; changed < 2; ++changed) {
+        Init(&fixture, 1, 25); Enroll(&fixture);
+        fixture.failStep = WT_INVENTORY_RESTORE + 1;
+        assert(Reject(&fixture) != 0 && !fixture.restored && !fixture.received);
+        RecordedInPlace(&fixture);
+        fixture.failStep = 0; fixture.changed = changed; fixture.random = UINT32_MAX;
+        WtEngine_Close(&fixture.engine); Open(&fixture);
+        writes = fixture.writes;
+        assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.prepares == 0);
+        assert(changed ? fixture.received && !fixture.restored : fixture.restored && !fixture.received);
+        /* Only IDLE is committed: the return was already recorded. */
+        assert(fixture.writes == writes + 2);
+        Mirrored(&fixture, WT_JOURNAL_IDLE);
+        WtEngine_Close(&fixture.engine);
+    }
+}
+
 int main(void)
 {
+    InPlaceRestoreRecorded();
     PairAndReturn(); RefusedDelivery(); RejectionAndErrors(); SupersededSubmit(); FailedPersistence(); DeliveryPersistence();
     RejectedCancel(); MatchedCancelRace(); ServerReturn(); LoadedStateAndMismatch(); EnrollmentAndRetirementFaults(); ReadbackAndInventoryFaults();
     DeliveryKindBinding(); LocalSettlement(); RolledBackCopy();

@@ -97,8 +97,15 @@ static int LocatorValid(WtJournalLocator location)
 {
     if (location.kind == 0) return location.box == 0 && location.slot == 0 && location.length == 0;
     if (location.kind == 1) return location.box == 0 && location.slot < 6 && location.length == WT_GAME_PARTY_SIZE;
-    return location.kind == 2 && location.box < WT_GAME_BOX_COUNT && location.slot < WT_GAME_BOX_SLOTS
+    if (location.kind == 2) return location.box < WT_GAME_BOX_COUNT && location.slot < WT_GAME_BOX_SLOTS
         && location.length == WT_POKEMON_SIZE;
+#if WT_GAME_BATTLE_BOX_SLOTS > 0
+    /* Generation V's Battle Box, where only a recovered delivery is recorded. */
+    return location.kind == 3 && location.box == 0 && location.slot < WT_GAME_BATTLE_BOX_SLOTS
+        && location.length == WT_POKEMON_SIZE;
+#else
+    return 0;
+#endif
 }
 
 static void PutLocator(unsigned char *bytes, WtJournalLocator location)

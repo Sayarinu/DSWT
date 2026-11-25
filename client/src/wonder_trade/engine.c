@@ -106,24 +106,38 @@ static int Inventory(WtEngine *engine, enum WtInventoryStep step, WtJournalEntry
     return 0;
 }
 
+/* The offer recorded as a delivery of itself. */
+static int Returning(WtEngine *engine, WtJournalEntry *next)
+{
+    next->deliveryKind = WT_DELIVERY_RETURN;
+    memcpy(next->incoming, next->outgoing, sizeof(next->incoming));
+    return engine->journal.io.hash(next->incoming, sizeof(next->incoming), next->incomingDigest) == 0 ? 0 : Block(engine);
+}
+
 /* Return a rejected or cancelled offer. While the save still matches the
- * escrow it goes back to its own slot; once the game has saved since, it
- * returns like a delivery into the first free party or PC slot, recorded
- * before the save is written. 1 keeps it in the journal while storage is full. */
+ * escrow it goes back to its own slot. The journal first records it as a
+ * return without a destination, so a restore cut short and then saved over by
+ * another game is never put back twice: RECEIVE accepts that save as it is.
+ * Once the game has saved since the escrow, the offer returns like a delivery
+ * into the first free party or PC slot, recorded before the save is written.
+ * 1 keeps it in the journal while storage is full. */
 static int Restore(WtEngine *engine, WtJournalEntry *next)
 {
-    int prepared;
-    if (next->deliveryKind != WT_DELIVERY_RETURN) {
+    int inPlace = next->deliveryKind == WT_DELIVERY_RETURN && next->destination.kind == 0, prepared;
+    if (next->deliveryKind != WT_DELIVERY_RETURN || inPlace) {
         prepared = engine->io.inventory(engine->io.arg, WT_INVENTORY_PREPARE_RESTORE, next, next->source.slot);
-        if (prepared == 0) return Inventory(engine, WT_INVENTORY_RESTORE, next, next->source.slot);
+        if (prepared == 0) {
+            if (!inPlace && (Returning(engine, next) != 0 || Commit(engine, next) != 0)) return -1;
+            return Inventory(engine, WT_INVENTORY_RESTORE, next, next->source.slot);
+        }
         if (prepared != 1) return Block(engine);
-        next->deliveryKind = WT_DELIVERY_RETURN;
-        memcpy(next->incoming, next->outgoing, sizeof(next->incoming));
-        if (engine->journal.io.hash(next->incoming, sizeof(next->incoming), next->incomingDigest) != 0) return Block(engine);
-        prepared = engine->io.inventory(engine->io.arg, WT_INVENTORY_PREPARE_RECEIVE, next, 0);
-        if (prepared == 1) return 1;
-        if (prepared != 0) return Block(engine);
-        if (Commit(engine, next) != 0) return -1;
+        if (!inPlace) {
+            if (Returning(engine, next) != 0) return -1;
+            prepared = engine->io.inventory(engine->io.arg, WT_INVENTORY_PREPARE_RECEIVE, next, 0);
+            if (prepared == 1) return 1;
+            if (prepared != 0) return Block(engine);
+            if (Commit(engine, next) != 0) return -1;
+        }
     }
     if (Inventory(engine, WT_INVENTORY_RECEIVE, next, next->destination.slot) != 0
         || Inventory(engine, WT_INVENTORY_VERIFY_RECEIVED, next, next->destination.slot) != 0) return -1;

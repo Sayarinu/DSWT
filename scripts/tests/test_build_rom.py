@@ -10,16 +10,19 @@ import unittest
 
 
 class BuildRomTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix='rom build tests ')
+    def setUp(self, native=False):
+        temporary = tempfile.TemporaryDirectory(prefix='rom-native-' if native else 'rom build tests ')
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.scripts = self.root / 'scripts'
         self.scripts.mkdir()
         shutil.copy2(Path(__file__).resolve().parents[1] / 'build-rom.sh', self.scripts)
-        self.workspace = self.root / 'game workspace'
+        native_script = Path(__file__).resolve().parents[1] / 'build-rom-macos.sh'
+        if native_script.exists():
+            shutil.copy2(native_script, self.scripts)
+        self.workspace = self.root / ('workspace' if native else 'game workspace')
         (self.workspace / '.git').mkdir(parents=True)
-        self.tls = self.root / 'TLS source'
+        self.tls = self.root / ('tls' if native else 'TLS source')
         self.tls.mkdir()
         self.log = self.root / 'calls.jsonl'
         self.originals = {self.root / 'original.nds': b'original ROM',
@@ -38,6 +41,7 @@ class BuildRomTests(unittest.TestCase):
                         ROM_REVISION='1', WONDER_TRADE_PROFILE=str(self.profile),
                         DOCKER_DEFAULT_PLATFORM='linux/arm64')
         self.env.pop('ROM_BUILD_JOBS', None)
+        self.env.pop('ROM_BUILD_HOST', None)
         # The interpreter's path contains spaces; it must remain a single argument.
         self.env['PYTHON'] = str(binary / 'selected python')
         self.tool(binary / 'selected python', '''
@@ -172,6 +176,150 @@ def record(tool, args):
 
     def calls_for(self, tool):
         return [args for name, args in self.calls if name == tool]
+
+    def native_environment(self, game='diamond'):
+        self.setUp(native=True)
+        binary = self.root / 'fake tools'
+        self.tool(binary / 'uname', "print(os.environ.get('TEST_OS', 'Darwin'))\n")
+        self.tool(binary / 'arch', "raise SystemExit(int(os.environ.get('TEST_ARCH_FAIL', '0')))\n")
+        self.tool(binary / 'brew', "print(os.environ['TEST_BREW'])\n")
+        self.env.update(TEST_BREW=str(self.root / 'brew'), ROM_BUILD_HOST='macos',
+                        ROM_GAME=game, ROM_BUILD_JOBS='4')
+        (self.root / 'game').mkdir()
+        self.env.pop('ROM_REVISION')
+        self.tool(binary / 'tar', "print(os.environ.get('TEST_TAR', 'tar (GNU tar) 1.35'))\n")
+        self.tool(binary / 'make', """
+if sys.argv[1:] == ['--version']:
+    print(os.environ.get('TEST_MAKE_VERSION', 'GNU Make 4.4.1'))
+else:
+    record('make', sys.argv[1:])
+    raise SystemExit(int(os.environ.get('TEST_MAKE_FAIL', '0')))
+""")
+        for name in ('gsed', 'sha1sum', 'gcc', 'g++', 'pkg-config', 'arm-none-eabi-objcopy',
+                     'arm-none-eabi-ar', 'arm-none-eabi-objdump', 'clang', 'llvm-objcopy',
+                     'llvm-ar', 'cargo', 'wine', 'patch'):
+            self.tool(binary / name, 'pass\n')
+        self.tool(binary / 'cargo', "raise SystemExit(int(os.environ.get('TEST_CARGO_FAIL', '0')))\n")
+        assets = self.root / 'assets'
+        (assets / 'mwccarm').mkdir(parents=True)
+        (assets / 'mwccarm/license.dat').touch()
+        (assets / 'sdk-bin').mkdir()
+        (assets / 'ARM7-TS.lcf.template').touch()
+        (assets / 'ARM9-TS.lcf.template').touch()
+        for cpu in ('arm7', 'arm9'):
+            (self.workspace / cpu).mkdir()
+        self.tool(self.scripts / 'prepare-rom-macos.py',
+                  f"record('mac-tools', sys.argv[1:])\n"
+                  f"if os.environ.get('TEST_ASSETS_FAIL'): raise SystemExit(7)\nprint({str(assets)!r})\n")
+        return assets
+
+    def test_native_dp_builds_both_versions_and_modes_without_docker_shim(self):
+        for game in ('diamond', 'pearl'):
+            for mode in ('modified', 'pristine'):
+                with self.subTest(game=game, mode=mode):
+                    assets = self.native_environment(game)
+                    args = ('--pristine',) if mode == 'pristine' else ()
+                    result = self.run_build(*args)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    extra = ['COMPARE=1'] if mode == 'pristine' else [
+                        'COMPARE=0', f'WT_TLS_DIR={self.tls}', f'WT_MSL_DIR={assets}/msl',
+                        f'WT_PROFILE_HEADER={self.workspace}/.git/dswt-connection.h']
+                    self.assertEqual(self.calls_for('make'), [['tools'], [
+                        '-j4', f'GAME_VERSION={game.upper()}', *extra]])
+                    self.assertEqual(self.calls_for('prepare'), [
+                        ['--game', 'dp', *args]])
+                    self.assertEqual(self.calls_for('wineserver'), [['-p'], ['-k'], ['-w']])
+                    self.assertFalse(self.calls_for('docker'))
+                    self.assertTrue((self.workspace / 'tools/mwccarm/license.dat').exists())
+
+    def test_native_bw2_builds_both_versions_and_modes(self):
+        for game, version in (('black2', 'b2_us'), ('white2', 'w2_us')):
+            for mode in ('modified', 'pristine'):
+                with self.subTest(game=game, mode=mode):
+                    assets = self.native_environment(game)
+                    dump = self.root / 'own dump.nds'
+                    dump.write_bytes(b'owned input')
+                    self.env['DSWT_BW2_ROM'] = str(dump)
+                    args = ('--pristine',) if mode == 'pristine' else ()
+                    result = self.run_build(*args)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    options = [version]
+                    if mode == 'modified':
+                        options += ['--dsd', f'{assets}/dsd', '--wonder-trade-tls', str(self.tls),
+                                    '--wonder-trade-profile', str(self.workspace / '.git/dswt-connection.h'),
+                                    '--wonder-trade-msl', f'{assets}/msl']
+                    self.assertEqual(self.calls_for('configure'), [options])
+                    target = [] if mode == 'pristine' else [f'build/poke{game}_us.nds']
+                    self.assertEqual(self.calls_for('ninja'), [['-j4', *target]])
+                    self.assertEqual((self.workspace / f'orig/baserom_{version}.nds').read_bytes(), b'owned input')
+                    self.assertEqual(dump.read_bytes(), b'owned input')
+                    self.assertFalse(self.calls_for('docker') or self.calls_for('make'))
+
+    def test_native_prerequisites_fail_before_workspace_preparation(self):
+        for change, message in (({'TEST_OS': 'Linux'}, 'macOS'),
+                                ({'TEST_TAR': 'bsdtar 3.8'}, 'GNU tar'),
+                                ({'TEST_MAKE_VERSION': 'GNU Make 3.81'}, 'GNU Make 4'),
+                                ({'ROM_GAME': 'black2', 'TEST_CARGO_FAIL': '1'}, 'rustup toolchain install 1.100'),
+                                ({'TEST_ARCH_FAIL': '1'}, 'Rosetta'),
+                                ({'ROM_GAME': 'platinum'}, 'diamond, pearl, black2 or white2')):
+            with self.subTest(change=change):
+                self.native_environment()
+                dump = self.root / 'dump.nds'
+                dump.touch()
+                self.env['DSWT_BW2_ROM'] = str(dump)
+                result = self.run_build(env=dict(self.env, **change))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(self.calls_for('prepare') or self.calls_for('mac-tools'))
+
+    def test_native_refuses_spaces_and_unknown_host_mode(self):
+        for host, message in (('macos', 'whitespace'), ('native-ish', 'ROM_BUILD_HOST')):
+            result = self.run_build(env=dict(self.env, ROM_GAME='diamond', ROM_REVISION='5', ROM_BUILD_HOST=host))
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn(message, result.stderr)
+            self.assertFalse(self.calls_for('prepare'))
+
+    def test_native_missing_tools_explain_how_to_install_them(self):
+        for tool, instruction in (('docker', 'Docker Desktop'), ('llvm-objcopy', 'brew install'),
+                                  ('wine', 'Wine Stable')):
+            with self.subTest(tool=tool):
+                self.native_environment()
+                binary = self.root / 'fake tools'
+                # Limit PATH so installed host tools cannot hide the missing prerequisite.
+                for name in ('bash', 'dirname'):
+                    (binary / name).symlink_to(shutil.which(name))
+                (binary / tool).unlink()
+                self.env['PATH'] = str(binary)
+                result = self.run_build()
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(f'Missing {tool}', result.stderr)
+                self.assertIn(instruction, result.stderr)
+                self.assertFalse(self.calls_for('prepare'))
+
+    def test_native_refuses_workspace_and_tls_paths_with_spaces(self):
+        for variable in ('TEST_WORKSPACE', 'TEST_TLS'):
+            with self.subTest(variable=variable):
+                self.native_environment()
+                path = self.root / 'path with spaces'
+                (path / '.git').mkdir(parents=True)
+                self.env[variable] = str(path)
+                result = self.run_build()
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('workspace and TLS paths must not contain whitespace', result.stderr)
+                self.assertFalse(self.calls_for('mac-tools') or self.calls_for('make'))
+
+    def test_native_make_failure_is_propagated_and_stops_wine(self):
+        self.native_environment()
+        result = self.run_build(env=dict(self.env, TEST_MAKE_FAIL='9'))
+        self.assertEqual(result.returncode, 9, result.stdout + result.stderr)
+        self.assertEqual(self.calls_for('wineserver'), [['-p'], ['-k'], ['-w']])
+        self.assertEqual(self.calls_for('make'), [['tools']])
+
+    def test_native_tool_preparation_failure_stops_the_build(self):
+        self.native_environment()
+        result = self.run_build(env=dict(self.env, TEST_ASSETS_FAIL='1'))
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+        self.assertFalse(self.calls_for('make') or self.calls_for('wineserver'))
 
     def assert_docker(self, mode, revision, jobs='1', image='dswt-rom-builder', builder='tools/rom-builder', extra=()):
         build, run = self.calls_for('docker')

@@ -22,8 +22,9 @@ int WtGameSave_LayoutKnown(const SaveData *);
  * cannot checkpoint it (SaveBoth refuses), so Wonder Trade does not connect. */
 int WtGameSave_Written(const SaveData *);
 int WtGameSave_Eligible(SaveData *, unsigned slot);
-/* FALSE when the deposit's absence check would refuse: an identical copy would
- * remain, or another Pokémon cannot be read. */
+/* FALSE when the deposit's uniqueness check would refuse: a Pokémon with the
+ * same identity (personality and original trainer ID) would remain, or another
+ * Pokémon cannot be read (wonder_trade/delivery.h). */
 BOOL WtGameSave_Unique(SaveData *, unsigned slot, enum HeapID);
 
 #endif

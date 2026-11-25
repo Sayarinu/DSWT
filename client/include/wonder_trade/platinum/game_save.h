@@ -13,8 +13,9 @@ struct WtGame {
 };
 
 int WtGameSave_Eligible(SaveData *, unsigned slot);
-/* FALSE when the deposit's absence check would refuse: an identical copy would
- * remain, or another Pokémon cannot be read. Lets the picker explain this before
+/* FALSE when the deposit's uniqueness check would refuse: a Pokémon with the
+ * same identity (personality and original trainer ID) would remain, or another
+ * Pokémon cannot be read (wonder_trade/delivery.h). Lets the picker explain this before
  * any trade state changes. */
 BOOL WtGameSave_Unique(SaveData *, unsigned slot, enum HeapID);
 

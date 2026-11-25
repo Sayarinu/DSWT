@@ -394,9 +394,11 @@ static void Canonical(const Spec *spec, unsigned char out[136])
     FxPut16(out + 6, sum & 65535);
 }
 
+/* A matched delivery whose offer has left the save: no save here holds
+ * FxDefault(9), and a delivery is refused while its offer is still there. */
 static void Match(WtJournalEntry *entry, const Spec *spec)
 {
-    FxSpec offer = FxDefault(1);
+    FxSpec offer = FxDefault(9);
     memset(entry, 0, sizeof(*entry));
     entry->deliveryKind = WT_DELIVERY_MATCH;
     entry->source.kind = 1; entry->source.length = FX_MON;
@@ -453,6 +455,26 @@ static void PartyDelivery(void)
 #endif
     assert(WtGame_Received(&entry, &received) == 0 && received.species == 25);
     printf("PASS %s party delivery: placement, Pokémon, mail, Pokédex and records\n", FX_GAME_NAME);
+
+    /* The offer still in the save: a matched delivery is refused and nothing
+     * changes, then prepared once the offer is gone. */
+    Defaults(specs, 3); Setup(specs, 3);
+    Match(&entry, &spec);
+    {
+        FxSpec offer = FxDefault(1);
+        FxPartyMon(&offer, entry.original);
+        assert(WtPokemon_Decode(entry.original, entry.outgoing) == 0);
+    }
+    Keep();
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == -1);
+    Unchanged();
+    assert(Step(WT_INVENTORY_PREPARE_REMOVE, &entry, 1) == 0);
+    assert(Step(WT_INVENTORY_REMOVE, &entry, 1) == 0);
+    entry.deliveryKind = WT_DELIVERY_MATCH;
+    Canonical(&spec, entry.incoming);
+    Deliver(&entry);
+    assert(FxImageCount(&image) == 3);
+    printf("PASS %s party delivery: a matched delivery waits while its offer is still in the save\n", FX_GAME_NAME);
 }
 
 /* A trade evolution, and the Everstone's hold effect of this game. */
