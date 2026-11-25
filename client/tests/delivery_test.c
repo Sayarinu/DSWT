@@ -693,6 +693,28 @@ static void MovedToDaycare(void)
     puts("restore in place cut short, then the Day Care: one copy, at the Day Care");
 }
 
+/* A journal an older build left: its restore in place was written, without
+ * being recorded first, then the stock game walked the Pokémon and saved. The
+ * return finds it back, changed, and adds nothing. */
+static void OlderBuildRestore(void)
+{
+    WtEngine engine;
+    WtJournal store;
+    WtJournalEntry entry;
+    WtJournalIO io = { NULL, JournalRead, JournalWrite, Sha };
+    Seed(); Start(IN_PLACE);
+    CHECK(WtJournal_Open(&store, io) == 0 && WtJournal_Read(&store, &entry) == 0);
+    WtJournal_Close(&store);
+    CHECK(Load(&live) >= 0);
+    InsertSlot(&live, 1, entry.original);
+    Write(&live); Write(&live);
+    CHECK(Stock(IN_PLACE, PLAY_FRIENDSHIP, 1) == 1);
+    CHECK(Boot(&engine) == 0 && engine.entry.phase == WT_JOURNAL_IDLE);
+    CHECK(Copies(&live, offered) == 1 && live.count == 3 && memcmp(live.party[1], entry.original, PARTY) != 0);
+    WtEngine_Close(&engine);
+    puts("older build's restore in place, then walked in the stock game: back once, as it is");
+}
+
 /* Battle Box: a returned offer the stock game moved there is recorded with
  * journal locator kind 3, and its journal is valid. */
 static void BattleBoxRecord(void)
@@ -760,6 +782,7 @@ int main(void)
     ScanCases();
     ChangedByPlay();
     MovedToDaycare();
+    OlderBuildRestore();
     BattleBoxRecord();
     Refusals();
     Sweep();
