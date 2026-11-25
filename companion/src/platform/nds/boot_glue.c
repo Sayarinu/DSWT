@@ -2,11 +2,9 @@
  * platform (wonder_trade/flash.h, wonder_trade/game_adapter.h).
  *
  * The platform-only ones are implemented here. The inventory, checkpoint,
- * leave and hold checks are the save adapter's (adapter/platinum.c). Showing a
- * received Pokémon needs game data (LUNE-873); until then it is a stub that
- * fails safely. */
+ * leave and hold checks and the received Pokémon are the save adapter's
+ * (adapter/platinum.c). */
 #include <stdlib.h>
-#include <string.h>
 
 #include <nds.h>
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
@@ -54,12 +52,4 @@ void WtGame_SampleInput(WtEntropySample *sample)
         sample->x = touch.px;
         sample->y = touch.py;
     }
-}
-
-/* STUB (LUNE-873): no received Pokémon to show. */
-int WtGame_Received(const WtJournalEntry *entry, WtReceivedPokemon *received)
-{
-    (void)entry;
-    if (received) memset(received, 0, sizeof(*received));
-    return -1;
 }

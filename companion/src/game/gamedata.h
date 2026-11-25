@@ -17,7 +17,7 @@ typedef struct CpGameForms {
 /* Where one family keeps its data. */
 typedef struct CpGameTable {
     CpFamily family;
-    const char *personal, *growth, *evolution, *items, *messages, *font;
+    const char *personal, *growth, *evolution, *items, *messages, *font, *moves;
     /* The species name bank in the message archive: Japanese and Korean
      * leave some banks out, so later banks number lower there. */
     uint16_t speciesNameBank, speciesNameBankAsian;
@@ -35,7 +35,7 @@ const CpGameTable *CpGame_Table(CpFamily);
 typedef struct CpGame {
     CpRomInfo rom;
     const CpGameTable *table;
-    CpNarc personal, growth, evolution, items, messages, font;
+    CpNarc personal, growth, evolution, items, messages, font, moves;
 } CpGame;
 
 /* Identify the ROM and open its archives. CP_ERR_UNSUPPORTED for a game
@@ -86,5 +86,8 @@ typedef struct CpItem {
 
 /* CP_ERR_NOT_FOUND for item 0, an unused ID or one past the game's items. */
 int CpGame_Item(const CpGame *, uint16_t item, CpItem *out);
+
+/* A move's base PP from the move data (MoveTable_LoadParam's MOVEATTRIBUTE_PP). */
+int CpGame_MovePp(const CpGame *, uint16_t move, uint8_t *out);
 
 #endif

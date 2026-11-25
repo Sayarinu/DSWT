@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 project(dswt_companion_tests C)
 
+# Keep the sanitizer-backed host suite within the CI runtime budget.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Host test build type" FORCE)
+endif()
+
 # These test executables use assert() for their checks, including release builds.
 add_compile_options(-UNDEBUG)
 set(CMAKE_C_STANDARD 99)
@@ -77,6 +82,11 @@ target_include_directories(companion_journal PUBLIC "${CLIENT}/include")
 target_compile_definitions(companion_journal PRIVATE WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_compile_options(companion_journal PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_libraries(companion_journal PUBLIC companion_save)
+# LUNE-901: a first enrollment write cut in any SD sector order.
+add_executable(torn_enrollment_test journal/torn_enrollment_test.c "${CLIENT}/src/wonder_trade/wire.c")
+target_link_libraries(torn_enrollment_test PRIVATE companion_journal)
+target_compile_options(torn_enrollment_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+add_test(NAME torn_enrollment_test COMMAND torn_enrollment_test)
 foreach(cp_journal_test journal_save_test backup_save_test)
     add_executable(${cp_journal_test} "journal/${cp_journal_test}.c")
     target_link_libraries(${cp_journal_test} PRIVATE companion_journal)
@@ -116,6 +126,7 @@ endforeach()
 
 # --- Platinum offer adapter and visit driver (LUNE-871) ---------------------
 add_library(companion_adapter STATIC "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
+    "${COMPANION_SRC}/adapter/platinum_receive.c" "${COMPANION_SRC}/adapter/rom_data.c"
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
     "${COMPANION_SRC}/game/text.c" "${COMPANION_SRC}/game/pairing.c"
     "${CLIENT}/src/wonder_trade/pokemon_codec.c")
@@ -123,14 +134,32 @@ target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
+add_executable(platinum_receive_test adapter/platinum_receive_test.c)
 add_executable(visit_test session/visit_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
 target_include_directories(visit_test PRIVATE "${CLIENT}/tests")
-foreach(adapter_target companion_adapter platinum_adapter_test visit_test)
+foreach(adapter_target companion_adapter platinum_adapter_test platinum_receive_test visit_test)
     target_compile_options(${adapter_target} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 endforeach()
-foreach(adapter_test platinum_adapter_test visit_test)
+foreach(adapter_test platinum_adapter_test platinum_receive_test visit_test)
     target_link_libraries(${adapter_test} PRIVATE companion_adapter)
     add_test(NAME ${adapter_test} COMMAND ${adapter_test})
 endforeach()
+
+# --- Session model (LUNE-895): saves, ROMs, adapter and visits together ----
+# A synchronous fake worker, files in a temporary folder and the in-memory
+# server; boot.c and recovery.c see a stub Mbed TLS header.
+add_executable(app_model_test app/model_test.c posix_reader.c
+    "${COMPANION_SRC}/app/model.c" "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/wire.c"
+    "${CLIENT}/src/wonder_trade/session.c" "${CLIENT}/src/wonder_trade/boot.c"
+    "${CLIENT}/src/wonder_trade/recovery.c")
+target_include_directories(app_model_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/app/stub" "${CLIENT}/tests")
+set_target_properties(app_model_test PROPERTIES C_STANDARD 11)
+target_compile_options(app_model_test PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
+target_link_libraries(app_model_test PRIVATE companion_adapter companion_journal companion_ui)
+add_test(NAME app_model_test COMMAND app_model_test)
+
+# LUNE-874: host-only power-cut matrix over save and journal persistence.
+add_subdirectory(fault)
