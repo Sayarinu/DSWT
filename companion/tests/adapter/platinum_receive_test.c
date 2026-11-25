@@ -8,6 +8,9 @@
 #include <stdlib.h>
 
 #include "game/text.h"
+#include "journal_fixture.h"
+#include "session/visit.h"
+#include "wonder_trade/wire_layout.h"
 
 /* ---- The fake game data ---------------------------------------------------- */
 
@@ -783,6 +786,228 @@ static void StockSaveRedirect(void)
     puts("PASS stock save while applying: a retried recovery records the Land Forme the PC holds");
 }
 
+/* ---- Through the engine and its journal ------------------------------------ */
+
+static int Hash(const unsigned char *bytes, size_t size, unsigned char digest[32]) { return FxSha(bytes, size, digest); }
+
+/* A one-trade server whose offer is matched with `pokemon`. */
+static struct {
+    unsigned char saveID[16], trade[16], asset[16], receipt[16], offered[32], received[32], pokemon[136];
+    unsigned char events[8][WT_WIRE_EVENT_SIZE];
+    uint64_t nextCounter;
+    unsigned eventCount, state;
+} match;
+
+static void Put(unsigned char *p, uint64_t value, unsigned size)
+{
+    while (size--) { *p++ = (unsigned char)value; value >>= 8; }
+}
+
+static uint64_t Get(const unsigned char *p, unsigned size)
+{
+    uint64_t value = 0;
+    while (size--) value = (value << 8) | p[size];
+    return value;
+}
+
+static void MatchEvent(unsigned kind, const unsigned char *operation, const unsigned char *digest, int receipt)
+{
+    unsigned char *e = match.events[match.eventCount];
+    memset(e, 0, WT_WIRE_EVENT_SIZE);
+    Put(e + WT_WIRE_EVENT_SEQUENCE, ++match.eventCount, 8); e[WT_WIRE_EVENT_KIND] = (unsigned char)kind;
+    if (kind != WT_EVENT_ENROLLED) {
+        memcpy(e + WT_WIRE_EVENT_TRADE, match.trade, 16); memcpy(e + WT_WIRE_EVENT_ASSET, match.asset, 16);
+        memcpy(e + WT_WIRE_EVENT_DIGEST, digest, 32);
+    }
+    if (operation) memcpy(e + WT_WIRE_EVENT_OPERATION, operation, 16);
+    if (receipt) memcpy(e + WT_WIRE_EVENT_RECEIPT, match.receipt, 16);
+    e[WT_WIRE_EVENT_STATE] = (unsigned char)match.state;
+}
+
+static void MatchSnapshot(unsigned char *s)
+{
+    memset(s, 0, WT_WIRE_SNAPSHOT_SIZE);
+    memcpy(s + WT_WIRE_SNAPSHOT_TRADE, match.trade, 16); s[WT_WIRE_SNAPSHOT_STATE] = (unsigned char)match.state;
+    memcpy(s + WT_WIRE_SNAPSHOT_OFFERED_ASSET, match.asset, 16);
+    memcpy(s + WT_WIRE_SNAPSHOT_OFFERED_DIGEST, match.offered, 32);
+    if (match.state >= WT_TRADE_MATCHED) {
+        s[WT_WIRE_SNAPSHOT_DELIVERY_KIND] = WT_DELIVERY_MATCH;
+        memset(s + WT_WIRE_SNAPSHOT_RECEIVED_ASSET, 0x74, 16);
+        memcpy(s + WT_WIRE_SNAPSHOT_RECEIVED_DIGEST, match.received, 32);
+        memcpy(s + WT_WIRE_SNAPSHOT_RECEIPT, match.receipt, 16);
+    }
+    Put(s + WT_WIRE_SNAPSHOT_LAST_EVENT, match.eventCount, 8);
+}
+
+static int MatchPost(void *arg, const unsigned char *request, size_t size,
+    unsigned char reply[WT_WIRE_REPLY_MAX], size_t *replySize)
+{
+    const unsigned char *body = request + WT_WIRE_REQUEST_HEADER_SIZE;
+    unsigned operation = request[WT_WIRE_REQUEST_OPERATION], result = WT_RESULT_OK;
+    unsigned char *out = reply + WT_WIRE_REPLY_HEADER_SIZE;
+    size_t length = 0;
+    (void)arg;
+    assert(WtWire_CheckRequest(request, size, Hash) == 0);
+    switch (operation) {
+    case WT_OP_ENROLL:
+        memset(match.saveID, 0x51, 16); match.nextCounter = 1;
+        if (!match.eventCount) MatchEvent(WT_EVENT_ENROLLED, NULL, NULL, 0);
+        memcpy(out, match.saveID, 16); length = 16;
+        break;
+    case WT_OP_RECONCILE: {
+        uint64_t after = Get(body + WT_WIRE_RECONCILE_AFTER, 8), i;
+        unsigned limit = body[WT_WIRE_RECONCILE_LIMIT], count = 0;
+        for (i = after; i < match.eventCount && count < limit; ++i, ++count)
+            memcpy(out + WT_WIRE_PAGE_EVENTS + count * WT_WIRE_EVENT_SIZE, match.events[i], WT_WIRE_EVENT_SIZE);
+        out[WT_WIRE_PAGE_COUNT] = (unsigned char)count; out[WT_WIRE_PAGE_HAS_MORE] = after + count < match.eventCount;
+        Put(out + WT_WIRE_PAGE_END, after + count, 8);
+        length = WT_WIRE_PAGE_EVENTS + count * WT_WIRE_EVENT_SIZE;
+        break;
+    }
+    case WT_OP_SUBMIT:
+        assert(Get(request + WT_WIRE_REQUEST_COUNTER, 8) == match.nextCounter);
+        FxSha(body + WT_WIRE_SUBMIT_POKEMON, 136, match.offered);
+        ++match.nextCounter;
+        memset(match.trade, 0x71, 16); memset(match.asset, 0x72, 16); match.state = WT_TRADE_QUEUED;
+        MatchEvent(WT_EVENT_SUBMITTED, request + WT_WIRE_REQUEST_ID, match.offered, 0);
+        Put(out, match.eventCount, 8); MatchSnapshot(out + WT_WIRE_OUTCOME_SNAPSHOT); length = WT_WIRE_OUTCOME_SIZE;
+        break;
+    case WT_OP_STATUS:
+        MatchSnapshot(out); length = WT_WIRE_SNAPSHOT_SIZE;
+        break;
+    case WT_OP_COLLECT:
+        if (match.state != WT_TRADE_MATCHED) { result = WT_RESULT_CONFLICT; break; }
+        MatchSnapshot(out); memcpy(out + WT_WIRE_COLLECTION_POKEMON, match.pokemon, 136); length = WT_WIRE_COLLECTION_SIZE;
+        break;
+    case WT_OP_ACKNOWLEDGE:
+        assert(Get(request + WT_WIRE_REQUEST_COUNTER, 8) == match.nextCounter);
+        ++match.nextCounter; match.state = WT_TRADE_ACKNOWLEDGED;
+        MatchEvent(WT_EVENT_ACKNOWLEDGED, request + WT_WIRE_REQUEST_ID, match.received, 1);
+        Put(out, match.eventCount, 8); MatchSnapshot(out + WT_WIRE_OUTCOME_SNAPSHOT); length = WT_WIRE_OUTCOME_SIZE;
+        break;
+    default:
+        assert(0);
+    }
+    if (result != WT_RESULT_OK) length = 0;
+    memset(reply, 0, WT_WIRE_REPLY_HEADER_SIZE);
+    memcpy(reply, request, WT_WIRE_MAGIC_SIZE); reply[WT_WIRE_REPLY_OPERATION] = (unsigned char)operation;
+    Put(reply + WT_WIRE_REPLY_BODY_LENGTH, length, 2);
+    memcpy(reply + WT_WIRE_REPLY_REQUEST_ID, request + WT_WIRE_REQUEST_ID, 16);
+    Put(reply + WT_WIRE_REPLY_RESULT, result, 2);
+    Put(reply + WT_WIRE_REPLY_NEXT_COUNTER, match.nextCounter, 8);
+    Put(reply + WT_WIRE_REPLY_HIGHWATER, match.eventCount, 8);
+    *replySize = WT_WIRE_REPLY_HEADER_SIZE + length;
+    return 0;
+}
+
+static const CpTransport matchTransport = { NULL, MatchPost, NULL, NULL };
+
+/* The journal banks; a commit of `refusePhase` fails once (the power is cut
+ * before the journal records it), and once `cutAfter` is committed the next
+ * save write fails (cut before the step writes). */
+static unsigned char banks[2][WT_JOURNAL_RECORD_SIZE];
+static unsigned refusePhase, cutAfter, randomCounter;
+
+static int ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    (void)arg; memcpy(record, banks[bank], WT_JOURNAL_RECORD_SIZE); return 0;
+}
+
+static int WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    WtJournalEntry entry;
+    (void)arg;
+    assert(WtJournal_Decode(record, Hash, &entry) == 0);
+    if (refusePhase && entry.phase == refusePhase) { refusePhase = 0; return -1; }
+    memcpy(banks[bank], record, WT_JOURNAL_RECORD_SIZE);
+    if (cutAfter && entry.phase == cutAfter) { cutAfter = 0; file.failWrite = file.writes + 1; }
+    return 0;
+}
+
+static int EngineRandom(void *arg, unsigned char *bytes, size_t size)
+{
+    unsigned char input[4], digest[32];
+    (void)arg;
+    FxPut32(input, ++randomCounter); FxSha(input, 4, digest);
+    memcpy(bytes, digest, size); return 0;
+}
+
+static int AnyHoldable(void *arg, unsigned item) { (void)arg; (void)item; return 1; }
+
+static void OpenEngine(WtEngine *engine)
+{
+    WtJournalIO journal = { NULL, ReadBank, WriteBank, Hash };
+    WtEngineIO io = { &game, EngineRandom, WtGame_Inventory, WtGame_CanHold };
+    assert(CpSaveImage_Load(&image, &cpFile, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    game.holdable = AnyHoldable;
+    assert(WtEngine_Open(engine, journal, io) == 0);
+}
+
+static void FillParty(unsigned char *general, unsigned char *boxes)
+{
+    while (Fx32(general + FX_PARTY + 4) < 6) AddPartyMember(general, boxes);
+}
+
+/* A matched Sky Shaymin, cut after APPLYING was recorded; the stock game then
+ * fills the party; the recovery puts it in the PC (Land Forme) and is cut
+ * before APPLIED is recorded; the next settle must still record APPLIED, and
+ * the ACK must leave the journal IDLE. */
+static void StockSaveRedirectThroughJournal(void)
+{
+    WtJournalEntry entry;
+    WtEngine engine;
+    CpVisit visit;
+    WtReceivedPokemon received;
+    Spec sky = Basic(492, MODEST_ODD_LOW);
+    unsigned char canonical[136], digest[32];
+    sky.form = 1;
+    Setup(5);
+    memset(&match, 0, sizeof(match));
+    Canonical(&sky, match.pokemon); FxSha(match.pokemon, 136, match.received);
+    memset(match.receipt, 0x73, 16);
+    assert(WtTest_JournalEntry(WT_JOURNAL_EMPTY, Hash, &entry) == 0);
+    assert(WtJournal_Encode(&entry, Hash, banks[0]) == 0);
+    memcpy(banks[1], banks[0], sizeof(banks[0]));
+    refusePhase = cutAfter = randomCounter = 0;
+    /* Offer party slot 1; the server matches it. */
+    OpenEngine(&engine);
+    assert(CpVisit_Run(&engine, &game, 7, 1, 0, &matchTransport, &visit) == 0 && visit.phase == WT_JOURNAL_QUEUED);
+    WtEngine_Close(&engine);
+    match.state = WT_TRADE_MATCHED;
+    MatchEvent(WT_EVENT_MATCHED, NULL, match.received, 1);
+    /* Collect: APPLYING is recorded for party slot 4, then the power goes. */
+    cutAfter = WT_JOURNAL_APPLYING;
+    OpenEngine(&engine);
+    assert(CpVisit_Run(&engine, &game, 7, -1, WT_OP_COLLECT, &matchTransport, &visit) != 0);
+    WtEngine_Close(&engine);
+    file.failWrite = 0;
+    assert(FxStockPlay(&file, 1, 0, FillParty));
+    /* The recovery receives it into the PC; the power goes before APPLIED. */
+    refusePhase = WT_JOURNAL_APPLIED;
+    OpenEngine(&engine);
+    assert(engine.entry.phase == WT_JOURNAL_APPLYING && engine.entry.destination.kind == 1);
+    assert(WtEngine_Settle(&engine) != 0);
+    WtEngine_Close(&engine);
+    assert(FxStockCopies(&file, match.pokemon) == 1);
+    /* Again: APPLIED recorded from what the save holds. */
+    OpenEngine(&engine);
+    assert(WtEngine_Settle(&engine) == 0 && engine.entry.phase == WT_JOURNAL_APPLIED);
+    entry = engine.entry;
+    WtEngine_Close(&engine);
+    assert(entry.destination.kind == 2 && entry.destination.length == 136);
+    assert(WtPokemon_Decode(FxImageBox(&image, 0, 0), canonical) == 0);
+    FxSha(canonical, 136, digest);
+    assert(memcmp(digest, entry.appliedDigest, 32) == 0);
+    assert(WtGame_Received(&entry, &received) == 0 && received.species == 492 && received.form == 0);
+    /* The ACK carries that digest and ends the trade. */
+    OpenEngine(&engine);
+    assert(CpVisit_Run(&engine, &game, 7, -1, 0, &matchTransport, &visit) == 0);
+    assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave && match.state == WT_TRADE_ACKNOWLEDGED);
+    WtEngine_Close(&engine);
+    assert(FxStockCopies(&file, match.pokemon) == 1);
+    puts("PASS stock save while applying: a redirected recovery commits APPLIED and is acknowledged");
+}
+
 int main(void)
 {
     Stats();
@@ -796,6 +1021,7 @@ int main(void)
     StockSave();
     StockSaveCollision();
     StockSaveRedirect();
+    StockSaveRedirectThroughJournal();
     puts("PASS platinum receive");
     return 0;
 }

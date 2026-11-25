@@ -129,7 +129,10 @@ target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save)
 add_executable(platinum_adapter_test adapter/platinum_test.c)
-add_executable(platinum_receive_test adapter/platinum_receive_test.c)
+add_executable(platinum_receive_test adapter/platinum_receive_test.c "${COMPANION_SRC}/session/visit.c"
+    "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
+    "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")
+target_include_directories(platinum_receive_test PRIVATE "${CLIENT}/tests")
 add_executable(visit_test session/visit_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/journal.c"
     "${CLIENT}/src/wonder_trade/wire.c" "${CLIENT}/src/wonder_trade/session.c")

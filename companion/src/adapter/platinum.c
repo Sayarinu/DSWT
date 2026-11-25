@@ -155,17 +155,22 @@ static int Absent(CpSaveImage *image, const unsigned char outgoing[BOX_MON_SIZE]
     return 0;
 }
 
+/* Pokemon_Init's empty Pokémon (MON_SIZE), or BoxPokemon_Init's
+ * (BOX_MON_SIZE): zeros with their blocks encrypted with seed 0. */
+static void Empty(unsigned char *image, unsigned size)
+{
+    memset(image, 0, size);
+    Crypt(image + 8, BOX_MON_SIZE - 8, 0);
+    if (size == MON_SIZE) Crypt(image + BOX_MON_SIZE, EXTENSION_SIZE, 0);
+}
+
 /* Party_RemovePokemonBySlotIndex: later Pokémon move down one slot and the
- * last becomes Pokemon_Init's empty Pokémon, zeros encrypted with seed 0. */
+ * last becomes the empty Pokémon. */
 static void Remove(unsigned char *party, unsigned slot)
 {
     unsigned count = Read32(party + 4), i;
-    unsigned char *last;
     for (i = slot; i + 1 < count; ++i) memcpy(Slot(party, i), Slot(party, i + 1), MON_SIZE);
-    last = Slot(party, i);
-    memset(last, 0, MON_SIZE);
-    Crypt(last + 8, BOX_MON_SIZE - 8, 0);
-    Crypt(last + BOX_MON_SIZE, EXTENSION_SIZE, 0);
+    Empty(Slot(party, i), MON_SIZE);
     Write32(party + 4, count - 1);
 }
 
@@ -494,7 +499,11 @@ static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int
         if (!(stored = Destination(game->image, where)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
         *restore = 0;
         if (WtGame_Checkpoint(game) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
+        /* Every image field follows the destination's length, padded with
+         * zeros as the journal requires; the slot held the empty Pokémon. */
         entry->destination = where;
+        memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
+        Empty(entry->destinationBefore, where.length);
         memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
         memcpy(entry->destinationAfter, stored, where.length);
         Sha(canonical, sizeof(canonical), entry->appliedDigest);

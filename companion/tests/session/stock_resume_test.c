@@ -200,10 +200,16 @@ static int ReadAt(void *arg, uint32_t offset, void *data, size_t size)
     return 0;
 }
 
+/* Outside the sweep: a commit of refusePhase fails once (cut before the
+ * journal records it); after cutAfter is committed, save writes fail (cut
+ * before the step writes) until cleared. */
+static unsigned refusePhase, cutAfter;
+static int saveCut;
+
 static int WriteAt(void *arg, uint32_t offset, const void *data, size_t size)
 {
     World *world = arg;
-    if (offset > CP_SAVE_FILE_SIZE || size > CP_SAVE_FILE_SIZE - offset) return -1;
+    if (offset > CP_SAVE_FILE_SIZE || size > CP_SAVE_FILE_SIZE - offset || (world == &live && saveCut)) return -1;
     if (world == &live) Cut(1, offset, data, size); /* the first half of this write landed */
     memcpy(world->bytes + offset, data, size);
     if (world == &live) Cut(0, 0, NULL, 0);
@@ -222,7 +228,11 @@ static int ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_
 static int WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
     World *world = arg;
+    WtJournalEntry entry;
+    assert(WtJournal_Decode(record, Hash, &entry) == 0);
+    if (refusePhase && entry.phase == refusePhase) { refusePhase = 0; return -1; }
     memcpy(world->banks[bank], record, WT_JOURNAL_RECORD_SIZE);
+    if (cutAfter && entry.phase == cutAfter) { cutAfter = 0; saveCut = 1; }
     if (world == &live) Cut(0, 0, NULL, 0);
     return 0;
 }
@@ -379,6 +389,59 @@ static void Setup(void)
     server.rejectSubmit = scenario == REJECT_RESTORE;
 }
 
+static void FillParty(unsigned char *general, unsigned char *boxes)
+{
+    unsigned count;
+    (void)boxes;
+    while ((count = Fx32(general + FX_PARTY + 4)) < 6) {
+        FxSpec extra = FxDefault(20 + count);
+        FxPartyMon(&extra, general + FX_PARTY + 8 + count * FX_MON);
+        FxPut32(general + FX_PARTY + 4, count + 1);
+    }
+}
+
+/* A cancelled offer collected for the party, cut once APPLYING is recorded;
+ * the stock game fills the party; the recovery returns it to the PC and is
+ * cut before APPLIED is recorded. The next settle must record APPLIED (a PC
+ * destination, padded as the journal requires) and the ACK end the trade. */
+static void RedirectThroughJournal(void)
+{
+    WtEngine engine;
+    CpVisit visit;
+    WtJournalEntry entry;
+    scenario = CANCEL_RETURN;
+    Setup();
+    cutAfter = WT_JOURNAL_APPLYING;
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, WT_OP_CANCEL, &transport, &visit) != 0);
+    WtEngine_Close(&engine);
+    saveCut = 0;
+    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+    assert(FxStockPlay(&stock, 1, 0, FillParty));
+    memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+    refusePhase = WT_JOURNAL_APPLIED;
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(engine.entry.phase == WT_JOURNAL_APPLYING && engine.entry.destination.kind == 1);
+    assert(WtEngine_Settle(&engine) != 0);
+    WtEngine_Close(&engine);
+    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+    assert(FxStockCopies(&stock, offered) == 1);
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(WtEngine_Settle(&engine) == 0 && engine.entry.phase == WT_JOURNAL_APPLIED);
+    entry = engine.entry;
+    WtEngine_Close(&engine);
+    assert(entry.destination.kind == 2 && entry.destination.length == 136);
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_IDLE);
+    WtEngine_Close(&engine);
+    assert(server.state == WT_TRADE_ACKNOWLEDGED);
+    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+    assert(FxStockCopies(&stock, offered) == 1);
+    puts("PASS stock save during a return: a recovery into the PC commits APPLIED and is acknowledged");
+}
+
 int main(void)
 {
     unsigned total[OUTCOMES] = { 0, 0, 0, 0 }, i;
@@ -401,6 +464,7 @@ int main(void)
         for (i = 0; i < OUTCOMES; ++i) total[i] += tally[i];
     }
     assert(total[STUCK] == 0 && total[DUPLICATE] == 0 && total[LOST] == 0);
+    RedirectThroughJournal();
     printf("PASS stock save before resume: %u cases recovered, 0 stuck, 0 duplicates, 0 lost\n", total[RECOVERED]);
     return 0;
 }
