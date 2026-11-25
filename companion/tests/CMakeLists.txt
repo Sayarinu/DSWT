@@ -68,6 +68,7 @@ target_link_libraries(journal_io_test PRIVATE companion_core_journal)
 set(COMPANION_SAVE "${CMAKE_CURRENT_SOURCE_DIR}/../src/save")
 add_library(companion_save STATIC
     "${COMPANION_SAVE}/save_image.c"
+    "${COMPANION_SAVE}/gen5_save.c"
     "${COMPANION_SAVE}/sha256.c"
     "${COMPANION_SAVE}/posix_file.c")
 target_include_directories(companion_save PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
@@ -91,6 +92,15 @@ add_executable(save_layout_test save/save_layout_test.c)
 target_link_libraries(save_layout_test PRIVATE companion_save)
 target_compile_options(save_layout_test PRIVATE -O2 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 add_test(NAME save_layout_test COMMAND save_layout_test)
+# LUNE-881: the Black/White (0) and Black 2/White 2 (1) layouts.
+foreach(gen5_game 0 1)
+    add_executable(gen5_save_test_game${gen5_game} save/gen5_save_test.c)
+    target_compile_definitions(gen5_save_test_game${gen5_game} PRIVATE FX_GAME=${gen5_game})
+    target_link_libraries(gen5_save_test_game${gen5_game} PRIVATE companion_save)
+    target_compile_options(gen5_save_test_game${gen5_game} PRIVATE -O2 -Wall -Wextra -Werror -pedantic
+        -fsanitize=address,undefined)
+    add_test(NAME gen5_save_test_game${gen5_game} COMMAND gen5_save_test_game${gen5_game})
+endforeach()
 add_test(NAME posix_file_test COMMAND posix_file_test)
 find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
 add_test(NAME save_image_integration_test
@@ -201,7 +211,8 @@ endforeach()
 # The sweeps build the adapter themselves at -O1 (still with the sanitizers):
 # every case hashes and checks whole saves, and must stay within CI's budget.
 set(STOCK_SOURCES "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/platinum_receive.c"
-    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${CLIENT}/src/wonder_trade/pokemon_codec.c")
+    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/gen5_save.c" "${COMPANION_SAVE}/sha256.c"
+    "${CLIENT}/src/wonder_trade/pokemon_codec.c")
 add_executable(stock_save_test adapter/stock_save_test.c ${STOCK_SOURCES})
 add_executable(stock_resume_test session/stock_resume_test.c ${STOCK_SOURCES} "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c"

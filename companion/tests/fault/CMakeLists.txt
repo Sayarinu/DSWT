@@ -1,5 +1,5 @@
 add_executable(companion_write_fault_test write_fault_test.c
-    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${COMPANION_SAVE}/posix_file.c"
+    "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/gen5_save.c" "${COMPANION_SAVE}/sha256.c" "${COMPANION_SAVE}/posix_file.c"
     "${COMPANION_SAVE}/journal_save.c" "${COMPANION_SAVE}/journal_host_io.c"
     "${COMPANION_SRC}/platform/journal_io.c" "${COMPANION_SRC}/adapter/platinum.c"
     "${COMPANION_SRC}/adapter/platinum_receive.c"
@@ -23,7 +23,7 @@ set_tests_properties(companion_write_fault_test PROPERTIES TIMEOUT 120
 foreach(fault_game 1 2)
     set(fault_target companion_write_fault_test_game${fault_game})
     add_executable(${fault_target} write_fault_test.c
-        "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/sha256.c" "${COMPANION_SAVE}/posix_file.c"
+        "${COMPANION_SAVE}/save_image.c" "${COMPANION_SAVE}/gen5_save.c" "${COMPANION_SAVE}/sha256.c" "${COMPANION_SAVE}/posix_file.c"
         "${COMPANION_SAVE}/journal_save.c" "${COMPANION_SAVE}/journal_host_io.c"
         "${COMPANION_SRC}/platform/journal_io.c" "${COMPANION_SRC}/adapter/platinum.c"
         "${COMPANION_SRC}/adapter/platinum_receive.c"

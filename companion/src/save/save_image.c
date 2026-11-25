@@ -2,19 +2,20 @@
 
 #include <string.h>
 
+#include "gen5_save.h"
 #include "sha256.h"
 
 /* Diamond/Pearl: src/save.c and save_arrays.c of pokediamond; the PC
  * (PCStorage, current box first) is the box block's only array. */
 const CpSaveLayout CpSaveLayout_DiamondPearl = {
     CP_SAVE_FOOTER_BLOCK_COUNTERS, 20, { 0, 0xC100 }, { 0xC100, 0x121E0 },
-    0x90, 4, 30 * 136, 0, 0, 0
+    0x90, 4, 30 * 136, 0, 0, 0, NULL
 };
 
 const CpSaveLayout CpSaveLayout_Platinum = {
     CP_SAVE_FOOTER_BLOCK_COUNTERS, CP_SAVE_FOOTER_SIZE, { CP_SAVE_GENERAL_OFFSET, CP_SAVE_BOX_OFFSET },
     { CP_SAVE_GENERAL_SIZE, CP_SAVE_BOX_SIZE },
-    CP_SAVE_PARTY_CAPACITY_OFFSET, CP_SAVE_BOX_SLOTS_OFFSET - CP_SAVE_BOX_OFFSET, 30 * CP_SAVE_BOX_STRIDE, 0, 0, 0
+    CP_SAVE_PARTY_CAPACITY_OFFSET, CP_SAVE_BOX_SLOTS_OFFSET - CP_SAVE_BOX_OFFSET, 30 * CP_SAVE_BOX_STRIDE, 0, 0, 0, NULL
 };
 
 /* HeartGold/SoulSilver: src/save.c of pokeheartgold. PCStorage starts with
@@ -22,7 +23,7 @@ const CpSaveLayout CpSaveLayout_Platinum = {
  * box and boxModifiedFlag (BOX_ALL_MODIFIED_FLAG once every box is marked). */
 const CpSaveLayout CpSaveLayout_HeartGoldSoulSilver = {
     CP_SAVE_FOOTER_SHARED_COUNTER, 16, { 0, 0xF700 }, { 0xF628, 0x12310 },
-    0x90, 0, 0x1000, 0x12004, 4, 0x3FFFF
+    0x90, 0, 0x1000, 0x12004, 4, 0x3FFFF, NULL
 };
 
 enum { HGSS_BOXES = 18, HGSS_BOX_SIZE = 0x1000 };
@@ -165,6 +166,8 @@ CpSaveResult CpSaveImage_LoadLayout(CpSaveImage *image, const CpFile *file, cons
     int inconsistent = 0;
     if (image == NULL) return CP_SAVE_INVALID;
     image->loaded = 0;
+    if (layout != NULL && layout->footer == CP_SAVE_FOOTER_GEN5)
+        return magic == CP_SAVE_MAGIC_GEN5 ? CpGen5Save_Load(image, file, layout) : CP_SAVE_INVALID;
     if (layout == NULL || (magic != CP_SAVE_MAGIC_INTERNATIONAL && magic != CP_SAVE_MAGIC_KOREAN))
         return CP_SAVE_INVALID;
     image->layout = layout;
@@ -225,14 +228,15 @@ CpSaveResult CpSaveImage_Load(CpSaveImage *image, const CpFile *file, uint32_t m
 
 CpSaveResult CpSaveImage_LoadAny(CpSaveImage *image, const CpFile *file)
 {
-    static const CpSaveLayout *const layouts[3] = {
-        &CpSaveLayout_Platinum, &CpSaveLayout_DiamondPearl, &CpSaveLayout_HeartGoldSoulSilver
+    static const CpSaveLayout *const layouts[5] = {
+        &CpSaveLayout_Platinum, &CpSaveLayout_DiamondPearl, &CpSaveLayout_HeartGoldSoulSilver,
+        &CpSaveLayout_BlackWhite, &CpSaveLayout_Black2White2
     };
     static const uint32_t magics[2] = { CP_SAVE_MAGIC_INTERNATIONAL, CP_SAVE_MAGIC_KOREAN };
     CpSaveResult result, best = CP_SAVE_INVALID;
     unsigned i, j;
-    for (i = 0; i < 3; ++i) for (j = 0; j < 2; ++j) {
-        result = CpSaveImage_LoadLayout(image, file, layouts[i], magics[j]);
+    for (i = 0; i < 5; ++i) for (j = 0; j < (i < 3 ? 2u : 1u); ++j) {
+        result = CpSaveImage_LoadLayout(image, file, layouts[i], i < 3 ? magics[j] : CP_SAVE_MAGIC_GEN5);
         if (result == CP_SAVE_OK || result == CP_SAVE_IO_ERROR) return result;
         if (result != CP_SAVE_INVALID) best = result;
     }
@@ -241,8 +245,19 @@ CpSaveResult CpSaveImage_LoadAny(CpSaveImage *image, const CpFile *file)
 
 unsigned char *CpSaveImage_Block(CpSaveImage *image, unsigned block)
 {
-    if (image == NULL || !image->loaded || block >= 2) return NULL;
+    if (image == NULL || !image->loaded) return NULL;
+    if (image->layout->footer == CP_SAVE_FOOTER_GEN5)
+        return block < image->layout->gen5->blockCount ? image->bytes + image->blockOffsets[block] : NULL;
+    if (block >= 2) return NULL;
     return image->bytes + image->currentHalf[block] * CP_SAVE_HALF_SIZE + image->layout->offsets[block];
+}
+
+uint32_t CpSaveImage_BlockSize(const CpSaveImage *image, unsigned block)
+{
+    if (image == NULL || image->layout == NULL) return 0;
+    if (image->layout->footer == CP_SAVE_FOOTER_GEN5)
+        return block < image->layout->gen5->blockCount ? image->layout->gen5->blockSizes[block] : 0;
+    return block < 2 ? BodySize(image->layout, block) : 0;
 }
 
 CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_SAVE_HASH_SIZE])
@@ -250,6 +265,7 @@ CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_
     CpSaveSha256 hash;
     unsigned block;
     if (image == NULL || !image->loaded || digest == NULL) return CP_SAVE_INVALID;
+    if (image->layout->footer == CP_SAVE_FOOTER_GEN5) return CpGen5Save_Hash(image, digest);
     CpSaveSha256_Init(&hash);
     for (block = 0; block < 2; ++block)
         HashBody(&hash, image->layout, block, 0, Block(image, block), BodySize(image->layout, block));
@@ -265,6 +281,7 @@ CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
     const CpSaveLayout *layout;
     if (image == NULL || !image->loaded || expected == NULL) return CP_SAVE_INVALID;
     layout = image->layout;
+    if (layout->footer == CP_SAVE_FOOTER_GEN5) return CpGen5Save_Verify(image, file, expected);
     if (!FileSize(file)) return CP_SAVE_IO_ERROR;
     for (half = 0; half < 2; ++half) {
         CpSaveSha256 hash;
@@ -337,6 +354,7 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
     const CpSaveLayout *layout;
     CpSaveResult result = CpSaveImage_Hash(image, digest);
     if (result != CP_SAVE_OK || expected == NULL) return CP_SAVE_INVALID;
+    if (image->layout->footer == CP_SAVE_FOOTER_GEN5) return CpGen5Save_Commit(image, file, expected);
     if (memcmp(digest, expected, sizeof(digest)) != 0) return CP_SAVE_VERIFY_FAILED;
     if (!FileSize(file) || file->writeAt == NULL || file->sync == NULL) return CP_SAVE_IO_ERROR;
     layout = image->layout;
