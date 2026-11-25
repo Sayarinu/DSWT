@@ -524,6 +524,50 @@ static void HeartGoldEffects(void)
 }
 #endif
 
+/* The Pokédex's form history of every form species a delivery registers:
+ * HeartGold/SoulSilver's Pokedex_TryAppendSeenForm records Deoxys, Rotom,
+ * Shaymin and Giratina (at their own offsets); Diamond/Pearl's
+ * Pokedex_SetMonSeenForm records Deoxys and keeps no others. */
+static void FormHistory(void)
+{
+    FxSpec specs[6];
+    WtJournalEntry entry;
+    static const Spec forms[] = {
+        { 386, 0, 2, 2, 0x7001 }, /* Deoxys Defense */
+        { 386, 0, 2, 2, 0x7002 }, /* the same form again: no second entry */
+        { 479, 0, 1, 2, 0x7003 }, /* Heat Rotom */
+        { 492, 0, 0, 2, 0x7004 }, /* Land Shaymin */
+        { 487, 0, 0, 2, 0x7005 }, /* Altered Giratina */
+    };
+    unsigned char *general, *dex, before[0x340];
+    unsigned i;
+    Defaults(specs, 1); Setup(specs, 1);
+    memcpy(before, CpSaveImage_Block(&image, 0) + DEX, sizeof(before));
+    for (i = 0; i < sizeof(forms) / sizeof(forms[0]); ++i) {
+        Match(&entry, &forms[i]);
+        Deliver(&entry);
+    }
+    general = CpSaveImage_Block(&image, 0);
+    dex = general + DEX;
+    /* Deoxys: the first nibble of the last caught word's top byte; the rest 15. */
+    assert(dex[0x43] == 0xF2 && dex[0x83] == 0xFF);
+#if HGSS
+    assert(Fx32(dex + 0x338) == (0xFFFFFFFFu & ~7u) + 1); /* Rotom: entry 0 is form 1 */
+    assert(dex[0x33C] == 0xFC && dex[0x33D] == 0xFC);    /* both entries form 0 */
+    /* Giratina's Origin Forme next: the second entry. */
+    {
+        Spec origin = { 487, 0, 1, 2, 0x7006 };
+        Match(&entry, &origin); Deliver(&entry);
+        assert(CpSaveImage_Block(&image, 0)[DEX + 0x33D] == 0xFE);
+    }
+#else
+    /* Nothing after the Meister flags changes, in the Pokédex or past it where
+     * Platinum keeps Rotom (0x31C), Shaymin (0x320) and Giratina (0x321). */
+    assert(memcmp(dex + 0x137, before + 0x137, sizeof(before) - 0x137) == 0);
+#endif
+    printf("PASS %s form history: Deoxys%s\n", FX_GAME_NAME, HGSS ? ", Rotom, Shaymin and Giratina" : " only");
+}
+
 /* A returned offer already back is never added twice; a full PC keeps it. */
 static void Returns(void)
 {
@@ -662,6 +706,7 @@ int main(void)
 #if HGSS
     HeartGoldEffects();
 #endif
+    FormHistory();
     Returns();
     StockGame();
     CanHold();

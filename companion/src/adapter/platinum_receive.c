@@ -90,7 +90,10 @@ static const Profile kProfiles[3] = {
 /* The HeartGold/SoulSilver Pokédex (pokeheartgold include/pokedex.h): the
  * same as Platinum's up to the Unown order, then the Unown caught order, the
  * caught languages, the international view flag and Pichu's forms. */
-enum { HGSS_DEX_UNOWN_CAUGHT = 0x128, HGSS_DEX_LANGUAGES = 0x144, HGSS_DEX_INTERNATIONAL = 0x335, HGSS_DEX_PICHU = 0x33E };
+enum {
+    HGSS_DEX_UNOWN_CAUGHT = 0x128, HGSS_DEX_LANGUAGES = 0x144, HGSS_DEX_INTERNATIONAL = 0x335,
+    HGSS_DEX_ROTOM = 0x338, HGSS_DEX_SHAYMIN = 0x33C, HGSS_DEX_GIRATINA = 0x33D, HGSS_DEX_PICHU = 0x33E
+};
 /* The Diamond/Pearl Pokédex: Pokédex Meister flags of 14 species after the
  * Unown order. */
 enum { DP_DEX_MEISTER = 0x129 };
@@ -227,20 +230,21 @@ static void SetBit(unsigned char *array, unsigned index, unsigned value)
 
 static int Seen(const unsigned char *dex, unsigned species) { return Bit(dex + DEX_SEEN, species); }
 
-static unsigned char *TwoForms(unsigned char *dex, unsigned species)
+/* Shaymin's and Giratina's entries sit elsewhere in HeartGold/SoulSilver's Pokédex. */
+static unsigned char *TwoForms(unsigned char *dex, unsigned species, int hgss)
 {
     switch (species) {
     case SPECIES_SHELLOS: return dex + DEX_SHELLOS;
     case SPECIES_GASTRODON: return dex + DEX_GASTRODON;
-    case SPECIES_SHAYMIN: return dex + DEX_SHAYMIN;
-    default: return dex + DEX_GIRATINA;
+    case SPECIES_SHAYMIN: return dex + (hgss ? HGSS_DEX_SHAYMIN : DEX_SHAYMIN);
+    default: return dex + (hgss ? HGSS_DEX_GIRATINA : DEX_GIRATINA);
     }
 }
 
-/* UpdateForms_TwoForms: the first form seen fills both entries. */
-static void UpdateTwoForms(unsigned char *dex, unsigned species, unsigned form)
+/* UpdateForms_TwoForms (Pokedex_SetSeenForm_2max): the first form seen fills both entries. */
+static void UpdateTwoForms(unsigned char *dex, unsigned species, unsigned form, int hgss)
 {
-    unsigned char *forms = TwoForms(dex, species);
+    unsigned char *forms = TwoForms(dex, species, hgss);
     unsigned seen = !Seen(dex, species) ? 0 : Bit(forms, 1) == Bit(forms, 2) ? 1 : 2, i;
     for (i = 0; i < seen; ++i) if ((unsigned)Bit(forms, i + 1) == form) return;
     if (seen < 2) {
@@ -285,16 +289,16 @@ static void UpdateDeoxys(unsigned char *dex, unsigned form)
     Write32(word, (Read32(word) & ~(UINT32_C(15) << (24 + 4 * (seen & 1)))) | ((uint32_t)form << (24 + 4 * (seen & 1))));
 }
 
-/* UpdateForms_Rotom: six 3-bit entries, 7 unused. */
-static void UpdateRotom(unsigned char *dex, unsigned form)
+/* UpdateForms_Rotom (Pokedex_SetSeenRotomForm): six 3-bit entries, 7 unused. */
+static void UpdateRotom(unsigned char *dex, unsigned form, unsigned offset)
 {
-    uint32_t forms = Read32(dex + DEX_ROTOM);
+    uint32_t forms = Read32(dex + offset);
     unsigned seen = 0, i;
     if (Seen(dex, SPECIES_ROTOM)) {
         while (seen < 6 && ((forms >> (3 * seen)) & 7) != 7) ++seen;
         for (i = 0; i < seen; ++i) if (((forms >> (3 * i)) & 7) == form) return;
     }
-    if (seen < 6) Write32(dex + DEX_ROTOM, (forms & ~(UINT32_C(7) << (3 * seen))) | ((uint32_t)(form & 7) << (3 * seen)));
+    if (seen < 6) Write32(dex + offset, (forms & ~(UINT32_C(7) << (3 * seen))) | ((uint32_t)(form & 7) << (3 * seen)));
 }
 
 /* SetUnownForm: forms in the order first seen, 0xFF unused. */
@@ -342,13 +346,20 @@ static void DexCapture(CpReceiveGame game, unsigned char *dex, uint16_t species,
     switch (species) {
     case SPECIES_UNOWN: UpdateUnown(dex + DEX_UNOWN, form); break;
     case SPECIES_BURMY: case SPECIES_WORMADAM: UpdateThreeForms(dex, species, form); break;
-    case SPECIES_SHELLOS: case SPECIES_GASTRODON: UpdateTwoForms(dex, species, form); break;
+    case SPECIES_SHELLOS: case SPECIES_GASTRODON: UpdateTwoForms(dex, species, form, 0); break;
+    /* Diamond/Pearl keep no Shaymin, Giratina or Rotom forms (pokediamond
+     * Pokedex_SetMonSeenForm); HeartGold/SoulSilver keep them at their own
+     * offsets (pokeheartgold Pokedex_TryAppendSeenForm). Deoxys is the same
+     * in all three. */
     case SPECIES_SHAYMIN: case SPECIES_GIRATINA:
-        if (game == CP_RECEIVE_PLATINUM) UpdateTwoForms(dex, species, form);
+        if (game != CP_RECEIVE_DIAMOND_PEARL)
+            UpdateTwoForms(dex, species, form, game == CP_RECEIVE_HEARTGOLD_SOULSILVER);
         break;
-    /* HeartGold/SoulSilver only set Deoxys's seen flag here, as below does. */
-    case SPECIES_DEOXYS: if (game != CP_RECEIVE_HEARTGOLD_SOULSILVER) UpdateDeoxys(dex, form); break;
-    case SPECIES_ROTOM: if (game == CP_RECEIVE_PLATINUM) UpdateRotom(dex, form); break;
+    case SPECIES_DEOXYS: UpdateDeoxys(dex, form); break;
+    case SPECIES_ROTOM:
+        if (game != CP_RECEIVE_DIAMOND_PEARL)
+            UpdateRotom(dex, form, game == CP_RECEIVE_HEARTGOLD_SOULSILVER ? HGSS_DEX_ROTOM : DEX_ROTOM);
+        break;
     /* Pokedex_TryAppendSeenForm: male, female or Spiky-eared Pichu. */
     case SPECIES_PICHU:
         if (game == CP_RECEIVE_HEARTGOLD_SOULSILVER) UpdateThreeForms(dex, species, form ? 2 : gender == 0 ? 0 : 1);
