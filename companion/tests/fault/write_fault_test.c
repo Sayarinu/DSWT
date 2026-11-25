@@ -27,12 +27,19 @@ static int Hash(const unsigned char *bytes, size_t size, unsigned char digest[32
  *
  * Every recovery must pass: there are no known failures.
  * CP_FAULT_FULL=1 sweeps every journal byte, sector boundaries and odd save
- * offsets in both persistence orders; CI uses a deterministic smaller sample.
+ * offsets in both persistence orders; CI samples distinct journal cuts per
+ * inventory step and cut kind (with separate first/odd/last-byte prefix tears),
+ * while retaining cuts at every save write and sync.
  * CP_FAULT_SCENARIO selects one of names[] for a focused reproduction. */
 enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, SCENARIOS };
 static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint" };
 static const char *steps[] = { "checkpoint/network", "prepare-remove", "remove", "verify-removed",
     "prepare-receive", "receive", "verify-received", "restore", "prepare-restore" };
+enum CutKind { BEFORE_WRITE, LOST_WRITE, TORN_PREFIX, TAIL_FIRST, AFTER_WRITE, BEFORE_SYNC, AFTER_SYNC, CUT_KINDS };
+static const char *cutNames[] = { "before-write", "lost-write", "torn-prefix", "tail-first", "after-write",
+    "before-sync-lost-pending", "after-sync" };
+static unsigned sampled[sizeof(steps) / sizeof(*steps)], cutMask;
+static int journalWrite;
 static enum Scenario scenario;
 static jmp_buf reboot;
 static CpSaveImage image;
@@ -161,7 +168,7 @@ static int Seen(const unsigned char digest[32])
 
 /* A prefix persists bytes before tear; tail-first persists the sectors after
  * tear while leaving the head old. Both start with only durable earlier writes. */
-static void Cut(const char *model, int losePending, uint32_t offset, const void *data, size_t size,
+static void Cut(enum CutKind kind, int losePending, uint32_t offset, const void *data, size_t size,
     size_t tear, int tail)
 {
     pid_t child;
@@ -169,7 +176,18 @@ static void Cut(const char *model, int losePending, uint32_t offset, const void 
     unsigned plan, worst = RECOVERED;
     unsigned char digest[32];
     CpSaveSha256 hash;
+    unsigned *sample;
+    unsigned sampleBit = 1u << kind;
+    const char *model = cutNames[kind];
     if (!inject || !counting) return;
+    cutMask |= 1u << kind;
+    sample = &sampled[step];
+    if (kind == TORN_PREFIX) {
+        if (tear == 1) sampleBit = 1u << CUT_KINDS;
+        else if (tear == size - 1) sampleBit = 1u << (CUT_KINDS + 1);
+        else if (tear == 513) sampleBit = 1u << (CUT_KINDS + 2);
+    }
+    if (!full && journalWrite && (*sample & sampleBit)) return;
     ++attempts;
     if (data) { if (tail) ++tailAttempts; else ++prefixAttempts; }
     memcpy(crashBytes, losePending ? durable : live, sizeof(crashBytes));
@@ -192,6 +210,7 @@ static void Cut(const char *model, int losePending, uint32_t offset, const void 
     CpSaveSha256_Update(&hash, (const unsigned char *)&randomCounter, sizeof(randomCounter));
     CpSaveSha256_Finish(&hash, digest);
     if (Seen(digest)) { ++duplicates; return; }
+    if (journalWrite) *sample |= sampleBit;
     ++distinct;
     if (data) { if (tail) ++tailStates; else ++prefixStates; }
     /* The prompt says save once. Also check two stock saves, which refresh
@@ -228,7 +247,7 @@ static void Cut(const char *model, int losePending, uint32_t offset, const void 
 static void Tear(size_t tear, uint32_t offset, const void *bytes, size_t size, int tail)
 {
     if (tear > 0 && tear < size)
-        Cut(tail ? "tail-first" : "torn-prefix", 1, offset, bytes, size, tear, tail);
+        Cut(tail ? TAIL_FIRST : TORN_PREFIX, 1, offset, bytes, size, tear, tail);
 }
 
 static int ReadAt(void *arg, uint32_t offset, void *bytes, size_t size)
@@ -247,6 +266,7 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
 {
     int result;
     (void)arg;
+    journalWrite = JournalOffset(offset); /* Also classifies the following sync. */
     if (counting) {
         ++eventCount; stopOffset = offset; stopSize = size;
         if (JournalOffset(offset)) { ++journalWrites; expectedJournalByteTears += (unsigned)size - 1; }
@@ -254,8 +274,8 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
     }
     if (inject && counting) {
         size_t tear;
-        Cut("before-write", 0, 0, NULL, 0, 0, 0);
-        Cut("lost-write", 1, 0, NULL, 0, 0, 0);
+        Cut(BEFORE_WRITE, 0, 0, NULL, 0, 0, 0);
+        Cut(LOST_WRITE, 1, 0, NULL, 0, 0, 0);
         if (full) {
             /* Journal records: every byte. Save writes: every absolute sector
              * boundary, including writes that start inside a sector. */
@@ -281,7 +301,7 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
     result = disk.writeAt(disk.context, offset, bytes, size);
     assert(result == 0);
     memcpy(live + offset, bytes, size);
-    Cut("after-write", 0, 0, NULL, 0, 0, 0);
+    Cut(AFTER_WRITE, 0, 0, NULL, 0, 0, 0);
     return result;
 }
 
@@ -289,10 +309,10 @@ static int Sync(void *arg)
 {
     (void)arg;
     if (counting) { ++eventCount; ++syncs; stopOffset = 0; stopSize = 0; }
-    Cut("before-sync-lost-pending", 1, 0, NULL, 0, 0, 0);
+    Cut(BEFORE_SYNC, 1, 0, NULL, 0, 0, 0);
     assert(disk.sync(disk.context) == 0);
     memcpy(durable, live, sizeof(durable));
-    Cut("after-sync", 0, 0, NULL, 0, 0, 0);
+    Cut(AFTER_SYNC, 0, 0, NULL, 0, 0, 0);
     return 0;
 }
 
@@ -506,6 +526,7 @@ static void Setup(void)
     attempts = duplicates = distinct = prefixAttempts = tailAttempts = 0;
     prefixStates = tailStates = stockCases = stockRecovered = lastEvent = 0;
     journalByteTears = expectedJournalByteTears = 0;
+    memset(sampled, 0, sizeof(sampled)); cutMask = 0;
     memset(tally, 0, sizeof(tally));
     free(seen); seen = NULL; seenCapacity = 0;
     counting = 1;
@@ -523,7 +544,7 @@ static void Run(void)
 int main(void)
 {
     const char *only = getenv("CP_FAULT_SCENARIO");
-    unsigned ran = 0, failures = 0;
+    volatile unsigned ran = 0, failures = 0;
     full = getenv("CP_FAULT_FULL") != NULL;
     if (setjmp(reboot)) Resume();
     for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) {
@@ -540,6 +561,8 @@ int main(void)
         assert(distinct == tally[RECOVERED] + tally[JOURNAL_BLOCKED] + tally[SAVE_BLOCKED]
             + tally[STUCK] + tally[DUPLICATE] + tally[LOST]);
         assert(prefixStates > 0 && tailStates > 0);
+        assert(cutMask == (1u << CUT_KINDS) - 1);
+        assert(stockCases > 0 || scenario == PROVISION);
         assert(!full || journalByteTears == expectedJournalByteTears);
         failures += distinct - tally[RECOVERED];
         if (scenario == OFFER || scenario == REJECT_RESTORE) {
@@ -556,14 +579,15 @@ int main(void)
         }
         printf("%s: checkpoints=%u save-writes=%u journal-writes=%u syncs=%u attempts=%u "
             "identical-states=%u distinct-states=%u prefix-attempts=%u tail-attempts=%u "
-            "distinct-prefix=%u distinct-tail=%u stock-save-cases=%u stock-save-recovered=%u journal-byte-tears=%u\n",
+            "distinct-prefix=%u distinct-tail=%u stock-save-cases=%u stock-save-recovered=%u journal-byte-tears=%u cut-kinds=%#x\n",
             names[scenario], checkpoints, saveWrites, journalWrites, syncs, attempts, duplicates, distinct,
-            prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered, journalByteTears);
+            prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered, journalByteTears, cutMask);
         printf("  recovered=%u journal-blocked=%u save-blocked=%u stuck=%u duplicate=%u lost=%u\n",
             tally[RECOVERED], tally[JOURNAL_BLOCKED], tally[SAVE_BLOCKED], tally[STUCK], tally[DUPLICATE], tally[LOST]);
         CloseFile();
     }
     assert(ran != 0);
+    assert(only || ran == SCENARIOS);
     free(seen);
     printf("%s recovery: %u unexpected outcomes, %u distinct cuts not recovered\n",
         unexpected ? "FAIL" : "PASS", unexpected, failures);

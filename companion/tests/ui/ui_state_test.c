@@ -6,6 +6,7 @@
 
 #include "game/rom.h"
 #include "ui/ui.h"
+#include "ui/render.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include "wonder_trade/menu_input.h"
@@ -454,6 +455,41 @@ static void TestMenu(void)
     Tap(WT_MENU_LEFT + 10, WT_MENU_TOP + WT_MENU_HEIGHT + 2);
     Tap(WT_MENU_LEFT - 2, WT_MENU_TOP + 10);
     Expect(CP_UI_MENU, WonderTrade_Text_Queued);
+}
+
+/* Info keeps both the game's explanation and the repair-only backup warning,
+ * in the save's language, without adding an enrollment acknowledgement. */
+static void TestBackupWarningOnInfo(void)
+{
+    static const uint8_t languages[] = { CP_LANGUAGE_ENGLISH, CP_LANGUAGE_FRENCH, CP_LANGUAGE_GERMAN,
+        CP_LANGUAGE_ITALIAN, CP_LANGUAGE_SPANISH, CP_LANGUAGE_JAPANESE, CP_LANGUAGE_KOREAN };
+    static uint8_t topText[CP_CANVAS_BYTES], bottomText[CP_CANVAS_BYTES], expected[CP_CANVAS_BYTES];
+    CpScreen top = { .text = { .tiles = topText } }, bottom = { .text = { .tiles = bottomText } };
+    CpCanvas warning = { .tiles = expected };
+    unsigned language;
+    int x, y;
+    for (language = 0; language < Companion_Language_Count; ++language) {
+        char wrapped[CP_RENDER_MESSAGE_MAX];
+        ReachMenu(WT_JOURNAL_IDLE);
+        sFake.model.gameLanguage = languages[language];
+        Press(CP_UI_KEY_DOWN);
+        Press(CP_UI_KEY_A);
+        Expect(CP_UI_MESSAGE, WonderTrade_Text_Explanation);
+        assert(CpText_Wrap(wrapped, sizeof(wrapped),
+            Companion_Text[Companion_Text_BackupWarning][language], 216) <= 6);
+        memset(expected, 0, sizeof(expected));
+        CpCanvas_Text(&warning, 20, 80, wrapped, (CpInk){ CP_INK_DARK, CP_INK_SHADOW });
+        CpRender_Draw(&sUi, &sFake.model, &top, &bottom);
+        for (y = 80; y < 184; ++y)
+            for (x = 16; x < 240; ++x) {
+                uint8_t ink = CpCanvas_Get(&warning, x, y);
+                if (ink) assert(CpCanvas_Get(&bottom.text, x, y) == ink);
+            }
+        ExpectActions(1, WonderTrade_Text_Back, -1, -1);
+        Press(CP_UI_KEY_B);
+        Expect(CP_UI_MENU, WonderTrade_Text_Choose);
+    }
+    puts("PASS UI: Info shows the complete backup warning in every language and Back returns to the menu");
 }
 
 static void TestPicker(void)
@@ -942,6 +978,7 @@ int main(void)
     TestConnecting();
     TestOutcomes();
     TestMenu();
+    TestBackupWarningOnInfo();
     TestPicker();
     TestPickerTouch();
     TestTextIds();

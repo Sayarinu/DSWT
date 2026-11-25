@@ -101,7 +101,7 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
  * After playing changes those hashes, transitional escrow is retained only for
  * an absent original; Resume also rejects any engine stuck in those phases. */
 static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
-    const unsigned char digests[4][32], int played)
+    unsigned char digests[4][32], int played)
 {
     unsigned selected[2], counts[4] = { 0, 0, 0, 0 }, i, mon, escrow = 0;
     const unsigned char *general, *boxes;
@@ -151,7 +151,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
 }
 
 static void Conservation(const unsigned char *bytes, const WtJournalEntry *entry,
-    const unsigned char digests[4][32])
+    unsigned char digests[4][32])
 {
     assert(Ownership(bytes, entry, digests, 0) == 0);
 }

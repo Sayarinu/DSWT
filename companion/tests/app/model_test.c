@@ -49,7 +49,7 @@ typedef struct Fake {
     /* PSA: freed by every exchange, as WtTls_Close does on the DS. */
     int cryptoReady, randomFailures;
     unsigned prepares, seedWrites, posts;
-    int seedWait;
+    int seedWait, corruptReply;
     uint64_t freeSpace;
     int saveFd;
     /* A write-back cache in front of the card: readAt sees it, readDurable
@@ -302,6 +302,7 @@ static int Post(void *arg, const unsigned char *request, size_t size,
     unsigned char reply[WT_WIRE_REPLY_MAX], size_t *replySize)
 {
     int result = FsPost(arg, request, size, reply, replySize);
+    if (fake.corruptReply) reply[0] ^= 1;
     ++fake.posts;
     fake.cryptoReady = 0; /* WtTls_Close frees PSA */
     return result;
@@ -433,7 +434,10 @@ static void OnlyBackup(const char *stem, char *out, size_t size)
         snprintf(path, sizeof(path), "%s/%s", backupRoot, folder->d_name);
         directory = opendir(path);
         while (directory && (item = readdir(directory)))
-            if (strstr(item->d_name, ".sav")) snprintf(out, size, "_nds/dswt/backups/%s/%s", folder->d_name, item->d_name);
+            if (strstr(item->d_name, ".sav")) {
+                int written = snprintf(out, size, "_nds/dswt/backups/%s/%s", folder->d_name, item->d_name);
+                assert(written >= 0 && (size_t)written < size);
+            }
         if (directory) closedir(directory);
     }
     closedir(root);
@@ -744,6 +748,36 @@ static void OfferStatusCancelCollect(void)
         fake.posts, fake.seedWrites);
     CloseSession();
     assert(fake.saveFd < 0 && !fake.romOpen[CP_APP_ROM_GAME]);
+}
+
+static void SupportCodesMatchTheGame(void)
+{
+    unsigned submits = server.requests[WT_OP_SUBMIT];
+    LoadByName("Platinum.sav");
+    Connect();
+    /* The server has counted a trade this older copy never sent. */
+    ++server.nextCounter;
+    Visit(-1, 0, 0);
+    assert(app.visit.result == CP_VISIT_ERROR_ROLLED_BACK && app.visit.rolledBack);
+    assert(model->net == CP_UI_NET_ERROR && model->error == -41 && model->canLeave);
+    assert(server.requests[WT_OP_SUBMIT] == submits);
+    --server.nextCounter;
+    CloseSession();
+
+    LoadByName("Platinum.sav");
+    Connect();
+    fake.corruptReply = 1;
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_ERROR && model->error == -18 && !model->canLeave);
+    fake.corruptReply = 0;
+    CloseSession();
+
+    LoadByName("Platinum.sav");
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0 && model->canLeave);
+    CloseSession();
+    puts("PASS model: rollback -41 and malformed reply -18 match the game; a valid retry clears the error");
 }
 
 static void ReloadEnrolledSave(void)
@@ -1497,6 +1531,7 @@ int main(void)
     ScanFindsSavesAndTheirRoms();
     LoadRefusals();
     OfferStatusCancelCollect();
+    SupportCodesMatchTheGame();
     ReloadEnrolledSave();
     MatchedDeliveries();
     RestoredRetailNeedsRecovery();
