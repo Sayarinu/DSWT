@@ -954,6 +954,67 @@ static void ReturnAlreadyPresentFailsClosed(void)
     puts("PASS model: a returned offer already back in the save is never added twice (fails closed)");
 }
 
+/* Valid UTF-8 throughout, with no partial character at the end. */
+static int ValidUtf8(const char *text)
+{
+    const unsigned char *p = (const unsigned char *)text;
+    while (*p) {
+        unsigned extra = *p < 0x80 ? 0 : (*p & 0xE0) == 0xC0 ? 1 : (*p & 0xF0) == 0xE0 ? 2 : (*p & 0xF8) == 0xF0 ? 3 : 9;
+        if (extra == 9) return 0;
+        for (++p; extra; --extra, ++p) if ((*p & 0xC0) != 0x80) return 0;
+    }
+    return 1;
+}
+
+static void BackupStems(void)
+{
+    static const struct { const char *name, *stem; } cases[] = {
+        { "Platinum.sav", "Platinum" },
+        { "Platinum.SAV", "Platinum" },
+        /* 3-byte Japanese: 13 characters fit in 40 bytes (39), the 14th would split. */
+        { "ポケットモンスタープラチナ（日本語）.sav", "ポケットモンスタープラチナ" },
+        /* Korean, also 3 bytes each. */
+        { "포켓몬스터 플래티넘 한국어판 세이브 파일.sav", "포켓몬스터 플래티넘 한국어" },
+        { "A very long English save file name that goes on and on.sav", "A very long English save file name that" }, /* no trailing space */
+        { "Bad<name>:with*forbidden?chars|\"and\\slash.sav", "Bad_name__with_forbidden_chars__and_slas" },
+        { "Trailing dots... .sav", "Trailing dots" },
+        { "....sav", "save" },
+        { "é.sav", "é" },
+    };
+    char stem[CP_APP_BACKUP_STEM_MAX + 1];
+    unsigned i;
+    for (i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        size_t length = CpApp_BackupStem(cases[i].name, stem);
+        if (strcmp(stem, cases[i].stem) != 0) printf("stem %u: '%s' -> '%s' (want '%s')\n", i, cases[i].name, stem, cases[i].stem);
+        assert(length == strlen(stem) && length <= CP_APP_BACKUP_STEM_MAX && ValidUtf8(stem));
+        assert(!strpbrk(stem, "\\/:*?\"<>|") && stem[length - 1] != '.' && stem[length - 1] != ' ');
+    }
+    for (i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        CpApp_BackupStem(cases[i].name, stem);
+        assert(strcmp(stem, cases[i].stem) == 0);
+    }
+    puts("PASS model: backup folder stems are cut at characters and safe for FAT");
+}
+
+/* A long Japanese save name: its backup folder is a valid name and the backup works. */
+static void JapaneseSaveBacksUp(void)
+{
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1;
+    MakeDirectories("roms/nds/jp");
+    WriteRom("roms/nds/jp/ポケットモンスタープラチナ（日本語）.nds", "CPUE", 1);
+    WriteSave("roms/nds/jp/ポケットモンスタープラチナ（日本語）.sav", 3);
+    Rescan();
+    LoadByPath("jp/");
+    assert(model->loadMessage == -1);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0);
+    assert(CountBackups("ポケットモンスタープラチナ") == 1);
+    CloseSession();
+    puts("PASS model: a long Japanese save name backs up");
+}
+
 int main(void)
 {
     Setup();
@@ -969,6 +1030,8 @@ int main(void)
     SameNameSavesKeepSeparateBackups();
     UnprovenWritesAndTheLeaveFence();
     ReturnAlreadyPresentFailsClosed();
+    BackupStems();
+    JapaneseSaveBacksUp();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

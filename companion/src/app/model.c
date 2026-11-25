@@ -379,14 +379,30 @@ static int ReadPhase(CpApp *app, unsigned *phase, unsigned char saveID[16])
  * enrolls again gets a folder of its own rather than a conflicting one.
  * Backups made before this naming, in <root>/<stem>/, still count when they
  * hold this enrollment. */
+size_t CpApp_BackupStem(const char *name, char out[CP_APP_BACKUP_STEM_MAX + 1])
+{
+    size_t length = strlen(name), i;
+    if (EndsWithSav(name)) length -= 4;
+    if (length > CP_APP_BACKUP_STEM_MAX) {
+        /* Cut before a character, never inside one: back over continuation bytes. */
+        length = CP_APP_BACKUP_STEM_MAX;
+        while (length > 0 && ((unsigned char)name[length] & 0xC0) == 0x80) --length;
+    }
+    for (i = 0; i < length; ++i) {
+        unsigned char c = (unsigned char)name[i];
+        out[i] = c < 0x20 || c == 0x7F || strchr("\\/:*?\"<>|", c) ? '_' : (char)c;
+    }
+    /* FAT drops trailing dots and spaces from a name. */
+    while (length > 0 && (out[length - 1] == '.' || out[length - 1] == ' ')) --length;
+    if (!length) { memcpy(out, "save", 4); length = 4; }
+    out[length] = 0;
+    return length;
+}
+
 static void BackupName(const CpApp *app, const unsigned char saveID[16], char out[64])
 {
     static const char hex[] = "0123456789abcdef";
-    const char *base = Basename(app->saves[app->index].path);
-    size_t length = strlen(base), i;
-    if (EndsWithSav(base)) length -= 4;
-    if (length > 40) length = 40;
-    memcpy(out, base, length);
+    size_t length = CpApp_BackupStem(Basename(app->saves[app->index].path), out), i;
     out[length++] = '-';
     for (i = 0; i < 4; ++i) { out[length++] = hex[saveID[i] >> 4]; out[length++] = hex[saveID[i] & 15]; }
     memcpy(out + length, ".sav", 5);

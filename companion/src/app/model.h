@@ -91,4 +91,12 @@ extern CpSaveImage gCpAppImage;
 
 void CpApp_Init(CpApp *, const CpAppPlatform *, CompanionLanguage systemLanguage);
 
+/* The save's part of its backup folder name (<stem>-<id>): the file name
+ * without .sav, cut to at most CP_APP_BACKUP_STEM_MAX bytes at a UTF-8
+ * character boundary, characters FAT forbids (\ / : * ? " < > | and controls)
+ * as '_', no trailing dots or spaces, "save" when nothing is left. Returns
+ * its length. */
+#define CP_APP_BACKUP_STEM_MAX 40
+size_t CpApp_BackupStem(const char *name, char out[CP_APP_BACKUP_STEM_MAX + 1]);
+
 #endif
