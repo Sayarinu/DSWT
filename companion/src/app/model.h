@@ -14,7 +14,10 @@
 #include "wonder_trade/engine.h"
 
 /* The screens' real model: CpUiOps over the saves on the SD card, the
- * player's ROMs, the Platinum adapter and the visit driver (session/visit.h).
+ * player's ROMs, the game adapter (Diamond/Pearl, Platinum and HeartGold/
+ * SoulSilver, adapter/platinum.h) and the visit driver (session/visit.h).
+ * A save the paired game would not load (it never saved there, or its
+ * LoadCheck refuses both copies) asks the player to save in the game first.
  * Every op returns at once; scans, loads and visits run on the worker and
  * update() publishes their results, as WonderTradeNetwork does for the
  * patched game's application.c.
@@ -129,5 +132,9 @@ void CpApp_StartWifi(CpApp *);
  * its length. */
 #define CP_APP_BACKUP_STEM_MAX 40
 size_t CpApp_BackupStem(const char *name, char out[CP_APP_BACKUP_STEM_MAX + 1]);
+
+/* The save layout of a family the companion trades for, NULL for any other:
+ * Diamond/Pearl, Platinum and HeartGold/SoulSilver. */
+const CpSaveLayout *CpApp_Layout(CpFamily);
 
 #endif

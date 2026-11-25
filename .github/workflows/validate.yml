@@ -48,14 +48,23 @@ jobs:
   connectivity-server:
     name: Build and test connectivity server
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build server and run integration tests
-        run: docker build -f server/Dockerfile -t dswt-server .
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: server/Dockerfile
+          tags: dswt-server
+          load: true
+          cache-from: type=gha,scope=connectivity-server
+          cache-to: type=gha,mode=max,scope=connectivity-server
 
   tls-transport:
     name: Test bounded TLS transport

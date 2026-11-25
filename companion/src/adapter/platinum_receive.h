@@ -6,11 +6,12 @@
 
 #include "game/gamedata.h"
 
-/* A matched Wonder Trade delivery arriving in a Platinum save, as the patched
- * game's ReceiveEffects and BuildReceived (client/src/wonder_trade/platinum/
- * game_save.c) apply it with the game's own Pokémon, Pokédex, records,
- * Pokétch and journal code. Every effect here writes the bytes that code
- * writes, so the companion's save and the game's agree byte for byte. */
+/* A matched Wonder Trade delivery arriving in a Generation IV save, as the
+ * patched game's ReceiveEffects and BuildReceived (client/src/wonder_trade/
+ * platinum/, dp/ and hgss/ game_save.c) apply it with the game's own Pokémon,
+ * Pokédex, records, Pokétch and journal code. Every effect here writes the
+ * bytes that code writes, so the companion's save and the game's agree byte
+ * for byte. The CP_RECEIVE_*_OFFSET without a game are Platinum's. */
 
 /* What those effects read from the player's ROM. Each returns CP_OK, or
  * CP_ERR_NOT_FOUND where noted; anything else refuses the delivery.
@@ -32,6 +33,16 @@ typedef struct CpAdapterData {
 
 enum { CP_RECEIVE_PARTY = 1, CP_RECEIVE_BOX = 2 };
 
+/* The game whose receive effects apply. Diamond/Pearl use the GTS's
+ * (client/src/wonder_trade/dp/game_save.c ReceiveEffects: catch records,
+ * Pokédex and Pokétch history, nothing else); HeartGold/SoulSilver theirs
+ * (hgss/game_save.c: Pokédex, game stats, the Pokéwalker's Jirachi course). */
+typedef enum {
+    CP_RECEIVE_PLATINUM = 0,
+    CP_RECEIVE_DIAMOND_PEARL,
+    CP_RECEIVE_HEARTGOLD_SOULSILVER
+} CpReceiveGame;
+
 /* Offsets in the general block body (the game's save table). */
 enum {
     CP_RECEIVE_VARS_OFFSET = 0x0DAC,
@@ -50,6 +61,27 @@ enum {
  * partly changed: the caller puts it back. */
 int CpReceive_Apply(const CpAdapterData *, unsigned char *general, const unsigned char incoming[136],
                     int destination, const uint16_t *keptSentences, unsigned char image[236]);
+/* The same for any game. version is the cartridge's (gGameVersion), which
+ * new mail records; Platinum's is always 12. Diamond/Pearl's mail has no
+ * unset sentence IDs: keptSentences is ignored there. */
+int CpReceive_ApplyGame(CpReceiveGame, uint8_t version, const CpAdapterData *, unsigned char *general,
+                        const unsigned char incoming[136], int destination, const uint16_t *keptSentences,
+                        unsigned char image[236]);
+
+/* Offsets in the Diamond/Pearl general block body (pokediamond save_arrays.c). */
+enum {
+    CP_RECEIVE_DP_POKETCH_OFFSET = 0x114C,
+    CP_RECEIVE_DP_POKEDEX_OFFSET = 0x12DC,
+    CP_RECEIVE_DP_STATS_OFFSET = 0x5F08
+};
+
+/* Offsets in the HeartGold/SoulSilver general block body (pokeheartgold
+ * save_arrays.c). */
+enum {
+    CP_RECEIVE_HGSS_POKEDEX_OFFSET = 0x12B8,
+    CP_RECEIVE_HGSS_STATS_OFFSET = 0x4B3C,
+    CP_RECEIVE_HGSS_WALKER_OFFSET = 0xE5DC
+};
 
 /* Pieces of the above, for tests. `box` is a canonical PK4, `party` its
  * decrypted 100-byte party extension. */

@@ -6,11 +6,24 @@
 #include "adapter/platinum_receive.h"
 #include "wonder_trade/game_adapter.h"
 
-/* The companion's Platinum game adapter: WtGame_Inventory, WtGame_Checkpoint,
- * WtGame_CanLeave and WtGame_CanHold on a save file instead of the game's
- * RAM. Each step changes the save exactly as the patched game's
- * client/src/wonder_trade/platinum/game_save.c does, so a save can move
- * between the companion and the patched game at any point in a trade.
+/* The companion's Generation IV game adapter: WtGame_Inventory,
+ * WtGame_Checkpoint, WtGame_CanLeave and WtGame_CanHold on a save file
+ * instead of the game's RAM. Each step changes the save exactly as the
+ * patched game's client/src/wonder_trade/<game>/game_save.c does, so a save
+ * can move between the companion and the patched game at any point in a trade.
+ *
+ * One adapter serves Platinum, Diamond/Pearl and HeartGold/SoulSilver: the
+ * image's layout (CpSaveImage_LoadLayout) picks the game, and with it what
+ * differs between their game_save.c:
+ * - where the party and PC are (save_image.h);
+ * - Diamond/Pearl and HeartGold/SoulSilver judge an older save by their
+ *   counters only (Diamond/Pearl's box counter in the journal is the game's
+ *   RAM one, which its flash need not hold yet);
+ * - the receive effects (adapter/platinum_receive.h CpReceiveGame);
+ * - HeartGold/SoulSilver keep Aprijuice modifiers beside the party, which
+ *   move with it, block an offer, and are cleared for a delivery; they never
+ *   offer Spiky-eared Pichu; their 0x86 ball must be one they have;
+ * - the forms and the last item each game knows (WtGame_CanHold).
  *
  * The loaded image stands in for the game's live save. A step edits it only
  * once its result is proven, then writes both retail copies through the file
@@ -46,6 +59,9 @@ struct WtGame {
     /* The player's game data for matched deliveries: CpAdapter_RomData
      * (adapter/rom_data.h). NULL refuses them; returned offers need none. */
     const CpAdapterData *data;
+    /* The cartridge's version (CpRomInfo.version), which Diamond/Pearl and
+     * HeartGold/SoulSilver deliveries' new mail records. */
+    uint8_t version;
 };
 
 /* Party layout and limits of the game, as game_save.c uses them. */

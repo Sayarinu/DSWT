@@ -13,10 +13,44 @@
 #include "save/sha256.h"
 #include "wonder_trade/pokemon_codec.h"
 
+/* LUNE-880: FX_GAME picks the game whose saves these are: 0 Platinum (the
+ * default), 1 Diamond/Pearl, 2 HeartGold/SoulSilver. FX_FOOTER is the block
+ * footer's size, FX_BOX_STRIDE the distance between PC boxes and FX_SHARED
+ * marks HeartGold/SoulSilver's one counter per half. */
+#ifndef FX_GAME
+#define FX_GAME 0
+#endif
+#if FX_GAME == 0
 enum {
     FX_GENERAL = 0, FX_GENERAL_SIZE = 53036, FX_BOXES = 53036, FX_BOXES_SIZE = 74212,
     FX_PARTY = 152, FX_MON = 236, FX_BOX_MON = 136, FX_PC = 4
 };
+enum { FX_FOOTER = 20, FX_BOX_STRIDE = 30 * 136 };
+#define FX_SHARED 0
+#define FX_LAYOUT (&CpSaveLayout_Platinum)
+#define FX_GAME_NAME "Platinum"
+#elif FX_GAME == 1
+enum {
+    FX_GENERAL = 0, FX_GENERAL_SIZE = 0xC100, FX_BOXES = 0xC100, FX_BOXES_SIZE = 0x121E0,
+    FX_PARTY = 0x90, FX_MON = 236, FX_BOX_MON = 136, FX_PC = 4
+};
+enum { FX_FOOTER = 20, FX_BOX_STRIDE = 30 * 136 };
+#define FX_SHARED 0
+#define FX_LAYOUT (&CpSaveLayout_DiamondPearl)
+#define FX_GAME_NAME "Diamond/Pearl"
+#elif FX_GAME == 2
+enum {
+    FX_GENERAL = 0, FX_GENERAL_SIZE = 0xF628, FX_BOXES = 0xF700, FX_BOXES_SIZE = 0x12310,
+    FX_PARTY = 0x90, FX_MON = 236, FX_BOX_MON = 136, FX_PC = 0
+};
+enum { FX_FOOTER = 16, FX_BOX_STRIDE = 0x1000 };
+#define FX_SHARED 1
+#define FX_LAYOUT (&CpSaveLayout_HeartGoldSoulSilver)
+#define FX_GAME_NAME "HeartGold/SoulSilver"
+#endif
+/* The Aprijuice modifiers after the party (HeartGold/SoulSilver), and the
+ * PC as the bytes from its first slot to past its last. */
+enum { FX_APRIJUICE = FX_PARTY + 8 + 6 * FX_MON, FX_PC_SPAN = 17 * FX_BOX_STRIDE + 30 * FX_BOX_MON };
 
 typedef struct FxFile {
     unsigned char bytes[CP_SAVE_FILE_SIZE];
@@ -81,11 +115,35 @@ static inline void FxSeal(FxFile *file, unsigned half, unsigned block, uint32_t 
 {
     static const unsigned offsets[2] = { FX_GENERAL, FX_BOXES }, sizes[2] = { FX_GENERAL_SIZE, FX_BOXES_SIZE };
     unsigned char *body = file->bytes + half * CP_SAVE_HALF_SIZE + offsets[block];
-    unsigned char *footer = body + sizes[block] - 20;
-    unsigned crc = FxCrc(body, sizes[block] - 20);
+    unsigned char *footer = body + sizes[block] - FX_FOOTER;
+    unsigned crc = FxCrc(body, sizes[block] - FX_FOOTER);
+#if FX_SHARED
+    /* {counter, size, magic, block u16, CRC u16}: the one counter is global. */
+    (void)counter;
+    FxPut32(footer, global); FxPut32(footer + 4, sizes[block]); FxPut32(footer + 8, CP_SAVE_MAGIC_INTERNATIONAL);
+    FxPut16(footer + 12, block); FxPut16(footer + 14, crc);
+#else
     FxPut32(footer, global); FxPut32(footer + 4, counter); FxPut32(footer + 8, sizes[block]);
     FxPut32(footer + 12, CP_SAVE_MAGIC_INTERNATIONAL); footer[16] = (unsigned char)block; footer[17] = 0;
     footer[18] = (unsigned char)crc; footer[19] = (unsigned char)(crc >> 8);
+#endif
+}
+
+/* The PC slot at index box * 30 + slot from the start of the box block. */
+static inline unsigned char *FxPcSlot(unsigned char *boxes, unsigned index)
+{
+    return boxes + FX_PC + index / 30 * FX_BOX_STRIDE + index % 30 * FX_BOX_MON;
+}
+
+static inline const unsigned char *FxPcSlotConst(const unsigned char *boxes, unsigned index)
+{
+    return boxes + FX_PC + index / 30 * FX_BOX_STRIDE + index % 30 * FX_BOX_MON;
+}
+
+/* The save layout these fixtures build, with the international magic. */
+static inline CpSaveResult FxLoad(CpSaveImage *image, const CpFile *file)
+{
+    return CpSaveImage_LoadLayout(image, file, FX_LAYOUT, CP_SAVE_MAGIC_INTERNATIONAL);
 }
 
 /* Pokemon_Init's empty party Pokémon, or BoxPokemon_Init's for 136 bytes. */
@@ -148,14 +206,17 @@ static inline void FxBuild(FxFile *file, const FxSpec *specs, unsigned count)
     memset(file, 0, sizeof(*file));
     for (half = 0; half < 2; ++half) {
         unsigned char *general = FxGeneral(file, half), *boxes = FxBoxes(file, half);
-        for (i = 0; i < FX_GENERAL_SIZE - 20; ++i) general[i] = (unsigned char)(i * 7 + half);
-        for (i = 0; i < FX_BOXES_SIZE - 20; ++i) boxes[i] = (unsigned char)(i * 11 + 3);
+        for (i = 0; i < FX_GENERAL_SIZE - FX_FOOTER; ++i) general[i] = (unsigned char)(i * 7 + half);
+        for (i = 0; i < FX_BOXES_SIZE - FX_FOOTER; ++i) boxes[i] = (unsigned char)(i * 11 + 3);
         FxPut32(general + FX_PARTY, 6); FxPut32(general + FX_PARTY + 4, count);
         for (i = 0; i < 6; ++i) {
             unsigned char *slot = general + FX_PARTY + 8 + i * FX_MON;
             if (i < count) FxPartyMon(&specs[i], slot); else FxEmpty(slot, FX_MON);
         }
-        for (i = 0; i < 18 * 30; ++i) FxEmpty(boxes + FX_PC + i * FX_BOX_MON, FX_BOX_MON);
+#if FX_GAME == 2
+        memset(general + FX_APRIJUICE, 0, 30); /* no Aprijuice modifiers */
+#endif
+        for (i = 0; i < 18 * 30; ++i) FxEmpty(FxPcSlot(boxes, i), FX_BOX_MON);
         FxSeal(file, half, 0, 10 + half, 20 + half);
         FxSeal(file, half, 1, 10 + half, 30 + half);
     }
@@ -173,7 +234,7 @@ static inline unsigned FxImageCount(CpSaveImage *image)
 
 static inline unsigned char *FxImageBox(CpSaveImage *image, unsigned box, unsigned slot)
 {
-    return CpSaveImage_Block(image, 1) + FX_PC + (box * 30 + slot) * FX_BOX_MON;
+    return FxPcSlot(CpSaveImage_Block(image, 1), box * 30 + slot);
 }
 
 static inline int FxSha(const unsigned char *bytes, size_t size, unsigned char digest[32])

@@ -7,6 +7,9 @@ static const CpGameForms kPlatinumForms[] = {
     { 386, 496, 3 }, { 413, 499, 2 }, { 487, 501, 1 }, { 492, 502, 1 }, { 479, 503, 5 },
 };
 
+/* Platinum adds the Griseous Orb (112); 113..134 stay unused. */
+static const CpItemGap kPlatinumItemGaps[] = { { 113, 134 } };
+
 static const CpGameTable kPlatinum = {
     CP_FAMILY_PLATINUM,
     "poketool/personal/pl_personal.narc",
@@ -16,14 +19,74 @@ static const CpGameTable kPlatinum = {
     "msgdata/pl_msg.narc",
     "graphic/pl_font.narc",
     "poketool/waza/pl_waza_tbl.narc",
-    412, 408,
-    113, 134, 468,
+    NULL,
+    { 412, 408, 408 }, { 392, 390, 390 },
+    468, kPlatinumItemGaps, 1,
     kPlatinumForms, sizeof kPlatinumForms / sizeof kPlatinumForms[0],
+};
+
+/* Diamond and Pearl give only Deoxys and Wormadam forms their own records
+ * (pokediamond ResolveMonForm). */
+static const CpGameForms kDiamondPearlForms[] = { { 386, 496, 3 }, { 413, 499, 2 } };
+
+/* constants/items.h jumps from the Odd Keystone (111) to the Adamant Orb (135). */
+static const CpItemGap kDiamondPearlItemGaps[] = { { 112, 134 } };
+
+static const CpGameTable kDiamondPearl = {
+    CP_FAMILY_DP,
+    "poketool/personal/personal.narc",
+    "poketool/personal/growtbl.narc",
+    "poketool/personal/evo.narc",
+    "itemtool/itemdata/item_data.narc",
+    "msgdata/msg.narc",
+    "graphic/font.narc",
+    "poketool/waza/waza_tbl.narc",
+    "poketool/personal_pearl/personal.narc",
+    { 362, 356, 357 }, { 344, 341, 342 },
+    465, kDiamondPearlItemGaps, 1,
+    kDiamondPearlForms, sizeof kDiamondPearlForms / sizeof kDiamondPearlForms[0],
+};
+
+/* HeartGold and SoulSilver keep Platinum's form records (ResolveMonForm). */
+static const CpGameForms kHeartGoldSoulSilverForms[] = {
+    { 386, 496, 3 }, { 413, 499, 2 }, { 487, 501, 1 }, { 492, 502, 1 }, { 479, 503, 5 },
+};
+
+/* src/item.c: 113..134 and the Explorer Kit (428) read item 0's record. */
+static const CpItemGap kHeartGoldSoulSilverItemGaps[] = { { 113, 134 }, { 428, 428 } };
+
+/* Their archives are numbered: a/0/0/2 is NARC_poketool_personal_personal,
+ * and so on (include/filesystem_files_def.h). */
+static const CpGameTable kHeartGoldSoulSilver = {
+    CP_FAMILY_HGSS,
+    "a/0/0/2", /* personal */
+    "a/0/0/3", /* growth table */
+    "a/0/3/4", /* evolutions */
+    "a/0/1/7", /* item data */
+    "a/0/2/7", /* messages */
+    "a/0/1/6", /* fonts */
+    "a/0/1/1", /* moves */
+    NULL,
+    { 237, 232, 233 }, { 222, 219, 220 },
+    537, kHeartGoldSoulSilverItemGaps, 2,
+    kHeartGoldSoulSilverForms, sizeof kHeartGoldSoulSilverForms / sizeof kHeartGoldSoulSilverForms[0],
 };
 
 const CpGameTable *CpGame_Table(CpFamily family)
 {
-    return family == CP_FAMILY_PLATINUM ? &kPlatinum : NULL;
+    switch (family) {
+    case CP_FAMILY_DP: return &kDiamondPearl;
+    case CP_FAMILY_PLATINUM: return &kPlatinum;
+    case CP_FAMILY_HGSS: return &kHeartGoldSoulSilver;
+    default: return NULL;
+    }
+}
+
+uint16_t CpGame_Bank(const CpGame *game, const CpMessageBank *bank)
+{
+    if (game->rom.language == CP_LANGUAGE_JAPANESE) return bank->japanese;
+    if (game->rom.language == CP_LANGUAGE_KOREAN) return bank->korean;
+    return bank->international;
 }
 
 int CpGame_Open(const CpReader *reader, CpGame *out)
@@ -32,7 +95,8 @@ int CpGame_Open(const CpReader *reader, CpGame *out)
 
     if ((result = CpRom_Identify(reader, &out->rom)) != CP_OK) return result;
     if (!(out->table = CpGame_Table(out->rom.family))) return CP_ERR_UNSUPPORTED;
-    if ((result = CpNarc_OpenPath(reader, out->table->personal, &out->personal)) != CP_OK ||
+    if ((result = CpNarc_OpenPath(reader, out->table->personalPearl && out->rom.version == CP_VERSION_PEARL
+            ? out->table->personalPearl : out->table->personal, &out->personal)) != CP_OK ||
         (result = CpNarc_OpenPath(reader, out->table->growth, &out->growth)) != CP_OK ||
         (result = CpNarc_OpenPath(reader, out->table->evolution, &out->evolution)) != CP_OK ||
         (result = CpNarc_OpenPath(reader, out->table->items, &out->items)) != CP_OK ||
@@ -140,11 +204,15 @@ int CpGame_Item(const CpGame *game, uint16_t item, CpItem *out)
      * prevent toss, can register, field pocket (4 bits), battle pocket. */
     uint8_t record[10];
     uint16_t bits, index = item;
+    uint8_t i;
     int result;
 
     if (item == 0 || item >= table->itemCount) return CP_ERR_NOT_FOUND;
-    if (item >= table->itemGapFirst && item <= table->itemGapLast) return CP_ERR_NOT_FOUND;
-    if (item > table->itemGapLast) index = (uint16_t)(item - (table->itemGapLast - table->itemGapFirst + 1));
+    for (i = 0; i < table->itemGapCount; ++i) {
+        const CpItemGap *gap = &table->itemGaps[i];
+        if (item >= gap->first && item <= gap->last) return CP_ERR_NOT_FOUND;
+        if (item > gap->last) index = (uint16_t)(index - (gap->last - gap->first + 1));
+    }
     if ((result = ReadMember(&game->items, index, record, sizeof record)) != CP_OK) return result;
     bits = CpLe16(record + 8);
     out->price = CpLe16(record);

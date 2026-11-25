@@ -40,6 +40,10 @@ static const char *cutNames[] = { "before-write", "lost-write", "torn-prefix", "
     "before-sync-lost-pending", "after-sync" };
 static unsigned sampled[sizeof(steps) / sizeof(*steps)], cutMask;
 static int journalWrite;
+/* LUNE-880: a HeartGold/SoulSilver PC box write between the first and the
+ * last (boxes 1..16), and the sync after it. Their cuts leave the same states
+ * as the first and last box's, so CI samples them out; CP_FAULT_FULL keeps them. */
+static int interiorBox;
 static enum Scenario scenario;
 static jmp_buf reboot;
 static CpSaveImage image;
@@ -51,7 +55,7 @@ static WtJournalIO journalIO;
 static FxFile fixture;
 static unsigned char live[CP_SAVE_FILE_SIZE], durable[CP_SAVE_FILE_SIZE];
 static unsigned char digests[4][32];
-static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[540 * FX_BOX_MON];
+static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[FX_PC_SPAN];
 enum Outcome { RECOVERED, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST, OUTCOMES };
 static const char *outcomes[] = { "recovered", "journal-blocked", "save-blocked", "stuck", "duplicate", "lost" };
 static unsigned unexpected;
@@ -69,6 +73,8 @@ static unsigned step, stepMask, stockSaves;
 static uint32_t stopOffset;
 static size_t stopSize;
 static int inject, counting, full, stockPlayed;
+/* LUNE-880: a resume without stock play that still asks Cut for the next plan. */
+static int stockNext;
 static char path[sizeof(CP_FAULT_BINARY_DIR) + 32];
 
 /* Every distinct cut must recover; there are no known failures. */
@@ -132,7 +138,7 @@ static void CloseFile(void)
 static void Finish(enum Outcome outcome)
 {
     CloseFile();
-    _exit((int)outcome + (stockPlayed ? OUTCOMES : 0));
+    _exit((int)outcome + (stockPlayed || stockNext ? OUTCOMES : 0));
 }
 
 static size_t HashSlot(const unsigned char digest[32], size_t capacity)
@@ -179,7 +185,7 @@ static void Cut(enum CutKind kind, int losePending, uint32_t offset, const void 
     unsigned *sample;
     unsigned sampleBit = 1u << kind;
     const char *model = cutNames[kind];
-    if (!inject || !counting) return;
+    if (!inject || !counting || interiorBox) return;
     cutMask |= 1u << kind;
     sample = &sampled[step];
     if (kind == TORN_PREFIX) {
@@ -221,7 +227,7 @@ static void Cut(enum CutKind kind, int losePending, uint32_t offset, const void 
         child = fork();
         assert(child >= 0);
         if (child == 0) {
-            inject = 0; stockPlayed = 0; stockSaves = plan;
+            inject = 0; stockPlayed = 0; stockNext = 0; stockSaves = plan;
             memcpy(live, crashBytes, sizeof(live));
             longjmp(reboot, 1);
         }
@@ -267,6 +273,12 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
     int result;
     (void)arg;
     journalWrite = JournalOffset(offset); /* Also classifies the following sync. */
+#if FX_SHARED
+    {
+        uint32_t at = offset % CP_SAVE_HALF_SIZE;
+        interiorBox = !full && !journalWrite && at >= FX_BOXES + FX_BOX_STRIDE && at < FX_BOXES + 17 * FX_BOX_STRIDE;
+    }
+#endif
     if (counting) {
         ++eventCount; stopOffset = offset; stopSize = size;
         if (JournalOffset(offset)) { ++journalWrites; expectedJournalByteTears += (unsigned)size - 1; }
@@ -362,11 +374,11 @@ static void StockGameSave(void)
     RetailLoad(live, selected);
     for (block = 0; block < 2; ++block) {
         const unsigned char *body = live + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block];
-        const unsigned char *footer = body + blockSizes[block] - 20;
+        const unsigned char *footer = body + blockSizes[block] - FX_FOOTER;
         memcpy(ram + blockOffsets[block], body, blockSizes[block]);
-        counters[block] = Fx32(footer + 4);
+        counters[block] = Fx32(footer + (FX_SHARED ? 0 : 4));
     }
-    global = Fx32(ram + FX_GENERAL_SIZE - 20);
+    global = Fx32(ram + FX_GENERAL_SIZE - FX_FOOTER);
     ram[0x10] ^= 0x5a; /* The player plays: play time changes. */
     for (pass = 0; pass < stockSaves; ++pass) {
         ++global;
@@ -376,10 +388,16 @@ static void StockGameSave(void)
             selected[block] ^= 1;
             body = live + selected[block] * CP_SAVE_HALF_SIZE + blockOffsets[block];
             memcpy(body, ram + blockOffsets[block], blockSizes[block]);
-            footer = body + blockSizes[block] - 20;
+            footer = body + blockSizes[block] - FX_FOOTER;
+            crc = FxCrc(body, blockSizes[block] - FX_FOOTER);
+#if FX_SHARED
+            /* HeartGold/SoulSilver: one counter, the CRC last. */
+            FxPut32(footer, global); FxPut16(footer + 14, crc);
+            (void)counters;
+#else
             FxPut32(footer, global); FxPut32(footer + 4, ++counters[block]);
-            crc = FxCrc(body, blockSizes[block] - 20);
             FxPut16(footer + 18, crc);
+#endif
         }
     }
     stockPlayed = 1;
@@ -402,7 +420,7 @@ static void CheckFinal(int capture)
 {
     WtJournalEntry entry = ReadEntry();
     const unsigned char *party, *pc;
-    assert(CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    assert(FxLoad(&image, &file) == CP_SAVE_OK);
     Conservation(live, &entry, digests);
     party = CpSaveImage_Block(&image, 0) + FX_PARTY;
     pc = CpSaveImage_Block(&image, 1) + FX_PC;
@@ -427,7 +445,7 @@ static void Resume(void)
     assert(close(posix.fd) == 0);
     OpenBytes(live);
     Bind(); randomCounter += 1000; /* Fresh entropy after reboot. */
-    load = CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL);
+    load = FxLoad(&image, &file);
     if (CpSaveJournal_Detect(&file) == CP_SAVE_JOURNAL_UNUSED) {
         assert(scenario == PROVISION);
         Provision();
@@ -455,8 +473,24 @@ static void Resume(void)
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
         StockGameSave();
-        load = CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL);
+        load = FxLoad(&image, &file);
     }
+#if FX_SHARED
+    /* LUNE-880: HeartGold/SoulSilver load every cut save (their LoadCheck falls
+     * back to the older half), so the player may also play and save in the
+     * stock game before the companion resumes: the first plan resumes
+     * directly, the second after one stock save. */
+    else if (load == CP_SAVE_OK && scenario != PROVISION) {
+        if (stockSaves == 1) {
+            /* CI plays the stock game after every fourth distinct cut. */
+            stockNext = full || distinct % 4 == 1;
+        } else {
+            stockSaves = 1;
+            StockGameSave();
+            load = FxLoad(&image, &file);
+        }
+    }
+#endif
     if (load != CP_SAVE_OK) Finish(SAVE_BLOCKED);
     OpenEngine(&engine);
     /* This is the local boot path used by WtBoot_Check, without DS glue/TLS. */
@@ -506,7 +540,7 @@ static void Setup(void)
     }
     FxBuild(&fixture, specs, 4);
     OpenBytes(fixture.bytes); Bind();
-    assert(CpSaveImage_Load(&image, &file, CP_SAVE_MAGIC_INTERNATIONAL) == CP_SAVE_OK);
+    assert(FxLoad(&image, &file) == CP_SAVE_OK);
     if (scenario != PROVISION) Provision();
     if (scenario == CANCEL_RETURN) {
         WtEngine engine;

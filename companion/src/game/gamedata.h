@@ -14,21 +14,35 @@ typedef struct CpGameForms {
     uint8_t count;
 } CpGameForms;
 
+/* Item IDs first..last that have no data record (the game reads item 0's);
+ * later IDs shift down over them. */
+typedef struct CpItemGap {
+    uint16_t first, last;
+} CpItemGap;
+
+/* A message bank's number in the archive. Japanese and Korean leave some
+ * banks out, so later banks number lower there. */
+typedef struct CpMessageBank {
+    uint16_t international, japanese, korean;
+} CpMessageBank;
+
 /* Where one family keeps its data. */
 typedef struct CpGameTable {
     CpFamily family;
     const char *personal, *growth, *evolution, *items, *messages, *font, *moves;
-    /* The species name bank in the message archive: Japanese and Korean
-     * leave some banks out, so later banks number lower there. */
-    uint16_t speciesNameBank, speciesNameBankAsian;
-    /* Item IDs itemGapFirst..itemGapLast have no data record and later IDs
-     * shift down over them; itemCount is the highest item ID + 1. */
-    uint16_t itemGapFirst, itemGapLast, itemCount;
+    /* Pearl's own personal archive (Diamond/Pearl), NULL for one shared by
+     * the family's versions. */
+    const char *personalPearl;
+    CpMessageBank speciesNames, itemNames;
+    /* itemCount is the highest item ID + 1. */
+    uint16_t itemCount;
+    const CpItemGap *itemGaps;
+    uint8_t itemGapCount;
     const CpGameForms *forms;
     uint8_t formCount;
 } CpGameTable;
 
-/* The table for a family, NULL until that family's paths are added. */
+/* The table for a family, NULL for one the companion does not read. */
 const CpGameTable *CpGame_Table(CpFamily);
 
 /* One open game: the archives the accessors read, located once. */
@@ -41,6 +55,9 @@ typedef struct CpGame {
 /* Identify the ROM and open its archives. CP_ERR_UNSUPPORTED for a game
  * without a table. */
 int CpGame_Open(const CpReader *rom, CpGame *out);
+
+/* A message bank's number for the cartridge's language. */
+uint16_t CpGame_Bank(const CpGame *, const CpMessageBank *);
 
 /* Per-species, per-form data from the personal archive. */
 typedef struct CpPersonal {
