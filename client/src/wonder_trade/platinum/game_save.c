@@ -157,24 +157,28 @@ int WtGameSave_Eligible(SaveData *save, unsigned slot)
     return Eligible(SaveData_GetParty(save), slot);
 }
 
-static int Absent(SaveData *save, const unsigned char outgoing[136])
+static int ScanOutgoing(SaveData *save, const unsigned char outgoing[136], WtReceiveScan *scan)
 {
-    unsigned char canonical[136];
     Party *party = SaveData_GetParty(save);
     PCBoxes *boxes = SaveData_GetPCBoxes(save);
-    int i, box;
+    unsigned i, box;
+    memset(scan, 0, sizeof(*scan));
     if (party->capacity != 6 || party->currentCount < 1 || party->currentCount > 6) return -1;
-    for (i = 0; i < party->currentCount; ++i) {
-        if (WtPokemon_Decode((const unsigned char *)&party->pokemon[i], canonical) != 0
-            || memcmp(canonical, outgoing, 136) == 0) return -1;
+    for (i = 0; i < (unsigned)party->currentCount; ++i) {
+        if (WtReceive_Inspect(scan, outgoing, (const unsigned char *)&party->pokemon[i],
+                1, 0, i, sizeof(Pokemon)) != 0) return -1;
     }
     for (box = 0; box < MAX_PC_BOXES; ++box) for (i = 0; i < MAX_MONS_PER_BOX; ++i) {
-        BoxPokemon *mon = &boxes->boxMons[box][i];
-        if (!BoxPokemon_GetValue(mon, MON_DATA_SPECIES_EXISTS, NULL)) continue;
-        if (WtPokemon_Decode((const unsigned char *)mon, canonical) != 0
-            || memcmp(canonical, outgoing, 136) == 0) return -1;
+        if (WtReceive_Inspect(scan, outgoing, (const unsigned char *)&boxes->boxMons[box][i],
+                2, box, i, sizeof(BoxPokemon)) != 0) return -1;
     }
     return 0;
+}
+
+static int Absent(SaveData *save, const unsigned char outgoing[136])
+{
+    WtReceiveScan scan;
+    return ScanOutgoing(save, outgoing, &scan) == 0 && scan.matches == 0 ? 0 : -1;
 }
 
 /* Nonzero when the loaded save is older than the one recorded in the entry. */
@@ -251,6 +255,22 @@ static int ReceiveEffects(WtGame *game, SaveData *save, const WtJournalEntry *en
     return 0;
 }
 
+/* An offer already returned in a later retail save needs no insertion. */
+static int PrepareDelivery(WtGame *game, SaveData *save, WtJournalEntry *entry)
+{
+    WtReceiveScan scan;
+    Pokemon empty;
+    int result;
+    if (ScanOutgoing(save, entry->outgoing, &scan) != 0) return -1;
+    result = WtReceive_Check(entry, &scan, game->save->globalCounter, game->save->blockCounters[0], game->save->blockCounters[1]);
+    if (result != 1) return result;
+    Pokemon_Init(&empty);
+    if (WtReceive_Record(entry, &scan, (const unsigned char *)&empty, WtFlash_Hash) != 0
+        || Hash(save, entry->inventoryAfter) != 0) return -1;
+    memcpy(entry->inventoryBefore, entry->inventoryAfter, 32);
+    return 1;
+}
+
 static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, int prepare)
 {
     Pokemon mon;
@@ -258,8 +278,6 @@ static int BuildReceived(WtGame *game, SaveData *save, WtJournalEntry *entry, in
     unsigned char *destination, canonical[136];
     int box, slot, found;
     if (prepare) {
-        if (WtReceive_CheckReturn(entry->deliveryKind,
-                entry->deliveryKind == WT_DELIVERY_RETURN ? Absent(save, entry->outgoing) : 0) != 0) return -1;
         if (party->capacity != 6 || party->currentCount < 1 || party->currentCount > 6) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (party->currentCount < 6) {
@@ -352,12 +370,17 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
     if (!candidate) return -1;
     memcpy(candidate, game->save, sizeof(*candidate));
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
+        result = PrepareDelivery(game, candidate, entry);
+        if (result != 0) { if (result == 1) result = 0; goto done; }
         result = BuildReceived(game, candidate, entry, 1);
         if (result == 0) result = Hash(candidate, entry->inventoryAfter);
         goto done;
     }
     if (Hash(candidate, digest) != 0) goto done;
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
+    if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0) {
+        if (PrepareDelivery(game, candidate, entry) != 1) goto done;
+    }
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0 && memcmp(digest, entry->inventoryAfter, 32) != 0) {
         if (BuildReceived(game, candidate, entry, 0) != 0 || Hash(candidate, digest) != 0) goto done;
     }
     if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;

@@ -276,30 +276,34 @@ static void RemoveSlot(PokeParty *party, unsigned slot)
 
 /* No copy of the outgoing Pokémon remains in the party, the PC or the
  * Battle Box, and every Pokémon there can be read. */
-static int Absent(const Image *image, unsigned char *data, const unsigned char outgoing[WT_POKEMON_SIZE])
+static int ScanOutgoing(const Image *image, unsigned char *data, const unsigned char outgoing[136], WtReceiveScan *scan)
 {
-    unsigned char canonical[WT_POKEMON_SIZE];
     PokeParty *party = Party(image, data);
     BattleBoxSave *battleBox = Block(image, data, SAVE_BLOCK_BATTLE_BOX);
-    unsigned box, i;
+    unsigned i, box;
+    memset(scan, 0, sizeof(*scan));
     if (party->capacity != PARTY_SIZE || party->count < 1 || party->count > PARTY_SIZE) return -1;
     for (i = 0; i < (unsigned)party->count; ++i) {
-        if (WtPokemon_Decode((const unsigned char *)&party->pkms[i], canonical) != 0
-            || memcmp(canonical, outgoing, WT_POKEMON_SIZE) == 0) return -1;
+        if (WtReceive_Inspect(scan, outgoing, (const unsigned char *)&party->pkms[i],
+                1, 0, i, sizeof(PartyPkm)) != 0) return -1;
     }
-    for (box = 0; box <= BOX_MAX_TRAY; ++box) for (i = 0; i < BOX_MAX_POS; ++i) {
-        const BoxPkm *pkm;
-        if (box == BOX_MAX_TRAY) {
-            if (i >= BATTLE_BOX_SLOTS) break;
-            pkm = &battleBox->pkm[0][i];
-        } else {
-            pkm = BoxSlot(image, data, box, i);
-        }
-        if (WtPokemon_Decode((const unsigned char *)pkm, canonical) != 0) return -1;
-        if (Read16(canonical + 8) == 0) continue;
-        if (memcmp(canonical, outgoing, WT_POKEMON_SIZE) == 0) return -1;
+    for (box = 0; box < BOX_MAX_TRAY; ++box) for (i = 0; i < BOX_MAX_POS; ++i) {
+        if (WtReceive_Inspect(scan, outgoing, (const unsigned char *)BoxSlot(image, data, box, i),
+                2, box, i, sizeof(BoxPkm)) != 0) return -1;
+    }
+    /* Battle Box locators are not representable in the journal. A retained
+     * identity there still makes delivery unsafe, even with a PC match. */
+    for (i = 0; i < BATTLE_BOX_SLOTS; ++i) {
+        if (WtReceive_Inspect(scan, outgoing, (const unsigned char *)&battleBox->pkm[0][i],
+                2, BOX_MAX_TRAY, i, sizeof(BoxPkm)) != 0 || (scan->matches != 0 && scan->where.box == BOX_MAX_TRAY)) return -1;
     }
     return 0;
+}
+
+static int Absent(const Image *image, unsigned char *data, const unsigned char outgoing[136])
+{
+    WtReceiveScan scan;
+    return ScanOutgoing(image, data, outgoing, &scan) == 0 && scan.matches == 0 ? 0 : -1;
 }
 
 /* Nonzero when the loaded save is older than the one recorded in the entry. */
@@ -366,6 +370,22 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     return 0;
 }
 
+/* An offer already returned in a later retail save needs no insertion. */
+static int PrepareDelivery(WtGame *game, const Image *image, unsigned char *data, WtJournalEntry *entry)
+{
+    WtReceiveScan scan;
+    PartyPkm empty;
+    int result;
+    if (ScanOutgoing(image, data, entry->outgoing, &scan) != 0) return -1;
+    result = WtReceive_Check(entry, &scan, SaveData_GetSaveCount(game->save->sv), SaveData_GetSaveCount(game->save->sv), SaveData_GetSaveCount(game->save->sv));
+    if (result != 1) return result;
+    PokeParty_ClearPkm(&empty);
+    if (WtReceive_Record(entry, &scan, (const unsigned char *)&empty, WtFlash_Hash) != 0
+        || Hash(image, data, entry->inventoryAfter) != 0) return -1;
+    memcpy(entry->inventoryBefore, entry->inventoryAfter, 32);
+    return 1;
+}
+
 static int BuildReceived(WtGame *game, const Image *image, unsigned char *data, WtJournalEntry *entry, int prepare)
 {
     PartyPkm pkm;
@@ -374,8 +394,6 @@ static int BuildReceived(WtGame *game, const Image *image, unsigned char *data, 
     unsigned box = 0, slot = 0;
     int found = 0;
     if (prepare) {
-        if (WtReceive_CheckReturn(entry->deliveryKind,
-                entry->deliveryKind == WT_DELIVERY_RETURN ? Absent(image, data, entry->outgoing) : 0) != 0) return -1;
         if (party->capacity != PARTY_SIZE || party->count < 1 || party->count > PARTY_SIZE) return -1;
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (party->count < PARTY_SIZE) {
@@ -468,12 +486,17 @@ static int Receive(WtGame *game, const Image *image, enum WtInventoryStep step, 
     candidate = Candidate(game, image);
     if (!candidate) return -1;
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
+        result = PrepareDelivery(game, image, candidate, entry);
+        if (result != 0) { if (result == 1) result = 0; goto done; }
         result = BuildReceived(game, image, candidate, entry, 1);
         if (result == 0) result = Hash(image, candidate, entry->inventoryAfter);
         goto done;
     }
     if (Hash(image, candidate, digest) != 0) goto done;
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
+    if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0) {
+        if (PrepareDelivery(game, image, candidate, entry) != 1) goto done;
+    }
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0 && memcmp(digest, entry->inventoryAfter, 32) != 0) {
         if (BuildReceived(game, image, candidate, entry, 0) != 0 || Hash(image, candidate, digest) != 0) goto done;
     }
     if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
