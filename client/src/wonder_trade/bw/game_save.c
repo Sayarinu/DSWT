@@ -367,14 +367,19 @@ static int ReceiveEffects(WtGame *game, const Image *image, unsigned char *data,
     POKE_TOOL_SetPartyValue(pkm, WT_PARAM_HAPPINESS,
         POKE_TOOL_GetPersonalParam((u16)POKE_TOOL_GetPartyValue(pkm, WT_PARAM_SPECIES, 0),
             (u16)POKE_TOOL_GetPartyValue(pkm, WT_PARAM_FORM, 0), WT_PERSONAL_FRIENDSHIP));
+    /* Retail trades register the Pokémon received as caught before the
+     * evolution check (pokemontrade_save.c, fld_trade.c). */
+    ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     memcpy(&partner, entry->original, sizeof(partner));
     target = SHINKA_CHECK_CheckEvolution(Party(image, data), pkm, WT_EVO_CHECK_TRADE, (u32)&partner, 0, &method, game->heapId);
     mbedtls_platform_zeroize(&partner, sizeof(partner));
     if (target) {
         POKE_TOOL_ChangeSpecies(pkm, target);
         if (method == WT_EVO_METHOD_TRADE_WITH_ITEM) POKE_TOOL_SetPartyValue(pkm, WT_PARAM_ITEM, 0);
+        /* The evolution scene registers the evolved species (shinka_demo.c). */
+        ZUKAN_SAVE_RegisterSeen(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
+        ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     }
-    ZUKAN_SAVE_RegisterCaught(Block(image, data, SAVE_BLOCK_POKEDEX), pkm);
     return 0;
 }
 
@@ -607,6 +612,10 @@ static int Holdable(void *arg, unsigned item)
 int WtGame_CanHold(void *arg, const unsigned char pokemon[WT_POKEMON_SIZE])
 {
     const WtPokemonLimits limits = { SPECIES_LAST, ITEM_LAST, BALL_LAST, Forms, Holdable, arg };
+    /* ZUKAN_SAVE_RegisterCaught records the language as bit language - 1 of the
+     * species' seven, with no check for language 0 (a write before the species'
+     * bits, outside the Pokédex block for Bulbasaur); Black 2/White 2 skip it. */
+    if (pokemon[0x17] == 0) return 0;
     return WtPokemon_Fits(pokemon, &limits);
 }
 

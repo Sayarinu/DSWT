@@ -271,6 +271,7 @@ u32 SHINKA_CHECK_CheckEvolution(WtParty *party, WtPartyPokemon *pokemon, u32 mod
                                 u32 *method, u16 heapId);
 u16 ZUKAN_SAVE_GetFormCount(u32 species);
 void ZUKAN_SAVE_RegisterCaught(void *zukan, void *pokemon);
+void ZUKAN_SAVE_RegisterSeen(void *zukan, void *pokemon);
 WtParty *POKEPARTY_GetSaveData(struct SaveControl *save);
 
 /* The party screen (overlay 91, ov091/pokelist.c) and the part of its
