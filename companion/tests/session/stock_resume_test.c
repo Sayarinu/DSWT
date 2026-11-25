@@ -5,7 +5,15 @@
  * harness, deterministic and in process: each cut runs on its own copy of the
  * save, the journal banks and the server while the interrupted visit carries
  * on. Every cut must settle (nothing left in escrow, restoring or applying),
- * keep the offered Pokémon in exactly one place, and finish its visit. */
+ * keep the offered Pokémon in exactly one place, and finish its visit.
+ *
+ * LUNE-906: a return the stock game saved over is never put back again (the
+ * games' never-duplicate rule, client wonder_trade/delivery.h). Each cut while
+ * a return is in flight (RESTORING or APPLYING) is also played with the
+ * player releasing or trading away the offer in the stock game, when the save
+ * it loaded holds it: it must stay gone. The only accepted loss is the games'
+ * window: a return in flight that no complete retail copy held yet when the
+ * stock game loaded the save. */
 #include "../adapter/stock_game.h"
 #include "journal_fixture.h"
 
@@ -267,11 +275,16 @@ static void Bind(WtGame *game, CpSaveImage *image, const CpFile *file)
 enum { OFFERED_SLOT = 1 };
 enum Scenario { OFFER, CANCEL_RETURN, REJECT_RESTORE, SCENARIOS };
 static const char *const kNames[] = { "offer", "cancel-return", "reject-restore" };
-enum Outcome { RECOVERED, STUCK, DUPLICATE, LOST, OUTCOMES };
-static const char *const kOutcomes[] = { "recovered", "stuck", "duplicate", "lost" };
+enum Outcome { RECOVERED, WINDOW, STUCK, DUPLICATE, LOST, OUTCOMES };
+static const char *const kOutcomes[] = { "recovered", "lost-in-window", "stuck", "duplicate", "lost" };
 static enum Scenario scenario;
 static unsigned char offered[136];
-static unsigned tally[OUTCOMES], cases, writes;
+static unsigned tally[OUTCOMES], cases, writes, letGoCases;
+/* What the player does with the offer in the stock game: keep it, release
+ * it or trade it away. */
+enum Fate { KEPT, RELEASED, TRADED, FATES };
+static enum Fate fate;
+static void LetGo(unsigned char *general, unsigned char *boxes) { (void)FxGone(general, boxes, offered, fate == TRADED); }
 
 static int Transitional(unsigned phase)
 {
@@ -288,20 +301,44 @@ static int Ownership(const WtJournalEntry *entry)
     unsigned copies;
     memcpy(stock.bytes, cut.bytes, sizeof(stock.bytes));
     copies = FxStockCopies(&stock, offered) + held;
+    /* Let go in the stock game: it must stay gone. */
+    if (fate != KEPT) return copies ? 1 : 0;
     if (!copies && Transitional(entry->phase)) copies = 1;
     return copies == 1 ? 0 : copies ? 1 : -1;
 }
 
-static enum Outcome Recover(unsigned saves, int full)
+/* The phase the journal recorded when the power went. */
+static unsigned CutPhase(void)
+{
+    WtJournalEntry entry;
+    WtEngine engine;
+    unsigned phase;
+    memset(&cutGame, 0, sizeof(cutGame));
+    Open(&engine, &cut, &cutGame);
+    entry = engine.entry;
+    WtEngine_Close(&engine);
+    phase = entry.phase;
+    return entry.deliveryKind == WT_DELIVERY_RETURN || phase == WT_JOURNAL_RESTORING ? phase : 0;
+}
+
+/* -1 when the fate does not apply to this cut. */
+static int Recover(unsigned saves, int full)
 {
     static unsigned char settledBytes[CP_SAVE_FILE_SIZE];
     WtEngine engine;
     WtJournalEntry settled;
     CpVisit visit;
-    int slot = -1, result, ownership;
-    /* The stock game, then the companion's boot settle. */
+    int slot = -1, result, ownership, window;
+    unsigned phase = CutPhase(), loaded;
+    /* A return in flight: RESTORING in place, or APPLYING. */
+    int inFlight = phase == WT_JOURNAL_RESTORING || phase == WT_JOURNAL_APPLYING;
     memcpy(stock.bytes, cut.bytes, sizeof(stock.bytes));
-    assert(FxStockPlay(&stock, saves, full, NULL));
+    loaded = FxStockCopies(&stock, offered);
+    if (fate != KEPT && !(inFlight && loaded)) return -1;
+    /* The games' window: in flight, and not in the save the stock game loads. */
+    window = inFlight && !loaded;
+    /* The stock game, then the companion's boot settle. */
+    assert(FxStockPlay(&stock, saves, full, fate == KEPT ? NULL : LetGo));
     memcpy(cut.bytes, stock.bytes, sizeof(cut.bytes));
     if (CpSaveImage_Load(&cutImage, &cutFile, CP_SAVE_MAGIC_INTERNATIONAL) != CP_SAVE_OK) return STUCK;
     memset(&cutGame, 0, sizeof(cutGame)); cutGame.image = &cutImage; cutGame.file = &cutFile;
@@ -310,7 +347,7 @@ static enum Outcome Recover(unsigned saves, int full)
     settled = engine.entry;
     WtEngine_Close(&engine);
     ownership = Ownership(&settled);
-    if (ownership) return ownership > 0 ? DUPLICATE : LOST;
+    if (ownership) return ownership > 0 ? DUPLICATE : window ? WINDOW : LOST;
     if (result != 0 || Transitional(settled.phase)) return STUCK;
     /* Settling again changes nothing. */
     memcpy(settledBytes, cut.bytes, sizeof(settledBytes));
@@ -327,7 +364,7 @@ static enum Outcome Recover(unsigned saves, int full)
     settled = engine.entry;
     WtEngine_Close(&engine);
     ownership = Ownership(&settled);
-    if (ownership) return ownership > 0 ? DUPLICATE : LOST;
+    if (ownership) return ownership > 0 ? DUPLICATE : window ? WINDOW : LOST;
     if (result != 0 || !visit.canLeave || settled.phase != (scenario == OFFER ? WT_JOURNAL_QUEUED : WT_JOURNAL_IDLE))
         return STUCK;
     return RECOVERED;
@@ -344,19 +381,23 @@ static void Cut(unsigned tear, uint32_t offset, const void *bytes, size_t size)
     ++writes;
     keptServer = server; memcpy(keptReplay, replay, sizeof(replay)); keptReplayCount = replayCount;
     recovering = 1;
-    for (saves = 1; saves <= 2; ++saves) {
+    for (fate = KEPT; fate < FATES; ++fate) for (saves = 1; saves <= 2; ++saves) {
         unsigned full = saves == 2;
-        enum Outcome outcome;
+        int outcome;
         cut = live;
         if (tear) memcpy(cut.bytes + offset, bytes, size / 2);
         randomCounter = keptRandom + 1000; /* fresh entropy after the restart */
         outcome = Recover(saves, (int)full);
-        ++tally[outcome]; ++cases;
-        if (outcome != RECOVERED)
-            printf("FAIL %s cut %u%s, %u stock save(s) of %s: %s\n", kNames[scenario], writes, tear ? " (torn)" : "",
-                saves, full ? "both blocks" : "the general block", kOutcomes[outcome]);
         server = keptServer; memcpy(replay, keptReplay, sizeof(replay)); replayCount = keptReplayCount;
+        if (outcome < 0) continue;
+        ++tally[outcome];
+        if (fate == KEPT) ++cases; else ++letGoCases;
+        if (outcome != RECOVERED && outcome != WINDOW)
+            printf("FAIL %s cut %u%s, offer %s, %u stock save(s) of %s: %s\n", kNames[scenario], writes,
+                tear ? " (torn)" : "", fate == KEPT ? "kept" : fate == RELEASED ? "released" : "traded away",
+                saves, full ? "both blocks" : "the general block", kOutcomes[outcome]);
     }
+    fate = KEPT;
     randomCounter = keptRandom;
     recovering = 0;
 }
@@ -400,55 +441,89 @@ static void FillParty(unsigned char *general, unsigned char *boxes)
     }
 }
 
-/* A cancelled offer collected for the party, cut once APPLYING is recorded;
- * the stock game fills the party; the recovery returns it to the PC and is
- * cut before APPLIED is recorded. The next settle must record APPLIED (a PC
- * destination, padded as the journal requires) and the ACK end the trade. */
-static void RedirectThroughJournal(void)
+/* The stock game: the returned offer, from the party into PC box 0 slot 0. */
+static void DepositOffered(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char canonical[136], *party = general + FX_PARTY;
+    unsigned count = Fx32(party + 4), slot, i;
+    for (slot = 0; slot < count; ++slot) {
+        assert(WtPokemon_Decode(party + 8 + slot * FX_MON, canonical) == 0);
+        if (memcmp(canonical, offered, 136) == 0) break;
+    }
+    assert(slot < count);
+    memcpy(FxPcSlot(boxes, 0), party + 8 + slot * FX_MON, FX_BOX_MON);
+    for (i = slot; i + 1 < count; ++i) memcpy(party + 8 + i * FX_MON, party + 8 + (i + 1) * FX_MON, FX_MON);
+    FxEmpty(party + 8 + (count - 1) * FX_MON, FX_MON);
+    FxPut32(party + 4, count - 1);
+}
+
+/* A cancelled offer collected for the party: cut once APPLYING is recorded
+ * (before the return is written) or before APPLIED is (after), then the stock
+ * game, then the companion. The settle records APPLIED and the ACK ends the
+ * trade; the return is never added again (LUNE-906). */
+static void CollectCut(unsigned phase, FxStockAction action)
 {
     WtEngine engine;
     CpVisit visit;
-    WtJournalEntry entry;
     scenario = CANCEL_RETURN;
     Setup();
-    cutAfter = WT_JOURNAL_APPLYING;
+    if (phase == WT_JOURNAL_APPLYING) cutAfter = phase; else refusePhase = phase;
     Open(&engine, &live, &liveGame);
     assert(CpVisit_Run(&engine, &liveGame, 7, -1, WT_OP_CANCEL, &transport, &visit) != 0);
     WtEngine_Close(&engine);
     saveCut = 0;
     memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
-    assert(FxStockPlay(&stock, 1, 0, FillParty));
+    assert(FxStockCopies(&stock, offered) == (phase == WT_JOURNAL_APPLIED));
+    assert(FxStockPlay(&stock, 1, 0, action));
     memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
-    refusePhase = WT_JOURNAL_APPLIED;
-    Bind(&liveGame, &liveImage, &liveFile);
-    Open(&engine, &live, &liveGame);
-    assert(engine.entry.phase == WT_JOURNAL_APPLYING && engine.entry.destination.kind == 1);
-    assert(WtEngine_Settle(&engine) != 0);
-    WtEngine_Close(&engine);
-    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
-    assert(FxStockCopies(&stock, offered) == 1);
-    Bind(&liveGame, &liveImage, &liveFile);
-    Open(&engine, &live, &liveGame);
-    assert(WtEngine_Settle(&engine) == 0 && engine.entry.phase == WT_JOURNAL_APPLIED);
-    entry = engine.entry;
-    WtEngine_Close(&engine);
-    assert(entry.destination.kind == 2 && entry.destination.length == 136);
+}
+
+static void Acknowledged(unsigned copies)
+{
+    WtEngine engine;
+    CpVisit visit;
     Open(&engine, &live, &liveGame);
     assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_IDLE);
     WtEngine_Close(&engine);
     assert(server.state == WT_TRADE_ACKNOWLEDGED);
     memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
-    assert(FxStockCopies(&stock, offered) == 1);
-    puts("PASS stock save during a return: a recovery into the PC commits APPLIED and is acknowledged");
+    assert(FxStockCopies(&stock, offered) == copies);
+}
+
+static void RedirectThroughJournal(void)
+{
+    WtEngine engine;
+    WtJournalEntry entry;
+    /* Written, then deposited in the PC: APPLIED records it there. */
+    CollectCut(WT_JOURNAL_APPLIED, DepositOffered);
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(engine.entry.phase == WT_JOURNAL_APPLYING && engine.entry.destination.kind == 1);
+    assert(WtEngine_Settle(&engine) == 0 && engine.entry.phase == WT_JOURNAL_APPLIED);
+    entry = engine.entry;
+    WtEngine_Close(&engine);
+    assert(entry.destination.kind == 2 && entry.destination.box == 0 && entry.destination.slot == 0
+        && entry.destination.length == 136);
+    Acknowledged(1);
+    puts("PASS stock save during a return: one deposited since commits APPLIED in the PC and is acknowledged");
+    /* Not written, and the party filled: APPLIED without it, never added. */
+    CollectCut(WT_JOURNAL_APPLYING, FillParty);
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(engine.entry.phase == WT_JOURNAL_APPLYING);
+    assert(WtEngine_Settle(&engine) == 0 && engine.entry.phase == WT_JOURNAL_APPLIED);
+    WtEngine_Close(&engine);
+    Acknowledged(0);
+    puts("PASS stock save during a return: cut before it was written, APPLIED and acknowledged without adding it");
 }
 
 int main(void)
 {
-    unsigned total[OUTCOMES] = { 0, 0, 0, 0 }, i;
+    unsigned total[OUTCOMES] = { 0, 0, 0, 0, 0 }, i, letGo = 0;
     for (scenario = OFFER; scenario < SCENARIOS; ++scenario) {
         WtEngine engine;
         CpVisit visit;
-        memset(tally, 0, sizeof(tally)); cases = writes = 0;
+        memset(tally, 0, sizeof(tally)); cases = writes = letGoCases = 0;
         Setup();
         sweeping = 1;
         Open(&engine, &live, &liveGame);
@@ -457,14 +532,18 @@ int main(void)
         assert(visit.phase == (scenario == OFFER ? WT_JOURNAL_QUEUED : WT_JOURNAL_IDLE));
         WtEngine_Close(&engine);
         sweeping = 0;
-        printf("%s: %u cuts (each write, and each save write torn), %u stock-save cases: "
-            "recovered=%u stuck=%u duplicate=%u lost=%u\n", kNames[scenario], writes, cases,
-            tally[RECOVERED], tally[STUCK], tally[DUPLICATE], tally[LOST]);
+        printf("%s: %u cuts (each write, and each save write torn), %u stock-save cases, %u more with the offer "
+            "released or traded away while a return was in flight: recovered=%u lost-in-window=%u stuck=%u "
+            "duplicate=%u lost=%u\n", kNames[scenario], writes, cases, letGoCases,
+            tally[RECOVERED], tally[WINDOW], tally[STUCK], tally[DUPLICATE], tally[LOST]);
         assert(writes > 0 && cases == 2 * writes);
         for (i = 0; i < OUTCOMES; ++i) total[i] += tally[i];
+        letGo += letGoCases;
     }
     assert(total[STUCK] == 0 && total[DUPLICATE] == 0 && total[LOST] == 0);
     RedirectThroughJournal();
-    printf("PASS stock save before resume: %u cases recovered, 0 stuck, 0 duplicates, 0 lost\n", total[RECOVERED]);
+    assert(letGo > 0 && total[WINDOW] > 0);
+    printf("PASS stock save before resume: %u cases recovered (%u with the offer released or traded away), 0 stuck, "
+        "0 duplicates, %u lost only in the games' window\n", total[RECOVERED], letGo, total[WINDOW]);
     return 0;
 }

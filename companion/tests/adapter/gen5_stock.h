@@ -62,13 +62,17 @@ static inline void RetailLoad5(const unsigned char *bytes, unsigned char *ram)
     assert(!"the game would call this save broken");
 }
 
-/* A stock save after play: the RAM's play time changes, then every block is
- * written to both copies with a new count, as the game's full save does. */
+/* A stock save after play: the RAM's play time advances (it never comes back
+ * to an earlier value), then every block is written to both copies with a new
+ * count, as the game's full save does. */
 static inline void StockSave5(unsigned char *bytes, unsigned char *ram)
 {
     unsigned id;
     uint32_t count = Fx5R32(ram + FX5_USED - 16) + 1;
-    ram[Rl5Offset(FX5_TRAINER) + 0x28] ^= 0x5A; /* the play time */
+    { /* the play time */
+        unsigned char *time = ram + Rl5Offset(FX5_TRAINER) + 0x28;
+        Fx5W16(time, Fx5R16(time) + 1);
+    }
     for (id = 0; id < FX5_BLOCKS; ++id) {
         unsigned char *footer = ram + Rl5Offset(id) + Fx5Size_(id);
         Fx5W16(footer, Fx5R16(footer) + 1);
@@ -78,6 +82,35 @@ static inline void StockSave5(unsigned char *bytes, unsigned char *ram)
     Fx5Seal((Fx5File *)(void *)bytes, 0, count);
     memcpy(bytes + FX5_BACKUP, bytes, FX5_USED);
     memcpy(ram, bytes, FX5_USED);
+}
+
+/* LUNE-906: on the RAM the stock game loaded, the player lets go of the
+ * Pokémon with the target's identity: released (the party closes up behind
+ * it, a PC or Battle Box slot empties) or, with trade, traded away for another
+ * Pokémon (Fx5Default(40)) that takes its slot. 0 when the RAM does not hold it. */
+static inline int Fx5Gone(unsigned char *ram, const unsigned char target[136], int trade)
+{
+    unsigned char canonical[136], *party = ram + Rl5Offset(FX5_PARTY);
+    Fx5Spec other = Fx5Default(40);
+    unsigned count = Fx5R32(party + 4), mon, i;
+    for (mon = 0; mon < count + 720 + 6; ++mon) {
+        unsigned char *at = mon < count ? party + 8 + mon * FX5_MON
+            : mon < count + 720 ? ram + Rl5Offset(1 + (mon - count) / 30) + (mon - count) % 30 * FX5_BOX_MON
+            : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
+        if (WtPokemon_Decode(at, canonical) != 0 || !Fx5R16(canonical + 8)
+            || memcmp(canonical, target, 4) != 0 || memcmp(canonical + 12, target + 12, 4) != 0) continue;
+        if (mon >= count) {
+            if (trade) { Fx5Canonical(&other, canonical); assert(WtPokemon_Encode(canonical, at) == 0); }
+            else Fx5Empty(at, FX5_BOX_MON);
+            return 1;
+        }
+        if (trade) { Fx5PartyMon(&other, at); return 1; }
+        for (i = mon; i + 1 < count; ++i) memcpy(party + 8 + i * FX5_MON, party + 8 + (i + 1) * FX5_MON, FX5_MON);
+        Fx5Empty(party + 8 + (count - 1) * FX5_MON, FX5_MON);
+        Fx5W32(party + 4, count - 1);
+        return 1;
+    }
+    return 0;
 }
 
 static inline void SelectedHash5(const unsigned char *ram, unsigned char digest[32])

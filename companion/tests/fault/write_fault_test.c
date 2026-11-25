@@ -76,8 +76,16 @@ static Fixture fixture;
 static unsigned char live[CP_SAVE_FILE_SIZE], durable[CP_SAVE_FILE_SIZE];
 static unsigned char digests[4][32];
 static unsigned char expectedParty[PARTY_BYTES], expectedPC[PC_BYTES];
-enum Outcome { RECOVERED, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST, OUTCOMES };
-static const char *outcomes[] = { "recovered", "journal-blocked", "save-blocked", "stuck", "duplicate", "lost" };
+/* LUNE-906: LOST_IN_WINDOW is the one loss the games accept (client
+ * wonder_trade/delivery.h): a return in flight (RESTORING in place, or
+ * APPLYING) that no complete retail copy held when the stock game loaded and
+ * saved the card. Resume decides it from the cut itself, before recovering;
+ * any other loss is LOST. NOT_APPLICABLE: a released/traded-away run's cut
+ * with no return in flight in the loaded save (its base run covers it). */
+enum Outcome { RECOVERED, LOST_IN_WINDOW, NOT_APPLICABLE, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST,
+    OUTCOMES };
+static const char *outcomes[] = { "recovered", "lost-in-window", "not-applicable", "journal-blocked", "save-blocked",
+    "stuck", "duplicate", "lost" };
 static unsigned unexpected;
 static unsigned randomCounter, eventCount, saveWrites, journalWrites, syncs;
 static unsigned attempts, duplicates, distinct, tally[OUTCOMES];
@@ -117,17 +125,29 @@ enum { HELD_MOVES = sizeof(heldMoves) / sizeof(heldMoves[0]) };
 static unsigned held;
 static unsigned char offerCanonical[136], heldParty[PARTY_BYTES];
 
+/* LUNE-906: CANCEL_RETURN and REJECT_RESTORE run again with `letGo` set:
+ * after every cut that leaves a return in flight (the journal RESTORING in
+ * place or APPLYING) and the offer in the save the stock game loads, the
+ * player releases it (1) or trades it away (2) there and saves. The companion
+ * must never add it again: the save ends with no copy of it, nothing else
+ * lost or doubled, the visit finished. */
+static unsigned letGo;
+static const char *const letGoNames[] = { "", "released", "traded" };
+
 static const char *Name(void)
 {
     static char name[48];
-    snprintf(name, sizeof(name), "%s%s%s", names[scenario], held ? "+" : "", held ? heldNames[held - 1] : "");
+    snprintf(name, sizeof(name), "%s%s%s%s%s", names[scenario], held ? "+" : "", held ? heldNames[held - 1] : "",
+        letGo ? "+" : "", letGoNames[letGo]);
     return name;
 }
 
-/* Every distinct cut must recover; there are no known failures. */
+/* Every distinct cut must recover, or lose a return only in the games'
+ * window (LOST_IN_WINDOW, decided by rule in Resume); there are no known
+ * failures and no allowlist. */
 static void CheckOutcome(const char *kind, size_t tear, unsigned stock, unsigned outcome)
 {
-    if (outcome == RECOVERED) return;
+    if (outcome == RECOVERED || outcome == LOST_IN_WINDOW || outcome == NOT_APPLICABLE) return;
     ++unexpected;
     printf("FAIL unexpected-recovery %s event=%u kind=%s tear=%zu stock-saves=%u outcome=%s\n",
         Name(), eventCount, kind, tear, stock, outcomes[outcome]);
@@ -514,6 +534,45 @@ static int Holding(const unsigned char *bytes)
 #endif
 }
 
+/* LUNE-906: Pokémon with the offer's identity in the party and the PC (and
+ * the Battle Box) of the save the stock game loads. */
+static unsigned OfferLoaded(const unsigned char *bytes)
+{
+    unsigned copies = 0, count, mon;
+#ifdef FX_GEN5
+    static unsigned char ram[0x26000];
+    const unsigned char *party;
+    RetailLoad5(bytes, ram);
+    party = ram + Rl5Offset(FX5_PARTY);
+    count = Fx32(party + 4);
+    for (mon = 0; mon < count + 720 + 6; ++mon)
+        copies += IsOffer(mon < count ? party + 8 + mon * MON
+            : mon < count + 720 ? ram + Rl5Offset(1 + (mon - count) / 30) + (mon - count) % 30 * FX5_BOX_MON
+            : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON);
+#else
+    unsigned selected[2];
+    const unsigned char *general, *boxes;
+    RetailLoad(bytes, selected);
+    general = bytes + selected[0] * CP_SAVE_HALF_SIZE + FX_GENERAL;
+    boxes = bytes + selected[1] * CP_SAVE_HALF_SIZE + FX_BOXES;
+    count = Fx32(general + FX_PARTY + 4);
+    for (mon = 0; mon < count + 540; ++mon)
+        copies += IsOffer(mon < count ? general + FX_PARTY + 8 + mon * MON : FxPcSlotConst(boxes, mon - count));
+#endif
+    return copies;
+}
+
+/* The player releases the offer, or trades it away, on the RAM the stock
+ * game loaded. */
+static void LetGoOffered(unsigned char *ram)
+{
+#ifdef FX_GEN5
+    assert(Fx5Gone(ram, offerCanonical, letGo == 2));
+#else
+    assert(FxGone(ram + FX_GENERAL, ram + FX_BOXES, offerCanonical, letGo == 2));
+#endif
+}
+
 #ifdef FX_GEN5
 /* Black/White and Black 2/White 2: the stock load builds RAM block by block
  * (retail_load5.h), the player plays, and each stock save writes it to both
@@ -616,8 +675,8 @@ static int OfferSlot(void)
 #endif
     unsigned count = Fx32(party + 4), slot;
     for (slot = 0; slot < count && !IsOffer(party + 8 + slot * MON); ++slot) {}
-    assert(slot < count);
-    return (int)slot;
+    /* LUNE-906: released, traded away or lost in the window: none to offer. */
+    return slot < count ? (int)slot : -1;
 }
 
 static void Resume(void)
@@ -626,7 +685,8 @@ static void Resume(void)
     WtJournalEntry entry, settled;
     unsigned char after[CP_SAVE_FILE_SIZE];
     CpSaveResult load;
-    int slot = -1;
+    int slot = -1, inFlight;
+    unsigned loaded;
     /* The child inherits the server only. Recreate all companion handles. */
     assert(close(posix.fd) == 0);
     OpenBytes(live);
@@ -659,7 +719,18 @@ static void Resume(void)
         WtJournal_Close(&journal);
     }
     Conservation(live, &entry, digests);
-    if (held) {
+    /* LUNE-906: a return in flight, and whether the save the stock game loads
+     * holds the offer yet. */
+    inFlight = entry.phase == WT_JOURNAL_APPLYING
+        || (entry.phase == WT_JOURNAL_RESTORING && entry.deliveryKind == WT_DELIVERY_RETURN);
+    loaded = OfferLoaded(live);
+    if (letGo) {
+        if (!inFlight || !loaded) Finish(NOT_APPLICABLE);
+        stockSaves = 1;
+        StockGameSave(LetGoOffered);
+        load = LOAD(&image, &file);
+        fxOffer = FX_OFFER_GONE;
+    } else if (held) {
         /* The stock game loads any cut save, moves the offer and saves. */
         StockGameSave(HoldOffered);
         load = LOAD(&image, &file);
@@ -685,6 +756,8 @@ static void Resume(void)
         }
     }
 #endif
+    /* The games' window: never put back once the stock game saved over it. */
+    if (stockPlayed && inFlight && !loaded && !letGo) fxOffer = FX_OFFER_WINDOW;
     if (load != CP_SAVE_OK) Finish(SAVE_BLOCKED);
     OpenEngine(&engine);
     /* This is the local boot path used by WtBoot_Check, without DS glue/TLS. */
@@ -738,7 +811,8 @@ static void Resume(void)
         if (result != 0) Finish(STUCK);
     }
     CheckFinal(0);
-    Finish(RECOVERED);
+    if (fxOffer == FX_OFFER_GONE) assert(OfferLoaded(live) == 0);
+    Finish(fxOffer == FX_OFFER_WINDOW && !OfferLoaded(live) ? LOST_IN_WINDOW : RECOVERED);
 }
 
 static void Setup(void)
@@ -828,20 +902,22 @@ static void Run(void)
 int main(void)
 {
     const char *only = getenv("CP_FAULT_SCENARIO");
-    volatile unsigned ran = 0, failures = 0;
+    volatile unsigned ran = 0, failures = 0, windowLosses = 0;
     full = getenv("CP_FAULT_FULL") != NULL;
 #ifdef FX_GEN5
     CpCore_SelectFamily(CP_CORE_GEN5);
 #endif
     if (setjmp(reboot)) Resume();
-    for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) for (held = 0; held <= HELD_MOVES; ++held) {
+    for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) for (held = 0; held <= HELD_MOVES; ++held)
+    for (letGo = 0; letGo <= 2; ++letGo) {
         unsigned checkpoints;
         if (held && scenario != OFFER && scenario != CANCEL_RETURN && scenario != REJECT_RESTORE) continue;
+        if (letGo && (held || (scenario != CANCEL_RETURN && scenario != REJECT_RESTORE))) continue;
         if (only && strcmp(only, Name()) != 0) continue;
 #ifndef FX_GEN5
         if (scenario == MUSICAL) continue;
 #endif
-        ran += !held;
+        ran += !held && !letGo;
         Setup(); Run(); CheckFinal(1); checkpoints = eventCount; CloseFile();
         Setup(); inject = 1; Run(); inject = 0; CheckFinal(0);
         assert(eventCount == checkpoints && eventCount == saveWrites + journalWrites + syncs);
@@ -849,14 +925,17 @@ int main(void)
         assert(journalWrites > 0 || scenario == CHECKPOINT);
         assert(syncs == saveWrites + journalWrites);
         assert(attempts == distinct + duplicates);
-        assert(distinct == tally[RECOVERED] + tally[JOURNAL_BLOCKED] + tally[SAVE_BLOCKED]
-            + tally[STUCK] + tally[DUPLICATE] + tally[LOST]);
+        assert(distinct == tally[RECOVERED] + tally[LOST_IN_WINDOW] + tally[NOT_APPLICABLE] + tally[JOURNAL_BLOCKED]
+            + tally[SAVE_BLOCKED] + tally[STUCK] + tally[DUPLICATE] + tally[LOST]);
+        /* A released/traded-away run must reach the stock game with a return in flight. */
+        assert(!letGo || tally[RECOVERED] > 0);
         assert(prefixStates > 0 && tailStates > 0);
         assert(cutMask == (1u << CUT_KINDS) - 1);
         assert(stockCases > 0 || scenario == PROVISION || scenario == MUSICAL);
         assert(scenario != MUSICAL || musicalErases > 0);
         assert(!full || journalByteTears == expectedJournalByteTears);
-        failures += distinct - tally[RECOVERED];
+        failures += distinct - tally[RECOVERED] - tally[LOST_IN_WINDOW] - tally[NOT_APPLICABLE];
+        windowLosses += tally[LOST_IN_WINDOW];
         if (scenario == OFFER || scenario == REJECT_RESTORE) {
             unsigned remove = (1u << WT_INVENTORY_PREPARE_REMOVE) | (1u << WT_INVENTORY_REMOVE)
                 | (1u << WT_INVENTORY_VERIFY_REMOVED);
@@ -874,8 +953,9 @@ int main(void)
             "distinct-prefix=%u distinct-tail=%u stock-save-cases=%u stock-save-recovered=%u journal-byte-tears=%u cut-kinds=%#x\n",
             Name(), checkpoints, saveWrites, journalWrites, syncs, attempts, duplicates, distinct,
             prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered, journalByteTears, cutMask);
-        printf("  recovered=%u journal-blocked=%u save-blocked=%u stuck=%u duplicate=%u lost=%u\n",
-            tally[RECOVERED], tally[JOURNAL_BLOCKED], tally[SAVE_BLOCKED], tally[STUCK], tally[DUPLICATE], tally[LOST]);
+        printf("  recovered=%u lost-in-window=%u not-applicable=%u journal-blocked=%u save-blocked=%u stuck=%u "
+            "duplicate=%u lost=%u\n", tally[RECOVERED], tally[LOST_IN_WINDOW], tally[NOT_APPLICABLE],
+            tally[JOURNAL_BLOCKED], tally[SAVE_BLOCKED], tally[STUCK], tally[DUPLICATE], tally[LOST]);
         CloseFile();
     }
     assert(ran != 0 || only);
@@ -885,7 +965,7 @@ int main(void)
     assert(only || ran == SCENARIOS - 1);
 #endif
     free(seen);
-    printf("%s recovery: %u unexpected outcomes, %u distinct cuts not recovered\n",
-        unexpected ? "FAIL" : "PASS", unexpected, failures);
+    printf("%s recovery: %u unexpected outcomes, %u distinct cuts not recovered, %u returns lost in the games' window\n",
+        unexpected ? "FAIL" : "PASS", unexpected, failures, windowLosses);
     return unexpected ? 1 : 0;
 }

@@ -123,6 +123,13 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
  * recorded before/after inventory hashes; published phases require one side.
  * After playing changes those hashes, transitional escrow is retained only for
  * an absent original; Resume also rejects any engine stuck in those phases. */
+/* LUNE-906: what Ownership expects of the offered Pokémon (digests[1]):
+ * exactly one copy, none (released or traded away in the stock game), or none
+ * or one (a return in flight the stock game saved over before any retail copy
+ * held it: the games' window). */
+enum { FX_OFFER_ONE, FX_OFFER_GONE, FX_OFFER_WINDOW };
+static unsigned fxOffer;
+
 static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     unsigned char digests[4][32], int played)
 {
@@ -177,8 +184,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
         FxSha(canonical, sizeof(canonical), digest);
         assert(memcmp(digest, digests[1], 32) == 0);
     }
-    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) > 1) return 1;
-    for (i = 0; i < 4; ++i) if (counts[i] + (i == 1 ? escrow : 0) < 1) return -1;
+    /* LUNE-906 (fxOffer): the offer let go in the stock game must stay gone;
+     * in the games' window it may be lost, never doubled. */
+    for (i = 0; i < 4; ++i)
+        if (counts[i] + (i == 1 ? escrow : 0) > (i == 1 && fxOffer == FX_OFFER_GONE ? 0u : 1u)) return 1;
+    for (i = 0; i < 4; ++i)
+        if (counts[i] + (i == 1 ? escrow : 0) < (i == 1 && fxOffer != FX_OFFER_ONE ? 0u : 1u)) return -1;
     return 0;
 }
 

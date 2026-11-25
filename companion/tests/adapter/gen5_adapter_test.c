@@ -649,14 +649,31 @@ static void StockGame(void)
     StockSave(40);
     assert(Step(WT_INVENTORY_REMOVE, &entry, 1) == 0 && Fx5ImageCount(&image) == 2);
     BothCopies();
-    /* RECEIVE after the stock game saved: received once, never twice. */
-    Match(&entry, &spec);
-    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
-    StockSave(40);
-    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 3);
-    StockSave(41);
-    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 3);
-    assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+    /* RECEIVE after the stock game saved over a delivery never written: the
+     * save is accepted as it is, the delivery never added (LUNE-906: the
+     * games' never-duplicate rule, and the window that loses it). */
+    {
+        WtJournalEntry prepared;
+        Match(&entry, &spec);
+        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
+        prepared = entry;
+        StockSave(40);
+        assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 2);
+        assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0 && Fx5ImageCount(&image) == 2);
+        BothCopies();
+        /* Written, then the stock game saved before RECEIVE was recorded: the
+         * one Pokémon with its identity is recorded where it is, never twice. */
+        Offered(&entry, 3, 501, 0);
+        Match(&entry, &spec);
+        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
+        prepared = entry;
+        assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 3);
+        StockSave(41);
+        entry = prepared;
+        assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Fx5ImageCount(&image) == 3);
+        assert(entry.destination.kind == 1 && entry.destination.slot == 2);
+        assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+    }
     /* The delivered Pokémon moved to the Battle Box: recorded there, never
      * received again. */
     Decoded(Fx5ImageParty(&image, 2), box, NULL);
@@ -681,6 +698,90 @@ static void StockGame(void)
     }
     printf("PASS %s stock-game saves: a removal and a delivery finish once; one moved to the Battle Box is recorded there\n",
            FX5_NAME);
+}
+
+/* Pokémon with the target's identity in the image's party, PC and Battle Box. */
+static unsigned Copies(CpSaveImage *at, const unsigned char target[136])
+{
+    unsigned char canonical[136];
+    unsigned count = Fx5ImageCount(at), mon, copies = 0;
+    for (mon = 0; mon < count + 720 + 6; ++mon) {
+        const unsigned char *slot = mon < count ? Fx5ImageParty(at, mon)
+            : mon < count + 720 ? Fx5ImageBox(at, (mon - count) / 30, (mon - count) % 30)
+            : Fx5ImageBattleBox(at, mon - count - 720);
+        if (WtPokemon_Decode(slot, canonical) != 0 || !Fx5R16(canonical + 8)) continue;
+        copies += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 12, target + 12, 4) == 0;
+    }
+    return copies;
+}
+
+/* The player lets go of it in the stock game: released (the party closes up)
+ * or traded away for another Pokémon in its party slot. */
+static void Gone(CpSaveImage *at, const unsigned char target[136], int trade)
+{
+    unsigned char canonical[136], *party = CpSaveImage_Block(at, FX5_PARTY);
+    unsigned count = Fx5ImageCount(at), slot, i;
+    Fx5Spec other = Fx5Default(40);
+    for (slot = 0; slot < count; ++slot) {
+        assert(WtPokemon_Decode(Fx5ImageParty(at, slot), canonical) == 0);
+        if (memcmp(canonical, target, 4) == 0 && memcmp(canonical + 12, target + 12, 4) == 0) break;
+    }
+    if (slot == count) return;
+    if (trade) { Fx5PartyMon(&other, Fx5ImageParty(at, slot)); return; }
+    for (i = slot; i + 1 < count; ++i) memcpy(Fx5ImageParty(at, i), Fx5ImageParty(at, i + 1), FX5_MON);
+    Fx5Empty(Fx5ImageParty(at, count - 1), FX5_MON);
+    Fx5W32(party + 4, count - 1);
+}
+
+/* LUNE-906: a matched delivery's RECEIVE cut before each write and after the
+ * last; the stock game loads the save, the player keeps the delivery,
+ * releases it or trades it away, and saves; RECEIVE resumes from the journal.
+ * Never added again: kept, it is there once when the loaded save held it (or
+ * received, when that save is still the recorded inventory); let go, it stays
+ * gone. */
+static void StockFates(void)
+{
+    static const char *const fates[] = { "kept", "released", "traded away" };
+    WtJournalEntry journal, entry;
+    Spec spec = Basic(500);
+    unsigned char digest[32];
+    unsigned writes, cut, fate, held, lost, copies;
+    Offered(&journal, 3, 501, 0); Match(&journal, &spec);
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &journal, 0) == 0);
+    entry = journal; writes = file.writes;
+    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    writes = file.writes - writes;
+    for (fate = 0; fate < 3; ++fate) {
+        lost = 0;
+        for (cut = 1; cut <= writes + 1; ++cut) {
+            Offered(&journal, 3, 501, 0); Match(&journal, &spec);
+            assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &journal, 0) == 0);
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == (cut <= writes ? -1 : 0));
+            file.failWrite = 0;
+            /* The stock game loads, the player plays, and it saves. */
+            assert(Fx5Load(&check, &cpFile) == CP_SAVE_OK);
+            held = Copies(&check, journal.incoming);
+            assert(held == (cut > writes / 2));
+            if (fate) Gone(&check, journal.incoming, fate == 2);
+            CpSaveImage_Block(&check, 40)[3] ^= 0x5A;
+            assert(CpSaveImage_Hash(&check, digest) == CP_SAVE_OK
+                && CpSaveImage_CommitBoth(&check, &cpFile, digest) == CP_SAVE_OK);
+            assert(Fx5Load(&image, &cpFile) == CP_SAVE_OK);
+            entry = journal;
+            assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+            copies = Copies(&image, journal.incoming);
+            assert(held ? copies == (fate == 0) : copies == 0);
+            lost += !held;
+            BothCopies();
+            entry.phase = WT_JOURNAL_APPLIED;
+            assert(WtGame_CanLeave(&game, &entry) == 1);
+        }
+        printf("PASS %s stock save after a cut in RECEIVE, delivery %s: %u cuts, 0 duplicates, %u lost "
+               "(cuts before write %u, the first retail copy holding it)\n", FX5_NAME, fates[fate], writes + 1, lost,
+               writes / 2 + 1);
+    }
 }
 
 /* ---- Holding ------------------------------------------------------------------- */
@@ -774,6 +875,7 @@ int main(void)
     Pokedex();
     Returned();
     StockGame();
+    StockFates();
     Holding();
     Musical();
     return 0;
