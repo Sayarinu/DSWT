@@ -41,6 +41,7 @@ enum CpAppError {
     CP_APP_ERROR_WIFI_REJECTED = -26,  /* it ended while authenticating: most often a wrong password */
     CP_APP_ERROR_WIFI_NO_ADDRESS = -27, /* joined, but DHCP gave no IPv4 address */
     CP_APP_ERROR_WIFI_TIMEOUT = -28,   /* found, but no answer in time */
+    CP_APP_ERROR_WIFI_FORGET = -29,    /* wifi.cfg could not be deleted (a locked or read-only card) */
     CP_APP_ERROR_BACKUP = -90     /* the backup failed: nothing was edited */
 };
 

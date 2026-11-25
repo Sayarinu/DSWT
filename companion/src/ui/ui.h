@@ -35,6 +35,7 @@ typedef enum CpUiState {
     CP_UI_WIFI_JOINED,   /* "Connected to ..." and where its password is kept */
     CP_UI_WIFI_FAILED,   /* why the network could not be joined, with a support code */
     CP_UI_WIFI_FORGET,   /* "Forget ...?" */
+    CP_UI_WIFI_FORGET_FAILED, /* wifi.cfg could not be deleted: Retry, with a support code */
     CP_UI_STATE_COUNT
 } CpUiState;
 

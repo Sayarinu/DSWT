@@ -80,7 +80,7 @@ CompanionLanguage CpUi_GameLanguage(unsigned language, CompanionLanguage fallbac
 
 static int IsWifi(CpUiState state)
 {
-    return state >= CP_UI_WIFI_LIST && state <= CP_UI_WIFI_FORGET;
+    return state >= CP_UI_WIFI_LIST && state <= CP_UI_WIFI_FORGET_FAILED;
 }
 
 CompanionLanguage CpUi_Language(const CpUi *ui, const CpUiModel *model)
@@ -145,6 +145,7 @@ int CpUi_Actions(const CpUi *ui, const CpUiModel *model, int labels[CP_UI_MAX_AC
         labels[0] = WonderTrade_Text_ConfirmAction;
         return 1;
     case CP_UI_WIFI_FAILED:
+    case CP_UI_WIFI_FORGET_FAILED:
         labels[0] = WonderTrade_Text_Retry;
         labels[1] = WonderTrade_Text_Back;
         return 2;
@@ -203,6 +204,7 @@ enum CpUiCard CpUi_Card(const CpUi *ui, const CpUiModel *model)
     case CP_UI_ERROR:
     case CP_UI_RECOVERY:
     case CP_UI_WIFI_FAILED:
+    case CP_UI_WIFI_FORGET_FAILED:
         return CP_UI_CARD_FULL_TEXT;
     case CP_UI_WIFI_LIST:
         return CP_UI_CARD_NETWORKS;
@@ -416,7 +418,15 @@ static void ActivateWifi(CpUi *ui, CpUiModel *model, int label)
         else Show(ui, CP_UI_WIFI_KEYBOARD, Companion_Text_WifiPassword);
         break;
     case CP_UI_WIFI_FORGET:
-        if (label == WonderTrade_Text_ConfirmAction) model->ops->wifiForget(model->context);
+    case CP_UI_WIFI_FORGET_FAILED:
+        if (label == WonderTrade_Text_ConfirmAction || label == WonderTrade_Text_Retry) {
+            model->ops->wifiForget(model->context);
+            /* The card kept wifi.cfg: say so, with its code, and offer Retry. */
+            if (model->wifi.forgetFailed) {
+                Show(ui, CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+                break;
+            }
+        }
         ShowNetworks(ui, model);
         break;
     default:
@@ -482,6 +492,7 @@ static void Back(CpUi *ui, CpUiModel *model)
         ShowNetworks(ui, model);
         break;
     case CP_UI_WIFI_FORGET:
+    case CP_UI_WIFI_FORGET_FAILED:
         ShowNetworks(ui, model);
         break;
     case CP_UI_WIFI_JOINING:

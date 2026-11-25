@@ -920,8 +920,16 @@ static void WifiForget(void *context)
 {
     CpApp *app = context;
     CpUiModel *model = &app->model;
-    if (app->wifi.path[0] && CpWifiConfig_Forget(app->wifi.path) != 0) Log(app, "wifi: cannot delete wifi.cfg\n");
-    else Log(app, "wifi: forgot the stored network\n");
+    model->wifi.forgetFailed = 0;
+    if (app->wifi.path[0] && CpWifiConfig_Forget(app->wifi.path) != 0) {
+        /* The password is still on the card and would be joined next launch:
+         * keep showing it as stored, so the player can retry or delete it. */
+        Log(app, "wifi: cannot delete wifi.cfg\n");
+        model->wifi.forgetFailed = 1;
+        model->wifi.code = CP_APP_ERROR_WIFI_FORGET;
+        return;
+    }
+    Log(app, "wifi: forgot the stored network\n");
     CpWifiConfig_Wipe(&app->wifi.config, sizeof(app->wifi.config));
     app->wifi.haveConfig = 0;
     model->wifi.saved = 0;

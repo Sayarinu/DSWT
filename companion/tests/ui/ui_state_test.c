@@ -48,7 +48,16 @@ static void WifiJoin(void *c, const char *ssid, unsigned security, const char *k
     snprintf(fake->lastKey, sizeof(fake->lastKey), "%s", key);
     fake->model.wifi.state = CP_UI_NETWORK_JOINING;
 }
-static void WifiForget(void *c) { ((Fake *)c)->forgets++; ((Fake *)c)->model.wifi.saved = 0; }
+/* forgetFails: the card refuses the delete, as the model reports it. */
+static int sForgetFails;
+static void WifiForget(void *c)
+{
+    Fake *fake = c;
+    fake->forgets++;
+    fake->model.wifi.forgetFailed = sForgetFails;
+    if (sForgetFails) fake->model.wifi.code = -29;
+    else fake->model.wifi.saved = 0;
+}
 static void WifiLeave(void *c) { ((Fake *)c)->leaves++; ((Fake *)c)->model.wifi.state = CP_UI_NETWORK_IDLE; }
 static const CpUiOps kWifiOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
     WifiScan, WifiJoin, WifiForget, WifiLeave };
@@ -804,10 +813,29 @@ static void TestWifiFromTheSaveList(void)
     Press(CP_UI_KEY_B);
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
     assert(sFake.forgets == 0);
+    /* A card that refuses the delete: the network stays, with a code and Retry. */
+    sForgetFails = 1;
     Press(CP_UI_KEY_RIGHT);
     Press(CP_UI_KEY_A);
     Press(CP_UI_KEY_A);
     assert(sFake.forgets == 1);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    assert(CpUi_Card(&sUi, model) == CP_UI_CARD_FULL_TEXT && model->wifi.saved);
+    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Back, 0);
+    Press(CP_UI_KEY_A);
+    assert(sFake.forgets == 2);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChooseSaved);
+    ExpectActions(3, WonderTrade_Text_ConfirmAction, Companion_Text_WifiForget, WonderTrade_Text_Back);
+    /* Retry once the card allows it. */
+    Press(CP_UI_KEY_RIGHT);
+    Press(CP_UI_KEY_A);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_WIFI_FORGET_FAILED, Companion_Text_WifiForgetFailed);
+    sForgetFails = 0;
+    Press(CP_UI_KEY_A);
+    assert(sFake.forgets == 4);
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiChoose);
     ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
 

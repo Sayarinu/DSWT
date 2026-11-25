@@ -1397,6 +1397,34 @@ static void WifiConfigOnTheCard(void)
     puts("PASS model: wifi.cfg is read defensively, and joining works without a card");
 }
 
+/* A card that refuses to delete wifi.cfg: the network stays stored and
+ * shown, with a support code, until a forget succeeds. */
+static void WifiForgetFailureKeepsTheNetwork(void)
+{
+    char folder[400];
+    CpWifiConfig stored;
+    memset(&stored, 0, sizeof(stored));
+    stored.security = CP_WIFI_SECURITY_WPA2;
+    snprintf(stored.ssid, sizeof(stored.ssid), "Home");
+    snprintf(stored.key, sizeof(stored.key), "correct horse 9");
+    snprintf(folder, sizeof(folder), "%s_nds/dswt", fake.root);
+    {
+        char path[420];
+        snprintf(path, sizeof(path), "%s/wifi.cfg", folder);
+        assert(CpWifiConfig_Save(path, &stored) == 0);
+    }
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    assert(model->wifi.saved);
+    assert(chmod(folder, 0500) == 0);
+    model->ops->wifiForget(model->context);
+    assert(model->wifi.forgetFailed && model->wifi.code == CP_APP_ERROR_WIFI_FORGET);
+    assert(model->wifi.saved && !strcmp(model->wifi.savedSsid, "Home") && CfgExists(""));
+    assert(chmod(folder, 0700) == 0);
+    model->ops->wifiForget(model->context);
+    assert(!model->wifi.forgetFailed && !model->wifi.saved && !CfgExists(""));
+    puts("PASS model: a wifi.cfg the card will not delete stays stored and is reported");
+}
+
 /* Listing networks takes the radio off whatever network it was on, so
  * leaving the settings without joining always reconnects, even when the
  * driver still reports the old association; connect never trusts it. */
@@ -1467,6 +1495,7 @@ int main(void)
     WifiJoinStoresAndForgets();
     WifiConfigOnTheCard();
     WifiSettingsDropTheConnection();
+    WifiForgetFailureKeepsTheNetwork();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

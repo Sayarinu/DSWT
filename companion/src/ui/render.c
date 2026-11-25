@@ -414,7 +414,7 @@ static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
     switch (card) {
     case CP_UI_CARD_FULL_TEXT:
         DrawBody(top, message);
-        if (ui->state == CP_UI_ERROR || ui->state == CP_UI_WIFI_FAILED) {
+        if (ui->state == CP_UI_ERROR || ui->state == CP_UI_WIFI_FAILED || ui->state == CP_UI_WIFI_FORGET_FAILED) {
             char number[12];
             int right = (BODY_X + BODY_W) * 8 - 8;
             /* Under up to five lines of explanation, as in Diamond/Pearl. */

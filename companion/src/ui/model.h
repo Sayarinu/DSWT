@@ -179,6 +179,9 @@ typedef struct CpUiModel {
         char savedSsid[CP_WIFI_SSID_MAX + 1];
         /* JOINED, but the network could not be written to the SD card. */
         int saveFailed;
+        /* The last forget could not delete wifi.cfg (code says so); the
+         * network stays stored and saved stays set. */
+        int forgetFailed;
     } wifi;
 } CpUiModel;
 

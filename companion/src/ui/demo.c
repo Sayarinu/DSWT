@@ -20,6 +20,7 @@ enum { JOB_NONE, JOB_SCAN, JOB_LOAD, JOB_CONNECT, JOB_RESUME, JOB_TRADE, JOB_COL
 /* The real model's codes for "no saved network worked" and a rejected join. */
 #define DEMO_WIFI_CODE (-20)
 #define DEMO_JOIN_CODE (-26)
+#define DEMO_FORGET_CODE (-29)
 #define WIFI_FIRST_FRAMES 45
 #define WIFI_ALL_FRAMES 90
 #define JOIN_FRAMES 90
@@ -125,6 +126,12 @@ static void WifiJoin(void *context, const char *ssid, unsigned security, const c
 static void WifiForget(void *context)
 {
     CpUiDemo *demo = context;
+    demo->model.wifi.forgetFailed = demo->failForget;
+    if (demo->failForget) {
+        demo->failForget = 0;
+        demo->model.wifi.code = DEMO_FORGET_CODE;
+        return;
+    }
     demo->model.wifi.saved = 0;
     demo->model.wifi.savedSsid[0] = 0;
 }
@@ -365,7 +372,7 @@ void CpUiDemo_SetOutcome(CpUiDemo *demo, enum CpUiDemoOutcome outcome)
 
 /* The walk: press a key (or nothing), optionally pick the next outcome, then
  * wait `hold` frames for the screens to settle and be seen. */
-enum { NONE = -1, FAIL_CONNECT = -2, FAIL_WIFI = -3, FAIL_JOIN = -4 };
+enum { NONE = -1, FAIL_CONNECT = -2, FAIL_WIFI = -3, FAIL_JOIN = -4, FAIL_FORGET = -5 };
 /* A tap on a key of the password keyboard, in place of buttons. */
 #define TAP_FLAG 0x10000u
 #define TAP(index) (TAP_FLAG | (unsigned)(index))
@@ -409,7 +416,8 @@ static const struct {
     { CP_UI_KEY_A, NONE, 150 },         /* the list, with the saved network */
     { CP_UI_KEY_RIGHT, NONE, 60 },      /* Forget network */
     { CP_UI_KEY_A, NONE, 150 },         /* "Forget Lune Home?" */
-    { CP_UI_KEY_A, NONE, 60 },
+    { CP_UI_KEY_A, FAIL_FORGET, 150 },  /* the card kept wifi.cfg: code -29 */
+    { CP_UI_KEY_A, NONE, 60 },          /* Retry: forgotten, back to the list */
     { CP_UI_KEY_B, NONE, 60 },          /* back to the save list */
     { CP_UI_KEY_A, NONE, 240 },         /* Retry: BOOT, then three saves */
     { CP_UI_KEY_DOWN, NONE, 120 },      /* a save without its ROM */
@@ -489,6 +497,7 @@ int CpUiDemo_Tour(CpUiDemo *demo, CpUiInput *input)
         if (kTour[demo->step].outcome == FAIL_CONNECT) demo->failConnect = 1;
         else if (kTour[demo->step].outcome == FAIL_WIFI) demo->failWifi = 1;
         else if (kTour[demo->step].outcome == FAIL_JOIN) demo->failJoin = 1;
+        else if (kTour[demo->step].outcome == FAIL_FORGET) demo->failForget = 1;
         else if (kTour[demo->step].outcome >= 0) demo->outcome = kTour[demo->step].outcome;
         input->pressed = kTour[demo->step].keys;
         if (input->pressed & TAP_FLAG) {

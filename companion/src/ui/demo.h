@@ -32,7 +32,7 @@ typedef struct CpUiDemo {
     /* Wi-Fi settings: made-up networks found over a second or two, and joins
      * that succeed unless failJoin is set. failWifi makes the next connect
      * find no saved network. */
-    int failWifi, failJoin;
+    int failWifi, failJoin, failForget;
     unsigned scanStart, joinDue;
     int joining;
     unsigned loading;

@@ -103,7 +103,7 @@ static void TestWifiMessages(void)
         Companion_Text_WifiJoinedUnsaved, Companion_Text_WifiForgetConfirm, Companion_Text_WifiConnecting,
         Companion_Text_WifiReasonTkip, Companion_Text_WifiReasonEnterprise, Companion_Text_WifiReasonDsi };
     static const int failures[] = { Companion_Text_WifiFailed, Companion_Text_WifiNotFound,
-        Companion_Text_WifiNoAddress, Companion_Text_WifiTimedOut };
+        Companion_Text_WifiNoAddress, Companion_Text_WifiTimedOut, Companion_Text_WifiForgetFailed };
     static CpUiModel model;
     CpUi ui;
     char message[CP_RENDER_MESSAGE_MAX], wrapped[CP_RENDER_MESSAGE_MAX];

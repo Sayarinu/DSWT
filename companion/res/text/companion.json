@@ -581,6 +581,16 @@
       "es_ES": "Ocultar",
       "ja_JP": "かくす",
       "ko_KR": "숨기기"
+    },
+    {
+      "id": "Companion_Text_WifiForgetFailed",
+      "en_US": "Couldn’t delete the saved network\nfrom the SD card. Check that the\ncard isn’t locked and try again,\nor delete _nds/dswt/wifi.cfg\non a computer.",
+      "fr_FR": "Impossible d’effacer le réseau\nenregistré de la carte SD. Vérifiez\nque la carte n’est pas verrouillée\net réessayez, ou effacez\n_nds/dswt/wifi.cfg sur un ordinateur.",
+      "de_DE": "Das gespeicherte Netzwerk konnte\nnicht von der SD-Karte gelöscht\nwerden. Prüfe, ob die Karte gesperrt\nist, oder lösche _nds/dswt/wifi.cfg\nam Computer.",
+      "it_IT": "Impossibile cancellare la rete\nsalvata dalla scheda SD. Controlla\nche la scheda non sia bloccata e\nriprova, o cancella\n_nds/dswt/wifi.cfg da un computer.",
+      "es_ES": "No se ha podido borrar la red\nguardada de la tarjeta SD. Comprueba\nque no esté bloqueada e inténtalo\nde nuevo, o borra _nds/dswt/wifi.cfg\nen un ordenador.",
+      "ja_JP": "ほぞんした　ネットワークを\nSDカードから　けせませんでした\nカードの　ロックを　かくにんして\nもういちど　ためすか　パソコンで\n_nds/dswt/wifi.cfgを　けしてください",
+      "ko_KR": "저장된 네트워크를\nSD 카드에서 삭제할 수 없었습니다\n카드 잠금을 확인하고 다시 시도하거나\n컴퓨터에서 _nds/dswt/wifi.cfg를\n삭제해 주십시오"
     }
   ]
 }
