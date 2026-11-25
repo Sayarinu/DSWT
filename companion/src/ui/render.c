@@ -125,6 +125,10 @@ static int GameName(unsigned version)
     case CP_VERSION_PLATINUM: return Companion_Text_GamePlatinum;
     case CP_VERSION_HEARTGOLD: return Companion_Text_GameHeartGold;
     case CP_VERSION_SOULSILVER: return Companion_Text_GameSoulSilver;
+    case CP_VERSION_BLACK: return Companion_Text_GameBlack;
+    case CP_VERSION_WHITE: return Companion_Text_GameWhite;
+    case CP_VERSION_BLACK2: return Companion_Text_GameBlack2;
+    case CP_VERSION_WHITE2: return Companion_Text_GameWhite2;
     default: return -1;
     }
 }

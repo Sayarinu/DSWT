@@ -303,6 +303,46 @@
       "ko_KR": "소울실버"
     },
     {
+      "id": "Companion_Text_GameBlack",
+      "en_US": "Black",
+      "fr_FR": "Noire",
+      "de_DE": "Schwarz",
+      "it_IT": "Nera",
+      "es_ES": "Negra",
+      "ja_JP": "ブラック",
+      "ko_KR": "블랙"
+    },
+    {
+      "id": "Companion_Text_GameWhite",
+      "en_US": "White",
+      "fr_FR": "Blanche",
+      "de_DE": "Weiß",
+      "it_IT": "Bianca",
+      "es_ES": "Blanca",
+      "ja_JP": "ホワイト",
+      "ko_KR": "화이트"
+    },
+    {
+      "id": "Companion_Text_GameBlack2",
+      "en_US": "Black 2",
+      "fr_FR": "Noire 2",
+      "de_DE": "Schwarz 2",
+      "it_IT": "Nera 2",
+      "es_ES": "Negra 2",
+      "ja_JP": "ブラック2",
+      "ko_KR": "블랙2"
+    },
+    {
+      "id": "Companion_Text_GameWhite2",
+      "en_US": "White 2",
+      "fr_FR": "Blanche 2",
+      "de_DE": "Weiß 2",
+      "it_IT": "Bianca 2",
+      "es_ES": "Blanca 2",
+      "ja_JP": "ホワイト2",
+      "ko_KR": "화이트2"
+    },
+    {
       "id": "Companion_Text_LanguageJapanese",
       "en_US": "Japanese",
       "fr_FR": "Japonais",
