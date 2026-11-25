@@ -4,7 +4,7 @@
 
 **Wonder Trade for the Pokémon DS games.**
 
-Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold or SoulSilver, keep playing, and collect whatever another player sent, from any of those games.
+Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold, SoulSilver, Black, White, Black 2 or White 2, keep playing, and collect whatever another player sent, from a game in the same generation.
 
 [![CI](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Sayarinu/DSWT/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -19,7 +19,7 @@ Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold or So
 ## Features
 
 - **Wonder Trade in the game's own menu.** Pick a party Pokémon and confirm.
-- **Trade across games.** Platinum, Diamond, Pearl, HeartGold and SoulSilver all trade with each other, and a Pokémon only goes to a game that can hold it.
+- **Trade across games.** Diamond, Pearl, Platinum, HeartGold and SoulSilver trade with each other; Black, White, Black 2 and White 2 trade with each other. A Pokémon only goes to a game that can hold it.
 - **Collect when you're ready.** Your offer waits on the server while you play. Cancel any time before a match.
 - **Trade evolutions** happen when you collect.
 - **Legality checks.** Every offer is checked with [PKHeX.Core](https://github.com/kwsch/PKHeX), and refused Pokémon come back to you.
@@ -30,7 +30,7 @@ Offer a Pokémon from your own copy of Diamond, Pearl, Platinum, HeartGold or So
 
 DSWT is a patch: you need a dump of your own cartridge. **DSWT never distributes ROMs.**
 
-DSWT is tested on melonDS with the US versions of Pokémon Platinum, Diamond, Pearl, HeartGold and SoulSilver. Most other languages are supported as ports: see **[Language support](https://github.com/Sayarinu/DSWT/wiki/Language-support)**.
+DSWT is tested on melonDS with the US versions of Pokémon Platinum, Diamond, Pearl, HeartGold and SoulSilver, and the USA/Europe versions of Black, White, Black 2 and White 2 in DS mode only. Other supported languages are ports: see **[Language support](https://github.com/Sayarinu/DSWT/wiki/Language-support)**.
 
 Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)**, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
 
