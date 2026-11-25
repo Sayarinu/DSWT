@@ -51,30 +51,36 @@ CpSaveJournalDetection CpSaveJournal_Detect(const CpFile *file)
     return CpSaveJournal_DetectArea(file, NULL);
 }
 
-CpSaveJournalDetection CpSaveJournal_DetectArea(const CpFile *file, const CpJournalArea *area)
+/* The journal's own view: 1 a journal, 0 banks it may initialize (blank, or
+ * what a cut first write leaves), -1 anything else. */
+static int JournalState(const CpFile *file, const CpJournalArea *area)
 {
     WtJournal journal;
     CpPlatformFile platform = { (void *)file, Read, NULL, NULL, Size, NULL };
     CpJournalStore store = { &platform, NULL, 0, CpSaveJournal_Hash, area };
     WtJournalIO io = { &store, CpJournal_ReadBank, NoWrite, CpSaveJournal_Hash };
-    int result;
-    if (!file || !file->readAt || !file->size) return CP_SAVE_JOURNAL_REFUSE;
-    if (Gen5(area)) {
-        int state = CpMusicalArea_Inspect(file, area);
-        if (state < 0) return CP_SAVE_JOURNAL_REFUSE;
-        /* Nothing a journal wrote: the patched game too erases it first. */
-        if (state == CP_MUSICAL_LEFTOVER) return CP_SAVE_JOURNAL_UNUSED;
-    }
-    result = WtJournal_Open(&journal, io);
-    if (result == WT_JOURNAL_ERROR_READ || result == WT_JOURNAL_ERROR_SELF_TEST) return CP_SAVE_JOURNAL_REFUSE;
+    int result = WtJournal_Open(&journal, io);
+    if (result == WT_JOURNAL_ERROR_READ || result == WT_JOURNAL_ERROR_SELF_TEST) return -1;
     if (result == 0) {
         WtJournal_Close(&journal);
-        return CP_SAVE_JOURNAL_HAS_JOURNAL;
+        return 1;
     }
     /* A cut first enrollment write reads as blank (CpJournal_ReadBank).
      * Initialize(NULL) checks WtJournal_Unused without writing: like the game,
      * a cut first write can be erased and initialized with fresh entropy. */
-    return WtJournal_Initialize(&journal, io, NULL) == WT_JOURNAL_NEEDS_SEED
+    return WtJournal_Initialize(&journal, io, NULL) == WT_JOURNAL_NEEDS_SEED ? 0 : -1;
+}
+
+CpSaveJournalDetection CpSaveJournal_DetectArea(const CpFile *file, const CpJournalArea *area)
+{
+    int state;
+    if (!file || !file->readAt || !file->size) return CP_SAVE_JOURNAL_REFUSE;
+    state = JournalState(file, area);
+    if (state > 0) return CP_SAVE_JOURNAL_HAS_JOURNAL;
+    if (state == 0) return CP_SAVE_JOURNAL_UNUSED;
+    /* Generation V: banks holding a musical's leftovers and no journal are
+     * unused once erased, as the patched game erases them. */
+    return Gen5(area) && CpMusicalArea_Inspect(file, area) == CP_MUSICAL_LEFTOVER
         ? CP_SAVE_JOURNAL_UNUSED : CP_SAVE_JOURNAL_REFUSE;
 }
 
@@ -89,8 +95,8 @@ int CpSaveJournal_ProvisionArea(const CpFile *file, const CpJournalArea *area, W
 {
     if (!journal) return -1;
     WtJournal_Close(journal);
-    if (!seed || CpSaveJournal_DetectArea(file, area) != CP_SAVE_JOURNAL_UNUSED) return -1;
-    /* A musical's leftovers are erased first, never written over. */
-    if (Gen5(area) && CpMusicalArea_Inspect(file, area) != CP_MUSICAL_FREE) return -1;
+    /* Only banks the journal itself may initialize: a musical's leftovers
+     * are erased first (CpMusicalArea_Erase), never written over. */
+    if (!seed || !file || !file->readAt || !file->size || JournalState(file, area) != 0) return -1;
     return WtJournal_Initialize(journal, io, seed);
 }

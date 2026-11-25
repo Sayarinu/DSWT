@@ -1,5 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "../adapter/save_fixture.h"
+/* LUNE-881: FX_GEN5 runs the matrix over Black/White (FX5_GAME 0) and Black
+ * 2/White 2 (1) saves, with their journal in the musical distribution save. */
+#ifdef FX_GEN5
+#include "../adapter/gen5_fixture.h"
+#include "core/journal_family.h"
+#include "save/journal_save.h"
+#endif
 
 #include <fcntl.h>
 #include <setjmp.h>
@@ -17,7 +24,17 @@ static int Hash(const unsigned char *bytes, size_t size, unsigned char digest[32
     return FxSha(bytes, size, digest);
 }
 #include "fake_server.h"
+#ifdef FX_GEN5
+#include "retail_load5.h"
+#define LOAD(image, file) Fx5Load(image, file)
+typedef Fx5File Fixture;
+enum { PARTY_BYTES = 0x534, PC_BYTES = 0x530 };
+#else
 #include "retail_load.h"
+#define LOAD(image, file) FxLoad(image, file)
+typedef FxFile Fixture;
+enum { PARTY_BYTES = CP_ADAPTER_PARTY_SIZE, PC_BYTES = FX_PC_SPAN };
+#endif
 
 /* The supervisor continues the uninterrupted operation. At each boundary a
  * forked child abandons the call stack, discards all client state, and opens
@@ -31,8 +48,11 @@ static int Hash(const unsigned char *bytes, size_t size, unsigned char digest[32
  * inventory step and cut kind (with separate first/odd/last-byte prefix tears),
  * while retaining cuts at every save write and sync.
  * CP_FAULT_SCENARIO selects one of names[] for a focused reproduction. */
-enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, SCENARIOS };
-static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint" };
+/* LUNE-881: Generation V adds "musical": the journal banks hold a musical's
+ * leftovers and the save a marker the game no longer honours; the release
+ * clears the marker in both copies, erases the banks, then the journal starts. */
+enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, MUSICAL, SCENARIOS };
+static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint", "musical" };
 static const char *steps[] = { "checkpoint/network", "prepare-remove", "remove", "verify-removed",
     "prepare-receive", "receive", "verify-received", "restore", "prepare-restore" };
 enum CutKind { BEFORE_WRITE, LOST_WRITE, TORN_PREFIX, TAIL_FIRST, AFTER_WRITE, BEFORE_SYNC, AFTER_SYNC, CUT_KINDS };
@@ -52,10 +72,10 @@ static CpPosixFile posix;
 static CpFile disk, file;
 static CpJournalHostStore host;
 static WtJournalIO journalIO;
-static FxFile fixture;
+static Fixture fixture;
 static unsigned char live[CP_SAVE_FILE_SIZE], durable[CP_SAVE_FILE_SIZE];
 static unsigned char digests[4][32];
-static unsigned char expectedParty[CP_ADAPTER_PARTY_SIZE], expectedPC[FX_PC_SPAN];
+static unsigned char expectedParty[PARTY_BYTES], expectedPC[PC_BYTES];
 enum Outcome { RECOVERED, JOURNAL_BLOCKED, SAVE_BLOCKED, STUCK, DUPLICATE, LOST, OUTCOMES };
 static const char *outcomes[] = { "recovered", "journal-blocked", "save-blocked", "stuck", "duplicate", "lost" };
 static unsigned unexpected;
@@ -63,6 +83,7 @@ static unsigned randomCounter, eventCount, saveWrites, journalWrites, syncs;
 static unsigned attempts, duplicates, distinct, tally[OUTCOMES];
 static unsigned prefixAttempts, tailAttempts, prefixStates, tailStates, stockCases, stockRecovered;
 static unsigned journalByteTears, expectedJournalByteTears;
+static unsigned musicalErases;
 /* Hash both disk bytes and surviving server/replay state: equal files with a
  * different server history are different recovery cases. */
 static unsigned char (*seen)[32];
@@ -262,10 +283,17 @@ static int ReadAt(void *arg, uint32_t offset, void *bytes, size_t size)
     return disk.readAt(disk.context, offset, bytes, size);
 }
 
+#ifdef FX_GEN5
+static const CpJournalArea *Area(void) { return CpSaveJournal_Area(FX5_LAYOUT); }
+#else
+static const CpJournalArea *Area(void) { return &CpJournalArea_Gen4; }
+#endif
+
 static int JournalOffset(uint32_t offset)
 {
-    return (offset >= CP_JOURNAL_BANK_0 && offset < CP_JOURNAL_BANK_0 + CP_JOURNAL_RESERVED_SIZE)
-        || (offset >= CP_JOURNAL_BANK_1 && offset < CP_JOURNAL_BANK_1 + CP_JOURNAL_RESERVED_SIZE);
+    const CpJournalArea *area = Area();
+    return (offset >= area->bank[0] && offset < area->bank[0] + area->reserved)
+        || (offset >= area->bank[1] && offset < area->bank[1] + area->reserved);
 }
 
 static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
@@ -273,6 +301,15 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
     int result;
     (void)arg;
     journalWrite = JournalOffset(offset); /* Also classifies the following sync. */
+#ifdef FX_GEN5
+    /* A musical's leftovers are erased only once neither copy marks it saved. */
+    if (journalWrite && size == 4096 && ((const unsigned char *)bytes)[0] == 0xFF) {
+        unsigned copy;
+        ++musicalErases;
+        for (copy = 0; copy < 2; ++copy)
+            assert(Fx5R16(durable + (copy ? FX5_BACKUP : 0) + Fx5Offset(FX5_TRAINER) + 0x3C) == 0);
+    }
+#endif
 #if FX_SHARED
     {
         uint32_t at = offset % CP_SAVE_HALF_SIZE;
@@ -340,7 +377,7 @@ static void Bind(void)
     file = hooked;
     memset(&image, 0, sizeof(image)); memset(&game, 0, sizeof(game));
     game.image = &image; game.file = &file;
-    journalIO = CpJournalHostIO(&host, &file);
+    journalIO = CpJournalHostIOArea(&host, &file, Area());
 }
 
 static void Provision(void)
@@ -348,7 +385,7 @@ static void Provision(void)
     unsigned char seed[32];
     WtJournal journal;
     memset(seed, 4, sizeof(seed)); /* Synthetic entropy, not player credentials. */
-    assert(CpSaveJournal_Provision(&file, &journal, journalIO, seed) == 0);
+    assert(CpSaveJournal_ProvisionArea(&file, Area(), &journal, journalIO, seed) == 0);
     WtJournal_Close(&journal);
 }
 
@@ -366,6 +403,20 @@ static WtJournalEntry ReadEntry(void)
  * stock save writes both blocks to their alternate halves. A second save, when
  * requested by Cut, refreshes the other halves too. No companion load/commit
  * implementation or rejected image participates in this recovery model. */
+#ifdef FX_GEN5
+/* Black/White and Black 2/White 2: the stock load builds RAM block by block
+ * (retail_load5.h), the player plays, and each stock save writes it to both
+ * copies with a new count. */
+static void StockGameSave(void)
+{
+    static unsigned char ram[0x26000];
+    unsigned pass;
+    RetailLoad5(live, ram);
+    for (pass = 0; pass < stockSaves; ++pass) StockSave5(live, ram);
+    stockPlayed = 1;
+    CloseFile(); OpenBytes(live); Bind();
+}
+#else
 static void StockGameSave(void)
 {
     unsigned selected[2], block, pass;
@@ -403,6 +454,7 @@ static void StockGameSave(void)
     stockPlayed = 1;
     CloseFile(); OpenBytes(live); Bind();
 }
+#endif
 
 static int Visit(int slot, unsigned action)
 {
@@ -420,10 +472,16 @@ static void CheckFinal(int capture)
 {
     WtJournalEntry entry = ReadEntry();
     const unsigned char *party, *pc;
-    assert(FxLoad(&image, &file) == CP_SAVE_OK);
+    assert(LOAD(&image, &file) == CP_SAVE_OK);
     Conservation(live, &entry, digests);
+#ifdef FX_GEN5
+    /* The party, and the first PC tray, where a delivery to a full party goes. */
+    party = CpSaveImage_Block(&image, FX5_PARTY);
+    pc = CpSaveImage_Block(&image, 1);
+#else
     party = CpSaveImage_Block(&image, 0) + FX_PARTY;
     pc = CpSaveImage_Block(&image, 1) + FX_PC;
+#endif
     if (capture) {
         memcpy(expectedParty, party, sizeof(expectedParty)); memcpy(expectedPC, pc, sizeof(expectedPC));
     } else if (!stockPlayed) {
@@ -445,9 +503,13 @@ static void Resume(void)
     assert(close(posix.fd) == 0);
     OpenBytes(live);
     Bind(); randomCounter += 1000; /* Fresh entropy after reboot. */
-    load = FxLoad(&image, &file);
-    if (CpSaveJournal_Detect(&file) == CP_SAVE_JOURNAL_UNUSED) {
-        assert(scenario == PROVISION);
+    load = LOAD(&image, &file);
+#ifdef FX_GEN5
+    /* The companion releases the area at every visit, as the game does. */
+    if (scenario == MUSICAL && load == CP_SAVE_OK) assert(CpGen5_ReleaseMusical(&game) == 0);
+#endif
+    if (CpSaveJournal_DetectArea(&file, Area()) == CP_SAVE_JOURNAL_UNUSED) {
+        assert(scenario == PROVISION || scenario == MUSICAL);
         Provision();
     }
     {
@@ -456,7 +518,7 @@ static void Resume(void)
         if (result != 0) {
             WtJournalEntry available[2];
             int valid[2], bank;
-            unsigned offsets[2] = { CP_JOURNAL_BANK_0, CP_JOURNAL_BANK_1 };
+            unsigned offsets[2] = { Area()->bank[0], Area()->bank[1] };
             for (bank = 0; bank < 2; ++bank)
                 valid[bank] = WtJournal_Decode(live + offsets[bank], Hash, &available[bank]) == 0;
             assert(valid[0] || valid[1]);
@@ -473,9 +535,9 @@ static void Resume(void)
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
         StockGameSave();
-        load = FxLoad(&image, &file);
+        load = LOAD(&image, &file);
     }
-#if FX_SHARED
+#if FX_SHARED || defined(FX_GEN5)
     /* LUNE-880: HeartGold/SoulSilver load every cut save (their LoadCheck falls
      * back to the older half), so the player may also play and save in the
      * stock game before the companion resumes: the first plan resumes
@@ -487,7 +549,7 @@ static void Resume(void)
         } else {
             stockSaves = 1;
             StockGameSave();
-            load = FxLoad(&image, &file);
+            load = LOAD(&image, &file);
         }
     }
 #endif
@@ -529,19 +591,53 @@ static void Resume(void)
 
 static void Setup(void)
 {
+#ifdef FX_GEN5
+    Fx5Spec specs[4];
+#else
     FxSpec specs[4];
+#endif
     unsigned i;
     inject = counting = 0; step = 0; randomCounter = 0;
     memset(&server, 0, sizeof(server)); replayCount = 0;
     memset(replay, 0, sizeof(replay));
     for (i = 0; i < 4; ++i) {
         unsigned char canonical[136];
-        specs[i] = FxDefault(i); FxCanonical(&specs[i], canonical); FxSha(canonical, sizeof(canonical), digests[i]);
+#ifdef FX_GEN5
+        specs[i] = Fx5Default(i); Fx5Canonical(&specs[i], canonical);
+#else
+        specs[i] = FxDefault(i); FxCanonical(&specs[i], canonical);
+#endif
+        FxSha(canonical, sizeof(canonical), digests[i]);
     }
+#ifdef FX_GEN5
+    Fx5Build(&fixture, specs, 4, 40);
+    /* The last stock save was cut in its backup pass: the backup's copy of
+     * the last PC tray is the one before, which a checkpoint rewrites. */
+    {
+        unsigned char *tray = Fx5Block(&fixture, 1, 24);
+        tray[0x7F0] ^= 0x33;
+        Fx5W16(tray + Fx5Size_(24) + 2, Fx5Crc(tray, Fx5Size_(24)));
+        Fx5W16(tray + Fx5Size_(24), Fx5R16(tray + Fx5Size_(24)) - 1);
+    }
+#else
     FxBuild(&fixture, specs, 4);
+#endif
+#ifdef FX_GEN5
+    if (scenario == MUSICAL) {
+        /* A marked musical whose save count no longer matches: the game's
+         * load drops it, and the banks hold what it left. */
+        unsigned char *trainer = Fx5Block(&fixture, 0, FX5_TRAINER);
+        Fx5W16(trainer + 0x3C, 0xC21E);
+        Fx5W32(trainer + FX5_COUNTS + 24, 77);
+        Fx5Block(&fixture, 0, FX5_MUSICAL_SAVE)[0x29E] = 1;
+        Fx5Seal(&fixture, 0, 40);
+        memcpy(fixture.bytes + FX5_BACKUP, fixture.bytes, FX5_USED);
+        for (i = 0; i < 0x2000; ++i) fixture.bytes[FX5_JOURNAL + i] = (unsigned char)(i * 3 + 7);
+    }
+#endif
     OpenBytes(fixture.bytes); Bind();
-    assert(FxLoad(&image, &file) == CP_SAVE_OK);
-    if (scenario != PROVISION) Provision();
+    assert(LOAD(&image, &file) == CP_SAVE_OK);
+    if (scenario != PROVISION && scenario != MUSICAL) Provision();
     if (scenario == CANCEL_RETURN) {
         WtEngine engine;
         CpVisit visit;
@@ -563,6 +659,12 @@ static void Setup(void)
 
 static void Run(void)
 {
+#ifdef FX_GEN5
+    if (scenario == MUSICAL) {
+        assert(CpGen5_ReleaseMusical(&game) == 0);
+        Provision();
+    }
+#endif
     if (scenario == PROVISION) Provision();
     if (scenario == CHECKPOINT) assert(WtGame_Checkpoint(&game) == 0);
     if (scenario == PROVISION || scenario == CHECKPOINT) counting = 0;
@@ -575,10 +677,16 @@ int main(void)
     const char *only = getenv("CP_FAULT_SCENARIO");
     volatile unsigned ran = 0, failures = 0;
     full = getenv("CP_FAULT_FULL") != NULL;
+#ifdef FX_GEN5
+    CpCore_SelectFamily(CP_CORE_GEN5);
+#endif
     if (setjmp(reboot)) Resume();
     for (scenario = PROVISION; scenario < SCENARIOS; ++scenario) {
         unsigned checkpoints;
         if (only && strcmp(only, names[scenario]) != 0) continue;
+#ifndef FX_GEN5
+        if (scenario == MUSICAL) continue;
+#endif
         ++ran;
         Setup(); Run(); CheckFinal(1); checkpoints = eventCount; CloseFile();
         Setup(); inject = 1; Run(); inject = 0; CheckFinal(0);
@@ -591,7 +699,8 @@ int main(void)
             + tally[STUCK] + tally[DUPLICATE] + tally[LOST]);
         assert(prefixStates > 0 && tailStates > 0);
         assert(cutMask == (1u << CUT_KINDS) - 1);
-        assert(stockCases > 0 || scenario == PROVISION);
+        assert(stockCases > 0 || scenario == PROVISION || scenario == MUSICAL);
+        assert(scenario != MUSICAL || musicalErases > 0);
         assert(!full || journalByteTears == expectedJournalByteTears);
         failures += distinct - tally[RECOVERED];
         if (scenario == OFFER || scenario == REJECT_RESTORE) {
@@ -616,7 +725,11 @@ int main(void)
         CloseFile();
     }
     assert(ran != 0);
+#ifdef FX_GEN5
     assert(only || ran == SCENARIOS);
+#else
+    assert(only || ran == SCENARIOS - 1);
+#endif
     free(seen);
     printf("%s recovery: %u unexpected outcomes, %u distinct cuts not recovered\n",
         unexpected ? "FAIL" : "PASS", unexpected, failures);
