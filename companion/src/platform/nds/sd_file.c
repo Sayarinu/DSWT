@@ -263,6 +263,24 @@ CpPlatformFile CpSdFile_Platform(CpSdFile *file)
     return platform;
 }
 
+int CpSdFile_ReadDurablePath(const char *path, uint32_t offset, void *bytes, size_t size)
+{
+    /* Kept off the stack: the cluster chain alone is 8 KiB. */
+    static CpSdFile probe;
+    int fd, result;
+    if (!path || strlen(path) >= sizeof(probe.path) || !InBounds(offset, size)) return CP_SD_ERROR_PATH;
+    memset(&probe, 0, sizeof(probe));
+    probe.fd = -1;
+    strcpy(probe.path, path);
+    if (Mount(path) == 0) return ReadDurable(&probe, offset, bytes, size) == 0 ? 0 : CP_SD_ERROR_RAW;
+    /* No raw access (exFAT): a fresh descriptor reads the file again. */
+    fd = open(path, O_RDONLY);
+    if (fd < 0) return CP_SD_ERROR_OPEN;
+    result = PositionedRead(fd, offset, bytes, size);
+    close(fd);
+    return result == 0 ? 0 : CP_SD_ERROR_OPEN;
+}
+
 int CpSdFile_RawStatus(const CpSdFile *file)
 {
     return file->raw;

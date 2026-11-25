@@ -143,6 +143,26 @@
       "ko_KR": "일치하는 ROM을 찾을 수 없습니다\n{name}.nds를 리포트와\n같은 폴더에 넣어 주십시오"
     },
     {
+      "id": "Companion_Text_SaveError",
+      "en_US": "This save can’t be used here.\nSee _nds/dswt/companion-log.txt\non the SD card.",
+      "fr_FR": "Cette sauvegarde est inutilisable ici.\nVoir _nds/dswt/companion-log.txt\nsur la carte SD.",
+      "de_DE": "Dieser Spielstand ist hier nicht nutzbar.\nSiehe _nds/dswt/companion-log.txt\nauf der SD-Karte.",
+      "it_IT": "Questo salvataggio non si può usare.\nVedi _nds/dswt/companion-log.txt\nsulla scheda SD.",
+      "es_ES": "Esta partida no se puede usar aquí.\nConsulta _nds/dswt/companion-log.txt\nen la tarjeta SD.",
+      "ja_JP": "この　レポートは　つかえません\nSDカードの　_nds/dswt/companion-log.txt\nを　みてください",
+      "ko_KR": "이 리포트는 사용할 수 없습니다\nSD 카드의 _nds/dswt/companion-log.txt\n를 확인해 주십시오"
+    },
+    {
+      "id": "Companion_Text_BackupFailed",
+      "en_US": "Couldn’t back up this save,\nso it was not changed. Check\nthe SD card’s free space.",
+      "fr_FR": "Sauvegarde de secours impossible :\nla partie n’a pas été modifiée.\nVérifiez l’espace libre de la carte SD.",
+      "de_DE": "Keine Sicherung möglich, daher\nwurde der Spielstand nicht geändert.\nPrüfe den freien Platz der SD-Karte.",
+      "it_IT": "Impossibile fare un backup: il\nsalvataggio non è stato modificato.\nControlla lo spazio sulla scheda SD.",
+      "es_ES": "No se pudo hacer una copia, así que\nla partida no se ha modificado.\nRevisa el espacio libre de la tarjeta SD.",
+      "ja_JP": "バックアップが　できなかったので\nレポートは　かえていません\nSDカードの　あきを　みてください",
+      "ko_KR": "백업할 수 없어서 리포트를\n바꾸지 않았습니다\nSD 카드의 빈 공간을 확인해 주십시오"
+    },
+    {
       "id": "Companion_Text_ReasonEgg",
       "en_US": "Egg",
       "fr_FR": "Œuf",

@@ -33,6 +33,11 @@ typedef struct CpSdFile {
 /* Zero on success, otherwise enum CpSdError. */
 int CpSdFile_Open(CpSdFile *, const char *path, int writable);
 CpPlatformFile CpSdFile_Platform(CpSdFile *);
+/* readDurable for any 512 KiB file by path, without an open CpSdFile (the
+ * backup's copy while backup_save.c still holds it open): raw sectors located
+ * from the FAT, or a fresh descriptor where the FAT cannot be parsed. Zero on
+ * success, otherwise enum CpSdError. */
+int CpSdFile_ReadDurablePath(const char *path, uint32_t offset, void *bytes, size_t size);
 /* Zero when the raw sector path is in use, else why not (enum CpSdError). */
 int CpSdFile_RawStatus(const CpSdFile *);
 void CpSdFile_Close(CpSdFile *);
