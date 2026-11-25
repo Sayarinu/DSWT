@@ -930,6 +930,7 @@
     }
   ],
   "release_allowlist": [
+    "Project-built DS companion homebrew (.nds) with only project code and reviewed permissive dependencies; no game data, art or text",
     "Reviewed checksum-specific BPS patches without ROMs or unrelated original game content",
     "Supported input/output checksum and compatibility manifests",
     "Installation, supported-device and recovery instructions",

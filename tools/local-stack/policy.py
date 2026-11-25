@@ -13,9 +13,11 @@ PUBLISHER = "publish-images.yml"
 DEPLOYER = "deploy.yml"
 RELEASER = "release.yml"
 RELEASE_INPUTS = {"inputs": {"version": {"description": "Release version, such as 0.1.0, of an existing draft release",
-                                         "required": "true"}}}
+                                         "required": "true"},
+                             "companion": {"description": "Attach the DS Companion (requires hardware testing and translation review)",
+                                           "type": "boolean", "default": "false"}}}
 RELEASE_WRITERS = ("fetch", "publish")
-RELEASE_BUILDERS = ("linux", "macos", "windows")
+RELEASE_BUILDERS = ("linux", "macos", "windows", "companion")
 MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
 DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
                   "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
@@ -145,9 +147,9 @@ def publisher(data):
 
 
 def releaser(data):
-    """Run by hand from main with one version input; only fetch and publish may write, and only contents."""
+    """Run by hand from main; companion downloads are opt-in, only fetch and publish may write contents."""
     require(data.get("on") == {"workflow_dispatch": RELEASE_INPUTS},
-            "Releasing must only run by hand, with only the version input")
+            "Releasing must only run by hand, with a version and a default-off companion input")
     jobs = data.get("jobs")
     require(isinstance(jobs, dict) and set(jobs) == {*RELEASE_WRITERS, *RELEASE_BUILDERS},
             "Releasing needs exactly the fetch, build and publish jobs")
@@ -159,6 +161,20 @@ def releaser(data):
         require(isinstance(jobs[name], dict) and "permissions" not in jobs[name] and jobs[name].get("needs") == "fetch",
                 "Builds read source only and start from the verified archive")
     require(jobs["publish"].get("needs") == list(RELEASE_BUILDERS), "Publish only after every build")
+    companion = jobs["companion"]
+    require("if" not in companion, "Every release must build and check the companion")
+    builds = [step for step in companion.get("steps", []) if step.get("run") == "scripts/build-companion.sh"]
+    require(len(builds) == 1 and "if" not in builds[0]
+            and builds[0].get("env") == {"CONNECTION_PROFILE": "companion/production-connection-profile.json"},
+            "Build the companion from source with only the tracked public production profile")
+    uploads = [step for step in companion.get("steps", [])
+               if str(step.get("uses", "")).startswith("actions/upload-artifact@")]
+    require(len(uploads) == 1 and uploads[0].get("if") == "inputs.companion",
+            "Only hand the companion to publish when explicitly requested")
+    publish_steps = jobs["publish"].get("steps", [])
+    publishes = [step for step in publish_steps if ' publish --version ' in step.get("run", "")]
+    require(len(publishes) == 1 and publishes[0].get("env", {}).get("COMPANION") == "${{ inputs.companion }}"
+            and '--companion "$COMPANION"' in publishes[0]["run"], "Publish must honor the companion opt-in")
     # What remains must satisfy every contribution rule, without the exceptions granted here.
     reviewed = copy.deepcopy(data)
     reviewed["on"] = "workflow_dispatch"
