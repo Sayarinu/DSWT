@@ -137,7 +137,7 @@ static void TestStagingOrder(void)
 {
     Card *card = NewCard(0xFF);
     CpPlatformFile file = Platform(card);
-    CpJournalStore store = { &file, NULL, 0 };
+    CpJournalStore store = { &file, NULL, 0, NULL };
     unsigned char record[WT_JOURNAL_RECORD_SIZE], back[WT_JOURNAL_RECORD_SIZE];
     Record(record, 3);
     assert(CpJournal_WriteBank(&store, 1, record) == 0 && store.error == 0);
@@ -154,7 +154,7 @@ static void TestVerifiedReadBack(void)
 {
     Card *card = NewCard(0);
     CpPlatformFile file = Platform(card);
-    CpJournalStore store = { &file, NULL, 0 };
+    CpJournalStore store = { &file, NULL, 0, NULL };
     unsigned char record[WT_JOURNAL_RECORD_SIZE];
     Record(record, 9);
     /* A sync that reports success without reaching the card is caught. */
@@ -173,7 +173,7 @@ static void TestInjectedFailures(void)
     for (failAt = 1; failAt <= 7; failAt++) {
         Card *card = NewCard(0xFF);
         CpPlatformFile file = Platform(card);
-        CpJournalStore store = { &file, NULL, 0 };
+        CpJournalStore store = { &file, NULL, 0, NULL };
         unsigned char record[WT_JOURNAL_RECORD_SIZE];
         Record(record, (unsigned char)failAt);
         card->failAt = failAt;
@@ -192,7 +192,7 @@ static void TestRefusals(void)
 {
     Card *card = NewCard(0xFF);
     CpPlatformFile file = Platform(card);
-    CpJournalStore store = { &file, Hold, 0 };
+    CpJournalStore store = { &file, Hold, 0, NULL };
     unsigned char record[WT_JOURNAL_RECORD_SIZE];
     Record(record, 1);
 
@@ -240,7 +240,7 @@ static void TestJournalLifecycle(void)
 {
     Card *card = NewCard(0xFF);
     CpPlatformFile file = Platform(card);
-    CpJournalStore store = { &file, NULL, 0 };
+    CpJournalStore store = { &file, NULL, 0, NULL };
     WtJournalIO io = CpJournal_IO(&store, TestSha256);
     WtJournal journal;
     WtJournalEntry entry;
@@ -273,7 +273,7 @@ static void TestPowerCuts(void)
         for (flush = 0; flush <= 8; flush++) {
             Card *card = NewCard(0xFF);
             CpPlatformFile file = Platform(card);
-            CpJournalStore store = { &file, NULL, 0 };
+            CpJournalStore store = { &file, NULL, 0, NULL };
             WtJournalIO io = CpJournal_IO(&store, TestSha256);
             WtJournal journal;
             WtJournalEntry entry;
