@@ -135,10 +135,24 @@ $(TLS_LIB): $(TLS_OBJS)
 	$(V)rm -f $@
 	$(V)$(PREFIX)ar rcs $@ $^
 
-$(BUILDDIR)/app/%.o: %.c | check-inputs
+# Changing write permission must also rebuild incremental ROMs in either direction.
+CP_CARD_SAVE_WRITES ?= 0
+ifneq ($(CP_CARD_SAVE_WRITES),1)
+ifneq ($(CP_CARD_SAVE_WRITES),0)
+$(error CP_CARD_SAVE_WRITES must be 0 or 1)
+endif
+endif
+CARD_SAVE_CONFIG := $(BUILDDIR)/card-save-config.h
+.PHONY: check-card-save-config
+$(CARD_SAVE_CONFIG): check-card-save-config
+	@mkdir -p $(@D)
+	@echo '#define CP_CARD_SAVE_WRITES $(CP_CARD_SAVE_WRITES)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+
+$(BUILDDIR)/app/%.o: %.c $(CARD_SAVE_CONFIG) | check-inputs
 	@echo "  CC      $<"
 	@mkdir -p $(@D)
-	$(V)$(CC) $(BASE_CFLAGS) -include $(CONNECTION_HEADER) -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
+	$(V)$(CC) $(BASE_CFLAGS) -include $(CARD_SAVE_CONFIG) -include $(CONNECTION_HEADER) -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
 
 $(BUILDDIR)/core/%.o: $(CLIENT)/src/wonder_trade/%.c | check-inputs
 	@echo "  CC      $<"

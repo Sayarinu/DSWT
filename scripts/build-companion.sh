@@ -41,7 +41,7 @@ image="dswt-companion-builder"
 builder="$repo_root/tools/companion-builder"
 docker build -f "$builder/Dockerfile" -t "$image" "$builder"
 # The sources are read-only; everything the build writes goes to /out.
-docker run --rm --user "$(id -u):$(id -g)" \
+docker run --rm -e "CP_CARD_SAVE_WRITES=${CP_CARD_SAVE_WRITES:-0}" --user "$(id -u):$(id -g)" \
     -v "$repo_root/companion:/dswt/companion:ro" \
     -v "$repo_root/client:/dswt/client:ro" \
     -v "$tls_workspace:/tls:ro" \

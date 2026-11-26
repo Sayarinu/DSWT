@@ -291,6 +291,7 @@ add_test(NAME app_model_test COMMAND app_model_test)
 
 # LUNE-874: host-only power-cut matrix over save and journal persistence.
 add_subdirectory(fault)
+add_subdirectory(card_save)
 
 # --- Wi-Fi settings (LUNE-875): wifi.cfg, key rules and the keyboard --------
 add_executable(wifi_config_test wifi_config_test.c "${COMPANION_SRC}/platform/wifi_config.c"
