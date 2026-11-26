@@ -1,6 +1,7 @@
 #ifndef WONDER_TRADE_SEED_H
 #define WONDER_TRADE_SEED_H
 
+#include "wonder_trade/journal_layout.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "wonder_trade/journal.h"
@@ -23,8 +24,8 @@ enum WtSeedError {
 };
 
 /* Backend writes invalidate CMIT, verify the body, write CMIT last, then read back. */
-typedef int (*WtSeedReadBank)(void *arg, int bank, unsigned char record[4096]);
-typedef int (*WtSeedWriteBank)(void *arg, int bank, const unsigned char record[4096]);
+typedef int (*WtSeedReadBank)(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE]);
+typedef int (*WtSeedWriteBank)(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE]);
 typedef WtJournal WtSeed;
 
 /* This connectivity port accepts only an EMPTY journal with a provisioned seed. */

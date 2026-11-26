@@ -1,3 +1,5 @@
+#include "wonder_trade/save_crc.h"
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/dp/game_save.h"
 
 #include <stddef.h>
@@ -50,8 +52,8 @@ int WtGameSave_LayoutKnown(const SaveData *save)
     if (SAVE_BLOCK_NUM != 36 || SAVE_PAGE_MAX != 32 || SAVE_SECTOR_SIZE != 0x1000
         || sizeof(struct SaveChunkFooter) != FOOTER_SIZE || sizeof(struct SaveArrayFooter) != EXTRA_FOOTER_SIZE
         || sizeof(PCStorage) != 0x121C8 || offsetof(PCStorage, boxes) != 4
-        || sizeof(struct Pokemon) != 236 || sizeof(struct BoxPokemon) != 136
-        || sizeof(struct Party) != 8 + PARTY_SIZE * 236
+        || sizeof(struct Pokemon) != WT_POKEMON_PK4_PARTY_SIZE || sizeof(struct BoxPokemon) != WT_POKEMON_SIZE
+        || sizeof(struct Party) != 8 + PARTY_SIZE * WT_POKEMON_PK4_PARTY_SIZE
         || save->arrayHeaders[35].offset != BOXES_OFFSET || save->arrayHeaders[2].offset != 0x90
         || UNK_020EE6D8 != 2) return 0;
     for (i = 0; i < 2; ++i) {
@@ -62,7 +64,7 @@ int WtGameSave_LayoutKnown(const SaveData *save)
         const struct SaveChunkHeader *chunk = &UNK_020EE6E0[i];
         if ((u32)chunk->linkedId * SAVE_SECTOR_SIZE + chunk->sizeFunc() + EXTRA_FOOTER_SIZE > gWtGameConfig.journalBank[0]) return 0;
     }
-    return gWtGameConfig.journalBank[0] == 0x30000 && gWtGameConfig.journalBank[1] == 0x70000;
+    return gWtGameConfig.journalBank[0] == WT_GEN4_BANK_A && gWtGameConfig.journalBank[1] == WT_GEN4_BANK_B;
 }
 
 int WtGameSave_Written(const SaveData *save)
@@ -100,7 +102,7 @@ done:
 static int Verify(const SaveData *save, const unsigned char expected[32])
 {
     unsigned age, half, block, offset, i, bit, size;
-    unsigned char page[256], footers[2][2][FOOTER_SIZE], digest[32];
+    unsigned char page[WT_FLASH_PAGE_SIZE], footers[2][2][FOOTER_SIZE], digest[32];
     mbedtls_sha256_context hash;
     int result = -1;
     if (!WtGameSave_LayoutKnown(save)) return -1;
@@ -115,7 +117,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
         if (mbedtls_sha256_starts(&hash, 0) != 0) goto done;
         for (block = 0; block < 2; ++block) {
             const unsigned char *footer;
-            unsigned crc = 65535;
+            unsigned crc = WT_SAVE_CRC_INITIAL;
             u32 body = sBlocks[block].size - FOOTER_SIZE, address;
             for (half = 0; half < 2 && Read32(footers[block][half] + 4) != save->unk_20218[block] - age; ++half) ;
             if (half == 2) { result = -7; goto done; }
@@ -131,7 +133,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
                 if (WtFlash_ReadRange(address + offset, page, size) != 0) { result = -2; goto done; }
                 for (i = 0; i < size; ++i) {
                     crc ^= (unsigned)page[i] << 8;
-                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 65535;
+                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & WT_SAVE_CRC_HIGH_BIT) ? WT_SAVE_CRC_POLYNOMIAL : 0)) & UINT16_MAX;
                 }
                 if (mbedtls_sha256_update(&hash, page, size) != 0) goto done;
             }

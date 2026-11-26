@@ -1,3 +1,4 @@
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
 #include <nitro.h>
@@ -84,13 +85,13 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
 #endif
 #endif
 
-/* Diamond and Pearl never use the 64 KiB flash sectors at 0x30000 and 0x70000
+/* Diamond and Pearl never use the 64 KiB flash sectors at WT_GEN4_BANK_A and WT_GEN4_BANK_B
  * (client/core/save-layouts/save-layout-dp.json). SaveDetectFlash in src/save.c accepts a
  * 4 Mbit or 2 Mbit flash; only the 4 Mbit one has room for the journal. The
  * DMA channel (2) and power mode (1) are those the GTS starts Wi-Fi with
  * (ov80_02236870 calling ov04_021DDEE0). */
 const WtGameConfig gWtGameConfig = {
-    { 0x30000, 0x70000 },
+    { WT_GEN4_BANK_A, WT_GEN4_BANK_B },
     2, 1,
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_VARIANT,

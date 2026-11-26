@@ -181,7 +181,7 @@ class SaveLayoutTests(unittest.TestCase):
                                   json.loads((ROOT / pin).read_text()))
 
     def test_journal_codec_names_every_record_section(self):
-        source = (ROOT / "client/core/src/wonder_trade/journal.c").read_text()
+        source = (ROOT / "client/core/include/wonder_trade/journal_layout.h").read_text()
         layout = json.loads((ROOT / "client/core/save-layouts/save-layout.json").read_text())
         body = re.search(r"enum \{\n(    WT_REC_.*?)\n\};", source, re.S).group(1)
         offsets = {name: int(value) for name, value in re.findall(r"(WT_REC_\w+) = (\d+)", body)}
@@ -197,8 +197,21 @@ class SaveLayoutTests(unittest.TestCase):
             with self.subTest(section=section["name"]):
                 self.assertEqual(offsets[named[section["name"]]], section["offset"])
         # No numeric record offset is left outside the named layout.
-        code = source[source.index("};", source.index("WT_REC_COMMIT")):]
+        code = (ROOT / "client/core/src/wonder_trade/journal.c").read_text()
         self.assertFalse(re.findall(r"\b(?:record|partial|complete) \+ \d", code))
+
+    def test_flash_addresses_and_sizes_match_each_game(self):
+        header = (ROOT / "client/core/include/wonder_trade/journal_layout.h").read_text()
+        constants = {name: int(value, 0) for name, value in
+                     re.findall(r"^#define (WT_\w+) (0x[0-9A-F]+|[0-9]+)$", header, re.M)}
+        for suffix, family in (("", "GEN4"), ("-dp", "GEN4"), ("-hgss", "GEN4"),
+                               ("-bw", "BW"), ("-b2w2", "B2W2")):
+            layout = json.loads((ROOT / f"client/core/save-layouts/save-layout{suffix}.json").read_text())
+            with self.subTest(layout=suffix):
+                self.assertEqual([constants[f"WT_{family}_BANK_{bank}"] for bank in "AB"], layout["journal_banks"])
+                self.assertEqual(constants["WT_JOURNAL_RECORD_SIZE"], layout["record_size"])
+                commit, = (section for section in layout["record_sections"] if section["name"] == "commit_tag")
+                self.assertEqual(constants["WT_JOURNAL_COMMIT_SIZE"], commit["size"])
 
     def test_games_share_one_journal_record_format(self):
         platinum, *others = (json.loads((ROOT / path).read_text()) for path, _ in self.LAYOUTS)

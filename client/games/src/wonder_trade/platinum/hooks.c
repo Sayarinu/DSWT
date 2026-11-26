@@ -1,3 +1,4 @@
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
 #include <nitro.h>
@@ -15,9 +16,9 @@
 #error "The build sets WT_GAME_VARIANT, the enrolled game variant"
 #endif
 
-/* Platinum never uses the 64 KiB flash sectors at 0x30000 and 0x70000. */
+/* Platinum never uses the 64 KiB flash sectors at WT_GEN4_BANK_A and WT_GEN4_BANK_B. */
 const WtGameConfig gWtGameConfig = {
-    { 0x30000, 0x70000 },
+    { WT_GEN4_BANK_A, WT_GEN4_BANK_B },
     DEFAULT_DWC_DMA_NUMBER, DEFAULT_DWC_POWER_MODE,
     { CARD_BACKUP_TYPE_FLASH_4MBITS, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_GAME_VARIANT,

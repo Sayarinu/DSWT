@@ -5,60 +5,6 @@
 
 #include <string.h>
 
-/* Byte offsets of the 4 KiB journal record (client/core/save-layouts/save-layout.json,
- * record_sections). Sections: header 0, identity 32, progress 96,
- * transaction 160, pokemon_images 416, transport_private_state 1440,
- * pending_request 1952, reserved_zero 2216, sha256 4060, commit_tag 4092.
- * RESERVED_* ranges are zero in every supported record. */
-enum {
-    WT_REC_FORMAT = 0,                    /* "DSWJ" and format version 1 */
-    WT_REC_PHASE = 6,
-    WT_REC_SIZE = 8,
-    WT_REC_RESERVED_SIZE_TAIL = 12,
-    WT_REC_GENERATION = 16,
-    WT_REC_RESERVED_HEADER_TAIL = 24,
-    WT_REC_SAVE_ID = 32,                  /* identity */
-    WT_REC_CREDENTIAL = 48,
-    WT_REC_ENROLLMENT_ID = 80,
-    WT_REC_NEXT_COUNTER = 96,             /* progress */
-    WT_REC_EVENT_CURSOR = 104,
-    WT_REC_LAST_RECEIPT = 112,
-    WT_REC_LAST_OPERATION = 128,
-    WT_REC_LAST_OPERATION_COUNTER = 144,
-    WT_REC_RESERVED_PROGRESS_TAIL = 152,
-    WT_REC_OPERATION = 160,               /* transaction */
-    WT_REC_OPERATION_COUNTER = 176,
-    WT_REC_TRADE = 184,
-    WT_REC_RECEIPT = 200,
-    WT_REC_SOURCE = 216,
-    WT_REC_DESTINATION = 220,
-    WT_REC_DELIVERY_KIND = 224,
-    WT_REC_GLOBAL_COUNTER = 225,
-    WT_REC_GENERAL_COUNTER = 229,
-    WT_REC_BOX_COUNTER = 233,
-    WT_REC_INVENTORY_BEFORE = 237,
-    WT_REC_INVENTORY_AFTER = 269,
-    WT_REC_ORIGINAL_DIGEST = 301,
-    WT_REC_INCOMING_DIGEST = 333,
-    WT_REC_APPLIED_DIGEST = 365,
-    WT_REC_RESERVED_TRANSACTION_TAIL = 397,
-    WT_REC_ORIGINAL = 416,                /* pokemon_images */
-    WT_REC_DESTINATION_BEFORE = 652,
-    WT_REC_DESTINATION_AFTER = 888,
-    WT_REC_OUTGOING = 1124,
-    WT_REC_INCOMING = 1260,
-    WT_REC_RESERVED_IMAGES_TAIL = 1396,
-    WT_REC_ENTROPY_FORMAT = 1440,         /* transport_private_state */
-    WT_REC_SEED = 1444,
-    WT_REC_RESERVED_ENTROPY_TAIL = 1476,
-    WT_REC_PENDING_REQUEST = 1952,        /* pending_request: length, then the frame */
-    WT_REC_RESERVED_REQUEST_HEADER = 1954,
-    WT_REC_REQUEST = 1960,
-    WT_REC_RESERVED = 2216,               /* reserved_zero */
-    WT_REC_DIGEST = 4060,                 /* sha256 of the bytes before it */
-    WT_REC_COMMIT = 4092                  /* "CMIT" */
-};
-
 static const unsigned char kHashABC[32] = {
     0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
     0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad

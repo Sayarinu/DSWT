@@ -1,6 +1,7 @@
 #ifndef WONDER_TRADE_JOURNAL_H
 #define WONDER_TRADE_JOURNAL_H
 
+#include "wonder_trade/journal_layout.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -8,7 +9,6 @@
 extern "C" {
 #endif
 
-#define WT_JOURNAL_RECORD_SIZE 4096
 #define WT_JOURNAL_FRAME_MAX 256
 
 enum WtJournalPhase {

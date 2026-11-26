@@ -1,3 +1,4 @@
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
 #include <nitro.h>
@@ -28,11 +29,11 @@ extern void sub_02034DE0(void);
 #endif
 #endif
 
-/* HeartGold and SoulSilver never use the 64 KiB flash sectors at 0x30000 and
- * 0x70000 (client/core/save-layouts/save-layout-hgss.json). Their carts' infrared flash
+/* HeartGold and SoulSilver never use the 64 KiB flash sectors at WT_GEN4_BANK_A and
+ * WT_GEN4_BANK_B (client/core/save-layouts/save-layout-hgss.json). Their carts' infrared flash
  * identifies as FLASH_4MBITS_EX; the game falls back to FLASH_4MBITS. */
 const WtGameConfig gWtGameConfig = {
-    { 0x30000, 0x70000 },
+    { WT_GEN4_BANK_A, WT_GEN4_BANK_B },
     2, 1,
     { CARD_BACKUP_TYPE_FLASH_4MBITS_EX, CARD_BACKUP_TYPE_FLASH_4MBITS },
     WT_VARIANT,

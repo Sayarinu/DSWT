@@ -1,3 +1,5 @@
+#include "wonder_trade/save_crc.h"
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/platinum/game_save.h"
 
 #include <string.h>
@@ -64,7 +66,7 @@ done:
 static int Verify(const SaveData *save, const unsigned char expected[32])
 {
     unsigned bank, block, offset, i, bit, size;
-    unsigned char page[256], footer[20], digest[32];
+    unsigned char page[WT_FLASH_PAGE_SIZE], footer[20], digest[32];
     mbedtls_sha256_context hash;
     int result = -1;
     if (!Layout(save)) return -1;
@@ -73,7 +75,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
         if (mbedtls_sha256_starts(&hash, 0) != 0) goto done;
         for (block = 0; block < 2; ++block) {
             const SaveBlockInfo *info = &save->blockInfo[block];
-            unsigned crc = 65535;
+            unsigned crc = WT_SAVE_CRC_INITIAL;
             u32 address = bank * 0x40000 + info->offset;
             for (offset = 0; offset < info->size - 20; offset += size) {
                 size = info->size - 20 - offset;
@@ -82,7 +84,7 @@ static int Verify(const SaveData *save, const unsigned char expected[32])
                     || mbedtls_sha256_update(&hash, page, size) != 0) goto done;
                 for (i = 0; i < size; ++i) {
                     crc ^= (unsigned)page[i] << 8;
-                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 65535;
+                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & WT_SAVE_CRC_HIGH_BIT) ? WT_SAVE_CRC_POLYNOMIAL : 0)) & UINT16_MAX;
                 }
             }
             if (WtFlash_ReadRange(address + info->size - 20, footer, sizeof(footer)) != 0

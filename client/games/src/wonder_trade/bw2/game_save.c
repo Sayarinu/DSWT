@@ -1,3 +1,5 @@
+#include "wonder_trade/save_crc.h"
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/bw2/game_save.h"
 
 #include <nitro.h>
@@ -90,7 +92,7 @@ done:
 static int Verify(const Image *image, const unsigned char expected[32])
 {
     static const u32 copies[2] = { MAIN_COPY, BACKUP_COPY };
-    unsigned char page[256], digest[32];
+    unsigned char page[WT_FLASH_PAGE_SIZE], digest[32];
     mbedtls_sha256_context hash;
     u32 copy, id, offset, size, start, length, i, bit;
     int result = -1;
@@ -98,7 +100,7 @@ static int Verify(const Image *image, const unsigned char expected[32])
     for (copy = 0; copy < 2; ++copy) {
         if (mbedtls_sha256_starts(&hash, 0) != 0) goto done;
         for (id = 0; id < image->blocks; ++id) {
-            unsigned crc = 0xffff;
+            unsigned crc = WT_SAVE_CRC_INITIAL;
             start = getStartOffsetOfSaveBlockDataInSave(image->table, id);
             length = getSizeOfSaveBlockData(image->table, id);
             for (offset = 0; offset < length; offset += size) {
@@ -107,7 +109,7 @@ static int Verify(const Image *image, const unsigned char expected[32])
                     || mbedtls_sha256_update(&hash, page, size) != 0) goto done;
                 for (i = 0; i < size; ++i) {
                     crc ^= (unsigned)page[i] << 8;
-                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 0xffff;
+                    for (bit = 0; bit < 8; ++bit) crc = ((crc << 1) ^ ((crc & WT_SAVE_CRC_HIGH_BIT) ? WT_SAVE_CRC_POLYNOMIAL : 0)) & UINT16_MAX;
                 }
             }
             if (WtFlash_ReadRange(copies[copy] + start + length, page, BLOCK_FOOTER_SIZE) != 0
@@ -170,7 +172,7 @@ static int MusicalRead(void *arg, int bank, unsigned char bytes[WT_MUSICAL_AREA_
 /* Programs erased flash over one bank, a page at a time, each verified. */
 static int MusicalErase(void *arg, int bank)
 {
-    static unsigned char erased[256];
+    static unsigned char erased[WT_FLASH_PAGE_SIZE];
     u32 address = gWtGameConfig.journalBank[bank], offset, type;
     int result = -1;
     s32 lockID = OS_GetLockID();

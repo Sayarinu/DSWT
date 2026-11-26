@@ -1,3 +1,4 @@
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/flash.h"
 
 #include <nitro.h>
@@ -19,10 +20,10 @@ static int Supported(void)
     return type == gWtGameConfig.flashType[0] || type == gWtGameConfig.flashType[1];
 }
 
-int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
+int WtFlash_ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
     WtFlashAccess *access = arg;
-    unsigned char page[256];
+    unsigned char page[WT_FLASH_PAGE_SIZE];
     u32 address, offset;
     int blank = -1, result = -1;
     s32 lockID;
@@ -35,8 +36,8 @@ int WtFlash_ReadBank(void *arg, int bank, unsigned char record[4096])
         access->error = UNSUPPORTED_FLASH;
         goto done;
     }
-    if (!CARD_ReadFlash(address, record, 4096)) { access->error = READ_FAILED; goto done; }
-    for (offset = 4096; offset < WT_GAME_BANK_RESERVED_SIZE; offset += sizeof(page)) {
+    if (!CARD_ReadFlash(address, record, WT_JOURNAL_RECORD_SIZE)) { access->error = READ_FAILED; goto done; }
+    for (offset = WT_JOURNAL_RECORD_SIZE; offset < WT_GAME_BANK_RESERVED_SIZE; offset += sizeof(page)) {
         u32 i;
         if (!CARD_ReadFlash(address + offset, page, sizeof(page))) { access->error = READ_FAILED; goto done; }
         for (i = 0; i < sizeof(page); i++) {
@@ -51,11 +52,11 @@ done:
     return result;
 }
 
-int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[4096])
+int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
 {
-    static const unsigned char uncommitted[4] = { 0, 0, 0, 0 };
+    static const unsigned char uncommitted[WT_JOURNAL_COMMIT_SIZE] = { 0, 0, 0, 0 };
     WtFlashAccess *access = arg;
-    unsigned char page[256];
+    unsigned char page[WT_FLASH_PAGE_SIZE];
     u32 address, offset;
     int result = -1;
     s32 lockID;
@@ -66,10 +67,10 @@ int WtFlash_WriteBank(void *arg, int bank, const unsigned char record[4096])
     WtGame_HoldAwake(TRUE);
     CARD_LockBackup(lockID);
     if (!Supported()) { access->error = UNSUPPORTED_FLASH; goto done; }
-    if (!CARD_WriteAndVerifyFlash(address + 4092, uncommitted, sizeof(uncommitted))
-        || !CARD_WriteAndVerifyFlash(address, record, 4092)
-        || !CARD_WriteAndVerifyFlash(address + 4092, record + 4092, 4)) goto done;
-    for (offset = 0; offset < 4096; offset += sizeof(page)) {
+    if (!CARD_WriteAndVerifyFlash(address + WT_REC_COMMIT, uncommitted, sizeof(uncommitted))
+        || !CARD_WriteAndVerifyFlash(address, record, WT_REC_COMMIT)
+        || !CARD_WriteAndVerifyFlash(address + WT_REC_COMMIT, record + WT_REC_COMMIT, WT_JOURNAL_COMMIT_SIZE)) goto done;
+    for (offset = 0; offset < WT_JOURNAL_RECORD_SIZE; offset += sizeof(page)) {
         if (!CARD_ReadFlash(address + offset, page, sizeof(page)) || memcmp(page, record + offset, sizeof(page)) != 0) goto done;
     }
     result = 0;

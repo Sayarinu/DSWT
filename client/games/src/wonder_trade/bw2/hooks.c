@@ -1,3 +1,4 @@
+#include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
 #include <nitro.h>
@@ -20,7 +21,7 @@
  * Wi-Fi takes DMA channel 2 and power mode 1, as the game's own DWC_InitInetEx
  * call does (src/wifi/device/dwc_rap.c). */
 const WtGameConfig gWtGameConfig = {
-    { 0x6B000, 0x6C000 },
+    { WT_B2W2_BANK_A, WT_B2W2_BANK_B },
     2, 1,
     { CARD_BACKUP_TYPE_FLASH_4MBITS_EX, CARD_BACKUP_TYPE_FLASH_4MBITS_EX },
     WT_GAME_VARIANT,
