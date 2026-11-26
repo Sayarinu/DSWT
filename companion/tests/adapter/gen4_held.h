@@ -112,12 +112,14 @@ static int FxHeld(void)
 /* Every cut of REMOVE in escrow and of RECEIVE for a return, then the stock
  * game moves the offered Pokémon there when the save it loaded holds it: the
  * step refuses and writes nothing, so it is neither sent nor added twice.
- * Taken back unchanged, the step finishes once; changed, it stays refused. */
+ * Taken back unchanged, the step finishes once; changed, the escrow stays
+ * refused, and the return (LUNE-906) is recorded where it is, as the games
+ * record it. A return the loaded save did not hold yet is never added. */
 static unsigned FxHeldSweep(void)
 {
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
-    unsigned cut, held, writes, returning, cases = 0;
+    unsigned cut, held, writes, returning, cases = 0, wasHeld;
     for (fxPlace = 0; fxPlace < FX_PLACES; ++fxPlace) for (fxChanged = 0; fxChanged <= 1; ++fxChanged)
     for (returning = 0; returning <= 1; ++returning) {
         enum WtInventoryStep cutStep = returning ? WT_INVENTORY_RECEIVE : WT_INVENTORY_REMOVE;
@@ -135,14 +137,16 @@ static unsigned FxHeldSweep(void)
             HeldStock(FxHoldOffered);
             entry = journal;
             ++cases;
+            wasHeld = 0;
             if (FxHeld()) {
+                wasHeld = 1;
                 ++held;
                 memcpy(before, file.bytes, sizeof(before));
                 assert(HeldStep(cutStep, &entry) == -1);
                 assert(memcmp(before, file.bytes, sizeof(before)) == 0 && HeldCopies() == 0);
                 HeldStock(FxWithdrawOffered);
                 entry = journal;
-                if (fxChanged) {
+                if (fxChanged && !returning) {
                     memcpy(before, file.bytes, sizeof(before));
                     assert(HeldStep(cutStep, &entry) == -1 && memcmp(before, file.bytes, sizeof(before)) == 0);
                     continue;
@@ -150,13 +154,14 @@ static unsigned FxHeldSweep(void)
             }
             assert(HeldStep(cutStep, &entry) == 0);
             if (!returning) assert(HeldStep(WT_INVENTORY_VERIFY_REMOVED, &entry) == 0 && HeldCopies() == 0);
-            else assert(HeldStep(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0 && HeldCopies() == 1);
+            else assert(HeldStep(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0 && (wasHeld ? HeldCopies() == 1 : HeldCopies() <= 1));
             assert(!FxHeld());
         }
         assert(held >= 1);
         printf("PASS %s stock save in %s, then %s%s: refused untouched in %u of %u cuts, %s once taken back\n",
             FX_GAME_NAME, returning ? "applying a return (RECEIVE)" : "escrow (REMOVE)", kFxPlaces[fxPlace].name,
-            fxChanged ? " (changed)" : "", held, writes + 1, fxChanged ? "still refused" : "finished");
+            fxChanged ? " (changed)" : "", held, writes + 1,
+            fxChanged && !returning ? "still refused" : returning ? "recorded where it is" : "finished");
     }
     return cases;
 }

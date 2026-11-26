@@ -338,7 +338,8 @@ typedef struct Found {
  * a Pokémon shares the identity (personality and original trainer ID) without
  * being one of those images, or two do, or one is held where no locator
  * reaches (Elsewhere): another Pokémon, this one changed by play, or one the
- * journal cannot name is never proof either way. */
+ * journal cannot name is never proof either way. Without digests (NULL) every
+ * image with the identity is one: 1 when exactly one Pokémon has it. */
 static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
     unsigned count, Found *found)
 {
@@ -364,9 +365,12 @@ static int Locate(CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], 
         }
         if (WtPokemon_Decode(stored, canonical) != 0) return -1;
         if (memcmp(canonical, target, 4) != 0 || memcmp(canonical + 0x0C, target + 0x0C, 4) != 0) continue;
-        Sha(canonical, sizeof(canonical), sum);
-        for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
-        if (j == count || ++matches > 1) return -1;
+        if (digests) {
+            Sha(canonical, sizeof(canonical), sum);
+            for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
+            if (j == count) return -1;
+        }
+        if (++matches > 1) return -1;
         found->party = inParty; found->box = box; found->slot = slot;
     }
     return matches;
@@ -566,86 +570,73 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
     return WtGame_Checkpoint(game);
 }
 
-/* The Pokémon a delivery brings, where the save holds it. Proof is its exact
- * image: a returned offer as it left, a matched one as the receive effects
- * build it for the party or for the PC (they depend only on the Pokémon and
- * the ROM), or as recorded when it was prepared. */
-static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
+/* client wonder_trade/delivery.h WtDelivery_Found: the Pokémon Locate found
+ * is recorded as the delivery, as it is now: where it is, its stored image
+ * (padded with zeros, as the journal requires; the slot held the empty
+ * Pokémon) and the digest of its canonical form, which the ACK reports and
+ * WtGame_Received shows. */
+static int Record(WtGame *game, WtJournalEntry *entry, const Found *found)
 {
-    unsigned char digests[3][32], image[MON_SIZE], canonical[BOX_MON_SIZE], *general, *scratch;
-    const size_t size = GeneralBody(game->image);
-    unsigned count = 1, i;
-    if (entry->deliveryKind == WT_DELIVERY_RETURN) {
-        Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
-        return Locate(game->image, entry->outgoing, digests, 1, found);
-    }
-    if (entry->deliveryKind != WT_DELIVERY_MATCH || !game->data || !(general = CpSaveImage_Block(game->image, 0))
-        || !(scratch = malloc(size))) return -1;
-    memcpy(digests[0], entry->appliedDigest, 32);
-    for (i = 0; i < 2; ++i) {
-        memcpy(scratch, general, size);
-        if (CpReceive_ApplyGame(RulesOf(game->image)->receive, game->version, game->data, scratch, entry->incoming,
-                i ? CP_RECEIVE_BOX : CP_RECEIVE_PARTY, NULL, image) != 0
-            || WtPokemon_Decode(image, canonical) != 0) { free(scratch); return -1; }
-        Sha(canonical, sizeof(canonical), digests[count++]);
-    }
-    free(scratch);
-    return Locate(game->image, entry->incoming, digests, count, found);
+    WtJournalLocator where;
+    unsigned char *stored, canonical[BOX_MON_SIZE];
+    memset(&where, 0, sizeof(where));
+    where.kind = found->party ? 1 : 2; where.box = (unsigned char)found->box; where.slot = (unsigned char)found->slot;
+    where.length = found->party ? MON_SIZE : BOX_MON_SIZE;
+    if (!(stored = Destination(game->image, where)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
+    entry->destination = where;
+    memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
+    Empty(entry->destinationBefore, where.length);
+    memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
+    memcpy(entry->destinationAfter, stored, where.length);
+    Sha(canonical, sizeof(canonical), entry->appliedDigest);
+    return 0;
 }
 
-/* PREPARE_RECEIVE of a returned offer that is already back: a restore that
- * finished before the companion could record it, then a game save over both
- * recorded inventories. 1 when it is back and RECEIVE need only checkpoint. */
-static int Back(WtGame *game, const WtJournalEntry *entry)
+/* PREPARE_RECEIVE of a returned offer that is already back, as delivery.h
+ * WtDelivery_Prepare: a restore that finished before the companion could
+ * record it, then a game save over it. The one Pokémon with its identity, in
+ * any state play left it, is recorded where it is and never added; RECEIVE
+ * then only writes the save again. 1 when it is back, 0 when it is not. */
+static int Back(WtGame *game, WtJournalEntry *entry)
 {
     Found found;
     int where;
     if (entry->deliveryKind != WT_DELIVERY_RETURN) return 0;
-    where = Delivered(game, entry, &found);
+    if (memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
+    where = Locate(game->image, entry->outgoing, NULL, 0, &found);
+    if (where != 1) return where;
     /* Back in a save no game wrote since: something else put it there. */
-    return where == 1 && !Moved(game->image, entry) ? -1 : where;
+    if (!Moved(game->image, entry) || Record(game, entry, &found) != 0
+        || Hash(game->image, entry->inventoryAfter) != 0) return -1;
+    memcpy(entry->inventoryBefore, entry->inventoryAfter, 32);
+    return 1;
 }
 
 /* RECEIVE when a game saved over both recorded inventories (the stock game,
- * played before the companion could finish). The patched game never gets
- * here: it settles before it can be played. Decided by the Pokémon's exact
- * image (Delivered): present, the delivery was applied (or the offer
- * restored), the save is only checkpointed and the record describes where it
- * is; absent, it is prepared again on this save, where PREPARE_RECEIVE would
- * put it, and applied. Never twice, never dropped. */
-static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int *restore)
+ * played before the companion could finish), as delivery.h WtDelivery_Recover.
+ * The patched game never gets here: it settles before it can be played. That
+ * save may hold the delivery or not, and may since have released it, traded
+ * it away or moved it: nothing in it tells these apart, so the delivery is
+ * never added again (the owner's never-duplicate rule). The save is accepted
+ * as it is and only checkpointed. The one Pokémon with the delivery's
+ * identity, in any state play left it, is recorded where it is; with none the
+ * record stays as prepared, and VERIFY_RECEIVED only checkpoints. Refused,
+ * writing nothing: two with the identity (never pick one; a Pokémon with a
+ * fixed personality and trainer ID may meet another copy of itself), one held
+ * where no locator reaches (Elsewhere: the step waits for it to come back),
+ * an unreadable slot, or a matched delivery whose offer is still here. */
+static int ReceiveMoved(WtGame *game, WtJournalEntry *entry)
 {
     Found found;
-    int where = Delivered(game, entry, &found);
-    if (where < 0) return -1;
-    if (where == 0) {
-        /* No room (1) fails too: the delivery stays in the journal. */
-        if (BuildReceived(game, entry, backup, 1) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
-        *restore = 0;
-        if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) return -1;
-    } else {
-        /* Recorded from the save, not the journal: a recovery that put it
-         * elsewhere than prepared (a full party sends it to the PC, with the
-         * PC's effects) may have been cut before the engine committed. The
-         * engine only commits after RECEIVE, so the record is rebuilt here
-         * and the ACK and WtGame_Received report what the save holds. */
-        WtJournalLocator where;
-        unsigned char *stored, canonical[BOX_MON_SIZE];
-        memset(&where, 0, sizeof(where));
-        where.kind = found.party ? 1 : 2; where.box = (unsigned char)found.box; where.slot = (unsigned char)found.slot;
-        where.length = found.party ? MON_SIZE : BOX_MON_SIZE;
-        if (!(stored = Destination(game->image, where)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
-        *restore = 0;
-        if (WtGame_Checkpoint(game) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
-        /* Every image field follows the destination's length, padded with
-         * zeros as the journal requires; the slot held the empty Pokémon. */
-        entry->destination = where;
-        memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
-        Empty(entry->destinationBefore, where.length);
-        memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
-        memcpy(entry->destinationAfter, stored, where.length);
-        Sha(canonical, sizeof(canonical), entry->appliedDigest);
-    }
+    int where;
+    if (entry->deliveryKind == WT_DELIVERY_MATCH) {
+        if (Absent(game->image, entry->outgoing) != 0) return -1;
+    } else if (entry->deliveryKind != WT_DELIVERY_RETURN
+        || memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
+    if ((where = Locate(game->image, entry->incoming, NULL, 0, &found)) < 0) return -1;
+    if (where == 1 && Record(game, entry, &found) != 0) return -1;
+    if (WtGame_Checkpoint(game) != 0) return -1;
+    if (where == 1 && Hash(game->image, entry->inventoryAfter) != 0) return -1;
     Counters(game->image, entry);
     return 0;
 }
@@ -654,28 +645,34 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
 {
     Backup *backup;
     unsigned char digest[32];
-    int result = -1, restore = 1;
+    int result = -1, restore = 1, before, after;
     if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
     if (!(backup = Keep(game->image))) return -1;
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
         result = Back(game, entry);
-        if (result == 1) { result = 0; goto done; }
-        if (result == 0) result = BuildReceived(game, entry, backup, 1);
-        if (result == 0) result = Hash(game->image, entry->inventoryAfter);
+        if (result == 1) result = 0;
+        else if (result == 0 && (result = BuildReceived(game, entry, backup, 1)) == 0)
+            result = Hash(game->image, entry->inventoryAfter);
+        /* RECEIVE tells another game's later save by these counters. */
+        if (result == 0) Counters(game->image, entry);
         goto done;
     }
     if (Hash(game->image, digest) != 0) goto done;
-    if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0
-        && Moved(game->image, entry)) {
-        result = ReceiveMoved(game, entry, backup, &restore);
+    before = memcmp(digest, entry->inventoryBefore, 32) == 0;
+    after = memcmp(digest, entry->inventoryAfter, 32) == 0;
+    if (!before && !after) {
+        /* Neither recorded inventory: only another game's later save. */
+        /* Nothing to put back: the step edits the image nowhere. */
+        restore = 0;
+        if (Moved(game->image, entry)) result = ReceiveMoved(game, entry);
         goto done;
     }
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
-        if (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0) goto done;
-    }
-    if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
+    /* A return to the offer's own slot is RESTORE's while the save is the escrow's. */
+    if (!entry->destination.kind) goto done;
+    if (!after && (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0
+            || memcmp(digest, entry->inventoryAfter, 32) != 0)) goto done;
     restore = 0;
-    if (SaveBoth(game, digest) != 0 || VerifyReceived(game, entry) != 0) goto done;
+    if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) goto done;
     Counters(game->image, entry); result = 0;
 done:
     Release(backup, restore);

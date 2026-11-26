@@ -3,7 +3,12 @@
  * player loads and saves in the stock game (modelled independently,
  * adapter/gen5_stock.h), and the step resumes from the journal. Every step is
  * cut before each of its writes and after the last; the offered Pokémon must
- * end up in exactly one place: the save or the journal. */
+ * end up in exactly one place: the save or the journal.
+ *
+ * LUNE-906: a return the stock game saved over is never put back again (the
+ * games' never-duplicate rule, client wonder_trade/delivery.h): kept, released
+ * or traded away there, it is never added; only a cut before the first retail
+ * copy held it loses it. */
 #include "gen5_stock.h"
 
 #include <stdio.h>
@@ -13,7 +18,7 @@ static CpSaveImage image;
 static CpFile cpFile = { &file, Fx5Read, Fx5Write, Fx5Sync, Fx5Size };
 static WtGame game;
 static unsigned char offered[136], ram[0x26000];
-static unsigned cases;
+static unsigned cases, windowLosses;
 
 enum { OFFERED_SLOT = 1 };
 
@@ -44,6 +49,25 @@ static unsigned Copies(void)
             : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
         assert(WtPokemon_Decode(slot, canonical) == 0);
         copies += memcmp(canonical, offered, 136) == 0;
+    }
+    return copies;
+}
+
+/* Pokémon with the offered one's identity the stock game loads, in any state. */
+static unsigned IdCopies(void)
+{
+    unsigned char canonical[136];
+    const unsigned char *party;
+    unsigned count, mon, copies = 0;
+    RetailLoad5(file.bytes, ram);
+    party = ram + Rl5Offset(FX5_PARTY);
+    count = Fx5R32(party + 4);
+    for (mon = 0; mon < count + 720 + 6; ++mon) {
+        const unsigned char *slot = mon < count ? party + 8 + mon * FX5_MON
+            : mon < count + 720 ? ram + Rl5Offset(1 + (mon - count) / 30) + (mon - count) % 30 * FX5_BOX_MON
+            : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
+        assert(WtPokemon_Decode(slot, canonical) == 0);
+        copies += Fx5R16(canonical + 8) && memcmp(canonical, offered, 4) == 0 && memcmp(canonical + 12, offered + 12, 4) == 0;
     }
     return copies;
 }
@@ -96,6 +120,9 @@ static void Arrange(enum State state, WtJournalEntry *journal)
     journal->phase = WT_JOURNAL_RESTORING;
     if (state == RESTORING) {
         assert(Step(WT_INVENTORY_PREPARE_RESTORE, journal) == 0);
+        /* The engine records it as a return to no destination first (LUNE-898). */
+        journal->deliveryKind = WT_DELIVERY_RETURN;
+        memcpy(journal->incoming, journal->outgoing, 136);
         return;
     }
     GameSaves(40);
@@ -105,21 +132,29 @@ static void Arrange(enum State state, WtJournalEntry *journal)
     assert(Step(WT_INVENTORY_PREPARE_RECEIVE, journal) == 0);
 }
 
+/* The engine's Restore (adapter/stock_save_test.c Restore). */
 static void Restore(WtJournalEntry *entry)
 {
-    int prepared;
-    if (entry->deliveryKind != WT_DELIVERY_RETURN) {
+    int inPlace = entry->deliveryKind == WT_DELIVERY_RETURN && entry->destination.kind == 0, prepared;
+    if (entry->deliveryKind != WT_DELIVERY_RETURN || inPlace) {
         prepared = Step(WT_INVENTORY_PREPARE_RESTORE, entry);
-        if (prepared == 0) { assert(Step(WT_INVENTORY_RESTORE, entry) == 0); return; }
+        if (prepared == 0) {
+            entry->deliveryKind = WT_DELIVERY_RETURN;
+            memcpy(entry->incoming, entry->outgoing, 136);
+            assert(Step(WT_INVENTORY_RESTORE, entry) == 0);
+            return;
+        }
         assert(prepared == 1);
-        entry->deliveryKind = WT_DELIVERY_RETURN;
-        memcpy(entry->incoming, entry->outgoing, 136);
-        assert(Step(WT_INVENTORY_PREPARE_RECEIVE, entry) == 0);
+        if (!inPlace) {
+            entry->deliveryKind = WT_DELIVERY_RETURN;
+            memcpy(entry->incoming, entry->outgoing, 136);
+            assert(Step(WT_INVENTORY_PREPARE_RECEIVE, entry) == 0);
+        }
     }
     assert(Step(WT_INVENTORY_RECEIVE, entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, entry) == 0);
 }
 
-static void Resume(enum State state, WtJournalEntry *entry)
+static void Resume(enum State state, WtJournalEntry *entry, unsigned copies)
 {
     if (state == ESCROW) {
         assert(Step(WT_INVENTORY_REMOVE, entry) == 0 && Step(WT_INVENTORY_VERIFY_REMOVED, entry) == 0);
@@ -128,35 +163,51 @@ static void Resume(enum State state, WtJournalEntry *entry)
         assert(Copies() == 0);
     } else {
         Restore(entry);
-        assert(Copies() == 1);
+        /* 2: not in the save the stock game loaded; restored if that save
+         * is still the escrow's inventory, else lost (the games' window). */
+        assert(copies == 2 ? IdCopies() <= 1 : IdCopies() == copies);
+        entry->phase = WT_JOURNAL_APPLIED;
+        assert(WtGame_CanLeave(&game, entry));
     }
 }
+
+/* LUNE-906: what the player does with the returned offer in the stock game. */
+enum Fate { KEPT, RELEASED, TRADED, FATES };
+static const char *const kFates[] = { "kept", "released", "traded away" };
+static enum Fate fate;
+static void LetGo(unsigned char *loaded) { (void)Fx5Gone(loaded, offered, fate == TRADED); }
 
 static void Sweep(enum State state)
 {
     static unsigned char resumed[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
-    unsigned writes, cut, saves;
+    unsigned writes, cut, saves, held, lost;
     Arrange(state, &journal);
     entry = journal; writes = file.writes;
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
     /* Two passes: the party, the CRC table, the footer and its last byte. */
     assert(writes == 8);
+    for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
+    lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
         Arrange(state, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
         assert(Step(kCutStep[state], &entry) == (cut <= writes ? -1 : 0));
         file.failWrite = 0;
-        StockPlay(saves, NULL);
+        /* The stock game loads a return once the first copy holding it is complete. */
+        held = IdCopies();
+        if (state != ESCROW) assert(held == (cut > writes / 2));
+        StockPlay(saves, fate == KEPT ? NULL : LetGo);
         Load();
         entry = journal;
-        Resume(state, &entry);
+        Resume(state, &entry, !held ? 2 : fate == KEPT);
+        if (state != ESCROW && !held && !IdCopies()) { ++lost; ++windowLosses; }
         memcpy(resumed, file.bytes, sizeof(resumed));
         Load();
         entry = journal;
-        Resume(state, &entry);
+        Resume(state, &entry, !held ? 2 : fate == KEPT);
         assert(memcmp(resumed, file.bytes, sizeof(resumed)) == 0);
         if (state == ESCROW) {
             entry.phase = WT_JOURNAL_RESTORING;
@@ -165,8 +216,14 @@ static void Sweep(enum State state)
         }
         ++cases;
     }
-    printf("PASS %s stock save after a cut in %s: %u cuts x 2 stock plays, one copy every time\n", FX5_NAME,
-           kStates[state], writes + 1);
+    if (state == ESCROW)
+        printf("PASS %s stock save after a cut in %s: %u cuts x 2 stock plays, one copy every time\n", FX5_NAME,
+               kStates[state], writes + 1);
+    else
+        printf("PASS %s stock save after a cut in %s, offer %s: %u cuts x 2 stock plays, 0 duplicates, "
+               "lost only when cut before the first retail copy (%u cases)\n", FX5_NAME, kStates[state], kFates[fate],
+               writes + 1, lost);
+    }
 }
 
 static unsigned char *PartySlot(unsigned char *loaded, unsigned slot)
@@ -270,39 +327,47 @@ static void BattleBoxReturned(unsigned char *loaded)
 
 /* A return cut at every write, then the stock game moves the Pokémon, if the
  * save it loaded holds it, to the Battle Box: RECEIVE records it there (journal
- * locator kind 3) and never adds it again; a save without it receives it once. */
+ * locator kind 3) and never adds it again; a save without it accepts the loss
+ * (LUNE-906: a cut before the first copy held it). */
 static void ReturnInBattleBox(void)
 {
     static unsigned char resumed[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
-    unsigned cut, writes = 8, inBox = 0;
+    unsigned cut, writes = 8, inBox = 0, held;
     for (cut = 1; cut <= writes + 1; ++cut) {
         Arrange(APPLYING_RETURN, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
         assert(Step(WT_INVENTORY_RECEIVE, &entry) == (cut <= writes ? -1 : 0));
         file.failWrite = 0;
+        held = Copies();
         StockPlay(1, BattleBoxReturned);
         Load();
         entry = journal;
         assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0);
-        assert(Copies() == 1);
+        /* Not in the save the game loaded: received if that save is still the
+         * recorded inventory, else lost (the games' window). */
+        held = held ? 1 : Copies();
+        assert(Copies() == held);
         if (entry.destination.kind == 3) {
-            assert(entry.destination.slot == 4 && entry.destination.length == FX5_BOX_MON);
+            assert(held && entry.destination.slot == 4 && entry.destination.length == FX5_BOX_MON);
             ++inBox;
         } else {
             assert(entry.destination.kind == 1);
+            if (!held) ++windowLosses;
         }
         memcpy(resumed, file.bytes, sizeof(resumed));
-        /* Resumed again from the recorded entry: nothing changes. */
+        /* Resumed again from the journal, as a cut before it recorded the
+         * recovery leaves it: nothing changes. */
         Load();
+        entry = journal;
         assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0);
-        assert(memcmp(resumed, file.bytes, sizeof(resumed)) == 0 && Copies() == 1);
+        assert(memcmp(resumed, file.bytes, sizeof(resumed)) == 0 && Copies() == held);
         ++cases;
     }
     /* At least the completed write reached the Battle Box. */
     assert(inBox >= 1);
-    printf("PASS %s stock save after a return: moved to the Battle Box, recorded there in %u of %u cuts, one copy every time\n",
+    printf("PASS %s stock save after a return: moved to the Battle Box, recorded there in %u of %u cuts, never added\n",
            FX5_NAME, inBox, writes + 1);
 }
 
@@ -318,6 +383,9 @@ static void SubmitReadyAfterPlay(void)
     printf("PASS %s stock save once submitted: still proven removed\n", FX5_NAME);
 }
 
+/* LUNE-906: a return the stock game saved over takes the one Pokémon with its
+ * identity for itself, in whatever state play left it (an evolution changes
+ * the species), as the games do; two are never told apart (LUNE-914). */
 static void IdentityCollisions(void)
 {
     static unsigned char before[CP_SAVE_FILE_SIZE];
@@ -326,19 +394,30 @@ static void IdentityCollisions(void)
     Arrange(APPLYING_RETURN, &journal);
     StockPlay(1, Impostor);
     Load();
-    memcpy(before, file.bytes, sizeof(before));
     entry = journal;
-    assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
-    assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0);
+    assert(IdCopies() == 1 && Copies() == 0);
+    assert(entry.destination.kind == 2 && entry.destination.box == 3 && entry.destination.slot == 7);
     Arrange(RESTORING, &journal);
     StockPlay(1, Impostor);
     Load();
-    memcpy(before, file.bytes, sizeof(before));
     entry = journal;
-    assert(Step(WT_INVENTORY_PREPARE_RESTORE, &entry) == 1);
-    entry.deliveryKind = WT_DELIVERY_RETURN; memcpy(entry.incoming, entry.outgoing, 136);
-    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry) == -1);
-    assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    Restore(&entry);
+    assert(IdCopies() == 1 && Copies() == 0 && entry.destination.kind == 2);
+    for (cut = 0; cut <= 1; ++cut) {
+        Arrange(cut ? RESTORING : APPLYING_RETURN, &journal);
+        entry = journal;
+        if (cut) Restore(&entry);
+        else assert(Step(WT_INVENTORY_RECEIVE, &entry) == 0);
+        StockPlay(1, Impostor);
+        Load();
+        assert(IdCopies() == 2);
+        memcpy(before, file.bytes, sizeof(before));
+        entry = journal;
+        assert(Step(cut ? WT_INVENTORY_PREPARE_RESTORE : WT_INVENTORY_RECEIVE, &entry) == (cut ? 1 : -1));
+        if (cut) assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
+        assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+    }
     for (cut = 1; cut <= 9; cut += 8) {
         Arrange(ESCROW, &journal);
         entry = journal;
@@ -352,7 +431,7 @@ static void IdentityCollisions(void)
         assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
-    printf("PASS %s stock save: another Pokemon with the same identity is never taken as the offer\n", FX5_NAME);
+    printf("PASS %s stock save: one Pokemon with the identity is taken as the return, two are refused untouched\n", FX5_NAME);
 }
 
 /* ---- LUNE-913: the Day Care, the Dream World, the GTS, DNA Splicers ------- */
@@ -469,12 +548,14 @@ static int Held(void)
 /* Every cut of REMOVE in escrow and of RECEIVE for a return, then the stock
  * game moves the offered Pokémon there (when the save it loaded holds it): the
  * step refuses and writes nothing, the Pokémon is never sent nor added twice.
- * Once the player takes it back, the step finishes with one copy. */
+ * Once the player takes it back, the step finishes with one copy; healed, the
+ * escrow stays refused and the return is recorded where it is (LUNE-906). A
+ * return the loaded save did not hold yet is never added. */
 static void HeldElsewhere(void)
 {
     static unsigned char before[CP_SAVE_FILE_SIZE];
     WtJournalEntry journal, entry;
-    unsigned cut, held, state;
+    unsigned cut, held, state, wasHeld;
     for (place = 0; place < PLACES; ++place) for (healed = 0; healed <= (place < 2); ++healed)
     for (state = ESCROW; state <= APPLYING_RETURN; state += APPLYING_RETURN - ESCROW) {
         enum WtInventoryStep cutStep = kCutStep[state];
@@ -488,15 +569,16 @@ static void HeldElsewhere(void)
             StockPlay(1, HoldOffered);
             Load();
             entry = journal;
+            wasHeld = 0;
             if (Held()) {
-                ++held;
+                ++held; wasHeld = 1;
                 memcpy(before, file.bytes, sizeof(before));
                 assert(Step(cutStep, &entry) == -1);
                 assert(memcmp(before, file.bytes, sizeof(before)) == 0 && Copies() == 0);
                 StockPlay(1, WithdrawOffered);
                 Load();
                 entry = journal;
-                if (healed) {
+                if (healed && state == ESCROW) {
                     /* Back changed: never proof either way, still refused. */
                     memcpy(before, file.bytes, sizeof(before));
                     assert(Step(cutStep, &entry) == -1 && memcmp(before, file.bytes, sizeof(before)) == 0);
@@ -509,7 +591,7 @@ static void HeldElsewhere(void)
             if (state == ESCROW) {
                 assert(Step(WT_INVENTORY_VERIFY_REMOVED, &entry) == 0 && Copies() == 0 && !Held());
             } else {
-                assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0 && Copies() == 1 && !Held());
+                assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry) == 0 && (wasHeld ? IdCopies() == 1 : IdCopies() <= 1) && !Held());
             }
             ++cases;
         }
@@ -517,7 +599,7 @@ static void HeldElsewhere(void)
         assert(held >= 1);
         printf("PASS %s stock save in %s, then %s%s: refused untouched in %u of 9 cuts, %s once taken back\n",
             FX5_NAME, kStates[state], kPlaces[place].name, healed ? " (healed)" : "", held,
-            healed ? "still refused (changed)" : "finished");
+            healed && state == ESCROW ? "still refused (changed)" : state == ESCROW ? "finished" : "recorded where it is");
     }
 }
 
@@ -661,6 +743,7 @@ int main(void)
     HeldElsewhere();
     HeldUnique();
     History();
-    printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, 0 lost\n", FX5_NAME, cases);
+    printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, %u lost "
+        "(each cut before the first retail copy held the return, the games' window)\n", FX5_NAME, cases, windowLosses);
     return 0;
 }

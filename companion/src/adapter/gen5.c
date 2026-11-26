@@ -313,7 +313,8 @@ typedef struct Found {
 } Found;
 
 /* As adapter/platinum.c Locate, over the party, the PC and the Battle Box:
- * 1 found, 0 absent, -1 unreadable or ambiguous, or held elsewhere (Elsewhere). */
+ * 1 found, 0 absent, -1 unreadable or ambiguous, or held elsewhere (Elsewhere).
+ * Without digests (NULL) every image with the identity is one. */
 static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_SIZE], unsigned char (*digests)[32],
                   unsigned count, Found *found)
 {
@@ -333,9 +334,12 @@ static int Locate(const CpSaveImage *image, const unsigned char target[BOX_MON_S
         if (kind < 0) return -1;
         if (kind == 0) continue;
         if (memcmp(canonical, target, 4) != 0 || memcmp(canonical + 0x0C, target + 0x0C, 4) != 0) continue;
-        Sha(canonical, sizeof(canonical), sum);
-        for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
-        if (j == count || ++matches > 1) return -1;
+        if (digests) {
+            Sha(canonical, sizeof(canonical), sum);
+            for (j = 0; j < count && memcmp(sum, digests[j], 32) != 0; ++j) {}
+            if (j == count) return -1;
+        }
+        if (++matches > 1) return -1;
         found->party = inParty; found->kind = inParty ? 1 : inBattleBox ? 3 : 2;
         /* The Battle Box follows the last tray: its slot is the same remainder. */
         found->box = inBattleBox ? 0 : box; found->slot = slot;
@@ -507,63 +511,58 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
     return Checkpoint(game);
 }
 
-/* The delivered Pokémon's possible exact images (adapter/platinum.c Delivered). */
-static int Delivered(WtGame *game, const WtJournalEntry *entry, Found *found)
+/* adapter/platinum.c Record: the Pokémon Locate found, recorded as the
+ * delivery where it is, the Battle Box included (journal locator kind 3). */
+static int Record(WtJournalEntry *entry, const CpSaveImage *image, const Found *found)
 {
-    unsigned char digests[3][32], image[MON_SIZE], canonical[BOX_MON_SIZE], *scratch;
-    const uint32_t size = CpSaveImage_BlockSize(game->image, Layout(game->image)->pokedexBlock);
-    unsigned count = 1, i;
-    if (entry->deliveryKind == WT_DELIVERY_RETURN) {
-        Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
-        return Locate(game->image, entry->outgoing, digests, 1, found);
-    }
-    if (entry->deliveryKind != WT_DELIVERY_MATCH || !game->data || !(scratch = malloc(size))) return -1;
-    memcpy(digests[0], entry->appliedDigest, 32);
-    for (i = 0; i < 2; ++i) {
-        memcpy(scratch, Pokedex(game->image), size);
-        if (CpReceive5_Apply(RulesOf(game->image)->receive, game->data, scratch, entry->incoming, entry->original,
-                i ? CP_RECEIVE_BOX : CP_RECEIVE_PARTY, image) != 0
-            || WtPokemon_Decode(image, canonical) != 0) { free(scratch); return -1; }
-        Sha(canonical, sizeof(canonical), digests[count++]);
-    }
-    free(scratch);
-    return Locate(game->image, entry->incoming, digests, count, found);
+    WtJournalLocator at;
+    unsigned char *stored, canonical[BOX_MON_SIZE];
+    memset(&at, 0, sizeof(at));
+    at.kind = (unsigned char)found->kind; at.box = (unsigned char)found->box; at.slot = (unsigned char)found->slot;
+    at.length = found->party ? MON_SIZE : BOX_MON_SIZE;
+    if (!(stored = Destination(image, at)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
+    entry->destination = at;
+    memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
+    Empty(entry->destinationBefore, at.length);
+    memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
+    memcpy(entry->destinationAfter, stored, at.length);
+    Sha(canonical, sizeof(canonical), entry->appliedDigest);
+    return 0;
 }
 
-static int Back(WtGame *game, const WtJournalEntry *entry)
+/* adapter/platinum.c Back: a returned offer already back is recorded where it
+ * is, never added. */
+static int Back(WtGame *game, WtJournalEntry *entry)
 {
     Found found;
     int where;
     if (entry->deliveryKind != WT_DELIVERY_RETURN) return 0;
-    where = Delivered(game, entry, &found);
-    return where == 1 && !Moved(game->image, entry) ? -1 : where;
+    if (memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
+    where = Locate(game->image, entry->outgoing, NULL, 0, &found);
+    if (where != 1) return where;
+    if (!Moved(game->image, entry) || Record(entry, game->image, &found) != 0
+        || Hash(game->image, entry->inventoryAfter) != 0) return -1;
+    memcpy(entry->inventoryBefore, entry->inventoryAfter, 32);
+    return 1;
 }
 
-static int ReceiveMoved(WtGame *game, WtJournalEntry *entry, Backup *backup, int *restore)
+/* adapter/platinum.c ReceiveMoved (delivery.h WtDelivery_Recover): a save
+ * the stock game wrote over both recorded inventories is accepted as it is and
+ * the delivery never added again; the one Pokémon with its identity is
+ * recorded where it is. Two, one held elsewhere, an unreadable slot or a
+ * matched delivery's offer still here refuse, writing nothing. */
+static int ReceiveMoved(WtGame *game, WtJournalEntry *entry)
 {
     Found found;
-    int where = Delivered(game, entry, &found);
-    if (where < 0) return -1;
-    if (where == 0) {
-        if (BuildReceived(game, entry, backup, 1) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
-        *restore = 0;
-        if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) return -1;
-    } else {
-        WtJournalLocator at;
-        unsigned char *stored, canonical[BOX_MON_SIZE];
-        memset(&at, 0, sizeof(at));
-        at.kind = (unsigned char)found.kind; at.box = (unsigned char)found.box; at.slot = (unsigned char)found.slot;
-        at.length = found.party ? MON_SIZE : BOX_MON_SIZE;
-        if (!(stored = Destination(game->image, at)) || WtPokemon_Decode(stored, canonical) != 0) return -1;
-        *restore = 0;
-        if (Checkpoint(game) != 0 || Hash(game->image, entry->inventoryAfter) != 0) return -1;
-        entry->destination = at;
-        memset(entry->destinationBefore, 0, sizeof(entry->destinationBefore));
-        Empty(entry->destinationBefore, at.length);
-        memset(entry->destinationAfter, 0, sizeof(entry->destinationAfter));
-        memcpy(entry->destinationAfter, stored, at.length);
-        Sha(canonical, sizeof(canonical), entry->appliedDigest);
-    }
+    int where;
+    if (entry->deliveryKind == WT_DELIVERY_MATCH) {
+        if (Absent(game->image, entry->outgoing) != 0) return -1;
+    } else if (entry->deliveryKind != WT_DELIVERY_RETURN
+        || memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
+    if ((where = Locate(game->image, entry->incoming, NULL, 0, &found)) < 0) return -1;
+    if (where == 1 && Record(entry, game->image, &found) != 0) return -1;
+    if (Checkpoint(game) != 0) return -1;
+    if (where == 1 && Hash(game->image, entry->inventoryAfter) != 0) return -1;
     Counters(game->image, entry);
     return 0;
 }
@@ -572,28 +571,32 @@ static int Receive(WtGame *game, enum WtInventoryStep step, WtJournalEntry *entr
 {
     Backup *backup;
     unsigned char digest[32];
-    int result = -1, restore = 1;
+    int result = -1, restore = 1, before, after;
     if (step == WT_INVENTORY_VERIFY_RECEIVED) return Applied(game, entry);
     if (!(backup = Keep(game->image))) return -1;
     if (step == WT_INVENTORY_PREPARE_RECEIVE) {
         result = Back(game, entry);
-        if (result == 1) { result = 0; goto done; }
-        if (result == 0) result = BuildReceived(game, entry, backup, 1);
-        if (result == 0) result = Hash(game->image, entry->inventoryAfter);
+        if (result == 1) result = 0;
+        else if (result == 0 && (result = BuildReceived(game, entry, backup, 1)) == 0)
+            result = Hash(game->image, entry->inventoryAfter);
+        /* RECEIVE tells another game's later save by these counters. */
+        if (result == 0) Counters(game->image, entry);
         goto done;
     }
     if (Hash(game->image, digest) != 0) goto done;
-    if (memcmp(digest, entry->inventoryBefore, 32) != 0 && memcmp(digest, entry->inventoryAfter, 32) != 0
-        && Moved(game->image, entry)) {
-        result = ReceiveMoved(game, entry, backup, &restore);
+    before = memcmp(digest, entry->inventoryBefore, 32) == 0;
+    after = memcmp(digest, entry->inventoryAfter, 32) == 0;
+    if (!before && !after) {
+        /* Nothing to put back: the step edits the image nowhere. */
+        restore = 0;
+        if (Moved(game->image, entry)) result = ReceiveMoved(game, entry);
         goto done;
     }
-    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
-        if (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0) goto done;
-    }
-    if (memcmp(digest, entry->inventoryAfter, 32) != 0) goto done;
+    if (!entry->destination.kind) goto done;
+    if (!after && (BuildReceived(game, entry, backup, 0) != 0 || Hash(game->image, digest) != 0
+            || memcmp(digest, entry->inventoryAfter, 32) != 0)) goto done;
     restore = 0;
-    if (SaveBoth(game, digest) != 0 || VerifyReceived(game, entry) != 0) goto done;
+    if (SaveBoth(game, entry->inventoryAfter) != 0 || VerifyReceived(game, entry) != 0) goto done;
     Counters(game->image, entry); result = 0;
 done:
     Release(backup, restore);
