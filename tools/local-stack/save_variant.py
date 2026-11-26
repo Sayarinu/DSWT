@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Derive a disposable retail test save with edited party Pokémon.
 
-Only blank-journal originals are accepted, so every variant is enrolled as a new
-identity by `emulator.py create`. Both retail copies receive the same edits and
+Each variant needs a blank journal for separate enrollment. Both retail copies receive the same edits and
 their block CRCs are recomputed; the source is never modified.
 """
 

@@ -24,7 +24,6 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
-| `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
 | `patches/` | Supported cartridges and the install guide shipped in each release |
 | `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
@@ -108,9 +107,6 @@ docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-
 docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \
   --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   dswt-validator-tests
-
-# Test durable emulator persistence
-docker build -f emulator/Dockerfile -t dswt-emulator-builder .
 ```
 
 CI also scans the full history with gitleaks and runs `git diff --check` on the

@@ -54,6 +54,6 @@
     "The journal reuses the musical distribution area (owner decision on LUNE-831). The game reads that area only while the trainer data marks a musical distribution as saved, and treats a failed load as no distribution; the integration patch must stop the game from importing distributions and clear that marker before the first journal write.",
     "Black/White: bank 1 covers the musical distribution's save footer at 0x75D04, inside the record's reserved_zero bytes, so any load of the area fails on the footer size and reports no distribution.",
     "Deleting the save from the title screen erases the main copy, the backup copy's footer and the data outside the save (delete_save_writes), but not the extra saves: erasing the main save resets the trainer data markers first, so no extra save is opened. The journal and the persistence page survive a deleted save, so a new game can find an earlier journal.",
-    "The persistence page is the virtual, read-only page the durable melonDS supplies; it lies in the unused tail of the main save's backup copy, which the game never reads or writes."
+    "The persistence page is the virtual, read-only page a compatible host supplies; it lies in the unused tail of the main save's backup copy, which the game never reads or writes."
   ]
 }

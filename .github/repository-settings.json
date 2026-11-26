@@ -27,8 +27,7 @@
         "Build and test connectivity server",
         "Build and test DS companion",
         "Build and test isolated legality validator",
-        "Test bounded TLS transport",
-        "Test durable emulator persistence"
+        "Test bounded TLS transport"
       ]
     },
     "enforce_admins": true,

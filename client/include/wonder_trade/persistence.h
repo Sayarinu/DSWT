@@ -1,11 +1,10 @@
 #ifndef POKEPLATINUM_WONDER_TRADE_PERSISTENCE_H
 #define POKEPLATINUM_WONDER_TRADE_PERSISTENCE_H
 
-/* Virtual, read-only capability page supplied by the supported emulator. Each
+/* Virtual, read-only capability page supplied by compatible hosts. Each
  * game family has its own address that the game never reads or writes
  * (persistence_address in protocol/save-layout*.json), so the page stays
- * untouched in the actual save file. This header stands alone: the emulator
- * copies it without the rest of the client. */
+ * untouched in the actual save file. */
 #define WT_PERSISTENCE_ADDRESS_GEN4 0x2FF00
 #define WT_PERSISTENCE_ADDRESS_BW 0x47FC0
 #define WT_PERSISTENCE_ADDRESS_B2W2 0x4BFC0
