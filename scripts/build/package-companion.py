@@ -9,10 +9,20 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 LICENSES = (
-    "mbedtls.txt", "ds-companion-blocksds.txt", "ds-companion-cc0.txt",
-    "ds-companion-libnds.txt", "ds-companion-fatfs.txt", "ds-companion-dswifi.txt",
-    "ds-companion-lwip.txt", "ds-companion-mbedtls.txt", "ds-companion-picolibc.txt",
-    "ds-companion-gpl-3.0.txt", "ds-companion-gcc-exception.txt", "ds-companion-galmuri.txt",
+    "LICENSES/Apache-2.0.txt",
+    "LICENSES/CC0-1.0.txt",
+    "LICENSES/GCC-exception-3.1.txt",
+    "LICENSES/GPL-2.0-or-later.txt",
+    "LICENSES/GPL-3.0-or-later.txt",
+    "LICENSES/OFL-1.1.txt",
+    "licensing/ds-companion-blocksds.txt",
+    "licensing/ds-companion-dswifi.txt",
+    "licensing/ds-companion-fatfs.txt",
+    "licensing/ds-companion-libnds.txt",
+    "licensing/ds-companion-lwip.txt",
+    "licensing/ds-companion-mbedtls.txt",
+    "licensing/ds-companion-picolibc.txt",
+    "licensing/mbedtls.txt",
 )
 INSTALL = """DSWT Companion
 
@@ -46,7 +56,7 @@ def package(version, build, output):
     members = {"dswt-companion.nds": data, "INSTALL.txt": INSTALL.encode(),
                "NOTICE": (ROOT / "NOTICE").read_bytes(), "LICENSE": (ROOT / "LICENSE").read_bytes(),
                "font-manifest.json": (build / "build/text/font-manifest.json").read_bytes()}
-    members.update({f"licensing/{name}": (ROOT / "licensing" / name).read_bytes() for name in LICENSES})
+    members.update({name: (ROOT / name).read_bytes() for name in LICENSES})
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"dswt-companion-{version}.zip"
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:

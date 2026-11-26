@@ -341,6 +341,9 @@ class ReleaseTests(Fixture):
         super().setUp()
         self.create()
         self.bundle = self.root / "game/bundle"
+        for relative in patcher.PATCH_NOTICES:
+            (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / relative).write_text(relative)
         for name, relative in patcher.RELEASE_DOCUMENTS.items():
             (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
             (self.root / relative).write_text(name)
@@ -354,6 +357,8 @@ class ReleaseTests(Fixture):
                                                   ("INSTALL.md", "LICENSE", "NOTICE", "dswt-us-rev0.bps",
                                                    "dswt-us-rev1.bps", "manifest.json")])
             self.assertEqual(archive.read("dswt-0.1.0/LICENSE"), b"LICENSE")
+            for relative in patcher.PATCH_NOTICES:
+                self.assertIn((self.root / relative).read_bytes(), archive.read("dswt-0.1.0/NOTICE"))
         with self.assertRaises(patcher.PatchError):
             patcher.package(self.bundle, self.root / "game/a.zip", root=self.root)
         with self.assertRaises(patcher.PatchError):

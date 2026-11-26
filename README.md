@@ -62,7 +62,7 @@ Bug reports and pull requests are welcome. Please open an [issue](https://github
 
 ## License
 
-Original DSWT work is under the [MIT License](LICENSE). The legality validator in [`validator/`](validator/) is GPL-3.0-or-later and carries its own notices. These licenses do not cover the games, their assets or other third-party components. See [NOTICE](NOTICE) and [`licensing/`](licensing/).
+Original DSWT work is under the [MIT License](LICENSE). The legality validator in [`validator/`](validator/) is GPL-3.0-or-later and carries its own notices. These licenses do not cover the games, their assets or other third-party components. See [NOTICE](NOTICE) and the [license texts](LICENSES/) and [component notices](licensing/).
 
 ## Disclaimer
 

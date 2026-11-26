@@ -43,6 +43,7 @@ VERBATIM_WINDOW, VERBATIM_STRIDE = 32, 16
 RESERVED_SUFFIXES = ("localhost", "local", "test", "example", "invalid", "internal", "lan", "home.arpa", "onion")
 # Release files copied into the player archive beside the manifest and patches.
 RELEASE_DOCUMENTS = {"INSTALL.md": "tools/patcher-app/INSTALL.md", "LICENSE": "LICENSE", "NOTICE": "NOTICE"}
+PATCH_NOTICES = ("licensing/mbedtls.txt", "LICENSES/Apache-2.0.txt")
 FLIPS_TIMEOUT = 30 * 60
 # Flips --bps-delta holds about 9 bytes per source and target byte, plus both files.
 FLIPS_DELTA_BYTES = 10
@@ -957,6 +958,9 @@ def package(bundle_dir, output, root=ROOT):
         members[entry["patch"]["file"]] = patch
     for name, relative in RELEASE_DOCUMENTS.items():
         members[name] = (root / relative).read_bytes()
+    # Preserve the flat archive contract used by released desktop patchers.
+    for relative in PATCH_NOTICES:
+        members["NOTICE"] += b"\n" + (root / relative).read_bytes()
     parent, name = _new_output(output, root)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:

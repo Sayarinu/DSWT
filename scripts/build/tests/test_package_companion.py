@@ -48,10 +48,10 @@ class PackageCompanionTests(unittest.TestCase):
         with zipfile.ZipFile(target) as archive:
             prefix = "dswt-companion-0.4.1/"
             expected = {"dswt-companion.nds", "NOTICE", "LICENSE", "INSTALL.txt", "font-manifest.json",
-                        *(f"licensing/{name}" for name in package.LICENSES)}
+                        *package.LICENSES}
             self.assertEqual(set(archive.namelist()), {prefix + name for name in expected})
             self.assertEqual(archive.read(prefix + "dswt-companion.nds"), self.rom)
-            for name in ("NOTICE", "LICENSE", *(f"licensing/{name}" for name in package.LICENSES)):
+            for name in ("NOTICE", "LICENSE", *package.LICENSES):
                 self.assertEqual(archive.read(prefix + name), (ROOT / name).read_bytes())
             self.assertIn(b"https://github.com/Sayarinu/DSWT/wiki/DS-Companion",
                           archive.read(prefix + "INSTALL.txt"))

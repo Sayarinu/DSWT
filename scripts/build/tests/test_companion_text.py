@@ -218,7 +218,7 @@ int main(void) {
         expected += b''.join(struct.pack('=I', cp) for cp in points) + b'\x80' * len(points)
         self.assertEqual(result.stdout, expected)
         self.assertEqual((output / 'dswt-companion-pixel.ofl.txt').read_bytes(),
-                         (ROOT / 'licensing/ds-companion-galmuri.txt').read_bytes())
+                         (ROOT / 'LICENSES/OFL-1.1.txt').read_bytes())
         manifest = json.loads((output / 'font-manifest.json').read_text())
         self.assertEqual(manifest['codepoints'], points)
         self.assertEqual(manifest['name'], 'DSWT Companion Pixel')

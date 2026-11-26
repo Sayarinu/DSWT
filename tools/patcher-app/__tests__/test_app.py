@@ -26,6 +26,9 @@ class AppFixture(Fixture):
         super().setUp()
         self.create()
         self.bundle = self.root / "game/bundle"
+        for relative in patcher.PATCH_NOTICES:
+            (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / relative).write_text(relative)
         for name, relative in patcher.RELEASE_DOCUMENTS.items():
             (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
             (self.root / relative).write_text(f"{name} text")

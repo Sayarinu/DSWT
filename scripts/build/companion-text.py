@@ -196,7 +196,7 @@ extern const uint8_t Companion_FontAscent, Companion_FontLineHeight;
     for name, data in (
         ('companion_text.h', header.encode()), ('companion_text.c', source.encode()),
         ('font-manifest.json', (json.dumps(manifest, indent=2) + '\n').encode()),
-        ('dswt-companion-pixel.ofl.txt', (ROOT / 'licensing/ds-companion-galmuri.txt').read_bytes()),
+        ('dswt-companion-pixel.ofl.txt', (ROOT / 'LICENSES/OFL-1.1.txt').read_bytes()),
     ):
         write_if_changed(output / name, data)
 

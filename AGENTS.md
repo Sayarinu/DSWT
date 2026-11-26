@@ -28,7 +28,8 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
 | `scripts/` | Single-purpose entry points grouped under build/, prepare/ and port/ |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit, ROM and companion builder images |
-| `licensing/` | Redistribution inventory and bundled third-party licenses |
+| `LICENSES/` | License texts named by SPDX identifier |
+| `licensing/` | Redistribution decisions and package-specific notices |
 
 ## Platform
 
