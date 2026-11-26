@@ -1,3 +1,4 @@
+#include "wonder_trade/trade_variant.h"
 #include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
@@ -79,9 +80,9 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
  * takes the revision from the running cartridge (WtGame_EnrollVariant). */
 #ifndef WT_VARIANT /* A retail port sets its own language. */
 #if defined(PEARL)
-#define WT_VARIANT 0x010B0205
+#define WT_VARIANT WT_VARIANT_CODE(WT_TRADE_FAMILY_DP, WT_VERSION_PEARL, WT_LANGUAGE_ENGLISH, 5)
 #else
-#define WT_VARIANT 0x010A0205
+#define WT_VARIANT WT_VARIANT_CODE(WT_TRADE_FAMILY_DP, WT_VERSION_DIAMOND, WT_LANGUAGE_ENGLISH, 5)
 #endif
 #endif
 

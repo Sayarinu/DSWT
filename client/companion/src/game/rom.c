@@ -4,13 +4,12 @@
 
 uint32_t CpBuildCode(CpFamily family, unsigned version, unsigned language, unsigned revision)
 {
-    return (uint32_t)family << 24 | (uint32_t)(version & 0xFF) << 16 | (uint32_t)(language & 0xFF) << 8 |
-        (uint32_t)(revision & 0xFF);
+    return WT_VARIANT_CODE(family, version, language, revision);
 }
 
 CpFamily CpBuildCode_Family(uint32_t code)
 {
-    unsigned family = code >> 24, version = code >> 16 & 0xFF, language = code >> 8 & 0xFF;
+    unsigned family = code >> WT_VARIANT_FAMILY_SHIFT, version = code >> WT_VARIANT_VERSION_SHIFT & UINT8_MAX, language = code >> WT_VARIANT_LANGUAGE_SHIFT & UINT8_MAX;
     int game;
 
     if (code == CP_BUILD_CODE_LEGACY_PLATINUM) return CP_FAMILY_PLATINUM;
@@ -75,12 +74,13 @@ int CpRom_FromCode(const char gameCode[4], uint8_t revision, CpRomInfo *out)
 
 int CpRom_Identify(const CpReader *reader, CpRomInfo *out)
 {
-    uint8_t header[0x20];
+    enum { HEADER_PREFIX_SIZE = 0x20, GAME_CODE = 0x0C, REVISION = 0x1E };
+    uint8_t header[HEADER_PREFIX_SIZE];
     CpRomFile rom;
 
     CpRomFile_Whole(reader, &rom);
     if (CpRomFile_Read(&rom, 0, header, sizeof header) != CP_OK) return CP_ERR_IO;
-    return CpRom_FromCode((const char *)header + 0x0C, header[0x1E], out);
+    return CpRom_FromCode((const char *)header + GAME_CODE, header[REVISION], out);
 }
 
 uint32_t CpRom_GeneralBlockSize(CpFamily family)

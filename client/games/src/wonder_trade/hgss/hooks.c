@@ -1,3 +1,4 @@
+#include "wonder_trade/trade_variant.h"
 #include "wonder_trade/journal_layout.h"
 #include "wonder_trade/game_adapter.h"
 
@@ -23,9 +24,9 @@ extern void sub_02034DE0(void);
  * takes the revision from the running cartridge (WtGame_EnrollVariant). */
 #ifndef WT_VARIANT /* A retail port sets its own language. */
 #if defined(SOULSILVER)
-#define WT_VARIANT 0x03080200
+#define WT_VARIANT WT_VARIANT_CODE(WT_TRADE_FAMILY_HGSS, WT_VERSION_SOULSILVER, WT_LANGUAGE_ENGLISH, 0)
 #else
-#define WT_VARIANT 0x03070200
+#define WT_VARIANT WT_VARIANT_CODE(WT_TRADE_FAMILY_HGSS, WT_VERSION_HEARTGOLD, WT_LANGUAGE_ENGLISH, 0)
 #endif
 #endif
 

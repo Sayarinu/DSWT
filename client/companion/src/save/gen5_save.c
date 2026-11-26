@@ -1,3 +1,4 @@
+#include "wonder_trade/save_crc.h"
 #include "gen5_save.h"
 
 #include <string.h>
@@ -54,7 +55,7 @@ const CpSaveLayout CpSaveLayout_Black2White2 = {
 };
 
 enum {
-    FOOTER_SIZE = 16,
+    FOOTER_SIZE = 16, FOOTER_LENGTH = 4, FOOTER_MAGIC = 8, FOOTER_CRC_OFFSET = 14,
     /* Where the load reads the backup copy: the image's second half. */
     SCRATCH = CP_SAVE_HALF_SIZE,
     AREA_NONE = 0, AREA_MAIN = 1, AREA_BACKUP = 2,
@@ -78,7 +79,7 @@ uint16_t CpGen5Save_Crc(uint16_t crc, const unsigned char *data, size_t size)
     unsigned bit;
     for (i = 0; i < size; ++i) {
         crc ^= (uint16_t)((unsigned)data[i] << 8);
-        for (bit = 0; bit < 8; ++bit) crc = (uint16_t)((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0));
+        for (bit = 0; bit < 8; ++bit) crc = (uint16_t)((crc << 1) ^ ((crc & WT_SAVE_CRC_HIGH_BIT) ? WT_SAVE_CRC_POLYNOMIAL : 0));
     }
     return crc;
 }
@@ -109,8 +110,8 @@ static int FileSize(const CpFile *file)
 static unsigned CheckFooter(const CpSaveGen5 *g, const unsigned char *data)
 {
     const unsigned char *footer = data + g->dataSize - FOOTER_SIZE;
-    if (Read32(footer + 4) != g->dataSize || Read32(footer + 8) != CP_SAVE_MAGIC_GEN5) return FOOTER_NONE;
-    return Read16(footer + 14) == CpGen5Save_Crc(0xFFFF, data + CrcTableAt(g), CrcTableSize(g)) ? FOOTER_GOOD : FOOTER_CRC;
+    if (Read32(footer + FOOTER_LENGTH) != g->dataSize || Read32(footer + FOOTER_MAGIC) != CP_SAVE_MAGIC_GEN5) return FOOTER_NONE;
+    return Read16(footer + FOOTER_CRC_OFFSET) == CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, data + CrcTableAt(g), CrcTableSize(g)) ? FOOTER_GOOD : FOOTER_CRC;
 }
 
 static void Fill(CpSaveImage *image, unsigned area)
@@ -161,9 +162,9 @@ static int LoadDouble(CpSaveImage *image, const CpSaveGen5 *g)
             uint16_t mainCrc = Read16(work[0] + end + 2), backupCrc = Read16(work[1] + end + 2);
             image->areas[id] = AREA_NONE;
             if (mainCrc != want && backupCrc != want) break;
-            if (mainCrc != want || mainCrc != CpGen5Save_Crc(0xFFFF, work[0] + offset, size))
+            if (mainCrc != want || mainCrc != CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, work[0] + offset, size))
                 image->areas[id] = AREA_MAIN;
-            if (backupCrc != want || backupCrc != CpGen5Save_Crc(0xFFFF, work[1] + offset, size)) {
+            if (backupCrc != want || backupCrc != CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, work[1] + offset, size)) {
                 if (image->areas[id] == AREA_MAIN) break;
                 image->areas[id] = AREA_BACKUP;
             }
@@ -215,8 +216,8 @@ int CpGen5Save_MusicalLoads(const CpSaveLayout *layout, const CpFile *file, uint
     if (file->readAt(file->context, base + g->musicalDataSize - FOOTER_SIZE, footer, sizeof(footer)) != 0
         || file->readAt(file->context, base + g->musicalDataSize - FOOTER_SIZE - 4, table, sizeof(table)) != 0
         || file->readAt(file->context, base + g->musicalBlockSize, record, sizeof(record)) != 0) return -1;
-    if (Read32(footer + 4) != g->musicalDataSize || Read32(footer + 8) != CP_SAVE_MAGIC_GEN5
-        || Read16(footer + 14) != CpGen5Save_Crc(0xFFFF, table, sizeof(table)) || Read32(footer) != count
+    if (Read32(footer + FOOTER_LENGTH) != g->musicalDataSize || Read32(footer + FOOTER_MAGIC) != CP_SAVE_MAGIC_GEN5
+        || Read16(footer + FOOTER_CRC_OFFSET) != CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, table, sizeof(table)) || Read32(footer) != count
         || Read16(record + 2) != Read16(table)) return 0;
     while (offset < g->musicalBlockSize) {
         size = g->musicalBlockSize - offset;
@@ -379,7 +380,7 @@ static int Save(CpSaveImage *image, const CpFile *file)
             uint32_t at = image->blockOffsets[id], size = g->blockSizes[id];
             uint16_t crc;
             if ((area = image->areas[id]) == AREA_NONE) continue;
-            crc = CpGen5Save_Crc(0xFFFF, image->bytes + at, size);
+            crc = CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, image->bytes + at, size);
             Write16(image->bytes + at + size + 2, crc);
             Write16(image->bytes + table + 2 * id, crc);
             if (WriteSync(file, CopyAddress(g, area) + at, image->bytes + at, size + 4u) != 0) return -1;
@@ -389,9 +390,9 @@ static int Save(CpSaveImage *image, const CpFile *file)
             return -1;
         if (image->areas[n + 1] == AREA_NONE) image->areas[n + 1] = AREA_MAIN;
         Write32(image->bytes + footer, image->globalCounter);
-        Write32(image->bytes + footer + 4, g->dataSize);
-        Write32(image->bytes + footer + 8, CP_SAVE_MAGIC_GEN5);
-        Write16(image->bytes + footer + 14, CpGen5Save_Crc(0xFFFF, image->bytes + table, CrcTableSize(g)));
+        Write32(image->bytes + footer + FOOTER_LENGTH, g->dataSize);
+        Write32(image->bytes + footer + FOOTER_MAGIC, CP_SAVE_MAGIC_GEN5);
+        Write16(image->bytes + footer + FOOTER_CRC_OFFSET, CpGen5Save_Crc(WT_SAVE_CRC_INITIAL, image->bytes + table, CrcTableSize(g)));
         area = image->areas[n + 1];
         if (WriteSync(file, CopyAddress(g, area) + footer, image->bytes + footer, FOOTER_SIZE - 1) != 0
             || WriteSync(file, CopyAddress(g, area) + footer + FOOTER_SIZE - 1, image->bytes + footer + FOOTER_SIZE - 1,

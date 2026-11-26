@@ -7,8 +7,8 @@
 /* The journal banks in a Generation IV save (journal_banks and
  * bank_reserved_size in client/core/save-layouts/save-layout.json, -dp and -hgss): each bank
  * is a 4 KiB record followed by blank bytes up to 64 KiB. */
-#define CP_JOURNAL_BANK_0 0x30000u
-#define CP_JOURNAL_BANK_1 0x70000u
+#define CP_JOURNAL_BANK_0 WT_GEN4_BANK_A
+#define CP_JOURNAL_BANK_1 WT_GEN4_BANK_B
 #define CP_JOURNAL_RESERVED_SIZE 0x10000u
 
 /* Where a game keeps its journal banks, and the flash reserved from each

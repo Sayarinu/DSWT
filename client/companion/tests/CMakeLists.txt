@@ -74,7 +74,7 @@ add_library(companion_save STATIC
     "${COMPANION_SAVE}/gen5_save.c"
     "${COMPANION_SAVE}/sha256.c"
     "${COMPANION_SAVE}/posix_file.c")
-target_include_directories(companion_save PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_include_directories(companion_save PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../src" "${CLIENT}/include")
 target_compile_options(companion_save PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_options(companion_save PUBLIC -fsanitize=address,undefined)
 
@@ -115,7 +115,7 @@ set(COMPANION_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 add_executable(game_data_test game_data_test.c posix_reader.c
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
     "${COMPANION_SRC}/game/text.c" "${COMPANION_SRC}/game/pairing.c")
-target_include_directories(game_data_test PRIVATE "${COMPANION_SRC}")
+target_include_directories(game_data_test PRIVATE "${COMPANION_SRC}" "${CLIENT}/include")
 target_compile_options(game_data_test PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_options(game_data_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
@@ -123,7 +123,7 @@ add_test(NAME game_data_test COMMAND game_data_test WORKING_DIRECTORY "${CMAKE_C
 add_executable(gen5_rom_check gen5_rom_check.c posix_reader.c
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
     "${COMPANION_SRC}/game/text.c")
-target_include_directories(gen5_rom_check PRIVATE "${COMPANION_SRC}")
+target_include_directories(gen5_rom_check PRIVATE "${COMPANION_SRC}" "${CLIENT}/include")
 target_compile_options(gen5_rom_check PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
 target_link_options(gen5_rom_check PRIVATE -fsanitize=address,undefined)
 add_test(NAME gen5_rom_check COMMAND gen5_rom_check)

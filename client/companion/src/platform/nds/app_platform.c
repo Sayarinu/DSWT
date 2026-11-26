@@ -21,6 +21,7 @@
 #include "ui/app.h"
 
 /* melonDS's DS-mode Wi-Fi can take close to a minute to associate. */
+#define MILLISECONDS_PER_SECOND 1000
 #define WIFI_TIMEOUT_MS 90000
 /* A network chosen in the Wi-Fi settings: a few seconds to find it, then the
  * DSi driver associates in seconds; a wrong password should not keep the
@@ -79,7 +80,7 @@ static void Log(void *arg, const char *line)
     if (stat(sLog, &info) == 0 && info.st_size > LOG_LIMIT) remove(sLog);
     file = fopen(sLog, "a");
     if (!file) return;
-    fprintf(file, "%6lu ", (unsigned long)(systemCounterTicksToMsec((u32)systemCounterGetTicks()) / 1000));
+    fprintf(file, "%6lu ", (unsigned long)(systemCounterTicksToMsec((u32)systemCounterGetTicks()) / MILLISECONDS_PER_SECOND));
     fputs(line, file);
     fclose(file);
 }

@@ -5,8 +5,8 @@
 #include <string.h>
 
 const CpJournalArea CpJournalArea_Gen4 = { { CP_JOURNAL_BANK_0, CP_JOURNAL_BANK_1 }, CP_JOURNAL_RESERVED_SIZE };
-const CpJournalArea CpJournalArea_BlackWhite = { { 0x74000u, 0x75000u }, 0x1000u };
-const CpJournalArea CpJournalArea_Black2White2 = { { 0x6B000u, 0x6C000u }, 0x1000u };
+const CpJournalArea CpJournalArea_BlackWhite = { { WT_BW_BANK_A, WT_BW_BANK_B }, WT_JOURNAL_RECORD_SIZE };
+const CpJournalArea CpJournalArea_Black2White2 = { { WT_B2W2_BANK_A, WT_B2W2_BANK_B }, WT_JOURNAL_RECORD_SIZE };
 
 static const CpJournalArea *Area(const CpJournalStore *store)
 {
@@ -14,14 +14,11 @@ static const CpJournalArea *Area(const CpJournalStore *store)
 }
 
 /* Record offsets (record_sections in client/core/save-layouts/save-layout.json). */
-enum {
-    REC_PHASE = 6, REC_GENERATION = 16, REC_CREDENTIAL = 48, REC_ENROLLMENT_ID = 80,
-    REC_NEXT_COUNTER = 96, REC_PENDING = 1952, REC_RESERVED = 2216, REC_DIGEST = 4060,
-    REC_TAG = 4092
-};
+
 /* The pending request: a 2-byte length, 6 zero bytes, then the frame. */
 enum {
-    PKT_FRAME = 8, PKT_SIZE = REC_RESERVED - REC_PENDING,
+    CP_SD_SECTOR_SIZE = 512,
+    PKT_FRAME = WT_REC_REQUEST - WT_REC_PENDING_REQUEST, PKT_SIZE = WT_REC_RESERVED - WT_REC_PENDING_REQUEST,
     PKT_OPERATION = PKT_FRAME + WT_WIRE_REQUEST_OPERATION,
     PKT_BODY_LENGTH = PKT_FRAME + WT_WIRE_REQUEST_BODY_LENGTH,
     PKT_ID = PKT_FRAME + WT_WIRE_REQUEST_ID,
@@ -42,7 +39,7 @@ static int Within(size_t i, size_t start, size_t size) { return i >= start && i 
  * values; where they and the record's identity both hold a byte, it matches. */
 static int EnrollPacketMix(const unsigned char *record)
 {
-    const unsigned char *packet = record + REC_PENDING;
+    const unsigned char *packet = record + WT_REC_PENDING_REQUEST;
     unsigned clues[3], size = 0, i;
     clues[0] = packet[0] | (unsigned)packet[1] << 8;
     clues[1] = packet[PKT_BODY_LENGTH] | (unsigned)packet[PKT_BODY_LENGTH + 1] << 8;
@@ -64,11 +61,11 @@ static int EnrollPacketMix(const unsigned char *record)
         else if (i == PKT_OPERATION) expected = WT_OP_ENROLL;
         else if (Within(i, PKT_BODY_LENGTH, 2)) expected = (unsigned char)((size - WT_WIRE_REQUEST_HEADER_SIZE) >> (8 * (i - PKT_BODY_LENGTH)));
         else if (Within(i, PKT_ID, WT_WIRE_ID_SIZE)) {
-            unsigned char held = record[REC_ENROLLMENT_ID + i - PKT_ID];
+            unsigned char held = record[WT_REC_ENROLLMENT_ID + i - PKT_ID];
             if (!held || held == byte) continue;
             return 0;
         } else if (Within(i, PKT_CREDENTIAL, WT_WIRE_CREDENTIAL_SIZE)) {
-            unsigned char held = record[REC_CREDENTIAL + i - PKT_CREDENTIAL];
+            unsigned char held = record[WT_REC_CREDENTIAL + i - PKT_CREDENTIAL];
             if (!held || held == byte) continue;
             return 0;
         } else if (Within(i, PKT_BODY, WT_WIRE_ENROLL_HINT_LENGTH)) continue;
@@ -81,9 +78,9 @@ static int EnrollPacketMix(const unsigned char *record)
 
 static int Sealed(const unsigned char *record, WtJournalHash hash)
 {
-    unsigned char digest[32];
-    int sealed = memcmp(record + REC_TAG, "CMIT", 4) == 0 && hash(record, REC_DIGEST, digest) == 0
-        && memcmp(record + REC_DIGEST, digest, 32) == 0;
+    unsigned char digest[WT_WIRE_DIGEST_SIZE];
+    int sealed = memcmp(record + WT_REC_COMMIT, "CMIT", WT_JOURNAL_COMMIT_SIZE) == 0 && hash(record, WT_REC_DIGEST, digest) == 0
+        && memcmp(record + WT_REC_DIGEST, digest, sizeof(digest)) == 0;
     memset(digest, 0, sizeof(digest));
     return sealed;
 }
@@ -122,14 +119,14 @@ int CpJournal_CutFirstEnrollment(const unsigned char torn[WT_JOURNAL_RECORD_SIZE
         before[i] = (unsigned char)(generation[0] >> (8 * i));
         after[i] = (unsigned char)(generation[1] >> (8 * i));
     }
-    for (i = 0; i < REC_DIGEST; i++) {
+    for (i = 0; i < WT_REC_DIGEST; i++) {
         unsigned char byte = torn[i];
-        if (i == REC_PHASE || i == REC_NEXT_COUNTER) { if (byte <= 1) continue; goto done; }
-        if (Within(i, REC_GENERATION, 8)) {
-            if (byte == before[i - REC_GENERATION] || byte == after[i - REC_GENERATION]) continue;
+        if (i == WT_REC_PHASE || i == WT_REC_NEXT_COUNTER) { if (byte <= 1) continue; goto done; }
+        if (Within(i, WT_REC_GENERATION, 8)) {
+            if (byte == before[i - WT_REC_GENERATION] || byte == after[i - WT_REC_GENERATION]) continue;
             goto done;
         }
-        if (Within(i, REC_CREDENTIAL, REC_NEXT_COUNTER - REC_CREDENTIAL) || Within(i, REC_PENDING, PKT_SIZE)) {
+        if (Within(i, WT_REC_CREDENTIAL, WT_REC_NEXT_COUNTER - WT_REC_CREDENTIAL) || Within(i, WT_REC_PENDING_REQUEST, PKT_SIZE)) {
             /* The ENROLLING record is known when valid is it; else EnrollPacketMix. */
             if (!byte || !enrolled || byte == valid[i]) continue;
             goto done;
@@ -174,7 +171,7 @@ int CpJournal_ReadBank(void *arg, int bank, unsigned char record[WT_JOURNAL_RECO
 {
     CpJournalStore *store = arg;
     const CpPlatformFile *file;
-    unsigned char page[512];
+    unsigned char page[CP_SD_SECTOR_SIZE];
     uint32_t offset;
     int blank = -1;
     size_t i;

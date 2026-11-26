@@ -1,0 +1,34 @@
+#ifndef WONDER_TRADE_VARIANT_H
+#define WONDER_TRADE_VARIANT_H
+
+#include <stdint.h>
+
+typedef enum WtTradeFamily {
+    WT_TRADE_FAMILY_NONE = 0,
+    WT_TRADE_FAMILY_DP = 1,
+    WT_TRADE_FAMILY_PLATINUM = 2,
+    WT_TRADE_FAMILY_HGSS = 3,
+    WT_TRADE_FAMILY_BW = 4,
+    WT_TRADE_FAMILY_B2W2 = 5
+} WtTradeFamily;
+
+/* The games' own version and language IDs. Language 6 is unused. */
+enum {
+    WT_VERSION_HEARTGOLD = 7, WT_VERSION_SOULSILVER = 8,
+    WT_VERSION_DIAMOND = 10, WT_VERSION_PEARL = 11, WT_VERSION_PLATINUM = 12,
+    WT_VERSION_WHITE = 20, WT_VERSION_BLACK = 21, WT_VERSION_WHITE2 = 22, WT_VERSION_BLACK2 = 23,
+    WT_VERSION_COUNT
+};
+enum {
+    WT_LANGUAGE_JAPANESE = 1, WT_LANGUAGE_ENGLISH = 2, WT_LANGUAGE_FRENCH = 3,
+    WT_LANGUAGE_ITALIAN = 4, WT_LANGUAGE_GERMAN = 5, WT_LANGUAGE_SPANISH = 7,
+    WT_LANGUAGE_KOREAN = 8
+};
+
+enum { WT_VARIANT_FAMILY_SHIFT = 24, WT_VARIANT_VERSION_SHIFT = 16, WT_VARIANT_LANGUAGE_SHIFT = 8 };
+
+#define WT_VARIANT_CODE(family, version, language, revision) \
+    (((uint32_t)(family) << WT_VARIANT_FAMILY_SHIFT) | (((uint32_t)(version) & UINT8_MAX) << WT_VARIANT_VERSION_SHIFT) | \
+     (((uint32_t)(language) & UINT8_MAX) << WT_VARIANT_LANGUAGE_SHIFT) | ((uint32_t)(revision) & UINT8_MAX))
+
+#endif
