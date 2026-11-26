@@ -2,8 +2,7 @@ name: Validate source inputs
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main, "LUNE-*"]
   push:
     branches:
       - main
