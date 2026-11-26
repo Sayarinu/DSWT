@@ -201,6 +201,19 @@ static inline FxSpec FxDefault(unsigned index)
     return spec;
 }
 
+/* Play in the unmodified game: the Pokémon gains experience. Its identity
+ * (personality and original trainer ID) never changes. */
+static inline void FxTrain(unsigned char *stored)
+{
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    assert(WtPokemon_Decode(stored, canonical) == 0);
+    FxPut32(canonical + 0x10, Fx32(canonical + 0x10) + 100); /* experience */
+    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
+    FxPut16(canonical + 6, sum & 65535);
+    assert(WtPokemon_Encode(canonical, stored) == 0);
+}
+
 static inline unsigned char *FxGeneral(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_GENERAL; }
 static inline unsigned char *FxBoxes(FxFile *file, unsigned half) { return file->bytes + half * CP_SAVE_HALF_SIZE + FX_BOXES; }
 

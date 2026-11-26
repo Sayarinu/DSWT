@@ -186,8 +186,9 @@ static void Sweep(enum State state)
     entry = journal; writes = file.writes;
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
-    /* Two passes: the party, the CRC table, the footer and its last byte. */
-    assert(writes == 8);
+    /* Two passes: the party, the CRC table, the footer and its last byte; a
+     * removal first zeroes each footer's magic and writes its count (LUNE-902). */
+    assert(writes == (state == ESCROW ? 12u : 8u));
     for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
     lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
@@ -418,11 +419,11 @@ static void IdentityCollisions(void)
         if (cut) assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
-    for (cut = 1; cut <= 9; cut += 8) {
+    for (cut = 1; cut <= 13; cut += 12) {
         Arrange(ESCROW, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 8 ? -1 : 0));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : 0));
         file.failWrite = 0;
         StockPlay(1, Impostor);
         Load();
@@ -560,11 +561,12 @@ static void HeldElsewhere(void)
     for (state = ESCROW; state <= APPLYING_RETURN; state += APPLYING_RETURN - ESCROW) {
         enum WtInventoryStep cutStep = kCutStep[state];
         held = 0;
-        for (cut = 1; cut <= 9; ++cut) {
+        unsigned writes = state == ESCROW ? 12u : 8u;
+        for (cut = 1; cut <= writes + 1; ++cut) {
             Arrange((enum State)state, &journal);
             entry = journal;
             file.failWrite = file.writes + cut;
-            assert(Step(cutStep, &entry) == (cut <= 8 ? -1 : 0));
+            assert(Step(cutStep, &entry) == (cut <= writes ? -1 : 0));
             file.failWrite = 0;
             StockPlay(1, HoldOffered);
             Load();
@@ -625,6 +627,133 @@ static void HeldUnique(void)
     }
 }
 
+/* LUNE-902: abandoning an escrow is proved by the save's history alone. */
+static void ReleaseOffered(unsigned char *loaded)
+{
+    unsigned char *party = loaded + Rl5Offset(FX5_PARTY);
+    unsigned count = Fx5R32(party + 4), i;
+    for (i = OFFERED_SLOT; i + 1 < count; ++i) memcpy(PartySlot(loaded, i), PartySlot(loaded, i + 1), FX5_MON);
+    Fx5Empty(PartySlot(loaded, count - 1), FX5_MON);
+    Fx5W32(party + 4, count - 1);
+}
+
+/* A twin from the stock game (an N's Pokémon, say): the offer's identity and
+ * every field play leaves alone, differing in experience. */
+static void AddTwin(unsigned char *loaded)
+{
+    unsigned char *slot = loaded + Rl5Offset(4) + 9 * FX5_BOX_MON;
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    memcpy(canonical, offered, 136);
+    Fx5W32(canonical + 0x10, Fx5R32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += Fx5R16(canonical + i);
+    Fx5W16(canonical + 6, sum & 0xFFFF);
+    assert(WtPokemon_Encode(canonical, slot) == 0);
+}
+
+/* The twin left at the Day Care (LUNE-913: Locate sees it there). */
+static void TwinInDayCare(unsigned char *loaded)
+{
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    memcpy(canonical, offered, 136);
+    Fx5W32(canonical + 0x10, Fx5R32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += Fx5R16(canonical + i);
+    Fx5W16(canonical + 6, sum & 0xFFFF);
+    assert(WtPokemon_Encode(canonical, PlaceMon(loaded, &kPlaces[0])) == 0);
+    SetFlag(loaded, &kPlaces[0], 1);
+}
+
+/* Traded away in the stock game: another Pokémon takes its party slot. */
+static void TradeOffered(unsigned char *loaded)
+{
+    Fx5Spec spec = Fx5Default(30);
+    Fx5PartyMon(&spec, PartySlot(loaded, OFFERED_SLOT));
+}
+
+static void TwinAndTrain(unsigned char *loaded)
+{
+    AddTwin(loaded);
+    TrainOffered(loaded);
+}
+
+/* As stock_save_test.c History, on this generation's save: the removal cut
+ * at each write and after the last, the stock game played and saved over it.
+ * WT_INVENTORY_HISTORY writes nothing and answers 1 only when what the stock game
+ * loaded still held the offer exactly as offered (always, when play then
+ * moved it, unless play left exactly the recorded removal); a twin after the removal is refused by REMOVE too, untouched. */
+/* LUNE-902: an interrupted stock save left one copy's footer not loading: the
+ * current save count, and a CRC that is the removal's CRC table's (a 1-in-65536
+ * coincidence in life). staleCopy 1 is the main copy, 2 the backup. */
+static unsigned staleCrc, staleCopy;
+static void StaleFooter(void)
+{
+    unsigned char *base = file.bytes + (staleCopy == 2 ? FX5_BACKUP : 0);
+    Fx5W32(base + FX5_USED - 16, image.globalCounter);
+    Fx5W32(base + FX5_USED - 12, FX5_USED);
+    Fx5W32(base + FX5_USED - 8, CP_SAVE_MAGIC_GEN5);
+    Fx5W16(base + FX5_USED - 2, staleCrc);
+}
+
+static void History(unsigned stale)
+{
+    static const Action actions[] = { NULL, TrainOffered, DepositOffered, BattleBoxOffered, ReleaseOffered, TradeOffered,
+                                      AddTwin, TwinAndTrain, TwinInDayCare };
+    enum { TWINS = 6 };
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
+    int answer;
+    staleCopy = stale;
+    Arrange(ESCROW, &journal);
+    entry = journal; writes = file.writes;
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+    writes = file.writes - writes;
+    assert(image.globalCounter - journal.globalCounter >= WT_ABANDON_STEP);
+    if (stale) {
+        const unsigned char *base = file.bytes + (stale == 2 ? FX5_BACKUP : 0);
+        staleCrc = Fx5R16(base + FX5_USED - 2);
+        Arrange(ESCROW, &journal);
+        StaleFooter(); Load(); /* the companion loads the save as it is */
+        entry = journal; writes = file.writes;
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+        writes = file.writes - writes;
+    }
+    for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves)
+        for (action = 0; action < sizeof(actions) / sizeof(*actions); ++action) {
+            Arrange(ESCROW, &journal);
+            if (stale) { StaleFooter(); Load(); }
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= writes ? -1 : 0));
+            file.failWrite = 0;
+            held = Copies();
+            assert(held <= 1);
+            StockPlay(saves, actions[action]);
+            Load();
+            memcpy(before, file.bytes, sizeof(before));
+            entry = journal;
+            answer = Step(WT_INVENTORY_HISTORY, &entry);
+            assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+            /* Never abandoned unless what the stock game loaded held the
+             * offer; never taken as removed when it did. */
+            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT);
+            else assert(answer == WT_HISTORY_REMOVED || answer == WT_HISTORY_AFTER);
+            /* Once play moved, released or traded it, it is left: never sent. */
+            if (held && action) assert(answer == WT_HISTORY_LEFT);
+            abandoned += answer == WT_HISTORY_LEFT;
+            /* A twin after the removal: taken as removed, so REMOVE never runs
+             * and the twin is never taken for the offer. */
+            if (!held && action >= TWINS) ++refused;
+            ++cases;
+        }
+    assert(abandoned > 0 && refused > 0);
+    printf("PASS %s stock save after a cut removal%s: %u cuts x 2 stock plays x 9 plays, abandonable %u times, "
+           "only from a save that held the offer; %u twins after the removal refused\n", FX5_NAME,
+           stale ? " over a stale footer with the removal's table CRC" : "", writes + 1,
+           abandoned, refused);
+}
+
 int main(void)
 {
     Sweep(ESCROW);
@@ -636,6 +765,9 @@ int main(void)
     IdentityCollisions();
     HeldElsewhere();
     HeldUnique();
+    History(0);
+    History(1);
+    History(2);
     printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, %u lost "
         "(each cut before the first retail copy held the return, the games' window)\n", FX5_NAME, cases, windowLosses);
     return 0;

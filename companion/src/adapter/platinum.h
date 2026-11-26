@@ -64,6 +64,13 @@
  * fails closed and writes nothing until the player takes it back. Deliveries
  * still go only to the party or the PC.
  *
+ * LUNE-902: an offer's removal is written with the save counter moved
+ * WT_ABANDON_STEP past the one its escrow recorded, and
+ * WT_INVENTORY_HISTORY tells by that counter whether a save descends from the
+ * removal or from the save before it (wonder_trade/engine.h): only then may
+ * the engine send the offer as removed, or abandon it as left through play.
+ * The Pokémon the save holds is never proof either way.
+ *
  * A Black/White or Black 2/White 2 image goes to adapter/gen5.h instead. */
 struct WtGame {
     CpSaveImage *image;

@@ -118,6 +118,16 @@ static void SelectedHash(const unsigned char *bytes, const unsigned selected[2],
     CpSaveSha256_Finish(&hash, digest);
 }
 
+/* LUNE-902: scenarios where the stock game changes the offered Pokémon
+ * (digests[1]) count it as offered or as trained (trainedDigest), never a
+ * twin that only shares its identity; once the stock game saved over an
+ * escrow (savedOver), the save is neither of its inventories. The journal
+ * keeps the companion's escrow inventoryBefore masked (engine.c). */
+/* goneByPlay: the player released or traded the offer away from a save that
+ * held it, so it may be in neither the save nor the journal. */
+static int changedOffer, savedOver, goneByPlay;
+static unsigned char trainedDigest[32];
+
 /* Journal images retained after a save transition are replay evidence, not
  * another owned Pokémon. ESCROW/RESTORING/APPLYING choose ownership by the
  * recorded before/after inventory hashes; published phases require one side.
@@ -146,8 +156,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
             : FxPcSlotConst(boxes, mon - count);
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
-        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        for (i = 0; i < 4; ++i) {
+            if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            else if (i == 1 && changedOffer && memcmp(digest, trainedDigest, 32) == 0) ++counts[1];
+        }
     }
+    played = played || savedOver;
     /* LUNE-913: and where no locator reaches: the Day Care, the GTS while
      * pokemonListed, the Pokéwalker. */
     for (mon = 0; mon < FX_HELD_PLACES; ++mon) {
@@ -161,9 +175,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
         if (played) { escrow = counts[1] == 0; break; }
-        assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
-            || memcmp(inventory, entry->inventoryAfter, 32) == 0);
-        escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
+        {
+            unsigned char before[32], after[32];
+            assert(WtEngine_EscrowInventories(entry, Hash, before, after) >= 0);
+            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, after, 32) == 0);
+            escrow = memcmp(inventory, after, 32) == 0;
+        }
         break;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED:
         escrow = 1;
@@ -189,7 +206,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     for (i = 0; i < 4; ++i)
         if (counts[i] + (i == 1 ? escrow : 0) > (i == 1 && fxOffer == FX_OFFER_GONE ? 0u : 1u)) return 1;
     for (i = 0; i < 4; ++i)
-        if (counts[i] + (i == 1 ? escrow : 0) < (i == 1 && fxOffer != FX_OFFER_ONE ? 0u : 1u)) return -1;
+        if (counts[i] + (i == 1 ? escrow : 0) < (i == 1 && (fxOffer != FX_OFFER_ONE || goneByPlay) ? 0u : 1u)) return -1;
     return 0;
 }
 

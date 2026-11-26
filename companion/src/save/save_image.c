@@ -324,10 +324,23 @@ static int WriteSync(const CpFile *file, uint32_t address, const unsigned char *
 }
 
 /* One block into the other half, written in its game's order. */
+/* counterFirst (LUNE-902): before the body, the footer's magic is zeroed,
+ * then its global counter (the first 4 bytes) written, each synced. The
+ * block cannot load from the moment its magic is gone (whatever an
+ * interrupted earlier save left in its CRC, which may even match the new
+ * body) until the footer's own write brings the magic back, by which time its
+ * counter is the new one. Only the copy being replaced is touched; the
+ * other copy of the block stays as it was, so the game still loads it. */
 static int WriteBlock(const CpFile *file, const CpSaveLayout *layout, unsigned block, uint32_t address,
-                      const unsigned char *body, const unsigned char *footer)
+                      const unsigned char *body, const unsigned char *footer, int counterFirst)
 {
+    static const unsigned char kNoMagic[4] = { 0, 0, 0, 0 };
     uint32_t bodySize = BodySize(layout, block), offset;
+    if (counterFirst) {
+        /* The magic, then the counter, each synced, before the body. */
+        uint32_t magic = address + bodySize + (layout->footer == CP_SAVE_FOOTER_SHARED_COUNTER ? 8 : 12);
+        if (WriteSync(file, magic, kNoMagic, 4) != 0 || WriteSync(file, address + bodySize, footer, 4) != 0) return -1;
+    }
     if (layout->footer == CP_SAVE_FOOTER_SHARED_COUNTER) {
         /* Save_WritePCBoxes: every modified box, then Save_WritePCFooter: the
          * rest of PCStorage; the general block is written whole. */
@@ -388,7 +401,9 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
                 footer[16] = (unsigned char)block;
                 Write16(footer + 18, crc);
             }
-            if (WriteBlock(file, layout, block, address, body, footer) != 0) {
+            /* Only the general block holds the party; the PC block's body is
+             * unchanged by a removal, so its old CRC would still match. */
+            if (WriteBlock(file, layout, block, address, body, footer, image->counterFirst && block == 0) != 0) {
                 image->loaded = 0;
                 return CP_SAVE_IO_ERROR;
             }

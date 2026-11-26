@@ -41,7 +41,13 @@ static int StateKnown(const WtJournalEntry *entry, WtWireHash hash)
     case WT_JOURNAL_EMPTY: case WT_JOURNAL_IDLE: case WT_JOURNAL_RECEIVED:
     case WT_JOURNAL_APPLYING: case WT_JOURNAL_RESTORING: return operation == 0;
     case WT_JOURNAL_ENROLLING: return operation == WT_OP_ENROLL;
+#ifdef WT_ABANDON_UNSENT
+    /* An escrow being abandoned holds the Cancel that fences its counter (Fence). */
+    case WT_JOURNAL_ESCROW: return operation == WT_OP_SUBMIT || operation == WT_OP_CANCEL;
+    case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
+#else
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_SUBMIT_READY: return operation == WT_OP_SUBMIT;
+#endif
     case WT_JOURNAL_QUEUED: return operation == 0 || operation == WT_OP_CANCEL;
     /* A delivery finished at boot waits for its ACK until the next visit. */
     case WT_JOURNAL_APPLIED: return operation == 0 || operation == WT_OP_ACKNOWLEDGE;
@@ -63,6 +69,90 @@ static int Random(WtEngine *engine, unsigned char *bytes, size_t size)
 {
     return engine->io.random(engine->io.arg, bytes, size) == 0 && !Zero(bytes, size) ? 0 : Block(engine);
 }
+
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: which escrows the DS Companion may abandon, proved by the save's
+ * history rather than by the Pokémon it holds (wonder_trade/engine.h
+ * WT_INVENTORY_HISTORY). Only a companion escrow qualifies, and its
+ * removal must be one that moved the save counter far ahead, so it must be
+ * one only the companion can write:
+ * - its Submit's request ID is 4 random bytes, then 12 bytes of SHA-256 over
+ *   them, the save, the counter, the save before the deposit and the offer
+ *   (CompanionMark): an escrow without it (a game's, an older companion's) is
+ *   never abandoned;
+ * - both its inventory hashes are stored masked with SHA-256 of a label and
+ *   the request ID (InventoryMask). The games' REMOVE runs only on a save
+ *   matching inventoryBefore (then removes) or inventoryAfter (then takes
+ *   it as removed); it finds neither, writes nothing and blocks, so a patched
+ *   game never advances a companion escrow, at any cut. Only this engine
+ *   unmasks them, and it records the true hashes with SUBMIT_READY, the
+ *   first phase the games may advance (or a rejected offer restore). The
+ *   games accept any nonzero request ID and inventory hash; nothing else is
+ *   stored. The companion is unreleased: no older companion build exists to
+ *   remove such an escrow without moving the counter. */
+static const char kCompanionDeposit[] = "DSWT LUNE-902 companion deposit v3";
+static const char kInventoryMask[2][40] = { "DSWT LUNE-902 masked inventoryBefore", "DSWT LUNE-902 masked inventoryAfter" };
+
+static int CompanionMark(WtJournalHash hash, const WtJournalEntry *entry, const unsigned char before[32],
+                         const unsigned char id[16], unsigned char mark[32])
+{
+    unsigned char bytes[sizeof(kCompanionDeposit) + 16 + 4 + 8 + 32 + 136], *at = bytes;
+    uint64_t counter = entry->operationCounter;
+    unsigned i;
+    int result;
+    memcpy(at, kCompanionDeposit, sizeof(kCompanionDeposit)); at += sizeof(kCompanionDeposit);
+    memcpy(at, entry->saveID, 16); at += 16;
+    memcpy(at, id, 4); at += 4;
+    for (i = 0; i < 8; ++i) *at++ = (unsigned char)(counter >> (8 * i));
+    memcpy(at, before, 32); at += 32;
+    memcpy(at, entry->outgoing, 136);
+    result = hash(bytes, sizeof(bytes), mark);
+    Clear(bytes, sizeof(bytes));
+    return result;
+}
+
+/* XOR both inventory hashes with their masks (InventoryMask): masks or unmasks. */
+static int MaskInventories(WtJournalHash hash, const unsigned char id[16], unsigned char before[32],
+                           unsigned char after[32])
+{
+    unsigned char bytes[40 + 16], mask[32];
+    unsigned which, i;
+    int result = 0;
+    for (which = 0; which < 2 && result == 0; ++which) {
+        unsigned char *target = which ? after : before;
+        memcpy(bytes, kInventoryMask[which], 40); memcpy(bytes + 40, id, 16);
+        result = hash(bytes, sizeof(bytes), mask);
+        for (i = 0; result == 0 && i < 32; ++i) target[i] ^= mask[i];
+    }
+    Clear(mask, sizeof(mask));
+    return result;
+}
+
+/* 1 when an ESCROW entry is the companion's, with `before` and `after` its
+ * true inventory hashes; 0 for any other escrow (they are then the stored ones). */
+static int CompanionEscrow(WtJournalHash hash, const WtJournalEntry *entry, unsigned char before[32],
+                           unsigned char after[32])
+{
+    unsigned char trueBefore[32], trueAfter[32], mark[32];
+    int companion = 0;
+    memcpy(trueBefore, entry->inventoryBefore, 32); memcpy(trueAfter, entry->inventoryAfter, 32);
+    if (entry->phase == WT_JOURNAL_ESCROW && entry->requestLength && entry->request[5] == WT_OP_SUBMIT
+        && memcmp(entry->request + 8, entry->operation, 16) == 0
+        && MaskInventories(hash, entry->operation, trueBefore, trueAfter) == 0)
+        companion = CompanionMark(hash, entry, trueBefore, entry->operation, mark) == 0
+            && memcmp(mark, entry->operation + 4, 12) == 0;
+    if (companion) { memcpy(before, trueBefore, 32); memcpy(after, trueAfter, 32); }
+    else { memmove(before, entry->inventoryBefore, 32); memmove(after, entry->inventoryAfter, 32); }
+    Clear(trueBefore, sizeof(trueBefore)); Clear(trueAfter, sizeof(trueAfter)); Clear(mark, sizeof(mark));
+    return companion;
+}
+
+int WtEngine_EscrowInventories(const WtJournalEntry *entry, WtJournalHash hash, unsigned char before[32],
+                               unsigned char after[32])
+{
+    return entry && hash && before && after ? CompanionEscrow(hash, entry, before, after) : -1;
+}
+#endif
 
 static void ClearRequest(WtJournalEntry *entry)
 {
@@ -150,8 +240,36 @@ static int Resume(WtEngine *engine)
     int result = -1;
     if (engine->blocked) goto done;
     if (next.phase == WT_JOURNAL_ESCROW) {
+#ifdef WT_ABANDON_UNSENT
+        /* The companion only. An escrow whose fence is recorded (Fence) is
+         * being abandoned whatever the save holds now. Otherwise the save's
+         * history decides (WT_INVENTORY_HISTORY):
+         * - the escrow's own save, or the offer still in the party exactly as
+         *   offered: REMOVE, as before (a byte-identical copy the player put
+         *   there is taken for the offer: a clone they made);
+         * - a save that descends from the removal, or holds exactly the
+         *   recorded removal: removed. REMOVE never runs again there (it
+         *   could take a Pokémon the stock game received since); the
+         *   removal is verified as it is;
+         * - the offer left the save through play before any removal: the
+         *   companion's own escrow waits for WtEngine_Request to fence its
+         *   counter and abandon it, so its Submit never goes out; any other
+         *   escrow blocks;
+         * - anything unproved blocks. Nothing written, nothing sent. */
+        if (next.request[5] == WT_OP_CANCEL) { result = WT_INVENTORY_KEPT; goto done; }
+        {
+            int companion = CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore, next.inventoryAfter);
+            int history = engine->io.inventory(engine->io.arg, WT_INVENTORY_HISTORY, &next, next.source.slot);
+            if (companion && history == WT_HISTORY_LEFT) { result = WT_INVENTORY_KEPT; goto done; }
+            if (history == WT_HISTORY_UNCHANGED) {
+                if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0) goto done;
+            } else if (history != WT_HISTORY_REMOVED && history != WT_HISTORY_AFTER) { Block(engine); goto done; }
+        }
+        if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+#else
         if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+#endif
         next.phase = WT_JOURNAL_SUBMIT_READY;
         if (Commit(engine, &next) != 0) goto done;
     }
@@ -262,6 +380,18 @@ int WtEngine_Deposit(WtEngine *engine, unsigned slot)
         || RequestIdentity(engine, &request, WT_OP_SUBMIT) != 0) goto done;
     next.phase = WT_JOURNAL_ESCROW;
     memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
+#ifdef WT_ABANDON_UNSENT
+    {
+        unsigned char mark[32];
+        int marked = CompanionMark(engine->journal.io.hash, &next, next.inventoryBefore, request.requestID, mark) == 0;
+        if (marked) {
+            memcpy(request.requestID + 4, mark, 12); memcpy(next.operation, request.requestID, 16);
+            marked = MaskInventories(engine->journal.io.hash, next.operation, next.inventoryBefore, next.inventoryAfter) == 0;
+        }
+        Clear(mark, sizeof(mark));
+        if (!marked) { Block(engine); goto done; }
+    }
+#endif
     request.counter = next.operationCounter;
     request.body.submit.generation = next.generation + 1;
     memcpy(request.body.submit.pokemon, next.outgoing, 136);
@@ -274,6 +404,46 @@ done:
     return result;
 }
 
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: an escrow REMOVE found kept is abandoned by fencing its counter.
+ * An empty reconcile page is no proof: another copy of the save may have sent
+ * this Submit, which the server checks against the counter, then validates
+ * without holding it, then checks again before accepting it. So instead the
+ * escrow sends a counted Cancel at the Submit's own counter, of a trade
+ * nobody holds (a random ID). The server checks and records both under the
+ * save's lock: if the Cancel is recorded first it is rejected NOT_FOUND and
+ * uses the counter, and a Submit at that counter can never be accepted;
+ * otherwise the Cancel finds the counter used and the escrow blocks.
+ * The Cancel replaces the Submit in the journal before it is sent (journal.c
+ * allows exactly that change), so a lost reply resends the same Cancel and a
+ * cut never forgets it; from then on the escrow is being abandoned whatever
+ * the save holds. The Submit was never sent from this journal: it leaves only
+ * from SUBMIT_READY, committed once the removal is proven. */
+static int Fence(WtEngine *engine)
+{
+    WtJournalEntry next = engine->entry;
+    WtWireRequest request;
+    int result = -1;
+    if (next.phase != WT_JOURNAL_ESCROW || !next.requestLength || next.operationCounter != next.nextCounter
+        || next.nextCounter == UINT64_MAX) { Block(engine); goto done; }
+    if (next.request[5] == WT_OP_SUBMIT) {
+        if (RequestIdentity(engine, &request, WT_OP_CANCEL) != 0 || Random(engine, request.body.trade, 16) != 0) goto done;
+        request.counter = next.nextCounter;
+        /* The journal keeps a Cancel's trade beside it. */
+        memcpy(next.operation, request.requestID, 16); memcpy(next.trade, request.body.trade, 16);
+        if (Encode(engine, &request, &next) != 0 || Commit(engine, &next) != 0) goto done;
+    } else if (next.request[5] != WT_OP_CANCEL) { Block(engine); goto done; }
+    /* Sent from the journal, as every counted request. */
+    memcpy(engine->frame, engine->entry.request, engine->entry.requestLength);
+    engine->frameSize = engine->entry.requestLength;
+    engine->lastResult = 0;
+    result = 0;
+done:
+    Clear(&next, sizeof(next)); Clear(&request, sizeof(request));
+    return result;
+}
+#endif
+
 int WtEngine_Request(WtEngine *engine, unsigned operation)
 {
     WtJournalEntry next;
@@ -281,6 +451,9 @@ int WtEngine_Request(WtEngine *engine, unsigned operation)
     int result = -1, rejectionLookup;
     if (Refresh(engine) != 0 || engine->frameSize) return -1;
     result = Resume(engine);
+#ifdef WT_ABANDON_UNSENT
+    if (result == WT_INVENTORY_KEPT) return Fence(engine);
+#endif
     if (result != 0) return result;
     if (engine->entry.phase == WT_JOURNAL_APPLIED && !engine->entry.requestLength && Acknowledge(engine) != 0) return -1;
     next = engine->entry;
@@ -335,6 +508,35 @@ static int ContextMatches(WtEngine *engine, const WtWireReply *reply, int finali
  * never made: only another copy of this save could have made it. */
 #define WT_RECONCILE_FOREIGN (-2)
 
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: the fence's answer. NOT_FOUND at the next counter proves the
+ * server recorded this Cancel at the escrow's counter: the Submit can never be
+ * accepted, and the escrow returns to IDLE with the Cancel as its last
+ * operation, the save untouched. The cursor stays behind the Cancel's
+ * REJECTED event, which the next Reconcile reads as this journal's own.
+ * Anything else that is not worth retrying blocks: COUNTER_MISMATCH means
+ * another copy used the counter, perhaps for this very Submit. */
+static int Abandon(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
+{
+    if (reply->result != WT_RESULT_NOT_FOUND || next->request[5] != WT_OP_CANCEL
+        || next->operationCounter != next->nextCounter || !ContextMatches(engine, reply, 1)) return -1;
+    memcpy(next->lastOperation, next->operation, 16); next->lastOperationCounter = next->operationCounter;
+    next->nextCounter = reply->nextCounter;
+    Idle(next);
+    if (Commit(engine, next) != 0) return -1;
+    engine->synchronized = 0;
+    return 0;
+}
+
+/* The fence's own REJECTED event, read by an IDLE journal after Abandon. */
+static int OwnFence(const WtJournalEntry *entry, const WtWireEvent *event)
+{
+    return entry->phase == WT_JOURNAL_IDLE && event->kind == WT_EVENT_REJECTED && entry->lastOperationCounter
+        && memcmp(event->operation, entry->lastOperation, 16) == 0 && Zero(event->trade, 16)
+        && Zero(event->digest, 32) && event->state == WT_TRADE_NONE;
+}
+#endif
+
 static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry *next)
 {
     unsigned i;
@@ -361,6 +563,9 @@ static int Reconcile(WtEngine *engine, const WtWireReply *reply, WtJournalEntry 
     for (i = 0; i < reply->body.page.count; ++i) {
         const WtWireEvent *event = &reply->body.page.events[i];
         if (event->kind == WT_EVENT_ENROLLED && next->phase == WT_JOURNAL_IDLE && next->nextCounter == 1) continue;
+#ifdef WT_ABANDON_UNSENT
+        if (OwnFence(next, event)) continue;
+#endif
         if (next->phase == WT_JOURNAL_SUBMIT_READY && event->kind == WT_EVENT_REJECTED
             && memcmp(event->operation, next->operation, 16) == 0
             && memcmp(event->digest, outgoingDigest, 32) == 0 && Zero(event->trade, 16)
@@ -433,6 +638,15 @@ int WtEngine_Reply(WtEngine *engine, const unsigned char *packet, size_t size)
     Clear(engine->frame, sizeof(engine->frame)); engine->frameSize = 0;
     engine->lastResult = reply.result; engine->refused = 0;
     next = engine->entry;
+#ifdef WT_ABANDON_UNSENT
+    /* Only Fence sends a Cancel while the journal is in ESCROW. */
+    if (operation == WT_OP_CANCEL && next.phase == WT_JOURNAL_ESCROW && reply.result != WT_RESULT_PROCESSING
+        && reply.result != WT_RESULT_UNAVAILABLE) {
+        engine->synchronized = 0;
+        if (Abandon(engine, &reply, &next) != 0) goto blocked;
+        result = 0; goto done;
+    }
+#endif
     if (reply.result != WT_RESULT_OK) {
         /* An error, including a validator verdict, is not restoration proof.
          * Reconcile the retained Submit's exact REJECTED event instead. */

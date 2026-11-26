@@ -121,6 +121,14 @@ static int PostOnce(const unsigned char *request, size_t size, unsigned char rep
         break;
     case WT_OP_CANCEL:
         if (counter != server.nextCounter) { result = WT_RESULT_COUNTER_MISMATCH; break; }
+        if (server.state == WT_TRADE_NONE || memcmp(body, server.trade, 16) != 0) {
+            /* As the server: a trade this save does not hold is rejected and
+             * recorded, using the counter (LUNE-902's fence relies on it). */
+            ++server.nextCounter; result = WT_RESULT_NOT_FOUND;
+            AddEvent(WT_EVENT_REJECTED, NULL, request + WT_WIRE_REQUEST_ID, NULL, NULL, WT_TRADE_NONE);
+            memset(server.events[server.eventCount - 1].bytes + WT_WIRE_EVENT_DIGEST, 0, 32);
+            break;
+        }
         if (server.state != WT_TRADE_QUEUED) { result = WT_RESULT_CONFLICT; break; }
         ++server.nextCounter; memset(server.receipt, 0x73, 16); server.state = WT_TRADE_RETURN_READY;
         AddEvent(WT_EVENT_CANCELLED, server.trade, request + WT_WIRE_REQUEST_ID, server.asset, server.receipt, WT_TRADE_RETURN_READY);
@@ -517,6 +525,265 @@ static void RedirectThroughJournal(void)
     puts("PASS stock save during a return: cut before it was written, APPLIED and acknowledged without adding it");
 }
 
+/* LUNE-902: what the player does with the offer in the stock game. */
+static void TrainOffered(unsigned char *general, unsigned char *boxes)
+{
+    (void)boxes;
+    FxTrain(general + FX_PARTY + 8 + OFFERED_SLOT * FX_MON);
+}
+
+static void DepositOfferedToPc(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char *party = general + FX_PARTY + 8;
+    unsigned count = Fx32(general + FX_PARTY + 4), i;
+    memcpy(FxPcSlot(boxes, 7), party + OFFERED_SLOT * FX_MON, FX_BOX_MON);
+    for (i = OFFERED_SLOT; i + 1 < count; ++i) memcpy(party + i * FX_MON, party + (i + 1) * FX_MON, FX_MON);
+    FxEmpty(party + i * FX_MON, FX_MON);
+    FxPut32(general + FX_PARTY + 4, count - 1);
+}
+
+/* An offer cut once ESCROW is recorded, before its removal wrote anything,
+ * then changed in the stock game: the next visit abandons the escrow, which
+ * was never sent, and leaves the Pokémon as the stock game saved it. The same
+ * escrow restored after another copy of the save did send its Submit finds
+ * the offer on the server and is never abandoned. */
+static void UnsentOffer(void)
+{
+    static World escrow, played;
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    static const FxStockAction actions[] = { TrainOffered, DepositOfferedToPc };
+    static const char *const kActions[] = { "trained", "deposited in the PC" };
+    Server fresh;
+    WtEngine engine;
+    CpVisit visit;
+    unsigned action;
+    scenario = OFFER;
+    for (action = 0; action < 2; ++action) {
+        Setup();
+        cutAfter = WT_JOURNAL_ESCROW;
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, OFFERED_SLOT, 0, &transport, &visit) != 0);
+        WtEngine_Close(&engine);
+        saveCut = 0;
+        assert(visit.phase == WT_JOURNAL_ESCROW && server.state == WT_TRADE_NONE);
+        escrow = live; fresh = server;
+        {
+            /* The games' REMOVE (the adapter's, without the companion's
+             * unmasking) cannot match the masked inventoryBefore: it fails and
+             * writes nothing, so only the companion removes this offer, moving
+             * the counter. With the true hash it would remove it. */
+            WtJournalEntry stored;
+            static unsigned char untouched[CP_SAVE_FILE_SIZE];
+            uint32_t recorded;
+            assert(WtJournal_Decode(live.banks[0], Hash, &stored) == 0 && stored.phase == WT_JOURNAL_ESCROW);
+            Bind(&liveGame, &liveImage, &liveFile);
+            memcpy(untouched, live.bytes, sizeof(untouched));
+            assert(WtGame_Inventory(&liveGame, WT_INVENTORY_REMOVE, &stored, stored.source.slot) == -1);
+            assert(memcmp(untouched, live.bytes, sizeof(untouched)) == 0);
+            assert(WtEngine_EscrowInventories(&stored, Hash, stored.inventoryBefore, stored.inventoryAfter) == 1);
+            recorded = stored.globalCounter;
+            Bind(&liveGame, &liveImage, &liveFile);
+            assert(WtGame_Inventory(&liveGame, WT_INVENTORY_REMOVE, &stored, stored.source.slot) == 0);
+            assert(liveImage.globalCounter - recorded >= WT_ABANDON_STEP);
+            live = escrow;
+        }
+        /* The stock game: the offer is changed, and is the save's only copy. */
+        memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+        assert(FxStockPlay(&stock, 1, 0, actions[action]));
+        memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+        played = live;
+        assert(FxStockCopies(&stock, offered) == 1);
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(WtEngine_Settle(&engine) == WT_INVENTORY_KEPT && engine.entry.phase == WT_JOURNAL_ESCROW);
+        WtEngine_Close(&engine);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+        WtEngine_Close(&engine);
+        assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave);
+        assert(memcmp(live.bytes, played.bytes, sizeof(live.bytes)) == 0);
+        /* The fence: a Cancel of a trade nobody holds used the Submit's counter. */
+        assert(!server.requests[WT_OP_SUBMIT] && server.requests[WT_OP_CANCEL] == 1 && server.state == WT_TRADE_NONE);
+        assert(server.nextCounter == 2);
+        memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+        assert(FxStockCopies(&stock, offered) == 1);
+        {
+            /* Another copy of the save still holding the escrow (the one cut
+             * before play) can never have its Submit accepted now: it is
+             * refused at the fenced counter, and that copy restores its
+             * Pokémon; the server holds nothing. */
+            static World kept;
+            kept = live;
+            live = escrow;
+            Bind(&liveGame, &liveImage, &liveFile);
+            Open(&engine, &live, &liveGame);
+            assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+            WtEngine_Close(&engine);
+            assert(visit.phase == WT_JOURNAL_IDLE && server.state == WT_TRADE_NONE);
+            assert(server.requests[WT_OP_SUBMIT] == 1);
+            memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+            assert(FxStockCopies(&stock, offered) == 1);
+            live = kept;
+        }
+        /* The save trades again: the changed Pokémon is offered and leaves it. */
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, 0, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_QUEUED);
+        WtEngine_Close(&engine);
+        printf("PASS unsent offer %s in the stock game: abandoned, kept in the save, nothing sent\n", kActions[action]);
+
+        /* Another copy of the escrow finished the removal and sent the Submit. */
+        live = escrow; server = fresh; memset(replay, 0, sizeof(replay)); replayCount = 0;
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_QUEUED);
+        WtEngine_Close(&engine);
+        assert(server.state == WT_TRADE_QUEUED);
+        /* This copy, changed in the stock game, is never abandoned. */
+        live = played;
+        Bind(&liveGame, &liveImage, &liveFile);
+        memcpy(before, live.bytes, sizeof(before));
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0);
+        assert(engine.blocked && engine.entry.phase == WT_JOURNAL_ESCROW && !visit.canLeave);
+        WtEngine_Close(&engine);
+        /* The fence found the counter used: the escrow stays, the save untouched. */
+        assert(memcmp(live.bytes, before, sizeof(before)) == 0 && server.state == WT_TRADE_QUEUED);
+        Open(&engine, &live, &liveGame);
+        assert(engine.entry.phase == WT_JOURNAL_ESCROW && engine.entry.request[5] == WT_OP_CANCEL);
+        assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0 && engine.blocked);
+        WtEngine_Close(&engine);
+        assert(memcmp(live.bytes, before, sizeof(before)) == 0 && server.state == WT_TRADE_QUEUED);
+        printf("PASS unsent offer %s in the stock game: a server holding it is never abandoned\n", kActions[action]);
+    }
+}
+
+/* The only Pokémon left with the offer's identity is a twin: the offer
+ * removed, another Pokémon sharing its identity and every field play never
+ * changes, differing in experience, in the PC. */
+static void TwinOnly(unsigned char *general, unsigned char *boxes)
+{
+    DepositOfferedToPc(general, boxes);
+    FxTrain(FxPcSlot(boxes, 7));
+}
+
+/* LUNE-902: an escrow deposited by a game or an older companion (no
+ * identity-unique mark) is never abandoned, whatever the save holds: the
+ * twin left could be another Pokémon and the offer only in the journal. The
+ * visit blocks; the save, the journal and the server are untouched. */
+static void LegacyTwin(void)
+{
+    static World played, marked;
+    WtEngine engine;
+    WtJournalEntry entry;
+    CpVisit visit;
+    unsigned bank, submits, cancels;
+    scenario = OFFER;
+    Setup();
+    cutAfter = WT_JOURNAL_ESCROW;
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, OFFERED_SLOT, 0, &transport, &visit) != 0);
+    WtEngine_Close(&engine);
+    saveCut = 0;
+    assert(visit.phase == WT_JOURNAL_ESCROW);
+    memcpy(marked.banks, live.banks, sizeof(marked.banks));
+    assert(WtJournal_Decode(live.banks[0], Hash, &entry) == 0);
+    /* As a game or an older companion records it: inventoryBefore unmasked, no mark. */
+    assert(WtEngine_EscrowInventories(&entry, Hash, entry.inventoryBefore, entry.inventoryAfter) == 1);
+    entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
+    assert(WtEngine_EscrowInventories(&entry, Hash, entry.inventoryBefore, entry.inventoryAfter) == 0);
+    for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, live.banks[bank]) == 0);
+    memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+    assert(FxStockPlay(&stock, 1, 0, TwinOnly));
+    memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+    played = live; submits = server.requests[WT_OP_SUBMIT]; cancels = server.requests[WT_OP_CANCEL];
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(WtEngine_Settle(&engine) == -1 && engine.blocked);
+    WtEngine_Close(&engine);
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) != 0 && !visit.canLeave);
+    WtEngine_Close(&engine);
+    assert(memcmp(&live, &played, sizeof(live)) == 0);
+    assert(server.requests[WT_OP_SUBMIT] == submits && server.requests[WT_OP_CANCEL] == cancels);
+    /* The companion's own escrow, marked unique at its deposit: that Pokémon
+     * can only be the offer, trained and deposited, and it is abandoned. */
+    memcpy(marked.bytes, played.bytes, sizeof(marked.bytes));
+    live = marked;
+    Bind(&liveGame, &liveImage, &liveFile);
+    Open(&engine, &live, &liveGame);
+    assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+    WtEngine_Close(&engine);
+    assert(visit.phase == WT_JOURNAL_IDLE && visit.canLeave && server.requests[WT_OP_SUBMIT] == submits);
+    assert(memcmp(live.bytes, played.bytes, sizeof(live.bytes)) == 0);
+    puts("PASS legacy escrow with only a twin left: blocked, save, journal and server untouched; marked, abandoned");
+}
+
+/* The stock game gives the player a Pokémon (a trade, say): `received`. */
+static unsigned char received[136];
+static void Receive(unsigned char *general, unsigned char *boxes)
+{
+    unsigned count = Fx32(general + FX_PARTY + 4);
+    FxSpec spec = FxDefault(1);
+    unsigned char *slot = general + FX_PARTY + 8 + count * FX_MON;
+    (void)boxes;
+    FxPartyMon(&spec, slot);
+    assert(WtPokemon_Encode(received, slot) == 0);
+    FxPut32(general + FX_PARTY + 4, count + 1);
+}
+
+/* LUNE-902: the removal reached the card (its counter moved far ahead) and the
+ * journal was cut before recording it; the stock game then receives a
+ * Pokémon with the offer's identity. The companion takes the save as removed
+ * and never runs REMOVE on it again: an exact copy of the offer (a clone the
+ * player made) fails the removal's verification and blocks, untouched; any
+ * other twin stays, and the offer is sent from the journal. */
+static void ReceivedAfterRemoval(void)
+{
+    static World cutWorld;
+    WtEngine engine;
+    CpVisit visit;
+    unsigned variant;
+    scenario = OFFER;
+    for (variant = 0; variant < 2; ++variant) {
+        Setup();
+        refusePhase = WT_JOURNAL_SUBMIT_READY;
+        Open(&engine, &live, &liveGame);
+        assert(CpVisit_Run(&engine, &liveGame, 7, OFFERED_SLOT, 0, &transport, &visit) != 0);
+        WtEngine_Close(&engine);
+        assert(visit.phase == WT_JOURNAL_ESCROW && server.state == WT_TRADE_NONE);
+        memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+        assert(FxStockCopies(&stock, offered) == 0);
+        memcpy(received, offered, 136);
+        if (variant) {
+            unsigned sum = 0, i;
+            FxPut32(received + 0x10, Fx32(received + 0x10) + 300);
+            for (i = 8; i < 136; i += 2) sum += received[i] | (received[i + 1] << 8);
+            FxPut16(received + 6, sum & 65535);
+        }
+        assert(FxStockPlay(&stock, 1, 0, Receive));
+        memcpy(live.bytes, stock.bytes, sizeof(live.bytes));
+        cutWorld = live;
+        Bind(&liveGame, &liveImage, &liveFile);
+        Open(&engine, &live, &liveGame);
+        if (!variant) {
+            assert(WtEngine_Settle(&engine) == -1 && engine.blocked);
+            WtEngine_Close(&engine);
+            assert(memcmp(live.bytes, cutWorld.bytes, sizeof(live.bytes)) == 0);
+            memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+            assert(FxStockCopies(&stock, offered) == 1 && !server.requests[WT_OP_SUBMIT]);
+        } else {
+            assert(CpVisit_Run(&engine, &liveGame, 7, -1, 0, &transport, &visit) == 0);
+            WtEngine_Close(&engine);
+            assert(visit.phase == WT_JOURNAL_QUEUED && server.state == WT_TRADE_QUEUED);
+            memcpy(stock.bytes, live.bytes, sizeof(stock.bytes));
+            assert(FxStockCopies(&stock, offered) == 1); /* the twin, untouched */
+        }
+    }
+    puts("PASS removal landed, then a Pokemon with the offer's identity received: never removed by REMOVE; "
+         "an exact clone blocks untouched, another twin stays and the offer is sent");
+}
+
 int main(void)
 {
     unsigned total[OUTCOMES] = { 0, 0, 0, 0, 0 }, i, letGo = 0;
@@ -542,6 +809,9 @@ int main(void)
     }
     assert(total[STUCK] == 0 && total[DUPLICATE] == 0 && total[LOST] == 0);
     RedirectThroughJournal();
+    UnsentOffer();
+    LegacyTwin();
+    ReceivedAfterRemoval();
     assert(letGo > 0 && total[WINDOW] > 0);
     printf("PASS stock save before resume: %u cases recovered (%u with the offer released or traded away), 0 stuck, "
         "0 duplicates, %u lost only in the games' window\n", total[RECOVERED], letGo, total[WINDOW]);

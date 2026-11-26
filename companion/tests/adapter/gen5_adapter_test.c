@@ -229,7 +229,8 @@ static void RemoveAndRestore(void)
     Fx5Empty(empty, FX5_MON);
     assert(Fx5ImageCount(&image) == 3 && memcmp(Fx5ImageParty(&image, 1), third, FX5_MON) == 0);
     assert(memcmp(Fx5ImageParty(&image, 3), empty, FX5_MON) == 0);
-    assert(image.globalCounter == 41 && entry.globalCounter == 41);
+    /* The removal moved the save count WT_ABANDON_STEP ahead (LUNE-902). */
+    assert(image.globalCounter == 40 + WT_ABANDON_STEP && entry.globalCounter == 40 + WT_ABANDON_STEP);
     BothCopies();
     assert(Step(WT_INVENTORY_VERIFY_REMOVED, &entry, 1) == 0 && WtGame_CanLeave(&game, &entry) == 1);
     /* Again on the removed save: nothing more is removed. */

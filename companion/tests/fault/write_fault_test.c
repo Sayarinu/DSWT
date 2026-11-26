@@ -50,9 +50,23 @@ enum { PARTY_BYTES = CP_ADAPTER_PARTY_SIZE, PC_BYTES = FX_PC_SPAN };
  * CP_FAULT_SCENARIO selects one of names[] for a focused reproduction. */
 /* LUNE-881: Generation V adds "musical": the journal banks hold a musical's
  * leftovers and the save a marker the game no longer honours; the release
- * clears the marker in both copies, erases the banks, then the journal starts. */
-enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, MUSICAL, SCENARIOS };
-static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint", "musical" };
+ * clears the marker in both copies, erases the banks, then the journal starts.
+ * LUNE-902: in offer-trained and offer-deposited the player opens the stock
+ * game after every cut and trains the offered Pokémon, or deposits it in the
+ * PC, before saving; in abandon the visit cut is the one that abandons an
+ * unsent escrow whose Pokémon was trained so. Each ends with the Pokémon in
+ * the save and nothing sent (IDLE), or sent and gone from the save (QUEUED).
+ * In offer-twin the stock game also brings in a twin (the offer's identity,
+ * another Pokémon) and trains the offer if it holds it: a save the removal
+ * reached must then stay blocked, untouched, with the offer in the journal.
+ * In offer-released and offer-traded the player releases the offer, or trades
+ * it away, in the stock game: from a save that still held it the offer must
+ * never be sent (the escrow is abandoned, nothing sent); from one the removal
+ * reached it is sent as before. */
+enum Scenario { PROVISION, OFFER, CANCEL_RETURN, REJECT_RESTORE, CHECKPOINT, MUSICAL, OFFER_TRAINED,
+    OFFER_DEPOSITED, ABANDON, OFFER_TWIN, OFFER_RELEASED, OFFER_TRADED, SCENARIOS };
+static const char *names[] = { "provision", "offer", "cancel-return", "reject-restore", "checkpoint", "musical",
+    "offer-trained", "offer-deposited", "abandon", "offer-twin", "offer-released", "offer-traded" };
 static const char *steps[] = { "checkpoint/network", "prepare-remove", "remove", "verify-removed",
     "prepare-receive", "receive", "verify-received", "restore", "prepare-restore" };
 enum CutKind { BEFORE_WRITE, LOST_WRITE, TORN_PREFIX, TAIL_FIRST, AFTER_WRITE, BEFORE_SYNC, AFTER_SYNC, CUT_KINDS };
@@ -105,6 +119,139 @@ static int inject, counting, full, stockPlayed;
 /* LUNE-880: a resume without stock play that still asks Cut for the next plan. */
 static int stockNext;
 static char path[sizeof(CP_FAULT_BINARY_DIR) + 32];
+
+/* The stock game changes the offered Pokémon in these scenarios. */
+static int Changing(void)
+{
+    return scenario == OFFER_TRAINED || scenario == OFFER_DEPOSITED || scenario == ABANDON || scenario == OFFER_TWIN
+        || scenario == OFFER_RELEASED || scenario == OFFER_TRADED;
+}
+
+/* The offer leaves the save through play in these scenarios. */
+static int Leaving(void)
+{
+    return scenario == OFFER_RELEASED || scenario == OFFER_TRADED;
+}
+
+/* The offer as offered (canonical), and as the stock game trains it. */
+static unsigned char offerImage[136], trainedImage[136], twinImage[136];
+
+static void Trained(const unsigned char *from, unsigned char *to, unsigned experience)
+{
+    unsigned sum = 0, i;
+    memcpy(to, from, 136);
+    FxPut32(to + 0x10, Fx32(to + 0x10) + experience);
+    for (i = 8; i < 136; i += 2) sum += to[i] | (to[i + 1] << 8);
+    FxPut16(to + 6, sum & 65535);
+}
+
+/* The phase a finished visit leaves. */
+static int Finished(unsigned phase)
+{
+    if (scenario == OFFER) return phase == WT_JOURNAL_QUEUED;
+    if (Changing()) return phase == WT_JOURNAL_QUEUED || phase == WT_JOURNAL_IDLE;
+    return phase == WT_JOURNAL_IDLE;
+}
+
+#ifdef FX_GEN5
+#define CHANGE_MON FX5_MON
+#define CHANGE_PC_SLOTS (24 * 30)
+static unsigned char *ChangeParty(unsigned char *ram) { return ram + Rl5Offset(FX5_PARTY); }
+static unsigned char *ChangePc(unsigned char *ram, unsigned i) { return ram + Rl5Offset(1 + i / 30) + i % 30 * FX5_BOX_MON; }
+static void ChangeEmpty(unsigned char *slot) { Fx5Empty(slot, FX5_MON); }
+#else
+#define CHANGE_MON FX_MON
+#define CHANGE_PC_SLOTS (18 * 30)
+static unsigned char *ChangeParty(unsigned char *ram) { return ram + FX_GENERAL + FX_PARTY; }
+static unsigned char *ChangePc(unsigned char *ram, unsigned i) { return FxPcSlot(ram + FX_BOXES, i); }
+static void ChangeEmpty(unsigned char *slot) { FxEmpty(slot, FX_MON); }
+#endif
+
+/* What the player does with the offered Pokémon in the stock game, on the
+ * loaded save: train it, or deposit it in the first empty PC slot. Nothing
+ * when it is not in the party (sent, or already deposited). */
+static void ChangeOffer(unsigned char *ram)
+{
+    unsigned char canonical[136], *party = ChangeParty(ram) + 8;
+    unsigned count = Fx32(ChangeParty(ram) + 4), i, slot;
+    if (scenario == OFFER_TWIN) {
+        for (i = 0; i < CHANGE_PC_SLOTS; ++i) {
+            assert(WtPokemon_Decode(ChangePc(ram, i), canonical) == 0);
+            if (!(canonical[8] | canonical[9]) || memcmp(canonical, twinImage, 136) == 0) break;
+        }
+        assert(i < CHANGE_PC_SLOTS);
+        assert(WtPokemon_Encode(twinImage, ChangePc(ram, i)) == 0);
+    }
+    for (slot = 0; slot < count; ++slot) {
+        assert(WtPokemon_Decode(party + slot * CHANGE_MON, canonical) == 0);
+        if (memcmp(canonical, offerImage, 136) == 0) break;
+    }
+    if (slot == count) return;
+    if (scenario == OFFER_TRADED) {
+#ifdef FX_GEN5
+        Fx5Spec spec = Fx5Default(30);
+        Fx5PartyMon(&spec, party + slot * CHANGE_MON);
+#else
+        FxSpec spec = FxDefault(30);
+        FxPartyMon(&spec, party + slot * CHANGE_MON);
+#endif
+        return;
+    }
+    if (scenario != OFFER_DEPOSITED && scenario != OFFER_RELEASED) {
+        assert(WtPokemon_Encode(trainedImage, party + slot * CHANGE_MON) == 0);
+        return;
+    }
+    for (i = 0; i < CHANGE_PC_SLOTS; ++i) {
+        assert(WtPokemon_Decode(ChangePc(ram, i), canonical) == 0);
+        if (!(canonical[8] | canonical[9])) break;
+    }
+    assert(i < CHANGE_PC_SLOTS && count > 1);
+    if (scenario != OFFER_RELEASED) memcpy(ChangePc(ram, i), party + slot * CHANGE_MON, 136);
+    for (; slot + 1 < count; ++slot) memcpy(party + slot * CHANGE_MON, party + (slot + 1) * CHANGE_MON, CHANGE_MON);
+    ChangeEmpty(party + slot * CHANGE_MON);
+    FxPut32(ChangeParty(ram) + 4, count - 1);
+}
+
+/* Nothing sent while the save keeps the offer: an IDLE journal after an offer
+ * whose Pokémon the stock game changed finds no trade on the server. */
+static int Unsent(const WtJournalEntry *entry)
+{
+    return !Changing() || entry->phase != WT_JOURNAL_IDLE || server.state == WT_TRADE_NONE;
+}
+
+/* Exactly the offer as offered in what the stock game loads from these bytes. */
+static int OfferHeld(const unsigned char *bytes)
+{
+    unsigned char canonical[136];
+    unsigned mon, count;
+    int found = 0;
+#ifdef FX_GEN5
+    static unsigned char ram[0x26000];
+    const unsigned char *party;
+    RetailLoad5(bytes, ram);
+    party = ram + Rl5Offset(FX5_PARTY);
+    count = Fx5R32(party + 4);
+    for (mon = 0; mon < count + 720 + 6; ++mon) {
+        const unsigned char *slot = mon < count ? party + 8 + mon * FX5_MON
+            : mon < count + 720 ? ram + Rl5Offset(1 + (mon - count) / 30) + (mon - count) % 30 * FX5_BOX_MON
+            : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
+        found |= WtPokemon_Decode(slot, canonical) == 0 && memcmp(canonical, offerImage, 136) == 0;
+    }
+#else
+    unsigned selected[2];
+    const unsigned char *general, *boxes;
+    RetailLoad(bytes, selected);
+    general = bytes + selected[0] * CP_SAVE_HALF_SIZE;
+    boxes = bytes + selected[1] * CP_SAVE_HALF_SIZE + FX_BOXES;
+    count = Fx32(general + FX_PARTY + 4);
+    for (mon = 0; mon < count + 540; ++mon) {
+        const unsigned char *slot = mon < count ? general + FX_PARTY + 8 + mon * FX_MON : FxPcSlotConst(boxes, mon - count);
+        found |= WtPokemon_Decode(slot, canonical) == 0 && memcmp(canonical, offerImage, 136) == 0;
+    }
+#endif
+    return found;
+}
+static unsigned char played[CP_SAVE_FILE_SIZE];
 
 /* LUNE-913: OFFER, CANCEL_RETURN and REJECT_RESTORE run again with `held`
  * set: after every cut the stock game moves the offered Pokémon, wherever the
@@ -163,9 +310,13 @@ static int Random(void *arg, unsigned char *bytes, size_t size)
     return 0;
 }
 
+/* Setup of abandon: the removal is cut before it writes. */
+static int refuseRemove;
+
 static int Inventory(void *arg, enum WtInventoryStep operation, WtJournalEntry *entry, unsigned slot)
 {
     int result;
+    if (refuseRemove && operation == WT_INVENTORY_REMOVE) return -1;
     step = (unsigned)operation + 1;
     if (counting) stepMask |= 1u << operation;
     result = WtGame_Inventory(arg, operation, entry, slot);
@@ -342,6 +493,20 @@ static int JournalOffset(uint32_t offset)
         || (offset >= area->bank[1] && offset < area->bank[1] + area->reserved);
 }
 
+/* A write of the footer that carries the save counter of the block holding
+ * the party (Platinum, Diamond/Pearl, HeartGold/SoulSilver: the general
+ * block's; Black/White, Black 2/White 2: each copy's save footer). */
+static int CounterFooter(uint32_t offset, size_t size)
+{
+#ifdef FX_GEN5
+    (void)offset;
+    return size <= 16;
+#else
+    uint32_t at = offset % CP_SAVE_HALF_SIZE;
+    return size <= FX_FOOTER && at >= FX_GENERAL + FX_GENERAL_SIZE - FX_FOOTER && at < FX_GENERAL + FX_GENERAL_SIZE;
+#endif
+}
+
 static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
 {
     int result;
@@ -392,6 +557,11 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
             if (full || tear < 513)
                 Tear(tear, offset, bytes, size, 1);
         }
+        /* LUNE-902: byte-granular tears, both persistence orders, of the
+         * footer writes carrying the counter of the block that holds the
+         * party: no torn footer may publish a removal with an older counter. */
+        if (Changing() && !journalWrite && CounterFooter(offset, size))
+            for (tear = 1; tear < size; ++tear) { Tear(tear, offset, bytes, size, 0); Tear(tear, offset, bytes, size, 1); }
     }
     result = disk.writeAt(disk.context, offset, bytes, size);
     assert(result == 0);
@@ -583,6 +753,7 @@ static void StockGameSave(StockAction action)
     unsigned pass;
     RetailLoad5(live, ram);
     if (action) action(ram);
+    if (Changing()) ChangeOffer(ram);
     for (pass = 0; pass < stockSaves; ++pass) StockSave5(live, ram);
     stockPlayed = 1;
     CloseFile(); OpenBytes(live); Bind();
@@ -603,6 +774,7 @@ static void StockGameSave(StockAction action)
     global = Fx32(ram + FX_GENERAL_SIZE - FX_FOOTER);
     ram[0x10] ^= 0x5a; /* The player plays: play time changes. */
     if (action) action(ram);
+    if (Changing()) ChangeOffer(ram);
     for (pass = 0; pass < stockSaves; ++pass) {
         ++global;
         for (block = 0; block < 2; ++block) {
@@ -636,8 +808,7 @@ static int Visit(int slot, unsigned action)
     OpenEngine(&engine);
     result = CpVisit_Run(&engine, &game, 7, slot, action, &transport, &visit);
     WtEngine_Close(&engine);
-    return result == 0 && visit.canLeave
-        && visit.phase == (scenario == OFFER ? WT_JOURNAL_QUEUED : WT_JOURNAL_IDLE) ? 0 : -1;
+    return result == 0 && visit.canLeave && Finished(visit.phase) ? 0 : -1;
 }
 
 static void CheckFinal(int capture)
@@ -661,7 +832,7 @@ static void CheckFinal(int capture)
         assert(memcmp(expectedParty, party, sizeof(expectedParty)) == 0);
         assert(memcmp(expectedPC, pc, sizeof(expectedPC)) == 0);
     }
-    assert(entry.phase == (scenario == OFFER ? WT_JOURNAL_QUEUED : WT_JOURNAL_IDLE));
+    assert(Finished(entry.phase));
 }
 
 /* The offered Pokémon's party slot in the loaded save: 1 unless the stock
@@ -685,7 +856,7 @@ static void Resume(void)
     WtJournalEntry entry, settled;
     unsigned char after[CP_SAVE_FILE_SIZE];
     CpSaveResult load;
-    int slot = -1, inFlight;
+    int slot = -1, settle, offerHeld = -1, inFlight;
     unsigned loaded;
     /* The child inherits the server only. Recreate all companion handles. */
     assert(close(posix.fd) == 0);
@@ -737,6 +908,15 @@ static void Resume(void)
     } else if (load == CP_SAVE_NEEDS_GAME_SAVE) {
         assert(!image.loaded && CpSaveImage_Block(&image, 0) == NULL);
         assert(!WtGame_CanLeave(&game, &entry));
+        offerHeld = OfferHeld(live);
+        goneByPlay = Leaving() && offerHeld;
+        StockGameSave(NULL);
+        load = LOAD(&image, &file);
+    }
+    /* LUNE-902: the player always plays the stock game after the cut. */
+    else if (Changing() && load == CP_SAVE_OK) {
+        offerHeld = OfferHeld(live);
+        goneByPlay = Leaving() && offerHeld;
         StockGameSave(NULL);
         load = LOAD(&image, &file);
     }
@@ -761,18 +941,36 @@ static void Resume(void)
     if (load != CP_SAVE_OK) Finish(SAVE_BLOCKED);
     OpenEngine(&engine);
     /* This is the local boot path used by WtBoot_Check, without DS glue/TLS. */
+    if (scenario == OFFER_TWIN) memcpy(played, live, sizeof(played));
     {
         static unsigned char opened[CP_SAVE_FILE_SIZE];
-        int result, ownership;
+        int ownership;
         memcpy(opened, live, sizeof(opened));
-        result = WtEngine_Settle(&engine);
+        settle = WtEngine_Settle(&engine);
+        /* A twin over a save the removal reached: held, never taken for the
+         * offer. Settle and the visit block and change nothing; nothing sent. */
+        if (scenario == OFFER_TWIN && engine.blocked && engine.entry.phase == WT_JOURNAL_ESCROW) {
+            unsigned requests[8];
+            CpVisit visit;
+            if (offerHeld != 0 || memcmp(played, live, sizeof(played)) != 0) Finish(STUCK);
+            if (Ownership(live, &engine.entry, digests, stockPlayed) != 0) Finish(LOST);
+            WtEngine_Close(&engine);
+            memcpy(requests, server.requests, sizeof(requests));
+            OpenEngine(&engine);
+            if (CpVisit_Run(&engine, &game, 7, -1, 0, &transport, &visit) == 0 || visit.canLeave) Finish(STUCK);
+            WtEngine_Close(&engine);
+            if (memcmp(played, live, sizeof(played)) != 0 || memcmp(requests, server.requests, sizeof(requests)) != 0)
+                Finish(DUPLICATE);
+            fprintf(stderr, "held-twin %s event=%u\n", names[scenario], eventCount);
+            Finish(RECOVERED);
+        }
         ownership = Ownership(live, &engine.entry, digests, stockPlayed);
         if (ownership > 0) Finish(DUPLICATE);
         if (ownership < 0) Finish(LOST);
         if (held && Holding(live)) {
             /* LUNE-913: a refusal while the offer is held there writes
              * nothing; the player takes it back and the companion settles. */
-            if ((result != 0 || engine.entry.phase == WT_JOURNAL_ESCROW || engine.entry.phase == WT_JOURNAL_RESTORING
+            if ((settle != 0 || engine.entry.phase == WT_JOURNAL_ESCROW || engine.entry.phase == WT_JOURNAL_RESTORING
                     || engine.entry.phase == WT_JOURNAL_APPLYING) && memcmp(opened, live, sizeof(opened)) != 0)
                 Finish(STUCK);
             WtEngine_Close(&engine);
@@ -781,20 +979,22 @@ static void Resume(void)
             assert(!Holding(live));
             if (LOAD(&image, &file) != CP_SAVE_OK) Finish(SAVE_BLOCKED);
             OpenEngine(&engine);
-            result = WtEngine_Settle(&engine);
+            settle = WtEngine_Settle(&engine);
             ownership = Ownership(live, &engine.entry, digests, stockPlayed);
             if (ownership > 0) Finish(DUPLICATE);
             if (ownership < 0) Finish(LOST);
         }
-        if (result != 0 || engine.entry.phase == WT_JOURNAL_ESCROW
-            || engine.entry.phase == WT_JOURNAL_RESTORING || engine.entry.phase == WT_JOURNAL_APPLYING)
+        /* LUNE-902: an escrow whose Pokémon the stock game changed waits for the visit. */
+        if (!(Changing() && settle == WT_INVENTORY_KEPT && engine.entry.phase == WT_JOURNAL_ESCROW && !engine.blocked)
+            && (settle != 0 || engine.entry.phase == WT_JOURNAL_ESCROW
+                || engine.entry.phase == WT_JOURNAL_RESTORING || engine.entry.phase == WT_JOURNAL_APPLYING))
             Finish(STUCK);
     }
     settled = engine.entry; memcpy(after, live, sizeof(after));
     assert(Ownership(live, &settled, digests, stockPlayed) == 0);
     WtEngine_Close(&engine);
     OpenEngine(&engine);
-    assert(WtEngine_Settle(&engine) == 0);
+    assert(WtEngine_Settle(&engine) == settle);
     assert(memcmp(&settled, &engine.entry, sizeof(settled)) == 0);
     assert(memcmp(after, live, sizeof(after)) == 0);
     assert(Ownership(live, &engine.entry, digests, stockPlayed) == 0);
@@ -806,7 +1006,9 @@ static void Resume(void)
         int result = Visit(slot, scenario == CANCEL_RETURN ? WT_OP_CANCEL : 0);
         WtJournalEntry final = ReadEntry();
         int ownership = Ownership(live, &final, digests, stockPlayed);
-        if (ownership > 0) Finish(DUPLICATE);
+        if (ownership > 0 || !Unsent(&final)) Finish(DUPLICATE);
+        /* Released or traded away from a save that held it: never sent. */
+        if (goneByPlay && (final.phase != WT_JOURNAL_IDLE || server.state != WT_TRADE_NONE)) Finish(DUPLICATE);
         if (ownership < 0) Finish(LOST);
         if (result != 0) Finish(STUCK);
     }
@@ -848,6 +1050,22 @@ static void Setup(void)
     }
 #else
     FxBuild(&fixture, specs, 4);
+    if (Leaving() || scenario == OFFER_TRAINED) {
+        /* LUNE-902: the stock game's last save wrote the general block only,
+         * so both halves hold the same save under one global counter (block
+         * counters apart). A removal's footer torn so that it keeps that
+         * global (its first bytes) would otherwise load as the newer copy. */
+        unsigned block;
+        for (block = 0; block < 2; ++block) {
+            unsigned offset = block ? FX_BOXES : FX_GENERAL, size = block ? FX_BOXES_SIZE : FX_GENERAL_SIZE;
+            memcpy(fixture.bytes + offset, fixture.bytes + CP_SAVE_HALF_SIZE + offset, size - FX_FOOTER);
+        }
+#if FX_SHARED
+        FxSeal(&fixture, 0, 0, 11, 0); FxSeal(&fixture, 0, 1, 11, 0);
+#else
+        FxSeal(&fixture, 0, 0, 11, 20); FxSeal(&fixture, 0, 1, 11, 30);
+#endif
+    }
 #endif
 #ifdef FX_GEN5
     if (scenario == MUSICAL) {
@@ -862,9 +1080,61 @@ static void Setup(void)
         for (i = 0; i < 0x2000; ++i) fixture.bytes[FX5_JOURNAL + i] = (unsigned char)(i * 3 + 7);
     }
 #endif
+#ifdef FX_GEN5
+    Fx5Canonical(&specs[1], offerImage);
+#else
+    FxCanonical(&specs[1], offerImage);
+#endif
+    Trained(offerImage, trainedImage, 100); Trained(offerImage, twinImage, 300);
+    FxSha(trainedImage, 136, trainedDigest);
+    changedOffer = Changing(); savedOver = 0; goneByPlay = 0; stockPlayed = 0; refuseRemove = 0;
     OpenBytes(fixture.bytes); Bind();
     assert(LOAD(&image, &file) == CP_SAVE_OK);
     if (scenario != PROVISION && scenario != MUSICAL) Provision();
+    if (scenario == ABANDON) {
+        /* An offer cut before its removal reached the card, then trained in
+         * the stock game: its escrow, never sent, is kept. */
+        WtEngine engine;
+        CpVisit visit;
+        WtJournalEntry entry;
+        refuseRemove = 1;
+        OpenEngine(&engine);
+        assert(CpVisit_Run(&engine, &game, 7, 1, 0, &transport, &visit) != 0);
+        WtEngine_Close(&engine);
+        refuseRemove = 0;
+        entry = ReadEntry();
+        assert(entry.phase == WT_JOURNAL_ESCROW && server.state == WT_TRADE_NONE);
+        stockSaves = 1; StockGameSave(NULL); stockPlayed = 0; savedOver = 1;
+        assert(LOAD(&image, &file) == CP_SAVE_OK);
+        OpenEngine(&engine);
+        assert(WtEngine_Settle(&engine) == WT_INVENTORY_KEPT && engine.entry.phase == WT_JOURNAL_ESCROW);
+        WtEngine_Close(&engine);
+        {
+            /* The same escrow as a game or an older companion deposits it
+             * (no identity-unique mark): never kept, the visit blocks and
+             * nothing is written or sent. Then the companion's own again. */
+            static unsigned char saved[CP_SAVE_FILE_SIZE], record[WT_JOURNAL_RECORD_SIZE];
+            unsigned requests[8], bank;
+            WtJournalEntry marked = ReadEntry(), unmarked = marked;
+            /* As a game or an older companion records it: inventoryBefore unmasked, no mark. */
+            assert(WtEngine_EscrowInventories(&unmarked, Hash, unmarked.inventoryBefore, unmarked.inventoryAfter) == 1);
+            unmarked.operation[9] ^= 0x5A; unmarked.request[8 + 9] ^= 0x5A;
+            assert(WtEngine_EscrowInventories(&unmarked, Hash, unmarked.inventoryBefore, unmarked.inventoryAfter) == 0);
+            assert(WtJournal_Encode(&unmarked, Hash, record) == 0);
+            for (bank = 0; bank < 2; ++bank) assert(journalIO.write(journalIO.arg, (int)bank, record) == 0);
+            memcpy(saved, live, sizeof(saved)); memcpy(requests, server.requests, sizeof(requests));
+            OpenEngine(&engine);
+            assert(WtEngine_Settle(&engine) == -1 && engine.blocked);
+            WtEngine_Close(&engine);
+            OpenEngine(&engine);
+            assert(CpVisit_Run(&engine, &game, 7, -1, 0, &transport, &visit) != 0 && !visit.canLeave);
+            WtEngine_Close(&engine);
+            assert(memcmp(saved, live, sizeof(saved)) == 0 && memcmp(requests, server.requests, sizeof(requests)) == 0);
+            assert(WtJournal_Encode(&marked, Hash, record) == 0);
+            for (bank = 0; bank < 2; ++bank) assert(journalIO.write(journalIO.arg, (int)bank, record) == 0);
+            assert(LOAD(&image, &file) == CP_SAVE_OK);
+        }
+    }
     if (scenario == CANCEL_RETURN) {
         WtEngine engine;
         CpVisit visit;
@@ -886,6 +1156,8 @@ static void Setup(void)
 
 static void Run(void)
 {
+    int offer = scenario == OFFER || scenario == REJECT_RESTORE || scenario == OFFER_TRAINED
+        || scenario == OFFER_DEPOSITED || scenario == OFFER_TWIN || Leaving();
 #ifdef FX_GEN5
     if (scenario == MUSICAL) {
         assert(CpGen5_ReleaseMusical(&game) == 0);
@@ -895,8 +1167,11 @@ static void Run(void)
     if (scenario == PROVISION) Provision();
     if (scenario == CHECKPOINT) assert(WtGame_Checkpoint(&game) == 0);
     if (scenario == PROVISION || scenario == CHECKPOINT) counting = 0;
-    assert(Visit(scenario == OFFER || scenario == REJECT_RESTORE ? 1 : -1,
-        scenario == CANCEL_RETURN ? WT_OP_CANCEL : 0) == 0);
+    assert(Visit(offer ? 1 : -1, scenario == CANCEL_RETURN ? WT_OP_CANCEL : 0) == 0);
+    if (scenario == ABANDON) {
+        WtJournalEntry entry = ReadEntry();
+        assert(entry.phase == WT_JOURNAL_IDLE && server.state == WT_TRADE_NONE && !server.requests[WT_OP_SUBMIT]);
+    }
 }
 
 int main(void)
@@ -921,7 +1196,7 @@ int main(void)
         Setup(); Run(); CheckFinal(1); checkpoints = eventCount; CloseFile();
         Setup(); inject = 1; Run(); inject = 0; CheckFinal(0);
         assert(eventCount == checkpoints && eventCount == saveWrites + journalWrites + syncs);
-        assert(saveWrites > 0 || scenario == PROVISION);
+        assert(saveWrites > 0 || scenario == PROVISION || scenario == ABANDON);
         assert(journalWrites > 0 || scenario == CHECKPOINT);
         assert(syncs == saveWrites + journalWrites);
         assert(attempts == distinct + duplicates);
@@ -936,7 +1211,8 @@ int main(void)
         assert(!full || journalByteTears == expectedJournalByteTears);
         failures += distinct - tally[RECOVERED] - tally[LOST_IN_WINDOW] - tally[NOT_APPLICABLE];
         windowLosses += tally[LOST_IN_WINDOW];
-        if (scenario == OFFER || scenario == REJECT_RESTORE) {
+        if (scenario == OFFER || scenario == REJECT_RESTORE || scenario == OFFER_TRAINED || scenario == OFFER_DEPOSITED
+            || scenario == OFFER_TWIN || Leaving()) {
             unsigned remove = (1u << WT_INVENTORY_PREPARE_REMOVE) | (1u << WT_INVENTORY_REMOVE)
                 | (1u << WT_INVENTORY_VERIFY_REMOVED);
             assert((stepMask & remove) == remove);

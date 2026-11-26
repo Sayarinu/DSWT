@@ -5,6 +5,11 @@
  * card, by the independent load model of adapter/gen5_stock.h. */
 #include "../adapter/gen5_stock.h"
 
+/* As retail_load.h: LUNE-902's changed offer, as offered or trained. */
+/* goneByPlay: the player released or traded the offer away from a save that
+ * held it, so it may be in neither the save nor the journal. */
+static int changedOffer, savedOver, goneByPlay;
+static unsigned char trainedDigest[32];
 /* LUNE-913: the Day Care's two slots, the Dream World and the GTS: block,
  * party image offset, flag offset and size (adapter/gen5.c Held). */
 typedef struct Fx5HeldPlace { unsigned block, mon, flag, flagSize; } Fx5HeldPlace;
@@ -43,8 +48,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
             : ram + Rl5Offset(FX5_BATTLE_BOX) + (mon - count - 720) * FX5_BOX_MON;
         assert(WtPokemon_Decode(slot, canonical) == 0);
         FxSha(canonical, sizeof(canonical), digest);
-        for (i = 0; i < 4; ++i) if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+        for (i = 0; i < 4; ++i) {
+            if (memcmp(digest, digests[i], 32) == 0) ++counts[i];
+            else if (i == 1 && changedOffer && memcmp(digest, trainedDigest, 32) == 0) ++counts[1];
+        }
     }
+    played = played || savedOver;
     /* LUNE-913: and where no locator reaches, while each place's flag is set. */
     for (mon = 0; mon < FX5_HELD_PLACES; ++mon) {
         if (!Fx5HeldOccupied(ram, mon)) continue;
@@ -56,9 +65,12 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     switch (entry->phase) {
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
         if (played) { escrow = counts[1] == 0; break; }
-        assert(memcmp(inventory, entry->inventoryBefore, 32) == 0
-            || memcmp(inventory, entry->inventoryAfter, 32) == 0);
-        escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
+        {
+            unsigned char before[32], after[32];
+            assert(WtEngine_EscrowInventories(entry, Hash, before, after) >= 0);
+            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, after, 32) == 0);
+            escrow = memcmp(inventory, after, 32) == 0;
+        }
         break;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED:
         escrow = 1;
@@ -84,7 +96,7 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     for (i = 0; i < 4; ++i)
         if (counts[i] + (i == 1 ? escrow : 0) > (i == 1 && fxOffer == FX_OFFER_GONE ? 0u : 1u)) return 1;
     for (i = 0; i < 4; ++i)
-        if (counts[i] + (i == 1 ? escrow : 0) < (i == 1 && fxOffer != FX_OFFER_ONE ? 0u : 1u)) return -1;
+        if (counts[i] + (i == 1 ? escrow : 0) < (i == 1 && (fxOffer != FX_OFFER_ONE || goneByPlay) ? 0u : 1u)) return -1;
     return 0;
 }
 

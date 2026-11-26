@@ -145,7 +145,9 @@ static void Sweep(enum State state)
     entry = journal; writes = file.writes;
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
-    assert(writes == 12); /* two passes over two blocks: body, footer tail, footer */
+    /* Two passes over two blocks: body, footer tail, footer; a removal first
+     * zeroes the general block's footer magic and writes its counter (LUNE-902). */
+    assert(writes == (state == ESCROW ? 16u : 12u));
     for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
     lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
@@ -348,11 +350,11 @@ static void IdentityCollisions(void)
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
     /* An escrow, removed or not: refused either way. */
-    for (cut = 1; cut <= 13; cut += 12) {
+    for (cut = 1; cut <= 17; cut += 16) {
         Arrange(ESCROW, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : 0));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 16 ? -1 : 0));
         file.failWrite = 0;
         assert(FxStockPlay(&file, 1, 0, Impostor));
         Load();
@@ -379,6 +381,188 @@ static void HeldStock(void (*action)(unsigned char *general))
 }
 #include "gen4_held.h"
 
+/* LUNE-902: abandoning an escrow is proved by the save's history alone. */
+static void ReleaseOffered(unsigned char *general, unsigned char *boxes)
+{
+    unsigned count = Fx32(general + FX_PARTY + 4), i;
+    (void)boxes;
+    for (i = OFFERED_SLOT; i + 1 < count; ++i) memcpy(PartySlot(general, i), PartySlot(general, i + 1), FX_MON);
+    FxEmpty(PartySlot(general, count - 1), FX_MON);
+    FxPut32(general + FX_PARTY + 4, count - 1);
+}
+
+/* Another Pokémon caught or traded for in the stock game that shares the
+ * offer's identity and every field play leaves alone (an N's Pokémon, say),
+ * differing in experience. */
+static void AddTwin(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char *slot = boxes + FX_PC + 9 * FX_BOX_MON;
+    (void)general;
+    assert(WtPokemon_Encode(offered, slot) == 0);
+    FxTrain(slot);
+}
+
+/* The twin left at the Day Care (LUNE-913: Locate sees it there). */
+static void TwinInDayCare(unsigned char *general, unsigned char *boxes)
+{
+    unsigned char canonical[136];
+    unsigned sum = 0, i;
+    (void)boxes;
+    memcpy(canonical, offered, 136);
+    FxPut32(canonical + 0x10, Fx32(canonical + 0x10) + 100);
+    for (i = 8; i < 136; i += 2) sum += canonical[i] | (canonical[i + 1] << 8);
+    FxPut16(canonical + 6, sum & 65535);
+    assert(WtPokemon_Encode(canonical, general + FX_DAYCARE) == 0);
+}
+
+/* Traded away in the stock game: another Pokémon takes its party slot. */
+static void TradeOffered(unsigned char *general, unsigned char *boxes)
+{
+    FxSpec spec = FxDefault(30);
+    (void)boxes;
+    FxPartyMon(&spec, PartySlot(general, OFFERED_SLOT));
+}
+
+static void TwinAndTrain(unsigned char *general, unsigned char *boxes)
+{
+    AddTwin(general, boxes);
+    TrainOffered(general, boxes);
+}
+
+/* The offer exactly as offered in the party, PC or anywhere the stock game
+ * loads it from. */
+static unsigned ExactCopies(void)
+{
+    uint32_t global, counters[2];
+    int selected[2], full;
+    unsigned count, i, copies = 0;
+    const unsigned char *general, *boxes;
+    unsigned char found[136];
+    assert(FxStockLoad(&file, selected, &full, &global, counters));
+    general = file.bytes + selected[0] * CP_SAVE_HALF_SIZE + FX_GENERAL;
+    boxes = file.bytes + selected[1] * CP_SAVE_HALF_SIZE + FX_BOXES;
+    count = Fx32(general + FX_PARTY + 4);
+    for (i = 0; i < count + 18 * 30; ++i) {
+        const unsigned char *slot = i < count ? general + FX_PARTY + 8 + i * FX_MON : boxes + FX_PC + (i - count) * FX_BOX_MON;
+        if (WtPokemon_Decode(slot, found) == 0 && memcmp(found, offered, 136) == 0) ++copies;
+    }
+    return copies;
+}
+
+/* The removal cut at each write, and after the last; the stock game loads,
+ * the player plays (nothing, trains the offer, deposits it, releases it,
+ * finds a twin, or both) and saves once or twice. WT_INVENTORY_HISTORY writes nothing,
+ * and answers 1 only when what the stock game loaded still held the offer;
+ * when it did and play moved the offer from where REMOVE takes it, it always
+ * answers 1. A save the removal reached, with a twin, is refused by REMOVE
+ * too, untouched: never taken for the offer. */
+/* LUNE-902: an interrupted stock save left the general block's older copy
+ * (the one the removal writes first) with a footer that does not load: the
+ * current global counter, a newer block counter, and a CRC that is the
+ * removal's body's (a 1-in-65536 coincidence in life). */
+static unsigned staleCrc, staleHalf;
+static void StaleFooter(void)
+{
+    unsigned char *footer = file.bytes + staleHalf * CP_SAVE_HALF_SIZE + FX_GENERAL + FX_GENERAL_SIZE - 20;
+    FxPut32(footer, image.globalCounter); FxPut32(footer + 4, image.blockCounters[0] + 5);
+    FxPut32(footer + 8, FX_GENERAL_SIZE); FxPut32(footer + 12, CP_SAVE_MAGIC_INTERNATIONAL);
+    footer[16] = 0; footer[17] = 0; FxPut16(footer + 18, staleCrc);
+}
+
+static void History(int stale)
+{
+    static const FxStockAction actions[] = { NULL, TrainOffered, DepositOffered, ReleaseOffered, TradeOffered, AddTwin,
+                                             TwinAndTrain, TwinInDayCare };
+    enum { TWINS = 5 };
+    static unsigned char before[CP_SAVE_FILE_SIZE];
+    WtJournalEntry journal, entry;
+    unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
+    int answer;
+    Arrange(ESCROW, &journal);
+    staleHalf = 1 - image.currentHalf[0];
+    entry = journal; writes = file.writes;
+    assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+    writes = file.writes - writes;
+    staleCrc = FxStockCrc(file.bytes + staleHalf * CP_SAVE_HALF_SIZE + FX_GENERAL, FX_GENERAL_SIZE - 20);
+    /* The removal moved the save counter WT_ABANDON_STEP ahead. */
+    assert(image.globalCounter - journal.globalCounter >= WT_ABANDON_STEP);
+    if (stale) {
+        uint32_t g, c;
+        Arrange(ESCROW, &journal);
+        StaleFooter(); Load(); /* the companion loads the save as it is */
+        assert(!FxStockValid(&file, staleHalf, 0, &g, &c));
+        entry = journal; writes = file.writes;
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+        writes = file.writes - writes;
+    }
+    for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves)
+        for (action = 0; action < sizeof(actions) / sizeof(*actions); ++action) {
+            Arrange(ESCROW, &journal);
+            if (stale) { StaleFooter(); Load(); }
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= writes ? -1 : 0));
+            file.failWrite = 0;
+            held = ExactCopies();
+            assert(held <= 1);
+            assert(FxStockPlay(&file, saves, saves == 2, actions[action]));
+            Load();
+            memcpy(before, file.bytes, sizeof(before));
+            entry = journal;
+            answer = Step(WT_INVENTORY_HISTORY, &entry);
+            assert(memcmp(before, file.bytes, sizeof(before)) == 0);
+            /* Never abandoned unless what the stock game loaded held the
+             * offer; never taken as removed when it did. */
+            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT);
+            else assert(answer == WT_HISTORY_REMOVED || answer == WT_HISTORY_AFTER);
+            /* Once play moved, released or traded it, it is left: never sent. */
+            if (held && action) assert(answer == WT_HISTORY_LEFT);
+            abandoned += answer == WT_HISTORY_LEFT;
+            /* A twin after the removal: taken as removed, so REMOVE never runs
+             * and the twin is never taken for the offer. */
+            if (!held && action >= TWINS) ++refused;
+            ++cases;
+        }
+    assert(abandoned > 0 && refused > 0);
+    printf("PASS stock save after a cut removal%s: %u cuts x 2 stock plays x 8 plays, abandonable %u times, "
+           "only from a save that held the offer; %u twins after the removal refused\n",
+           stale ? " over a stale footer with the removal's CRC" : "", writes + 1, abandoned, refused);
+}
+
+/* LUNE-902: the counter ranges are bounded. Fewer than WT_ABANDON_SAVES saves
+ * past the escrow's counter: before the removal; WT_ABANDON_STEP to
+ * WT_ABANDON_STEP + WT_ABANDON_SAVES past it: after; anything else, or a
+ * counter recorded within reach of the top of its range: unproved. */
+static void HistoryBounds(void)
+{
+    static const struct { uint32_t past; int answer; } cases[] = {
+        { 1, WT_HISTORY_LEFT }, { WT_ABANDON_SAVES - 1, WT_HISTORY_LEFT }, { WT_ABANDON_SAVES, WT_HISTORY_UNPROVEN },
+        { WT_ABANDON_STEP - 1, WT_HISTORY_UNPROVEN }, { WT_ABANDON_STEP, WT_HISTORY_REMOVED },
+        { WT_ABANDON_STEP + WT_ABANDON_SAVES - 1, WT_HISTORY_REMOVED },
+        { WT_ABANDON_STEP + WT_ABANDON_SAVES, WT_HISTORY_UNPROVEN }, { UINT32_C(0xFFFFFFFF), WT_HISTORY_UNPROVEN }
+    };
+    WtJournalEntry journal, entry;
+    unsigned i;
+    for (i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        Arrange(ESCROW, &journal);
+        assert(FxStockPlay(&file, 1, 0, TrainOffered));
+        Load();
+        entry = journal;
+        image.globalCounter = entry.globalCounter + cases[i].past;
+        image.blockCounters[0] = entry.generalCounter + 1; image.blockCounters[1] = entry.boxCounter + 1;
+        assert(Step(WT_INVENTORY_HISTORY, &entry) == cases[i].answer);
+    }
+    /* Recorded too near the top: the removal never moved it, nothing is proved. */
+    Arrange(ESCROW, &journal);
+    assert(FxStockPlay(&file, 1, 0, TrainOffered));
+    Load();
+    entry = journal;
+    entry.globalCounter = WT_ABANDON_LIMIT + 1;
+    image.globalCounter = entry.globalCounter + 1;
+    assert(Step(WT_INVENTORY_HISTORY, &entry) == WT_HISTORY_UNPROVEN);
+    puts("PASS the save counter's ranges: before the removal, after it, and nothing proved between or past them");
+}
+
 int main(void)
 {
     Sweep(ESCROW);
@@ -389,6 +573,9 @@ int main(void)
     IdentityCollisions();
     cases += FxHeldSweep();
     FxHeldUnique();
+    History(0);
+    History(1);
+    HistoryBounds();
     printf("PASS stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, %u lost "
         "(each cut before the first retail copy held the return, the games' window)\n", cases, windowLosses);
     return 0;

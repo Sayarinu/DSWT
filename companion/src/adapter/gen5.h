@@ -26,7 +26,9 @@
  *   Battle Box, and an offer moved there is refused;
  * - a Pokémon held where no locator reaches (the Day Care, the Dream World,
  *   the GTS deposit, Black 2/White 2's DNA Splicers partner) with the
- *   identity a step decides by fails that step closed (LUNE-913).
+ *   identity a step decides by fails that step closed (LUNE-913);
+ * - LUNE-902: the removal moves the save count WT_ABANDON_STEP ahead, and
+ *   WT_INVENTORY_HISTORY is decided by it, as adapter/platinum.h says.
  *
  * The journal banks lie in the musical distribution save
  * (save/musical_area.h), released before the journal's first write. */

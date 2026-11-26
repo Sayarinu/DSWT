@@ -104,6 +104,14 @@ static int PostOnce(void *arg, const unsigned char *request, size_t size,
         break;
     case WT_OP_CANCEL:
         if (counter != server.nextCounter) { result = WT_RESULT_COUNTER_MISMATCH; break; }
+        if (server.state == WT_TRADE_NONE || memcmp(body, server.trade, 16) != 0) {
+            /* As the server: a trade this save does not hold is rejected and
+             * recorded, using the counter (LUNE-902's fence relies on it). */
+            ++server.nextCounter; result = WT_RESULT_NOT_FOUND;
+            AddEvent(WT_EVENT_REJECTED, NULL, request + WT_WIRE_REQUEST_ID, NULL, NULL, WT_TRADE_NONE);
+            memset(server.events[server.eventCount - 1].bytes + WT_WIRE_EVENT_DIGEST, 0, 32);
+            break;
+        }
         if (server.state != WT_TRADE_QUEUED) { result = WT_RESULT_CONFLICT; break; }
         ++server.nextCounter; memset(server.receipt, 0x73, 16); server.state = WT_TRADE_RETURN_READY;
         AddEvent(WT_EVENT_CANCELLED, server.trade, request + WT_WIRE_REQUEST_ID, server.asset, server.receipt, WT_TRADE_RETURN_READY);

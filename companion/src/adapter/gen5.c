@@ -603,6 +603,60 @@ done:
     return result;
 }
 
+#ifdef WT_ABANDON_UNSENT
+/* LUNE-902: the offer's removal is written with the save counter
+ * WT_ABANDON_STEP past the one the escrow recorded (the counter the game
+ * compares to pick its copies and adds one to at every save). A save holding
+ * the removal, and every save a game writes over it, so keeps a counter at
+ * least that far ahead; History takes only a save closer than
+ * WT_ABANDON_SAVES for one a game wrote over the escrow's save before the
+ * removal. A counter too near the top of its range is not moved, and its
+ * escrow is never abandoned. Copies already holding the removal are kept. */
+static int SaveRemoval(WtGame *game, const WtJournalEntry *entry, const unsigned char expected[32])
+{
+    CpSaveImage *image = game->image;
+    unsigned char actual[32];
+    uint32_t recorded = entry->globalCounter;
+    int result;
+    if (Hash(image, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
+    if (CpSaveImage_Verify(image, game->file, expected) == CP_SAVE_OK) return 0;
+    if (recorded <= WT_ABANDON_LIMIT && (uint32_t)(image->globalCounter - recorded) < WT_ABANDON_STEP)
+        image->globalCounter = recorded + WT_ABANDON_STEP - 1;
+    image->counterFirst = 1;
+    result = CpSaveImage_CommitBoth(image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
+    image->counterFirst = 0;
+    return result;
+}
+
+/* WT_INVENTORY_HISTORY (wonder_trade/engine.h enum WtEscrowHistory): what the
+ * loaded save's counter proves about the escrow's removal, judged against
+ * the counter the escrow recorded before it. The removal (SaveRemoval) wrote
+ * it WT_ABANDON_STEP ahead, so a save that has it, and every save a game
+ * writes over that, stays at least that far ahead; a save a game wrote over
+ * the save before the removal is fewer than WT_ABANDON_SAVES saves past it.
+ * The Pokémon the save holds is never proof either way. Writes nothing. */
+static int History(WtGame *game, const WtJournalEntry *entry)
+{
+    CpSaveImage *image = game->image;
+    unsigned char digest[32], digests[1][32], *party = Party(image);
+    uint32_t past = (uint32_t)(image->globalCounter - entry->globalCounter);
+    int ranged = entry->globalCounter <= WT_ABANDON_LIMIT && !Behind(image, entry);
+    Found found;
+    if (!party || Hash(image, digest) != 0) return WT_HISTORY_UNPROVEN;
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0) return WT_HISTORY_UNCHANGED;
+    /* Exactly the recorded removal is the removal, whatever the counter. */
+    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return WT_HISTORY_AFTER;
+    if (ranged && past >= WT_ABANDON_STEP && past - WT_ABANDON_STEP < WT_ABANDON_SAVES) return WT_HISTORY_REMOVED;
+    if (!ranged || past >= WT_ABANDON_SAVES) return WT_HISTORY_UNPROVEN;
+    if (!Moved(image, entry)) return WT_HISTORY_UNPROVEN;
+    Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
+    return Locate(image, entry->outgoing, digests, 1, &found) == 1 && found.party
+        && Eligible(RulesOf(image), party, found.slot) ? WT_HISTORY_UNCHANGED : WT_HISTORY_LEFT;
+}
+#else
+#define SaveRemoval(game, entry, expected) SaveBoth(game, expected)
+#endif
+
 static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party, int *restore)
 {
     CpSaveImage *image = game->image;
@@ -622,7 +676,7 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
         Remove(party, found.slot);
         if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) return -1;
         *restore = 0;
-        if (SaveBoth(game, entry->inventoryAfter) != 0) return -1;
+        if (SaveRemoval(game, entry, entry->inventoryAfter) != 0) return -1;
     } else {
         *restore = 0;
         if (Checkpoint(game) != 0) return -1;
@@ -680,7 +734,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         if (memcmp(digest, entry->inventoryBefore, 32) != 0) goto done;
     }
     restore = 0;
-    if (SaveBoth(game, digest) != 0) goto done;
+    if ((step == WT_INVENTORY_REMOVE ? SaveRemoval(game, entry, digest) : SaveBoth(game, digest)) != 0) goto done;
     Counters(image, entry); result = 0;
 done:
     Release(backup, restore);
@@ -702,6 +756,10 @@ int CpGen5_Inventory(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         return Receive(game, step, entry);
     case WT_INVENTORY_PREPARE_REMOVE: case WT_INVENTORY_REMOVE: case WT_INVENTORY_RESTORE:
         return PartyStep(game, step, entry, slot);
+#ifdef WT_ABANDON_UNSENT
+    case WT_INVENTORY_HISTORY:
+        return History(game, entry);
+#endif
     default:
         return -1;
     }

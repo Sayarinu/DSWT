@@ -363,6 +363,18 @@ static int Save(CpSaveImage *image, const CpFile *file)
         Write16(count, Read16(count) + 1u);
     }
     for (pass = 0; pass < 2; ++pass) {
+        if (image->counterFirst) {
+            /* LUNE-902: the copy's footer can no longer validate (its magic
+             * zeroed), then carries the new save count, each synced, before
+             * any block or CRC table this pass writes: whatever an earlier
+             * interrupted save left in it, it loads again only with its own
+             * footer write, under the new count. The other copy is untouched. */
+            static const unsigned char kNoMagic[4] = { 0, 0, 0, 0 };
+            uint32_t to = CopyAddress(g, image->areas[n + 1] == AREA_NONE ? AREA_MAIN : image->areas[n + 1]) + footer;
+            unsigned char count[4];
+            Write32(count, image->globalCounter);
+            if (WriteSync(file, to + 8, kNoMagic, 4) != 0 || WriteSync(file, to, count, 4) != 0) return -1;
+        }
         for (id = 0; id < n; ++id) {
             uint32_t at = image->blockOffsets[id], size = g->blockSizes[id];
             uint16_t crc;

@@ -17,7 +17,64 @@ enum WtInventoryStep {
     /* 0 when RESTORE can put the escrowed Pokémon back exactly (the save is
      * unchanged since the escrow), 1 when the save has changed since. */
     WT_INVENTORY_PREPARE_RESTORE
+#ifdef WT_ABANDON_UNSENT
+    /* LUNE-902, DS Companion builds only: what the loaded save's history
+     * proves about an escrow's removal (enum WtEscrowHistory). Writes nothing. */
+    , WT_INVENTORY_HISTORY
+#endif
 };
+
+/* LUNE-902, DS Companion builds only (WT_ABANDON_UNSENT): Settle's and
+ * Resume's answer for an escrow the companion abandons. Only the companion's
+ * own escrow qualifies (engine.c CompanionEscrow), when WT_INVENTORY_HISTORY
+ * proves from the save's counters that its removal never reached the save a
+ * game loaded and saved over: the offer was there, and play has since
+ * changed, moved, released or traded it; sending it now could duplicate it.
+ * The engine fences the escrow's counter with a counted Cancel of a trade
+ * nobody holds, recorded in the journal first (WtEngine_Request), and returns
+ * to IDLE without touching the save. The games never define
+ * WT_ABANDON_UNSENT and compile exactly as before. */
+#define WT_INVENTORY_KEPT 2
+#ifdef WT_ABANDON_UNSENT
+/* How far the companion's removal moves the save counter ahead of the one the
+ * escrow recorded (2^28), and how many saves a game may have made over a save
+ * on either side of it for WT_INVENTORY_HISTORY to tell which (2^27): past
+ * that it proves nothing and the escrow blocks. 134 million saves cannot be
+ * made between an interrupted companion offer and the next visit in practice
+ * (one save takes seconds), and no lineage can wrap into the other range:
+ * counters above WT_ABANDON_LIMIT are never moved, and their escrows never
+ * abandoned or taken as removed by the counter. */
+#define WT_ABANDON_STEP UINT32_C(0x10000000)
+#define WT_ABANDON_SAVES UINT32_C(0x8000000)
+#define WT_ABANDON_LIMIT (UINT32_C(0xFFFFFFFF) - 2 * WT_ABANDON_STEP)
+/* WT_INVENTORY_HISTORY's answers. The companion's removal writes the save
+ * counter (the one the game compares to pick its copies and adds one to at
+ * every save) WT_ABANDON_STEP past the one the escrow recorded, so the
+ * counter tells which save a game saved over. */
+enum WtEscrowHistory {
+    /* Neither proved (an older copy, a counter between the two ranges, near
+     * the top of its range, or a save unchanged but neither inventory). */
+    WT_HISTORY_UNPROVEN = -1,
+    /* The escrow's own save, or one a game saved over it before the removal
+     * with the offer still in the party exactly as offered: REMOVE takes it. */
+    WT_HISTORY_UNCHANGED = 0,
+    /* A game saved over the save before the removal, and the offer is not
+     * where REMOVE takes it: play changed, moved, released or traded it. */
+    WT_HISTORY_LEFT = 1,
+    /* The save descends from the removal: removed, verified as it is (REMOVE
+     * never runs again: it could take a Pokémon received since). */
+    WT_HISTORY_REMOVED = 2,
+    /* Exactly the recorded removal (a game's or an earlier writer's), with a
+     * counter that proves nothing: also taken as removed, never as left. */
+    WT_HISTORY_AFTER = 3
+};
+
+/* An ESCROW entry's true inventory hashes (masked in the journal for the
+ * companion's own escrows): 1 for the companion's escrow, 0 for any other,
+ * -1 on bad arguments. For tests and tools. */
+int WtEngine_EscrowInventories(const WtJournalEntry *, WtJournalHash, unsigned char before[32],
+                               unsigned char after[32]);
+#endif
 
 /* PREPARE only computes checked images/locators/hashes in the candidate entry.
  * REMOVE/RECEIVE/RESTORE accept only the recorded exact pre/post inventory;
@@ -69,12 +126,18 @@ void WtEngine_Close(WtEngine *);
 int WtEngine_Enroll(WtEngine *, uint32_t build);
 int WtEngine_Deposit(WtEngine *, unsigned slot);
 /* Zero selects the recovery request. Pending mutation bytes always take
- * precedence. Returned frame belongs to the engine and contains a credential. */
+ * precedence. Returned frame belongs to the engine and contains a credential.
+ * With WT_ABANDON_UNSENT, an escrow REMOVE finds kept is never submitted: the
+ * request is a Cancel of a trade nobody holds at the Submit's counter, and the
+ * escrow returns to IDLE, the save untouched, only when the server rejects it
+ * NOT_FOUND at the next counter, having used the counter, so no copy's Submit
+ * at it can be accepted later. Any other answer, but a retry, blocks. */
 int WtEngine_Request(WtEngine *, unsigned operation);
 /* Finish what needs no network or randomness, before gameplay: complete an
  * interrupted deposit's removal (its Submit is sent on the next visit),
  * restore a rejected offer, and apply a collected delivery. 1 keeps a delivery or return in the journal
- * while storage is full. Everything else waits for the next visit. */
+ * while storage is full. WT_INVENTORY_KEPT (WT_ABANDON_UNSENT) leaves an
+ * escrow whose offer a stock game changed for the next visit. Everything else waits for the next visit. */
 int WtEngine_Settle(WtEngine *);
 /* The exact outstanding frame binds the raw reply. HTTP/TLS success alone
  * cannot advance the journal. A positive return retains a pending operation,

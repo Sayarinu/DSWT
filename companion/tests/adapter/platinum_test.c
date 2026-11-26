@@ -185,9 +185,10 @@ static void ShiftDownAndRestore(void)
             assert(memcmp(FxImageParty(&image, 5) + 8, kEmptyBlocks, 8) == 0);
             assert(memcmp(FxImageParty(&image, 5) + 136, kEmptyBlocks, 8) == 0);
         }
-        /* Both copies hold the removal, written twice the way the game saves. */
-        assert(image.globalCounter == 13 && image.blockCounters[0] == 23 && image.blockCounters[1] == 33);
-        assert(entry.globalCounter == 13 && entry.generalCounter == 23 && entry.boxCounter == 33);
+        /* Both copies hold the removal, written twice the way the game saves,
+         * the global counter moved WT_ABANDON_STEP ahead (LUNE-902). */
+        assert(image.globalCounter == 11 + WT_ABANDON_STEP + 1 && image.blockCounters[0] == 23 && image.blockCounters[1] == 33);
+        assert(entry.globalCounter == 11 + WT_ABANDON_STEP + 1 && entry.generalCounter == 23 && entry.boxCounter == 33);
         assert(CpSaveImage_Verify(&image, &cpFile, entry.inventoryAfter) == CP_SAVE_OK);
         Reload();
         assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK && memcmp(digest, entry.inventoryAfter, 32) == 0);
@@ -203,7 +204,7 @@ static void ShiftDownAndRestore(void)
         Reload();
         assert(CpSaveImage_Hash(&image, digest) == CP_SAVE_OK && memcmp(digest, entry.inventoryBefore, 32) == 0);
         assert(memcmp(CpSaveImage_Block(&image, 0) + FX_PARTY, party, sizeof(party)) == 0);
-        assert(entry.globalCounter == 15 && image.globalCounter == 15);
+        assert(entry.globalCounter == 11 + WT_ABANDON_STEP + 3 && image.globalCounter == 11 + WT_ABANDON_STEP + 3);
         /* Restored before; a replay finds it done. */
         assert(Step(WT_INVENTORY_PREPARE_RESTORE, &entry, slot) == 0);
         writes = file.writes;
