@@ -3,7 +3,7 @@
 
 /* Virtual, read-only capability page supplied by compatible hosts. Each
  * game family has its own address that the game never reads or writes
- * (persistence_address in protocol/save-layout*.json), so the page stays
+ * (persistence_address in client/core/save-layouts/save-layout*.json), so the page stays
  * untouched in the actual save file. */
 #define WT_PERSISTENCE_ADDRESS_GEN4 0x2FF00
 #define WT_PERSISTENCE_ADDRESS_BW 0x47FC0

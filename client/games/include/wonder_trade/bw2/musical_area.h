@@ -2,7 +2,7 @@
 #define WONDER_TRADE_BW2_MUSICAL_AREA_H
 
 /* Black 2 and White 2 keep the journal banks in the musical distribution save
- * (protocol/save-layout-b2w2.json). A save that once stored a downloaded
+ * (client/core/save-layouts/save-layout-b2w2.json). A save that once stored a downloaded
  * musical can still hold its data there after the game released the area.
  * The journal is created only in two blank banks, so leftover data is erased
  * first: after the release is durable, one bank at a time. A journal always

@@ -13,7 +13,7 @@ static const CpJournalArea *Area(const CpJournalStore *store)
     return store->area ? store->area : &CpJournalArea_Gen4;
 }
 
-/* Record offsets (record_sections in protocol/save-layout.json). */
+/* Record offsets (record_sections in client/core/save-layouts/save-layout.json). */
 enum {
     REC_PHASE = 6, REC_GENERATION = 16, REC_CREDENTIAL = 48, REC_ENROLLMENT_ID = 80,
     REC_NEXT_COUNTER = 96, REC_PENDING = 1952, REC_RESERVED = 2216, REC_DIGEST = 4060,

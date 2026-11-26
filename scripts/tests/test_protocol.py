@@ -170,9 +170,9 @@ class WireTests(unittest.TestCase):
 
 
 class SaveLayoutTests(unittest.TestCase):
-    LAYOUTS = (("protocol/save-layout.json", "client/games/upstream.json"),
-               ("protocol/save-layout-hgss.json", "client/games/upstream-pokeheartgold.json"),
-               ("protocol/save-layout-dp.json", "client/games/upstream-pokediamond.json"))
+    LAYOUTS = (("client/core/save-layouts/save-layout.json", "client/games/upstream.json"),
+               ("client/core/save-layouts/save-layout-hgss.json", "client/games/upstream-pokeheartgold.json"),
+               ("client/core/save-layouts/save-layout-dp.json", "client/games/upstream-pokediamond.json"))
 
     def test_journal_erase_sectors_do_not_overlap_any_retail_block(self):
         for path, pin in self.LAYOUTS:
@@ -182,7 +182,7 @@ class SaveLayoutTests(unittest.TestCase):
 
     def test_journal_codec_names_every_record_section(self):
         source = (ROOT / "client/core/src/wonder_trade/journal.c").read_text()
-        layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
+        layout = json.loads((ROOT / "client/core/save-layouts/save-layout.json").read_text())
         body = re.search(r"enum \{\n(    WT_REC_.*?)\n\};", source, re.S).group(1)
         offsets = {name: int(value) for name, value in re.findall(r"(WT_REC_\w+) = (\d+)", body)}
         values = list(offsets.values())
@@ -212,7 +212,7 @@ class SaveLayoutTests(unittest.TestCase):
 
     def test_hgss_layout_matches_the_pinned_decompilation(self):
         """Values derived from pokeheartgold's save.c/save_arrays.c and the linked size functions."""
-        layout = json.loads((ROOT / "protocol/save-layout-hgss.json").read_text())
+        layout = json.loads((ROOT / "client/core/save-layouts/save-layout-hgss.json").read_text())
         regions = {region["name"]: (region["offset"], region["size"]) for region in layout["retail_regions_per_half"]}
         # Two slots: general then PC boxes, each with a 16-byte footer, aligned to 0x100.
         self.assertEqual(regions["general"], (0, 0xF628))
@@ -228,7 +228,7 @@ class SaveLayoutTests(unittest.TestCase):
 
     def test_dp_layout_matches_the_pinned_decompilation(self):
         """Values derived from pokediamond's save.c/save_arrays.c and the linked size functions."""
-        layout = json.loads((ROOT / "protocol/save-layout-dp.json").read_text())
+        layout = json.loads((ROOT / "client/core/save-layouts/save-layout-dp.json").read_text())
         regions = {region["name"]: (region["offset"], region["size"]) for region in layout["retail_regions_per_half"]}
         # The 36 size functions of UNK_020EE700, identical in the Diamond and Pearl ARM9s.
         sizes = [0x5C, 0x2C, 0x590, 0x774, 0x3AC, 0xE8, 0xA0, 0x13C, 0x1E0, 0x880, 0x74C, 0x1400,
@@ -278,7 +278,7 @@ class SaveLayoutTests(unittest.TestCase):
 class GenVSaveLayoutTests(unittest.TestCase):
     """Black/White and Black 2/White 2: the journal shares the musical distribution area."""
 
-    LAYOUTS = ("protocol/save-layout-bw.json", "protocol/save-layout-b2w2.json")
+    LAYOUTS = ("client/core/save-layouts/save-layout-bw.json", "client/core/save-layouts/save-layout-b2w2.json")
 
     @staticmethod
     def used(block_size, blocks=1, end=None):
@@ -296,7 +296,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
         """Offsets from pokebw2's save_table.c and aletheia's _MainSaveDesc/_ExtraSaveDescs (0x0209D938);
         used sizes from the linked size functions."""
         regions = {r["name"]: (r["offset"], r["size"], r["used"])
-                   for r in self.load("protocol/save-layout-b2w2.json")["retail_regions"]}
+                   for r in self.load("client/core/save-layouts/save-layout-b2w2.json")["retail_regions"]}
         self.assertEqual(regions["main"], (0, 0x26000, self.used(0, 73, 0x25F00)))
         self.assertEqual(regions["main_backup"], (0x26000, 0x26000, self.used(0, 73, 0x25F00)))
         self.assertEqual(regions["musical_distribution"], (0x55800, 0x18000, self.used(0x17C00)))
@@ -305,7 +305,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
         self.assertEqual(regions["extra_block_20"], (0x7DC00, 0x400, self.used(0xC8)))
         self.assertEqual(regions["dream_radar"][:2], (0x7F000, 0x98))
         regions = {r["name"]: (r["offset"], r["size"], r["used"])
-                   for r in self.load("protocol/save-layout-bw.json")["retail_regions"]}
+                   for r in self.load("client/core/save-layouts/save-layout-bw.json")["retail_regions"]}
         self.assertEqual(regions["main"], (0, 0x24000, self.used(0, 69, 0x23F00)))
         self.assertEqual(regions["battle_video_0"][:2], (0x48000, 0x2000))
         self.assertEqual(regions["battle_video_0_backup"][:2], (0x4A000, 0x2000))
@@ -313,7 +313,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
         self.assertEqual(regions["save_outside"][:2], (0x7F800, 0x800))
 
     def test_journal_and_persistence_page_avoid_every_other_save_area(self):
-        platinum = self.load("protocol/save-layout.json")
+        platinum = self.load("client/core/save-layouts/save-layout.json")
         for path in self.LAYOUTS:
             with self.subTest(layout=path):
                 layout = self.load(path)
@@ -345,7 +345,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
                         self.assertFalse(start < write["offset"] + write["size"] and write["offset"] < end, write)
 
     def test_bw_journal_bank_replaces_the_musical_footer_with_reserved_zero_bytes(self):
-        layout = self.load("protocol/save-layout-bw.json")
+        layout = self.load("client/core/save-layouts/save-layout-bw.json")
         host = next(r for r in layout["retail_regions"] if r["name"] == "musical_distribution")
         footer = host["offset"] + host["used"] - layout["save_footer"]["size"]
         bank = next(b for b in layout["journal_banks"] if b <= footer < b + layout["bank_reserved_size"])
@@ -357,7 +357,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
         """wonder_trade/game_family.h and persistence.h take their save values from the layout files."""
         persistence = (ROOT / "client/core/include/wonder_trade/persistence.h").read_text()
         family = (ROOT / "client/core/include/wonder_trade/game_family.h").read_text()
-        for path, name in (("protocol/save-layout-bw.json", "BW"), ("protocol/save-layout-b2w2.json", "B2W2")):
+        for path, name in (("client/core/save-layouts/save-layout-bw.json", "BW"), ("client/core/save-layouts/save-layout-b2w2.json", "B2W2")):
             with self.subTest(layout=path):
                 layout = self.load(path)
                 address = re.search(rf"#define WT_PERSISTENCE_ADDRESS_{name} (0x[0-9A-F]+)", persistence).group(1)
@@ -369,7 +369,7 @@ class GenVSaveLayoutTests(unittest.TestCase):
             self.assertEqual(int(re.search(r"WT_GAME_BANK_RESERVED_SIZE (0x[0-9a-fA-F]+)", gen5).group(1), 16),
                              layout["bank_reserved_size"])
         gen4 = family[family.index("WT_GAME_FAMILY == WT_FAMILY_GEN4"):family.index("#elif")]
-        for path in ("protocol/save-layout.json", "protocol/save-layout-hgss.json", "protocol/save-layout-dp.json"):
+        for path in ("client/core/save-layouts/save-layout.json", "client/core/save-layouts/save-layout-hgss.json", "client/core/save-layouts/save-layout-dp.json"):
             layout = self.load(path)
             self.assertEqual(int(re.search(r"WT_GAME_SAVE_MAGIC (0x[0-9a-fA-F]+)", gen4).group(1), 16),
                              layout["footer_magic"]["international"])

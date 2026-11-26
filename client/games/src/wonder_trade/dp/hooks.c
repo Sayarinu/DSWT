@@ -85,7 +85,7 @@ extern void sub_02020074(void *sprite, const VecFx32 *scale, int mode);
 #endif
 
 /* Diamond and Pearl never use the 64 KiB flash sectors at 0x30000 and 0x70000
- * (protocol/save-layout-dp.json). SaveDetectFlash in src/save.c accepts a
+ * (client/core/save-layouts/save-layout-dp.json). SaveDetectFlash in src/save.c accepts a
  * 4 Mbit or 2 Mbit flash; only the 4 Mbit one has room for the journal. The
  * DMA channel (2) and power mode (1) are those the GTS starts Wi-Fi with
  * (ov80_02236870 calling ov04_021DDEE0). */

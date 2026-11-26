@@ -15,7 +15,7 @@
 /* The main save (SAVEDATA_BuildLayout, arm9/backup_system.c): two copies of
  * 0x24000 bytes, the backup at 0x24000; each holds the blocks, each followed
  * by a {count, CRC} footer, then a CRC of each block and the 16-byte footer
- * (protocol/save-layout-bw.json). */
+ * (client/core/save-layouts/save-layout-bw.json). */
 #define MAIN_COPY 0x0
 #define BACKUP_COPY 0x24000
 #define SAVE_USED 0x23F9C

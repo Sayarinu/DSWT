@@ -12,7 +12,7 @@
 #endif
 
 /* The journal banks lie in the musical distribution save, which the
- * integration patch stops the game from using (protocol/save-layout-bw.json).
+ * integration patch stops the game from using (client/core/save-layouts/save-layout-bw.json).
  * Wi-Fi takes DMA channel 2 and power mode 1, as the game's own
  * DWC_InitInetEx call does. */
 const WtGameConfig gWtGameConfig = {

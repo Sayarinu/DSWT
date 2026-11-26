@@ -1,5 +1,5 @@
 /* LUNE-881: the Black/White and Black 2/White 2 journal banks in the musical
- * distribution save (protocol/save-layout-bw.json, -b2w2 journal_banks):
+ * distribution save (client/core/save-layouts/save-layout-bw.json, -b2w2 journal_banks):
  * detection, a musical's leftovers erased before the journal and never
  * written over, a cut erase that repeats, and the Generation V journal. */
 #include "core/journal_family.h"

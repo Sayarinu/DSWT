@@ -80,7 +80,7 @@ class Target(platinum.Target):
         country, self.language_name, self.text_key, deltas = LANGUAGES[language]
         self.variant_id = f"{game}-{country}"
         self.deltas = [RETAIL / name for name in deltas]
-        layout = json.loads((ROOT / "protocol/save-layout-hgss.json").read_text())
+        layout = json.loads((ROOT / "client/core/save-layouts/save-layout-hgss.json").read_text())
         korean = self.variant_id.endswith(layout["korean_target_suffix"])
         self.save_magic = layout["footer_magic"]["korean" if korean else "international"]
         self.workspace, self.pristine, self.work = (Path(p).resolve() for p in (workspace, pristine, work))

@@ -15,7 +15,7 @@ struct WtGame {
 };
 
 /* Nonzero when the running game's save layout is the one recorded in
- * protocol/save-layout-dp.json, with both retail blocks and every extra chunk
+ * client/core/save-layouts/save-layout-dp.json, with both retail blocks and every extra chunk
  * ending before the first journal bank. Anything else is never written. */
 int WtGameSave_LayoutKnown(const SaveData *);
 /* Nonzero once the adventure has been saved to flash; until then the journal

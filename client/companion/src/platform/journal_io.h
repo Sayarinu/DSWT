@@ -5,7 +5,7 @@
 #include "wonder_trade/journal.h"
 
 /* The journal banks in a Generation IV save (journal_banks and
- * bank_reserved_size in protocol/save-layout.json, -dp and -hgss): each bank
+ * bank_reserved_size in client/core/save-layouts/save-layout.json, -dp and -hgss): each bank
  * is a 4 KiB record followed by blank bytes up to 64 KiB. */
 #define CP_JOURNAL_BANK_0 0x30000u
 #define CP_JOURNAL_BANK_1 0x70000u
@@ -13,7 +13,7 @@
 
 /* Where a game keeps its journal banks, and the flash reserved from each
  * bank's start. Black/White and Black 2/White 2 keep two adjacent 4 KiB banks
- * in the musical distribution save (protocol/save-layout-bw.json, -b2w2). */
+ * in the musical distribution save (client/core/save-layouts/save-layout-bw.json, -b2w2). */
 typedef struct CpJournalArea {
     uint32_t bank[2], reserved;
 } CpJournalArea;

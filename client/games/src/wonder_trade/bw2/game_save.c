@@ -31,7 +31,7 @@ u32 SaveData_GetSaveCount(SaveData *sv);
 /* The main save (src/system/save_table.c): two copies of SAVE_SIZE bytes, the
  * backup at 0x26000; each holds the blocks, each followed by a {count, CRC}
  * footer, then a CRC of each block and the 16-byte footer
- * (protocol/save-layout-b2w2.json). */
+ * (client/core/save-layouts/save-layout-b2w2.json). */
 #define MAIN_COPY 0x0
 #define BACKUP_COPY 0x26000
 #define SAVE_USED 0x25FA4

@@ -26,7 +26,7 @@ static const uint16_t kBlack2White2Blocks[73] = {
     0x498, 0x60, 0xFC, 0x3E4, 0xF0
 };
 
-/* protocol/save-layout-bw.json and -b2w2.json; the block IDs are aletheia's
+/* client/core/save-layouts/save-layout-bw.json and -b2w2.json; the block IDs are aletheia's
  * and pokebw2's (include/save/save_control.h SAVE_BLOCK_*). The trainer block
  * (SystemData, TrainerDataSave) holds the intro flag at 0x2C and the markers
  * from 0x30: 10 in Black/White, then their counts; 22 in Black 2/White 2. The

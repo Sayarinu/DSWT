@@ -15,7 +15,7 @@ struct WtGame {
 };
 
 /* Nonzero when the running game's save layout is the one recorded in
- * protocol/save-layout-hgss.json, with every retail block and extra chunk
+ * client/core/save-layouts/save-layout-hgss.json, with every retail block and extra chunk
  * ending before the first journal bank. Anything else is never written. */
 int WtGameSave_LayoutKnown(const SaveData *);
 /* FALSE until the player has saved this game once. A deposit first writes

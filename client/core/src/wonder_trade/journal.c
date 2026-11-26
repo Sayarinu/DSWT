@@ -5,7 +5,7 @@
 
 #include <string.h>
 
-/* Byte offsets of the 4 KiB journal record (protocol/save-layout.json,
+/* Byte offsets of the 4 KiB journal record (client/core/save-layouts/save-layout.json,
  * record_sections). Sections: header 0, identity 32, progress 96,
  * transaction 160, pokemon_images 416, transport_private_state 1440,
  * pending_request 1952, reserved_zero 2216, sha256 4060, commit_tag 4092.

@@ -25,7 +25,7 @@ typedef struct Game {
     uint32_t musicalAddress, musicalUsed, musicalBlock;
 } Game;
 
-/* protocol/save-layout-bw.json and -b2w2.json: main "used" and the backup's
+/* client/core/save-layouts/save-layout-bw.json and -b2w2.json: main "used" and the backup's
  * offset; the musical distribution region; the blocks end where the CRC
  * table begins. */
 static const Game games[2] = {

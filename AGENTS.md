@@ -19,12 +19,12 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 
 | Path | Contents |
 | --- | --- |
-| `client/core/` | Shared DS client code and native tests |
+| `client/core/` | Shared DS client code, save layouts and native tests |
 | `client/games/` | Game adapters, integration patches, resources and upstream pins |
 | `client/companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build-companion.sh` on the client core, with host tests in `client/companion/tests/` |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
-| `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
+| `protocol/` | Wonder Trade v1 wire contract shared by the DS and server |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
 | `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit, ROM and companion builder images |

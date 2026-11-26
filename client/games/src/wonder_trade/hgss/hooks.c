@@ -29,7 +29,7 @@ extern void sub_02034DE0(void);
 #endif
 
 /* HeartGold and SoulSilver never use the 64 KiB flash sectors at 0x30000 and
- * 0x70000 (protocol/save-layout-hgss.json). Their carts' infrared flash
+ * 0x70000 (client/core/save-layouts/save-layout-hgss.json). Their carts' infrared flash
  * identifies as FLASH_4MBITS_EX; the game falls back to FLASH_4MBITS. */
 const WtGameConfig gWtGameConfig = {
     { 0x30000, 0x70000 },

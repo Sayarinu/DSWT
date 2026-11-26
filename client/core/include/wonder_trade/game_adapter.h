@@ -58,7 +58,7 @@ typedef struct WtReceivedPokemon {
 typedef struct WtGameConfig {
     /* Flash addresses of the two 4 KiB journal banks, each the start of
      * WT_GAME_BANK_RESERVED_SIZE bytes of the 4 Mbit save flash that the game
-     * leaves to the journal (protocol/save-layout*.json journal_banks). */
+     * leaves to the journal (client/core/save-layouts/save-layout*.json journal_banks). */
     uint32_t journalBank[2];
     /* Wi-Fi access point DMA channel and power mode the game's SDK use expects. */
     uint8_t wifiDma, wifiPowerMode;

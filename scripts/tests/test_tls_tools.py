@@ -35,7 +35,7 @@ def synthetic_save(magic=0x20060623):
     return bytes(data)
 
 
-# Generation V saves (protocol/save-layout-bw.json, protocol/save-layout-b2w2.json): the
+# Generation V saves (client/core/save-layouts/save-layout-bw.json, client/core/save-layouts/save-layout-b2w2.json): the
 # main copies, the end of their blocks (where the CRC table starts), the block count,
 # the trainer data block's size, the musical distribution area, the journal banks and the targets.
 GEN_V = {

@@ -5,7 +5,7 @@
 
 /* The game family one build of the core serves. Each ROM build compiles the
  * core for a single family; Generation IV builds need not define WT_GAME_FAMILY.
- * Save values follow protocol/save-layout*.json. */
+ * Save values follow client/core/save-layouts/save-layout*.json. */
 #define WT_FAMILY_GEN4 4 /* Diamond, Pearl, Platinum, HeartGold and SoulSilver */
 #define WT_FAMILY_BW 5   /* Black and White */
 #define WT_FAMILY_B2W2 6 /* Black 2 and White 2 */
