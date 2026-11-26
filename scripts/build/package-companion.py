@@ -26,9 +26,7 @@ https://github.com/Sayarinu/DSWT/wiki/DS-Companion
 """
 
 
-def package(version, build, output):
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?", version):
-        raise ValueError("Use a release version such as 0.4.1")
+def checked_rom(build):
     data = (build / "dswt-companion.nds").read_bytes()
     if len(data) < 0x4000 or data[0x12] != 0x02 or not data[0x1C] & 1:
         raise ValueError("ROM must support both DS and DSi and enable DSi mode")
@@ -38,6 +36,13 @@ def package(version, build, output):
         if offset < 0x4000 or size == 0 or offset + size > len(data):
             raise ValueError(f"Missing or truncated {name} section")
     print("DS/DSi header and payload checks passed")
+    return data
+
+
+def package(version, build, output):
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?", version):
+        raise ValueError("Use a release version such as 0.4.1")
+    data = checked_rom(build)
     members = {"dswt-companion.nds": data, "INSTALL.txt": INSTALL.encode(),
                "NOTICE": (ROOT / "NOTICE").read_bytes(), "LICENSE": (ROOT / "LICENSE").read_bytes(),
                "font-manifest.json": (build / "build/text/font-manifest.json").read_bytes()}
@@ -55,11 +60,16 @@ def package(version, build, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--version")
+    action.add_argument("--check", action="store_true")
     parser.add_argument("--build", type=Path, default=ROOT / "game/companion")
     parser.add_argument("--output", type=Path, default=ROOT / "game/apps")
     args = parser.parse_args()
     try:
-        print(package(args.version, args.build, args.output))
+        if args.check:
+            checked_rom(args.build)
+        else:
+            print(package(args.version, args.build, args.output))
     except (OSError, ValueError) as error:
         parser.exit(1, f"Cannot package companion: {error}\n")

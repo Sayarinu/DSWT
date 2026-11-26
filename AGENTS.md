@@ -57,7 +57,7 @@ opening it. Commands run from the repository root with Python 3.12 or newer and
 Docker. Workflows are in `.github/workflows/`.
 
 ```sh
-# Validate source inputs
+# Validate source inputs, client build and port tools, service tooling and CI policy, and patch and release tools
 for suite in scripts/build/tests scripts/prepare/tests scripts/port/tests client/core/tests/contracts client/games/tests deploy/__tests__ validator/__tests__; do
   python3 -m unittest discover -s "$suite"
 done
@@ -86,23 +86,8 @@ cmake -S client/companion/tests -B game/companion-tests
 cmake --build game/companion-tests --parallel 2
 ctest --test-dir game/companion-tests --output-on-failure
 CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
-docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
-import os
-from pathlib import Path
-import struct
-import subprocess
-
-rom = Path("/out/dswt-companion.nds")
-subprocess.run([os.environ["BLOCKSDS"] + "/tools/ndstool/ndstool", "-i", str(rom)], check=True)
-data = rom.read_bytes()
-assert data[0x12] == 0x02, "ROM must support both DS and DSi"
-assert data[0x1C] & 1, "TWL flag must enable DSi mode"
-for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
-    offset = struct.unpack_from("<I", data, base)[0]
-    size = struct.unpack_from("<I", data, base + 12)[0]
-    assert offset >= 0x4000 and size > 0 and offset + size <= len(data), f"Missing or truncated {name} section"
-print("DS/DSi header and payload checks passed")
-PY
+docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+python3 scripts/build/package-companion.py --check
 
 # Build and test isolated legality validator
 docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-tests .

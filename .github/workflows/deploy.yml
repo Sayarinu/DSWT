@@ -74,49 +74,7 @@ jobs:
           DSWT_KNOWN_HOSTS: ${{ secrets.DSWT_KNOWN_HOSTS }}
           DSWT_SSH_KEY: ${{ secrets.DSWT_SSH_KEY }}
         run: |
-          umask 077
-          python3 - <<'PYTHON'
-          import hashlib, json, os
-          from pathlib import Path
-
-          def secret(name):
-              value = os.environ.get(name, "").strip()
-              if not value:
-                  raise SystemExit(f"The production environment has no {name}")
-              return value
-
-          # rclone's R2 secret is derived from DSWT_BACKUPS_KEY, so GitHub cannot know to hide it.
-          print("::add-mask::" + hashlib.sha256(secret("DSWT_BACKUPS_KEY").encode()).hexdigest())
-          key = secret("DSWT_SSH_KEY")
-          for line in key.splitlines():
-              if line.strip() and not line.startswith("-----"):
-                  print("::add-mask::" + line.strip())
-
-          lines = []
-          for name in ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID",
-                       "DSWT_BACKUPS_KEY"):
-              value = secret(name)
-              if "\n" in value or "\r" in value:
-                  raise SystemExit(f"{name} must be a single line")
-              lines.append(f"{name}={value}\n")
-          env = Path(".env")
-          env.write_text("".join(lines))
-          env.chmod(0o600)
-
-          profile = secret("DSWT_CONNECTION_JSON")
-          if not {"hostname", "ipv4", "port", "current_spki_sha256"} <= json.loads(profile).keys():
-              raise SystemExit("DSWT_CONNECTION_JSON is not a ROM profile")
-          tls = Path("game/dswt-production/tls")
-          tls.mkdir(mode=0o700, parents=True)
-          (tls / "connection.json").write_text(profile + "\n")
-
-          ssh = Path(os.environ["RUNNER_TEMP"]) / "dswt-deploy"
-          ssh.mkdir(mode=0o700)
-          (ssh / "id_ed25519").write_text(key + "\n")
-          (ssh / "known_hosts").write_text(secret("DSWT_KNOWN_HOSTS") + "\n")
-          for path in ssh.iterdir():
-              path.chmod(0o600)
-          PYTHON
+          python3 deploy/dswt.py write-credentials
           test -z "$(git status --porcelain)"
       - name: Deploy
         env:

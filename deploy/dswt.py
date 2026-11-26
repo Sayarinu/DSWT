@@ -423,9 +423,49 @@ def source_version():
     return git("rev-parse", "--short=12", "HEAD")
 
 
+def write_credentials(root, runner_temp):
+    def secret(name):
+        value = os.environ.get(name, "").strip()
+        if not value:
+            raise ValueError(f"The production environment has no {name}")
+        return value
+
+    # rclone's R2 secret is derived from DSWT_BACKUPS_KEY, so GitHub cannot know to hide it.
+    print("::add-mask::" + hashlib.sha256(secret("DSWT_BACKUPS_KEY").encode()).hexdigest())
+    key = secret("DSWT_SSH_KEY")
+    for line in key.splitlines():
+        if line.strip() and not line.startswith("-----"):
+            print("::add-mask::" + line.strip())
+
+    lines = []
+    for name in ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID",
+                 "DSWT_BACKUPS_KEY"):
+        value = secret(name)
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"{name} must be a single line")
+        lines.append(f"{name}={value}\n")
+    env = root / ".env"
+    env.write_text("".join(lines))
+    env.chmod(0o600)
+
+    profile = secret("DSWT_CONNECTION_JSON")
+    if not {"hostname", "ipv4", "port", "current_spki_sha256"} <= json.loads(profile).keys():
+        raise ValueError("DSWT_CONNECTION_JSON is not a ROM profile")
+    tls = root / "game/dswt-production/tls"
+    tls.mkdir(mode=0o700, parents=True)
+    (tls / "connection.json").write_text(profile + "\n")
+
+    ssh = runner_temp / "dswt-deploy"
+    ssh.mkdir(mode=0o700)
+    (ssh / "id_ed25519").write_text(key + "\n")
+    (ssh / "known_hosts").write_text(secret("DSWT_KNOWN_HOSTS") + "\n")
+    for path in ssh.iterdir():
+        path.chmod(0o600)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("keys", "deploy", "verify", "tidy", "restore-check", "terraform"))
+    parser.add_argument("action", choices=("write-credentials", "keys", "deploy", "verify", "tidy", "restore-check", "terraform"))
     parser.add_argument("--hostname", help="keys: the public TLS hostname")
     parser.add_argument("--ipv4", help="keys: the server address built into the ROM")
     parser.add_argument("--ssh-key", type=Path, default=Path.home() / ".ssh/dswt")
@@ -438,6 +478,9 @@ def main():
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
     os.umask(0o077)
     try:
+        if args.action == "write-credentials":
+            write_credentials(ROOT, Path(os.environ["RUNNER_TEMP"]))
+            return 0
         if args.action == "terraform":
             return terraform(extra)
         if args.action == "keys":

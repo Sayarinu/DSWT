@@ -17,7 +17,8 @@ RELEASE_INPUTS = {"inputs": {"version": {"description": "Release version, such a
                              "companion": {"description": "Attach the DS Companion (requires hardware testing and translation review)",
                                            "type": "boolean", "default": "false"}}}
 RELEASE_WRITERS = ("fetch", "publish")
-RELEASE_BUILDERS = ("linux", "macos", "windows", "companion")
+RELEASE_BUILDERS = ("patcher", "companion")
+PATCHER_RUNNERS = {"linux": "ubuntu-22.04", "macos": "macos-15", "windows": "windows-2025"}
 MAIN_ONLY = "github.repository == 'Sayarinu/DSWT' && github.ref == 'refs/heads/main'"
 DEPLOY_SECRETS = ("DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID", "DSWT_BACKUPS_KEY",
                   "DSWT_CONNECTION_JSON", "DSWT_KNOWN_HOSTS", "DSWT_SSH_KEY", "DSWT_TAILNET_HOST")
@@ -113,6 +114,8 @@ def workflow(data):
             if action is None:
                 require(isinstance(step.get("run"), str), "Step needs run or uses")
                 continue
+            if isinstance(action, str) and re.fullmatch(r"docker://ghcr\.io/gitleaks/gitleaks@sha256:[0-9a-f]{64}", action):
+                continue
             require(isinstance(action, str) and re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-fA-F]{40}", action),
                     "Pin every action to a full commit")
             require(not action.lower().startswith("tailscale/"), "Only the deploy job may join the tailnet")
@@ -178,6 +181,11 @@ def releaser(data):
     # What remains must satisfy every contribution rule, without the exceptions granted here.
     reviewed = copy.deepcopy(data)
     reviewed["on"] = "workflow_dispatch"
+    patcher = reviewed["jobs"]["patcher"]
+    matrix = [{"platform": platform, "runner": runner} for platform, runner in PATCHER_RUNNERS.items()]
+    require(patcher.get("strategy") == {"matrix": {"include": matrix}}
+            and patcher.get("runs-on") == "${{ matrix.runner }}", "Build only on the reviewed hosted runners")
+    # The matrix is literal and complete. Check the rest of the job under each runner.
     for name in RELEASE_WRITERS:
         job = reviewed["jobs"][name]
         del job["permissions"]
@@ -185,7 +193,9 @@ def releaser(data):
             if isinstance(step, dict) and isinstance(step.get("env"), dict) and step["env"].get("GH_TOKEN") == "${{ github.token }}":
                 require("run" in step, "Only commands may use the release token")
                 del step["env"]["GH_TOKEN"]
-    workflow(reviewed)
+    for runner in PATCHER_RUNNERS.values():
+        patcher["runs-on"] = runner
+        workflow(reviewed)
 
 
 def deployer(data):
@@ -249,6 +259,24 @@ def audit(root):
         data = path.read_bytes()
         require(len(data) <= 256 * 1024, "Workflow too large to review")
         loaded = yaml.load(data, Loader=WorkflowLoader)
+        if path.name == "validate.yml":
+            # Review the composite's actions under the same restrictions as the caller.
+            action = ".github/actions/build-image/action.yml"
+            content = (root / action).read_bytes()
+            composite = yaml.load(content, Loader=WorkflowLoader)
+            require(composite["runs"].get("using") == "composite", "Image builds use a composite action")
+            files[action] = hashlib.sha256(content).hexdigest()
+            for job in loaded["jobs"].values():
+                steps = []
+                for step in job["steps"]:
+                    if step.get("uses") == "./.github/actions/build-image":
+                        require(set(step) == {"name", "uses", "with"} and all(
+                            isinstance(value, str) and "${{" not in value for value in step["with"].values()
+                        ), "Local image builds take only literal inputs")
+                        steps.extend(composite["runs"]["steps"])
+                    else:
+                        steps.append(step)
+                job["steps"] = steps
         if path.name == PUBLISHER:
             publisher(loaded)  # Never a required PR check: it does not run on pull requests.
         elif path.name == DEPLOYER:

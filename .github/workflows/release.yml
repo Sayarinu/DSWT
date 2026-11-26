@@ -44,10 +44,16 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  linux:
-    name: Build the Linux patcher
+  patcher:
+    name: Build the patcher
     needs: fetch
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - {platform: linux, runner: ubuntu-22.04}
+          - {platform: macos, runner: macos-15}
+          - {platform: windows, runner: windows-2025}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - name: Check out source
@@ -63,73 +69,9 @@ jobs:
         with:
           name: patch-archive
           path: game/release
-      - name: Build, self-test and package
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          sudo apt-get update && sudo apt-get install --yes --no-install-recommends libtk8.6
-          python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
-          python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
-      - name: Keep the app
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: app-linux
-          path: game/apps/*.zip
-          if-no-files-found: error
-          retention-days: 7
-
-  macos:
-    name: Build the macOS patcher
-    needs: fetch
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.13"
-      - name: Get the archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: patch-archive
-          path: game/release
-      - name: Build, self-test and package
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          python -m pip install --require-hashes --no-deps -r tools/patcher-app/requirements.txt
-          python tools/patcher-app/build_app.py --archive "game/release/dswt-$VERSION.zip" --version "$VERSION" --output game/apps
-      - name: Keep the app
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: app-macos
-          path: game/apps/*.zip
-          if-no-files-found: error
-          retention-days: 7
-
-  windows:
-    name: Build the Windows patcher
-    needs: fetch
-    runs-on: windows-2025
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.13"
-      - name: Get the archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: patch-archive
-          path: game/release
+      - name: Install Linux Tk runtime
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libtk8.6
       - name: Build, self-test and package
         shell: bash
         env:
@@ -140,7 +82,7 @@ jobs:
       - name: Keep the app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: app-windows
+          name: app-${{ matrix.platform }}
           path: game/apps/*.zip
           if-no-files-found: error
           retention-days: 7
@@ -177,7 +119,7 @@ jobs:
   publish:
     name: Publish the release
     if: github.ref == 'refs/heads/main'
-    needs: [linux, macos, windows, companion]
+    needs: [patcher, companion]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

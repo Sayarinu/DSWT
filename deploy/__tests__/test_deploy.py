@@ -61,6 +61,23 @@ class DeployTests(unittest.TestCase):
         target.run = mock.Mock(side_effect=run)
         return target
 
+    def test_write_credentials_uses_private_files_and_validates_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = {name: "test-value" for name in (
+                "DISCORD_WEBHOOK_URL", "DISCORD_ALERT_USER_ID", "DSWT_BACKUP_PASSWORD", "R2_ACCOUNT_ID",
+                "DSWT_BACKUPS_KEY", "DSWT_SSH_KEY", "DSWT_KNOWN_HOSTS")}
+            profile = {"hostname": "localhost", "ipv4": "127.0.0.1", "port": 8443, "current_spki_sha256": "a" * 64}
+            environment["DSWT_CONNECTION_JSON"] = json.dumps(profile)
+            with mock.patch.dict(os.environ, environment), mock.patch("builtins.print"):
+                dswt.write_credentials(root, root)
+            self.assertEqual(json.loads((root / "game/dswt-production/tls/connection.json").read_text()), profile)
+            for name in (".env", "dswt-deploy/id_ed25519", "dswt-deploy/known_hosts"):
+                self.assertEqual((root / name).stat().st_mode & 0o777, 0o600)
+            with mock.patch.dict(os.environ, environment | {"DSWT_CONNECTION_JSON": "{}"}), mock.patch("builtins.print"):
+                with self.assertRaisesRegex(ValueError, "not a ROM profile"):
+                    dswt.write_credentials(root, root)
+
     def test_known_hosts_makes_host_keys_strict_and_default_is_unchanged(self):
         default = dswt.Target(Path("/keys/deploy"))
         self.assertEqual(default.ssh, ["ssh", "-i", "/keys/deploy", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"])
