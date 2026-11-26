@@ -10,6 +10,10 @@ import shutil
 import tarfile
 
 
+TAR_END_BYTES = 1024
+OCI_SCHEMA = 2
+
+
 PRIVATE_SENTINEL = b"DSWT_PRIVATE_INPUT_SENTINEL"
 SOURCE = "usr/share/dswt-validator/source/"
 KEY_LABEL = rb"(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY"
@@ -141,7 +145,7 @@ class Image:
             logical_end = archive.offset
         while reader.read(1024 * 1024):
             pass
-        if reader.size - logical_end < 1024 or reader.last_nonzero >= logical_end:
+        if reader.size - logical_end < TAR_END_BYTES or reader.last_nonzero >= logical_end:
             raise ValueError("Layer tar has missing terminator or nonzero trailing data")
         if reader.key_offsets != allowed_key_offsets:
             raise ValueError("Unknown encoded private key in layer bytes")
@@ -250,7 +254,7 @@ class Archive:
             if chunk.strip(b"\0"):
                 raise ValueError("OCI tar has nonzero trailing data")
             padding += len(chunk)
-        if padding < 1024:
+        if padding < TAR_END_BYTES:
             raise ValueError("OCI tar has no complete terminator")
         if self.json_file("oci-layout") != {"imageLayoutVersion": "1.0.0"}:
             raise ValueError("Unsupported OCI layout")
@@ -328,7 +332,7 @@ class Archive:
         manifests, attestations = [], []
 
         def walk(document, descriptor=None):
-            if document.get("schemaVersion") != 2:
+            if document.get("schemaVersion") != OCI_SCHEMA:
                 raise ValueError("Unsupported OCI schema")
             if "manifests" in document:
                 for child in document["manifests"]:

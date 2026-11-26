@@ -20,6 +20,12 @@ import time
 import uuid
 
 
+from http import HTTPStatus
+
+FIRST_USER_PORT = 1024
+MAX_PORT = 65535
+
+
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = Path(__file__).with_name("compose.yaml")
 OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
@@ -42,7 +48,7 @@ def load_module(name, path):
 
 
 wire = load_module("local_stack_wire", ROOT / "protocol/wire.py")
-connection_profile = load_module("local_stack_connection", ROOT / "scripts/configure-connection.py")
+connection_profile = load_module("local_stack_connection", ROOT / "scripts/build/configure-connection.py")
 
 
 def workspace_path(value):
@@ -80,7 +86,7 @@ def save_manifest(workspace, manifest):
 
 
 def valid_port(value):
-    return type(value) is int and 1024 <= value <= 65535
+    return type(value) is int and FIRST_USER_PORT <= value <= MAX_PORT
 
 
 def listen_ipv4(value):
@@ -129,7 +135,7 @@ def initialize(workspace, port=DEFAULT_PORT, observability=None, production=Fals
     (workspace / "control").mkdir(mode=0o700)
     # Docker cannot create a nested socket mount below the read-only control bind.
     (workspace / "control/run").mkdir(mode=0o700)
-    peer = load_module("local_stack_tls_peer", ROOT / "scripts/tls-test-server.py")
+    peer = load_module("local_stack_tls_peer", ROOT / "tools/local-stack/tls-test-server.py")
     peer.prepare(workspace / "tls", "10.64.0.1", "localhost", port)
     manifest = {
         "version": 1, "project": "dswt-local-" + uuid.uuid4().hex,
@@ -321,7 +327,7 @@ class Stack:
                                    {"Content-Type": "application/octet-stream", "Connection": "close"})
                 response = connection.getresponse()
                 packet = response.read(wire.MAX_PACKET + 1)
-                if response.status != 200 or response.getheader("Content-Type") != "application/octet-stream":
+                if response.status != HTTPStatus.OK or response.getheader("Content-Type") != "application/octet-stream":
                     raise ValueError("HTTPS trading endpoint is not ready")
                 reply = wire.decode_response(packet)
                 if (reply.request_id != request.request_id or reply.operation != request.operation

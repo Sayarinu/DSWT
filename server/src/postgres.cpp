@@ -11,6 +11,7 @@
 
 namespace dswt::server::detail {
 namespace {
+constexpr int kMinimumPostgresVersion = 160000;
 
 using Clock = std::chrono::steady_clock;
 
@@ -18,7 +19,7 @@ using Clock = std::chrono::steady_clock;
 // minutes, so a session is retired after this long. That keeps two dozen
 // sessions inside the database's share of the VPS for one new session a minute
 // per worker.
-std::atomic<Clock::duration> session_lifetime{std::chrono::seconds(60)};
+std::atomic<Clock::duration> session_lifetime{std::chrono::minutes(1)};
 
 // Opening a session forks a PostgreSQL backend, which dominated database CPU on
 // the 2-core VPS. Idle sessions are kept per connection string instead.
@@ -115,7 +116,7 @@ Database::Database(const std::string &info) : info_(info), opened_(Clock::now())
   // Diagnostics can contain private parameters; expose only SQLSTATE to
   // callers.
   PQsetNoticeProcessor(connection_.get(), [](void *, const char *) {}, nullptr);
-  if (PQserverVersion(connection_.get()) < 160000)
+  if (PQserverVersion(connection_.get()) < kMinimumPostgresVersion)
     throw std::runtime_error("PostgreSQL 16 or later is required");
   Execute(
       "SET search_path = pg_catalog; SET synchronous_commit = on; "
@@ -125,10 +126,11 @@ Database::Database(const std::string &info) : info_(info), opened_(Clock::now())
   auto settings = Execute(
       "SELECT current_setting('fsync'), current_setting('full_page_writes'), "
       "current_setting('synchronous_commit'), pg_is_in_recovery()");
-  if (std::string(PQgetvalue(settings.get(), 0, 0)) != "on" ||
-      std::string(PQgetvalue(settings.get(), 0, 1)) != "on" ||
-      std::string(PQgetvalue(settings.get(), 0, 2)) != "on" ||
-      std::string(PQgetvalue(settings.get(), 0, 3)) != "f")
+  enum Column { Fsync, FullPageWrites, SynchronousCommit, InRecovery };
+  if (std::string(PQgetvalue(settings.get(), 0, Fsync)) != "on" ||
+      std::string(PQgetvalue(settings.get(), 0, FullPageWrites)) != "on" ||
+      std::string(PQgetvalue(settings.get(), 0, SynchronousCommit)) != "on" ||
+      std::string(PQgetvalue(settings.get(), 0, InRecovery)) != "f")
     throw std::runtime_error("writable durable database settings are required");
 }
 

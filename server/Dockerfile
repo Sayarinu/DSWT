@@ -11,12 +11,12 @@ COPY server/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
 
 FROM base AS build
 RUN apt-get -o APT::Update::Error-Mode=any update && apt-get install -y --no-install-recommends \
-    ca-certificates cmake ninja-build g++ pkg-config libgrpc++-dev protobuf-compiler-grpc \
+    ca-certificates cmake clang-tidy ninja-build g++ pkg-config libgrpc++-dev protobuf-compiler-grpc \
     libprotobuf-dev libboost-system-dev libgtest-dev python3 libpq-dev postgresql-16 libssl-dev openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY server .
-RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDSWT_LINT=ON \
     && cmake --build /build --parallel 2 \
     && ctest --test-dir /build --output-on-failure
 

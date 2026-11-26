@@ -8,7 +8,7 @@ DIRECTORY = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("save_variant", DIRECTORY / "save_variant.py")
 variant = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(variant)
-fixture = variant.stack.load_module("variant_fixture", variant.stack.ROOT / "scripts/tests/test_verify_demo_trade.py")
+fixture = variant.stack.load_module("variant_fixture", variant.stack.ROOT / "tools/local-stack/__tests__/test_verify_demo_trade.py")
 
 
 def party(raw, bank, slot):

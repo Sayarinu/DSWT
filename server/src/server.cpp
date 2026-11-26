@@ -16,6 +16,9 @@ namespace dswt::server {
 namespace asio = boost::asio;
 
 namespace {
+constexpr int kGatewayThreads = 8;
+constexpr int kGatewayMemoryBytes = 4 * 1024 * 1024;
+constexpr int kRecoveryWorkers = 4;
 std::shared_ptr<asio::ssl::context> TlsContext(const std::optional<TlsFiles> &files) {
   if (!files) return {};
   try {
@@ -37,8 +40,8 @@ std::shared_ptr<asio::ssl::context> TlsContext(const std::optional<TlsFiles> &fi
 
 std::shared_ptr<grpc::Channel> Channel(const std::string &target) {
   grpc::ChannelArguments arguments;
-  arguments.SetMaxReceiveMessageSize(4096);
-  arguments.SetMaxSendMessageSize(4096);
+  arguments.SetMaxReceiveMessageSize(kGrpcMessageLimit);
+  arguments.SetMaxSendMessageSize(kGrpcMessageLimit);
   return grpc::CreateCustomChannel(target, grpc::InsecureChannelCredentials(), arguments);
 }
 } // namespace
@@ -53,10 +56,10 @@ void RunServer(const ServerConfig &config) {
   builder.AddListeningPort(config.grpc_address,
                            grpc::InsecureServerCredentials(), &grpc_port);
   builder.RegisterService(&service);
-  builder.SetMaxReceiveMessageSize(4096);
-  builder.SetMaxSendMessageSize(4096);
+  builder.SetMaxReceiveMessageSize(kGrpcMessageLimit);
+  builder.SetMaxSendMessageSize(kGrpcMessageLimit);
   grpc::ResourceQuota resources;
-  resources.SetMaxThreads(8).Resize(4 * 1024 * 1024);
+  resources.SetMaxThreads(kGatewayThreads).Resize(kGatewayMemoryBytes);
   builder.SetResourceQuota(resources);
   auto server = builder.BuildAndStart();
   if (!server || grpc_port == 0) {
@@ -65,7 +68,7 @@ void RunServer(const ServerConfig &config) {
 
   auto channel = Channel(config.grpc_target.value_or("127.0.0.1:" + std::to_string(grpc_port)));
   auto trade_channel = config.trade_target ? Channel(*config.trade_target) : nullptr;
-  asio::thread_pool submissions(config.submission_workers), recovery(4);
+  asio::thread_pool submissions(config.submission_workers), recovery(kRecoveryWorkers);
   asio::io_context io;
   auto services = std::make_shared<HttpServices>(
       std::make_shared<HttpRequestHandler>(std::move(channel), std::move(trade_channel)), submissions, recovery, std::move(tls),

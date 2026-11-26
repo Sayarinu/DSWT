@@ -6,7 +6,7 @@
 #include "postgres.h"
 #include "recovery_gate.h"
 #include "trade_encoding.h"
-#include "wire_layout.h"
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/telemetry.h"
 
 #include <algorithm>
@@ -171,15 +171,16 @@ public:
     v1::TradeSnapshot snapshot;
     if (PQntuples(row.get()) == 0) return snapshot;
     if (PQntuples(row.get()) != 1) throw std::runtime_error("ambiguous owned trade");
-    snapshot.set_trade_id(UnhexBytes(PQgetvalue(row.get(), 0, 0)));
-    snapshot.set_state(static_cast<v1::TradeState>(std::stoi(PQgetvalue(row.get(), 0, 1))));
-    snapshot.set_offered_asset_id(UnhexBytes(PQgetvalue(row.get(), 0, 2)));
-    snapshot.set_offered_sha256(UnhexBytes(PQgetvalue(row.get(), 0, 3)));
-    snapshot.set_received_asset_id(UnhexBytes(PQgetvalue(row.get(), 0, 4)));
-    snapshot.set_received_sha256(UnhexBytes(PQgetvalue(row.get(), 0, 5)));
-    snapshot.set_receipt_id(UnhexBytes(PQgetvalue(row.get(), 0, 6)));
-    snapshot.set_last_event(Unsigned(PQgetvalue(row.get(), 0, 7)));
-    snapshot.set_delivery_kind(static_cast<v1::DeliveryKind>(std::stoi(PQgetvalue(row.get(), 0, 8))));
+    enum Column { Trade, State, OfferedAsset, OfferedDigest, ReceivedAsset, ReceivedDigest, Receipt, LastEvent, Delivery };
+    snapshot.set_trade_id(UnhexBytes(PQgetvalue(row.get(), 0, Trade)));
+    snapshot.set_state(static_cast<v1::TradeState>(std::stoi(PQgetvalue(row.get(), 0, State))));
+    snapshot.set_offered_asset_id(UnhexBytes(PQgetvalue(row.get(), 0, OfferedAsset)));
+    snapshot.set_offered_sha256(UnhexBytes(PQgetvalue(row.get(), 0, OfferedDigest)));
+    snapshot.set_received_asset_id(UnhexBytes(PQgetvalue(row.get(), 0, ReceivedAsset)));
+    snapshot.set_received_sha256(UnhexBytes(PQgetvalue(row.get(), 0, ReceivedDigest)));
+    snapshot.set_receipt_id(UnhexBytes(PQgetvalue(row.get(), 0, Receipt)));
+    snapshot.set_last_event(Unsigned(PQgetvalue(row.get(), 0, LastEvent)));
+    snapshot.set_delivery_kind(static_cast<v1::DeliveryKind>(std::stoi(PQgetvalue(row.get(), 0, Delivery))));
     return snapshot;
   }
 
@@ -302,7 +303,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
     std::string body;
-    detail::AppendUnsigned(body, request->escrow_generation(), 8);
+    detail::AppendUnsigned(body, request->escrow_generation(), sizeof(std::uint64_t));
     body += request->pokemon().pk4();
     body += request->pokemon().sha256();
     const auto hash = detail::MutationHash(wire::kSubmit, request->context(), body);
@@ -463,7 +464,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
       Result(*reply, v1::RESULT_INVALID_REQUEST); return;
     }
     std::string body = request->trade_id() + request->receipt_id() + request->delivered_sha256() + request->applied_sha256();
-    detail::AppendUnsigned(body, request->applied_generation(), 8);
+    detail::AppendUnsigned(body, request->applied_generation(), sizeof(std::uint64_t));
     const auto hash = detail::MutationHash(wire::kAcknowledge, request->context(), body);
     Session session(connection_info_, request->context().auth(), *recovery_, true, *admission_, permit);
     if (!session.Begin(request->context(), hash, *reply)) return;
@@ -497,7 +498,7 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
   RpcTelemetry trace(Operation::Reconcile, context, [reply] { return reply->context().result(); });
   return Guard(context, *reply, *admission_, detail::RequestKind::Recovery, [&](auto &permit) {
     if (!CheckAuthShape(request->auth(), *reply)) return;
-    if (request->limit() == 0 || request->limit() > 8) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
+    if (request->limit() == 0 || request->limit() > wire::kReconcileLimitMax) { Result(*reply, v1::RESULT_INVALID_REQUEST); return; }
     ReturnRefusedOffer(connection_info_, *recovery_, *admission_, request->auth(), permit);
     Session session(connection_info_, request->auth(), *recovery_, false, *admission_, permit);
     if (!session.authenticated) { Result(*reply, v1::RESULT_UNAUTHENTICATED); return; }
@@ -516,16 +517,17 @@ grpc::Status TradeService::Reconcile(grpc::ServerContext *context, const v1::Rec
     }
     reply->set_page_end(request->after_event());
     reply->set_has_more(PQntuples(rows.get()) > static_cast<int>(request->limit()));
+    enum Column { Sequence, Kind, Trade, OperationId, Asset, Digest, Receipt, State };
     for (int row = 0; row < std::min(PQntuples(rows.get()), static_cast<int>(request->limit())); ++row) {
       auto *event = reply->add_events();
-      event->set_sequence(Unsigned(PQgetvalue(rows.get(), row, 0)));
-      event->set_kind(static_cast<v1::EventKind>(std::stoi(PQgetvalue(rows.get(), row, 1))));
-      event->set_trade_id(UnhexBytes(PQgetvalue(rows.get(), row, 2)));
-      event->set_operation_id(UnhexBytes(PQgetvalue(rows.get(), row, 3)));
-      event->set_asset_id(UnhexBytes(PQgetvalue(rows.get(), row, 4)));
-      event->set_payload_sha256(UnhexBytes(PQgetvalue(rows.get(), row, 5)));
-      event->set_receipt_id(UnhexBytes(PQgetvalue(rows.get(), row, 6)));
-      event->set_state(static_cast<v1::TradeState>(std::stoi(PQgetvalue(rows.get(), row, 7))));
+      event->set_sequence(Unsigned(PQgetvalue(rows.get(), row, Sequence)));
+      event->set_kind(static_cast<v1::EventKind>(std::stoi(PQgetvalue(rows.get(), row, Kind))));
+      event->set_trade_id(UnhexBytes(PQgetvalue(rows.get(), row, Trade)));
+      event->set_operation_id(UnhexBytes(PQgetvalue(rows.get(), row, OperationId)));
+      event->set_asset_id(UnhexBytes(PQgetvalue(rows.get(), row, Asset)));
+      event->set_payload_sha256(UnhexBytes(PQgetvalue(rows.get(), row, Digest)));
+      event->set_receipt_id(UnhexBytes(PQgetvalue(rows.get(), row, Receipt)));
+      event->set_state(static_cast<v1::TradeState>(std::stoi(PQgetvalue(rows.get(), row, State))));
       reply->set_page_end(event->sequence());
     }
     session.Publish(*reply, v1::RESULT_OK);

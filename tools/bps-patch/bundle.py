@@ -14,6 +14,9 @@ import secrets
 import struct
 import sys
 
+BLZ_FOOTER_BYTES = 8
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 
@@ -159,11 +162,11 @@ def _require(condition, message):
 
 def _blz_expand(data, label):
     """Expand one backward-LZ (BLZ) compressed binary, as the DS loader does."""
-    if len(data) < 8:
+    if len(data) < BLZ_FOOTER_BYTES:
         raise BundleError(f"{label} has malformed compressed code")
     end, extra = struct.unpack_from("<II", data, len(data) - 8)
     header, compressed = end >> 24, end & 0xFFFFFF
-    if header < 8 or header > compressed or compressed > len(data):
+    if header < BLZ_FOOTER_BYTES or header > compressed or compressed > len(data):
         raise BundleError(f"{label} has malformed compressed code")
     out = bytearray(data) + bytearray(extra)
     source, target, stop = len(data) - header, len(out), len(data) - compressed

@@ -1,5 +1,7 @@
+#include <climits>
+#include "hex_digits.h"
 #include "trade_encoding.h"
-#include "wire_layout.h"
+#include "dswt/server/wire_layout.h"
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -19,16 +21,15 @@ bool NonzeroBytes(std::string_view bytes, std::size_t size) {
 
 bool CanonicalShape(std::string_view bytes) {
   if (bytes.size() != wire::kPk4Size || bytes[wire::kPk4Sanity] != 0 || bytes[wire::kPk4Sanity + 1] != 0 ||
-      bytes[wire::kPk4Unused] != 0 || bytes[wire::kPk4Unused + 1] != 0 ||
-      bytes[wire::kPk4Unused + 2] != 0 || bytes[wire::kPk4Unused + 3] != 0)
+      bytes.substr(wire::kPk4Unused, wire::kPk4UnusedSize).find_first_not_of('\0') != std::string_view::npos)
     return false;
   auto word = [&](std::size_t offset) {
     return static_cast<unsigned char>(bytes[offset]) |
-           (static_cast<unsigned char>(bytes[offset + 1]) << 8);
+           (static_cast<unsigned char>(bytes[offset + 1]) << CHAR_BIT);
   };
   unsigned sum = 0;
   for (std::size_t offset = wire::kPk4Blocks; offset < bytes.size(); offset += 2) sum += word(offset);
-  return (sum & 65535) == static_cast<unsigned>(word(wire::kPk4Checksum));
+  return (sum & UINT16_MAX) == static_cast<unsigned>(word(wire::kPk4Checksum));
 }
 
 std::string HexBytes(std::string_view bytes) {
@@ -36,8 +37,8 @@ std::string HexBytes(std::string_view bytes) {
   std::string result;
   result.reserve(bytes.size() * 2);
   for (unsigned char value : bytes) {
-    result += digits[value >> 4];
-    result += digits[value & 15];
+    result += digits[value >> kNibbleBits];
+    result += digits[value & kNibbleMask];
   }
   return result;
 }
@@ -45,14 +46,14 @@ std::string HexBytes(std::string_view bytes) {
 std::string UnhexBytes(std::string_view hex) {
   auto nibble = [](char c) -> unsigned char {
     if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + kHexLetterBase;
     throw std::runtime_error("invalid stored binary value");
   };
   if (hex.size() % 2 != 0) throw std::runtime_error("invalid stored binary size");
   std::string result;
   result.reserve(hex.size() / 2);
   for (std::size_t i = 0; i < hex.size(); i += 2)
-    result += static_cast<char>(nibble(hex[i]) * 16 + nibble(hex[i + 1]));
+    result += static_cast<char>(nibble(hex[i]) * kHexRadix + nibble(hex[i + 1]));
   return result;
 }
 
@@ -85,8 +86,8 @@ std::string RandomIdentifier() {
 
 void AppendUnsigned(std::string &bytes, std::uint64_t value, std::size_t width) {
   for (std::size_t i = 0; i < width; ++i) {
-    bytes += static_cast<char>(value & 255);
-    value >>= 8;
+    bytes += static_cast<char>(value & UCHAR_MAX);
+    value >>= CHAR_BIT;
   }
 }
 
@@ -98,7 +99,7 @@ std::string MutationHash(unsigned char opcode, const v1::MutationContext &contex
   AppendUnsigned(frame, body.size(), 2);
   frame += context.operation_id();
   frame += context.auth().save_id();
-  AppendUnsigned(frame, context.counter(), 8);
+  AppendUnsigned(frame, context.counter(), sizeof(std::uint64_t));
   frame += body;
   return HashBytes(frame);
 }
@@ -110,7 +111,7 @@ std::string EncodeOutcome(std::uint64_t sequence, const v1::TradeSnapshot &snaps
     return std::string(field);
   };
   std::string bytes;
-  AppendUnsigned(bytes, sequence, 8);
+  AppendUnsigned(bytes, sequence, sizeof(std::uint64_t));
   bytes += fixed(snapshot.trade_id(), wire::kIdSize);
   bytes += static_cast<char>(snapshot.state());
   bytes += static_cast<char>(snapshot.delivery_kind());
@@ -119,7 +120,7 @@ std::string EncodeOutcome(std::uint64_t sequence, const v1::TradeSnapshot &snaps
   bytes += fixed(snapshot.received_asset_id(), wire::kIdSize);
   bytes += fixed(snapshot.received_sha256(), wire::kDigestSize);
   bytes += fixed(snapshot.receipt_id(), wire::kIdSize);
-  AppendUnsigned(bytes, snapshot.last_event(), 8);
+  AppendUnsigned(bytes, snapshot.last_event(), sizeof(std::uint64_t));
   return bytes;
 }
 
@@ -134,14 +135,14 @@ void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply) {
     std::uint64_t value = 0;
     auto part = take(count);
     for (std::size_t i = 0; i < count; ++i)
-      value |= static_cast<std::uint64_t>(static_cast<unsigned char>(part[i])) << (8 * i);
+      value |= static_cast<std::uint64_t>(static_cast<unsigned char>(part[i])) << (CHAR_BIT * i);
     return value;
   };
   auto field = [&](std::size_t size) {
     auto value = take(size);
     return NonzeroBytes(value, size) ? value : std::string{};
   };
-  reply.set_operation_event(number(8));
+  reply.set_operation_event(number(sizeof(std::uint64_t)));
   auto *snapshot = reply.mutable_outcome();
   snapshot->set_trade_id(field(wire::kIdSize));
   snapshot->set_state(static_cast<v1::TradeState>(number(1)));
@@ -152,7 +153,7 @@ void DecodeOutcome(std::string_view bytes, v1::MutationReply &reply) {
   auto received_hash = take(wire::kDigestSize);
   if (!snapshot->received_asset_id().empty()) snapshot->set_received_sha256(received_hash);
   snapshot->set_receipt_id(field(wire::kIdSize));
-  snapshot->set_last_event(number(8));
+  snapshot->set_last_event(number(sizeof(std::uint64_t)));
 }
 
 } // namespace dswt::server::detail

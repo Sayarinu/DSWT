@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/legality_client.h"
 #include "dswt/server/telemetry.h"
 
@@ -12,6 +13,10 @@
 
 namespace dswt::server {
 namespace {
+constexpr std::size_t kMaximumPolicyLength = 64;
+constexpr int kMaximumReplyBytes = 1024;
+constexpr int kMaximumRequestBytes = 256;
+constexpr int kMaximumReasons = 8;
 bool KnownReason(std::string_view reason) {
   constexpr std::string_view reasons[] = {
       "EGG_NOT_ALLOWED", "ILLEGAL_DATA", "ILLEGAL_ENCOUNTER", "ILLEGAL_MOVES",
@@ -45,15 +50,15 @@ LegalityClient::LegalityClient(const std::string &address,
                                const std::string &expected_policy,
                                std::chrono::milliseconds timeout)
     : impl_(std::make_unique<Impl>()) {
-  if (expected_policy.empty() || expected_policy.size() > 64 ||
+  if (expected_policy.empty() || expected_policy.size() > kMaximumPolicyLength ||
       !std::all_of(expected_policy.begin(), expected_policy.end(), [](unsigned char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
-      }) || timeout.count() < 1 || timeout > std::chrono::milliseconds(1500))
+      }) || timeout.count() < 1 || timeout > kMaximumLegalityTimeout)
     throw std::invalid_argument("invalid legality policy or deadline");
   grpc::ChannelArguments limits;
-  limits.SetMaxReceiveMessageSize(1024);
-  limits.SetMaxSendMessageSize(256);
+  limits.SetMaxReceiveMessageSize(kMaximumReplyBytes);
+  limits.SetMaxSendMessageSize(kMaximumRequestBytes);
   limits.SetInt(GRPC_ARG_ENABLE_RETRIES, 0);
   impl_->stub = v1::PokemonLegality::NewStub(
       grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), limits));
@@ -64,10 +69,10 @@ LegalityClient::LegalityClient(const std::string &address,
 LegalityClient::~LegalityClient() = default;
 
 LegalityDecision LegalityClient::CheckNewSubmission(
-    const std::array<unsigned char, 136> &pk4, PokemonFormat format) {
-  unsigned verdict = 11;
+    const std::array<unsigned char, wire::kPk4Size> &pk4, PokemonFormat format) {
+  unsigned verdict = v1::RESULT_UNAVAILABLE;
   RpcTelemetry trace(Operation::Legality, nullptr, [&] { return verdict; });
-  std::array<unsigned char, 32> digest{};
+  std::array<unsigned char, wire::kDigestSize> digest{};
   std::size_t digest_size = 0;
   if (EVP_Q_digest(nullptr, "SHA256", nullptr, pk4.data(), pk4.size(),
                    digest.data(), &digest_size) != 1 || digest_size != digest.size())
@@ -84,13 +89,13 @@ LegalityDecision LegalityClient::CheckNewSubmission(
   auto status = impl_->stub->Validate(&context, request, &reply);
   if (!status.ok() || reply.policy_version() != impl_->policy || reply.sha256() != hash ||
       reply.format() != request.format() ||
-      reply.reason_codes_size() > 8 || (reply.destinations() & ~FormatDestinations(format)) != 0)
+      reply.reason_codes_size() > kMaximumReasons || (reply.destinations() & ~FormatDestinations(format)) != 0)
     return {};
   if (reply.legal()) {
     // An empty destination set (as from a validator predating the field) is
     // malformed, never "every game".
     if (!reply.reason_codes().empty() || reply.destinations() == 0) return {};
-    verdict = 1;
+    verdict = v1::RESULT_OK;
     return {LegalityVerdict::Legal, {}, reply.destinations()};
   }
   if (reply.reason_codes().empty() || reply.destinations() != 0)
@@ -101,7 +106,7 @@ LegalityDecision LegalityClient::CheckNewSubmission(
       return {};
     decision.reasons.push_back(reason);
   }
-  verdict = 8;
+  verdict = v1::RESULT_ILLEGAL_POKEMON;
   return decision;
 }
 

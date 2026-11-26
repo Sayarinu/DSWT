@@ -12,24 +12,24 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
   ignored `game/` directory. Never commit
   anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file.
 - Project additions and integration changes to the game live in `client/`.
-  Preserve upstream notices, and record the new revision in `client/UPSTREAM.md`
-  and the matching `client/upstream*.json` when refreshing a workspace.
+  Preserve upstream notices, and record the new revision in `client/games/UPSTREAM.md`
+  and the matching `client/games/upstream*.json` when refreshing a workspace.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `client/` | Game-independent client core, the Platinum, HeartGold/SoulSilver and Diamond/Pearl adapters (`platinum/`, `hgss/` and `dp/`, behind `game_adapter.h`), their integration patches and native client tests |
-| `companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build-companion.sh` on the client core, with host tests in `companion/tests/` |
+| `client/core/` | Shared DS client code, save layouts and native tests |
+| `client/games/` | Game adapters, integration patches, resources and upstream pins |
+| `client/companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build/build-companion.sh` on the client core, with host tests in `client/companion/tests/` |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
-| `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
-| `emulator/` | Optional durable-persistence patch for melonDS (GPL) |
+| `protocol/` | Wonder Trade v1 wire contract shared by the DS and server |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
-| `patches/` | Supported cartridges and the install guide shipped in each release |
-| `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
+| `scripts/` | Single-purpose entry points grouped under build/, prepare/ and port/ |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit, ROM and companion builder images |
-| `licensing/` | Redistribution inventory and bundled third-party licenses |
+| `LICENSES/` | License texts named by SPDX identifier |
+| `licensing/` | Redistribution decisions and package-specific notices |
 
 ## Platform
 
@@ -58,8 +58,10 @@ opening it. Commands run from the repository root with Python 3.12 or newer and
 Docker. Workflows are in `.github/workflows/`.
 
 ```sh
-# Validate source inputs
-python3 -m unittest discover -s scripts/tests
+# Validate source inputs, client build and port tools, service tooling and CI policy, and patch and release tools
+for suite in scripts/build/tests scripts/prepare/tests scripts/port/tests client/core/tests/contracts client/games/tests deploy/__tests__ validator/__tests__; do
+  python3 -m unittest discover -s "$suite"
+done
 python3 -m venv game/policy-venv
 game/policy-venv/bin/pip install --require-hashes -r tools/local-stack/requirements.txt
 game/policy-venv/bin/python tools/local-stack/isolation.py policy
@@ -74,43 +76,25 @@ python3 -m unittest discover -s tools/patcher-app/__tests__
 docker build -f server/Dockerfile -t dswt-server .
 
 # Test bounded TLS transport (client host/native tests)
-tls_source="$(python3 scripts/prepare-tls.py)"
-cmake -S client/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
+tls_source="$(python3 scripts/prepare/prepare-tls.py)"
+cmake -S client/core/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
 cmake --build game/tls-tests --parallel 2
 ctest --test-dir game/tls-tests --output-on-failure
-python3 client/tests/test_tls.py game/tls-tests/tls_probe
+python3 client/core/tests/test_tls.py game/tls-tests/tls_probe
 
 # Build and test DS companion
-cmake -S companion/tests -B game/companion-tests
+cmake -S client/companion/tests -B game/companion-tests
 cmake --build game/companion-tests --parallel 2
 ctest --test-dir game/companion-tests --output-on-failure
-CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
-docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
-import os
-from pathlib import Path
-import struct
-import subprocess
-
-rom = Path("/out/dswt-companion.nds")
-subprocess.run([os.environ["BLOCKSDS"] + "/tools/ndstool/ndstool", "-i", str(rom)], check=True)
-data = rom.read_bytes()
-assert data[0x12] == 0x02, "ROM must support both DS and DSi"
-assert data[0x1C] & 1, "TWL flag must enable DSi mode"
-for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
-    offset = struct.unpack_from("<I", data, base)[0]
-    size = struct.unpack_from("<I", data, base + 12)[0]
-    assert offset >= 0x4000 and size > 0 and offset + size <= len(data), f"Missing or truncated {name} section"
-print("DS/DSi header and payload checks passed")
-PY
+CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
+docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+python3 scripts/build/package-companion.py --check
 
 # Build and test isolated legality validator
 docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-tests .
 docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \
   --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   dswt-validator-tests
-
-# Test durable emulator persistence
-docker build -f emulator/Dockerfile -t dswt-emulator-builder .
 ```
 
 CI also scans the full history with gitleaks and runs `git diff --check` on the
@@ -132,17 +116,17 @@ only merge what is ready to serve players. The required check names are listed i
 - Do not add AI or tool attribution anywhere: no `Co-Authored-By` trailers,
   "Generated with" lines or tool mentions in commits, PRs, code, comments or docs.
 - One ticket per PR. Keep PRs focused and self-contained, and fill in the PR
-  template: problem, changes, validation, material risks and ticket ID. Do not
-  link to the tracker; the ID is enough.
+  template with a ticket link, a bullet list explaining what changed and why,
+  and any material risks.
 - PRs merge into `main` with a merge commit once the required checks pass and
   review conversations are resolved. Squash and rebase merges are disabled.
-- `scripts/` holds only scripts that are reused, with their tests in
-  `scripts/tests/`. Put scripts used only for testing in the gitignored
+- Group reusable entry points by job under `scripts/`, with tests beside each group.
+  Put self-contained programs and builder images under `tools/`. Keep one-off test scripts in the gitignored
   `testing-scripts/` folder, and don't commit one-off or development scripts.
 - Documentation lives in the [wiki](https://github.com/Sayarinu/DSWT/wiki), written in plain terms. Keep
   `README.md` short, like a store page, and update the wiki page a change
   affects. Track only docs something depends on: this file, `README.md`,
-  `patches/INSTALL.md` (shipped in releases), `client/UPSTREAM.md`,
+  `tools/patcher-app/INSTALL.md` (shipped in releases), `client/games/UPSTREAM.md`,
   `validator/README.md` (in the validator image's GPL source) and license
   notices. Change docs only when necessary or beneficial, and skip routine
   progress notes.

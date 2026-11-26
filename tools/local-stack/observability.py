@@ -20,6 +20,8 @@ import isolation
 import policy
 import stack
 
+from http import HTTPStatus
+
 require = policy.require
 CONFIGS = ("prometheus.yml", "rules.yml", "alertmanager.yml", "loki.yaml", "config.alloy", "capture.py",
            "grafana/datasources/datasources.yaml", "grafana/dashboards/provider.yaml", "grafana/dashboards/dswt.json")
@@ -115,12 +117,12 @@ class Observer:
                 and urls == [CAPTURE] and loaded["route"]["receiver"] == "local-capture" and not loaded["route"].get("routes"),
                 "Alertmanager may deliver only to the local capture receiver")
         code, _ = self.grafana("/api/datasources", authenticated=False)
-        require(code == 401, "Grafana must refuse unauthenticated access")
+        require(code == HTTPStatus.UNAUTHORIZED, "Grafana must refuse unauthenticated access")
         code, sources = self.grafana("/api/datasources")
-        require(code == 200 and sorted(item["uid"] for item in sources) == ["alertmanager", "loki", "prometheus"],
+        require(code == HTTPStatus.OK and sorted(item["uid"] for item in sources) == ["alertmanager", "loki", "prometheus"],
                 "Grafana must provision only the local data sources")
         code, dashboard = self.grafana("/api/dashboards/uid/dswt-local")
-        require(code == 200, "Provisioned dashboard is missing")
+        require(code == HTTPStatus.OK, "Provisioned dashboard is missing")
         gateway = self.local.compose("ps", "-q", "gateway", capture=True, timeout=10).stdout.strip()
         bindings = json.loads(self.local.run(["inspect", "--format", "{{json .HostConfig.PortBindings}}", gateway],
                                              capture=True, timeout=10).stdout)

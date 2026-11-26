@@ -5,7 +5,7 @@
 #include <cstdint>
 
 // The enrollment build u32 names a save's game variant; see https://github.com/Sayarinu/DSWT/wiki/Protocol.
-// Structured codes pack family << 24 | version << 16 | language << 8 | revision
+// Structured codes pack family << kFamilyShift | version << kVersionShift | language << kLanguageShift | revision
 // with the games' own version and language IDs. Code 1 is the legacy alias for
 // US English Platinum that released clients send.
 namespace dswt::server::detail {
@@ -14,21 +14,28 @@ enum class GameFamily : std::uint8_t {
   None = 0, DiamondPearl = 1, Platinum = 2, HeartGoldSoulSilver = 3, BlackWhite = 4, Black2White2 = 5
 };
 
+enum GameVersion : unsigned {
+  HeartGold = 7, SoulSilver = 8, Diamond = 10, Pearl = 11, Platinum = 12,
+  White = 20, Black = 21, White2 = 22, Black2 = 23
+};
+inline constexpr unsigned kFamilyShift = 24, kVersionShift = 16, kLanguageShift = 8;
+inline constexpr unsigned kJapanese = 1, kEnglish = 2, kUnusedLanguage = 6, kKorean = 8;
 inline constexpr std::uint32_t kLegacyPlatinum = 1;
 
 constexpr std::uint32_t GameVariant(GameFamily family, unsigned version, unsigned language, unsigned revision) {
-  return (static_cast<std::uint32_t>(family) << 24) | ((version & 0xFF) << 16) | ((language & 0xFF) << 8) | (revision & 0xFF);
+  return (static_cast<std::uint32_t>(family) << kFamilyShift) | ((version & UINT8_MAX) << kVersionShift) | ((language & UINT8_MAX) << kLanguageShift) | (revision & UINT8_MAX);
 }
 
 // None for an unknown or inconsistent code; the matcher groups trades by this.
 constexpr GameFamily VariantFamily(std::uint32_t code) {
   if (code == kLegacyPlatinum) return GameFamily::Platinum;
-  const auto family = code >> 24, version = (code >> 16) & 0xFF, language = (code >> 8) & 0xFF;
-  const bool game = (family == 1 && (version == 10 || version == 11)) || (family == 2 && version == 12) ||
-      (family == 3 && (version == 7 || version == 8)) || (family == 4 && (version == 20 || version == 21)) ||
-      (family == 5 && (version == 22 || version == 23));
-  const bool known_language = language >= 1 && language <= 8 && language != 6;
-  return game && known_language ? static_cast<GameFamily>(family) : GameFamily::None;
+  const auto family = static_cast<GameFamily>(code >> kFamilyShift);
+  const auto version = (code >> kVersionShift) & UINT8_MAX, language = (code >> kLanguageShift) & UINT8_MAX;
+  const bool game = (family == GameFamily::DiamondPearl && (version == Diamond || version == Pearl)) || (family == GameFamily::Platinum && version == Platinum) ||
+      (family == GameFamily::HeartGoldSoulSilver && (version == HeartGold || version == SoulSilver)) || (family == GameFamily::BlackWhite && (version == White || version == Black)) ||
+      (family == GameFamily::Black2White2 && (version == White2 || version == Black2));
+  const bool known_language = language >= kJapanese && language <= kKorean && language != kUnusedLanguage;
+  return game && known_language ? family : GameFamily::None;
 }
 
 constexpr bool ValidVariant(std::uint32_t code) { return VariantFamily(code) != GameFamily::None; }
@@ -43,7 +50,7 @@ constexpr PokemonFormat FamilyFormat(GameFamily family) {
 // English Platinum code, so a client upgraded mid-enrollment keeps its identity.
 constexpr bool SameVariant(std::uint32_t stored, std::uint32_t requested) {
   const auto english_platinum = [](std::uint32_t code) {
-    return code == kLegacyPlatinum || ((code >> 16) == 0x020C && ((code >> 8) & 0xFF) == 2);
+    return code == kLegacyPlatinum || ((code >> kLanguageShift) == (GameVariant(GameFamily::Platinum, Platinum, kEnglish, 0) >> kLanguageShift));
   };
   return stored == requested || (english_platinum(stored) && english_platinum(requested) &&
       (stored == kLegacyPlatinum || requested == kLegacyPlatinum));

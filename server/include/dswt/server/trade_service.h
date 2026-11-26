@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/legality_client.h"
 #include "dswt/server/recovery_barrier.h"
 
@@ -13,7 +14,7 @@
 namespace dswt::server {
 
 // Validates a payload in its owner's format; see LegalityClient::CheckNewSubmission.
-using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, 136> &, PokemonFormat)>;
+using SubmissionValidator = std::function<LegalityDecision(const std::array<unsigned char, wire::kPk4Size> &, PokemonFormat)>;
 
 namespace detail { class RecoveryGate; class ServiceAdmission; }
 

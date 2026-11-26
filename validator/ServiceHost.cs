@@ -5,7 +5,15 @@ namespace DSWT.Validator;
 
 public static class ServiceHost
 {
-    public static WebApplication Build(int port = 50052)
+    private const int DefaultPort = 50052;
+    private const int MaxRequestBodyBytes = 512;
+    private const int MaxRequestHeaderBytes = 4096;
+    private const int MaxConnections = 16;
+    private const int MaxStreams = 4;
+    private const int MaxGrpcRequestBytes = 256;
+    private static readonly TimeSpan HeaderTimeout = TimeSpan.FromSeconds(5);
+
+    public static WebApplication Build(int port = DefaultPort)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.Configuration.Sources.Clear();
@@ -13,11 +21,11 @@ public static class ServiceHost
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.Listen(IPAddress.Loopback, port, endpoint => endpoint.Protocols = HttpProtocols.Http2);
-            options.Limits.MaxRequestBodySize = 512;
-            options.Limits.MaxRequestHeadersTotalSize = 4096;
-            options.Limits.MaxConcurrentConnections = 16;
-            options.Limits.Http2.MaxStreamsPerConnection = 4;
-            options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(5);
+            options.Limits.MaxRequestBodySize = MaxRequestBodyBytes;
+            options.Limits.MaxRequestHeadersTotalSize = MaxRequestHeaderBytes;
+            options.Limits.MaxConcurrentConnections = MaxConnections;
+            options.Limits.Http2.MaxStreamsPerConnection = MaxStreams;
+            options.Limits.RequestHeadersTimeout = HeaderTimeout;
         });
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole();
@@ -25,7 +33,7 @@ public static class ServiceHost
         builder.Services.AddSingleton<WorkerRunner>();
         builder.Services.AddGrpc(options =>
         {
-            options.MaxReceiveMessageSize = 256;
+            options.MaxReceiveMessageSize = MaxGrpcRequestBytes;
             options.MaxSendMessageSize = WorkerRunner.MaxReplyBytes;
             options.EnableDetailedErrors = false;
             options.CompressionProviders.Clear();

@@ -12,6 +12,8 @@
 
 namespace dswt::server::detail {
 namespace {
+constexpr int kPollMilliseconds = 25;
+constexpr auto kQueryTimeout = std::chrono::milliseconds(500);
 
 using Clock = std::chrono::steady_clock;
 
@@ -56,7 +58,7 @@ bool WaitSocket(PGconn *connection, short events, Clock::time_point deadline, co
   while (!stopped.load() && Clock::now() < deadline) {
     pollfd descriptor{PQsocket(connection), events, 0};
     if (descriptor.fd < 0) return false;
-    const auto ready = poll(&descriptor, 1, 25);
+    const auto ready = poll(&descriptor, 1, kPollMilliseconds);
     if (ready > 0) return !(descriptor.revents & (POLLERR | POLLNVAL));
     if (ready < 0 && errno != EINTR) return false;
   }
@@ -82,7 +84,7 @@ QueryResult BoundedQuery(const std::string &database, const char *sql, const cha
   }
   if (PQsetnonblocking(connection.get(), 1) != 0) return none;
   PQsetNoticeProcessor(connection.get(), [](void *, const char *) {}, nullptr);
-  const auto query_deadline = Clock::now() + std::chrono::milliseconds(500);
+  const auto query_deadline = Clock::now() + kQueryTimeout;
   if (!PQsendQuery(connection.get(), sql)) return none;
   while (true) {
     const auto flushed = PQflush(connection.get());

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Derive a disposable retail test save with edited party Pokémon.
 
-Only blank-journal originals are accepted, so every variant is enrolled as a new
-identity by `emulator.py create`. Both retail copies receive the same edits and
+Each variant needs a blank journal for separate enrollment. Both retail copies receive the same edits and
 their block CRCs are recomputed; the source is never modified.
 """
 
@@ -14,10 +13,13 @@ import re
 import struct
 import sys
 
+MOVE_COORDINATES = 2
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stack
 
-VERIFY = stack.load_module("variant_verify", stack.ROOT / "scripts/verify-demo-trade.py")
+VERIFY = stack.load_module("variant_verify", stack.ROOT / "tools/local-stack/verify-demo-trade.py")
 PARTY, SLOT, BOX = 152, 236, 136
 FIELDS = {"egg", "hp", "item", "capsule", "move"}
 
@@ -89,7 +91,7 @@ def parse(text):
     for slot, change in value.items():
         if not re.fullmatch(r"[0-5]", slot): raise ValueError("Use party slot keys 0-5")
         if not isinstance(change, dict) or not change or set(change) - FIELDS: raise ValueError("Unsupported party edit")
-        if "move" in change and not (isinstance(change["move"], list) and len(change["move"]) == 2
+        if "move" in change and not (isinstance(change["move"], list) and len(change["move"]) == MOVE_COORDINATES
                                      and integer(change["move"][0], 0, 3) and integer(change["move"][1], 1, 467)):
             raise ValueError("Use a move as [index 0-3, Platinum move ID]")
         for key, limit in (("hp", 0xFFFF), ("item", 467), ("capsule", 0xFF)):

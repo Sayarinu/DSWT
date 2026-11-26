@@ -7,6 +7,7 @@
 namespace dswt::server {
 
 // Concurrent Submit handlers when WT_SUBMISSION_WORKERS is unset.
+inline constexpr int kGrpcMessageLimit = 4096;
 inline constexpr unsigned kDefaultSubmissionWorkers = 4;
 // New saves one network may enroll per day when WT_ENROLLMENTS_PER_NETWORK is unset.
 inline constexpr unsigned kDefaultEnrollmentsPerNetwork = 16;

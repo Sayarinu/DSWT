@@ -20,6 +20,10 @@ import uuid
 import oci
 
 
+EXPECTED_CORE_RESOURCES = 1731
+TRIVY_SCHEMA = 2
+
+
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("pins.json")
 PUBLIC_SELFTESTS = Path(__file__).with_name("public-selftests.json")
@@ -197,10 +201,10 @@ def resource_evidence(image, resources):
                 {"sha256": entry["sha256"], "size": entry["size"]}
                 for path, entry in image.files.items() if path.startswith(prefix) and entry["type"] == "file"}
     assembly = image.files["app/PKHeX.Core.dll"]["sha256"]
-    if (len(expected) != 1731 or resources.get("resources") != expected or resources.get("count") != 1731
+    if (len(expected) != EXPECTED_CORE_RESOURCES or resources.get("resources") != expected or resources.get("count") != EXPECTED_CORE_RESOURCES
             or resources.get("assembly_sha256") != assembly):
         raise ValueError("Embedded resource evidence does not match the exported assembly/source")
-    return {"count": 1731, "assembly_sha256": assembly}
+    return {"count": EXPECTED_CORE_RESOURCES, "assembly_sha256": assembly}
 
 
 def evidence_bindings(workspace, report, service, image, metadata):
@@ -230,7 +234,7 @@ def package_version(package):
 
 
 def scanner_coverage(report, sbom, service, context, config_digest, expected_os):
-    if report.get("SchemaVersion") != 2 or report.get("ArtifactType") != "container_image":
+    if report.get("SchemaVersion") != TRIVY_SCHEMA or report.get("ArtifactType") != "container_image":
         raise ValueError("Unsupported or empty scanner result")
     if report.get("Metadata", {}).get("ImageID") != config_digest:
         raise ValueError("Scanner image ID does not bind the audited OCI configuration")

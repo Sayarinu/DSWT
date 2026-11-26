@@ -15,6 +15,7 @@
 !validator/ServiceHost.cs
 !validator/Validator.csproj
 !validator/WorkerRunner.cs
+!validator/__tests__/test_validator_inputs.py
 !validator/core-resources.json
 !validator/fetch-core.sh
 !validator/name-allowlist.txt

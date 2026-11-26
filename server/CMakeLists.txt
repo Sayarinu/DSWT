@@ -30,6 +30,12 @@ add_library(dswt_protocol STATIC
 target_include_directories(dswt_protocol PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(dswt_protocol PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 
+option(DSWT_LINT "Run clang-tidy on first-party server targets" OFF)
+if(DSWT_LINT)
+    find_program(CLANG_TIDY clang-tidy REQUIRED)
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY}")
+endif()
+
 add_library(dswt_encoding STATIC src/trade_encoding.cpp)
 target_include_directories(dswt_encoding PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(dswt_encoding PRIVATE dswt_protocol OpenSSL::Crypto)
@@ -93,5 +99,6 @@ target_compile_options(dswt-matcher PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
 if(BUILD_TESTING)
+    unset(CMAKE_CXX_CLANG_TIDY)
     add_subdirectory(tests)
 endif()

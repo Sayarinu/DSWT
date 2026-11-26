@@ -68,12 +68,16 @@ def changes(version, commit, repository):
 
 
 def upstreams(commit, repository):
-    """(name, revision) of every decompilation the commit pins, from its client/upstream*.json."""
-    listing = json.loads(gh("api", f"repos/{repository}/contents/client?ref={commit}"))
+    """(name, revision) of every decompilation the commit pins, from its client/games/upstream*.json."""
+    directory = f"repos/{repository}/contents/client"
+    listing = json.loads(gh("api", f"{directory}?ref={commit}"))
+    if any(item["name"] == "games" for item in listing):
+        directory += "/games"
+        listing = json.loads(gh("api", f"{directory}?ref={commit}"))
     names = [item["name"] for item in listing if UPSTREAM.fullmatch(item["name"])]
     pinned = []
     for name in names:
-        record = json.loads(gh("api", f"repos/{repository}/contents/client/{name}?ref={commit}",
+        record = json.loads(gh("api", f"{directory}/{name}?ref={commit}",
                                "-H", "Accept: application/vnd.github.raw"))
         pinned.append((record["repository"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1], record["revision"]))
     if not pinned:

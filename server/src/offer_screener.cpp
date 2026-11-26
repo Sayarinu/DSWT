@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/offer_screener.h"
 
 #include "bounded_query.h"
@@ -40,8 +41,8 @@ std::size_t OfferScreener::Poll(std::size_t limit, const std::atomic<bool> *stop
   }
   std::size_t recorded = 0;
   for (const auto &offer : pending) {
-    if ((stopped && *stopped) || offer.pk4.size() != 136) continue;
-    std::array<unsigned char, 136> data{};
+    if ((stopped && *stopped) || offer.pk4.size() != wire::kPk4Size) continue;
+    std::array<unsigned char, wire::kPk4Size> data{};
     std::copy(offer.pk4.begin(), offer.pk4.end(), data.begin());
     const auto verdict = validator_ ? validator_(data, offer.format) : LegalityDecision{};
     if (verdict.verdict == LegalityVerdict::Unavailable) continue;

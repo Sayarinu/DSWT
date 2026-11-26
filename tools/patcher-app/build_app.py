@@ -18,6 +18,9 @@ import sys
 import tempfile
 import zipfile
 
+ARCHIVE_PATH_PARTS = 2
+
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT / "tools/bps-patch"))
@@ -50,7 +53,7 @@ def read_archive(path, version=None):
         members = {}
         for info in infos:
             parts = PurePosixPath(info.filename).parts
-            if info.is_dir() or len(parts) != 2 or parts[1] in members or info.file_size > bps.MAX_PATCH:
+            if info.is_dir() or len(parts) != ARCHIVE_PATH_PARTS or parts[1] in members or info.file_size > bps.MAX_PATCH:
                 raise BuildError(f"Unexpected archive member {info.filename!r}")
             members[parts[1]] = archive.read(info)
     try:

@@ -45,10 +45,12 @@ WalForce NextWalForce(const WalForceInput &);
 // independently recoverable off-site storage.
 class WalArchiveBarrier {
 public:
+  static constexpr auto kPollInterval = std::chrono::milliseconds(50);
+  static constexpr auto kUnknownInterval = std::chrono::seconds(15);
   explicit WalArchiveBarrier(std::string connection_info,
-                             std::chrono::milliseconds interval = std::chrono::milliseconds(50),
+                             std::chrono::milliseconds interval = kPollInterval,
                              std::chrono::milliseconds switch_interval = std::chrono::seconds(1),
-                             std::chrono::milliseconds unknown_interval = std::chrono::seconds(15));
+                             std::chrono::milliseconds unknown_interval = kUnknownInterval);
   ~WalArchiveBarrier();
   WalArchiveBarrier(const WalArchiveBarrier &) = delete;
   WalArchiveBarrier &operator=(const WalArchiveBarrier &) = delete;

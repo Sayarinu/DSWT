@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dswt/server/wire_layout.h"
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -9,8 +10,8 @@
 
 namespace dswt::server {
 
-using IdentityId = std::array<unsigned char, 16>;
-using SaveCredential = std::array<unsigned char, 32>;
+using IdentityId = std::array<unsigned char, wire::kIdSize>;
+using SaveCredential = std::array<unsigned char, wire::kCredentialSize>;
 
 // Local database results, not externally recoverable protocol outcomes.
 // Use one instance per worker; a libpq connection cannot be shared

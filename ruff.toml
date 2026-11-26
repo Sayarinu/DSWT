@@ -1,0 +1,4 @@
+# Test fixtures encode specific examples and expected wire values.
+extend-exclude = ["**/tests/**", "**/__tests__/**", "game", ".evidence"]
+[lint]
+select = ["PLR2004"]

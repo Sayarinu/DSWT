@@ -7,6 +7,11 @@
 
 namespace dswt::server::detail {
 
+namespace {
+constexpr std::size_t kMaxRecoveryEntries = 4096;
+} // namespace
+
+
 RecoveryGate::RecoveryGate(RecoveryBarrier provider) : provider_(std::move(provider)) {}
 
 bool RecoveryGate::Covers(Database &database, const std::string &key, std::uint64_t generation) {
@@ -18,7 +23,7 @@ bool RecoveryGate::Covers(Database &database, const std::string &key, std::uint6
     auto existing = entries_.find(key);
     if (existing != entries_.end() && existing->second.first >= generation) position = existing->second.second;
     else {
-      if (existing == entries_.end() && entries_.size() >= 4096) entries_.erase(entries_.begin());
+      if (existing == entries_.end() && entries_.size() >= kMaxRecoveryEntries) entries_.erase(entries_.begin());
       entries_[key] = {generation, position};
     }
   }

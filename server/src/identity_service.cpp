@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/identity_service.h"
 
 #include "dswt/server/identity_store.h"
@@ -30,7 +31,7 @@ grpc::Status IdentityService::Enroll(grpc::ServerContext *context, const v1::Enr
   RpcTelemetry trace(Operation::Enroll, context, [reply] { return reply->context().result(); }, request->enrollment_id());
   reply->Clear();
   if (context && context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "request cancelled"};
-  if (!detail::NonzeroBytes(request->enrollment_id(), 16) || !detail::NonzeroBytes(request->credential(), 32) || request->hints().size() > 64 ||
+  if (!detail::NonzeroBytes(request->enrollment_id(), wire::kIdSize) || !detail::NonzeroBytes(request->credential(), wire::kCredentialSize) || request->hints().size() > wire::kEnrollHintsMax ||
       !detail::ValidVariant(request->client_build())) {
     reply->mutable_context()->set_result(v1::RESULT_INVALID_REQUEST);
     return grpc::Status::OK;

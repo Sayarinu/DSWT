@@ -2,8 +2,7 @@ name: Validate source inputs
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main, "LUNE-*"]
   push:
     branches:
       - main
@@ -27,18 +26,66 @@ jobs:
         if: github.event_name == 'pull_request'
         run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
-      - name: Validate changed data and build script
+      - name: Check Python constants
+        uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+        with:
+          version: "0.17.6"
+          args: check
+          src: scripts tools deploy validator
+
+      - name: Check build inputs
         run: |
-          python3 -m json.tool client/res/text/wonder_trade.json >/dev/null
-          python3 -m json.tool client/upstream.json >/dev/null
+          bash -n scripts/build/build-rom.sh
           python3 -m json.tool licensing/redistribution.json >/dev/null
-          bash -n scripts/build-rom.sh
-          python3 -m unittest discover -s scripts/tests
+
+  client-tools:
+    name: Test client build and port tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Test client build and port tools
+        run: |
+          for suite in scripts/build/tests scripts/prepare/tests scripts/port/tests client/core/tests/contracts client/games/tests; do
+            python3 -m unittest discover -s "$suite"
+          done
+
+  service-tools:
+    name: Test service tooling and CI policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Test service tooling and CI policy
+        run: |
           python3 -m venv "$RUNNER_TEMP/dswt-policy"
           "$RUNNER_TEMP/dswt-policy/bin/pip" install --require-hashes -r tools/local-stack/requirements.txt
           "$RUNNER_TEMP/dswt-policy/bin/python" tools/local-stack/isolation.py policy
           "$RUNNER_TEMP/dswt-policy/bin/python" -m unittest discover -s tools/local-stack/__tests__
+          python3 -m unittest discover -s deploy/__tests__
+          python3 -m unittest discover -s validator/__tests__
           python3 -m unittest discover -s tools/image-audit/__tests__
+
+  patcher-tools:
+    name: Test patch and release tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Test patch and release tools
+        run: |
           python3 tools/bps-patch/patcher.py prepare
           provenance=(game/tools/flips-v198-*/provenance.json)
           test "${#provenance[@]}" -eq 1 && test -f "${provenance[0]}"
@@ -54,17 +101,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build server and run integration tests
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: ./.github/actions/build-image
         with:
-          context: .
           file: server/Dockerfile
-          tags: dswt-server
-          load: true
-          cache-from: type=gha,scope=connectivity-server
-          cache-to: type=gha,mode=max,scope=connectivity-server
+          tag: dswt-server
+          scope: connectivity-server
 
   tls-transport:
     name: Test bounded TLS transport
@@ -77,11 +119,11 @@ jobs:
           persist-credentials: false
       - name: Build pinned TLS profile and run conformance tests
         run: |
-          tls_source="$(python3 scripts/prepare-tls.py)"
-          cmake -S client/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
+          tls_source="$(python3 scripts/prepare/prepare-tls.py)"
+          cmake -S client/core/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
           cmake --build game/tls-tests --parallel 2
           ctest --test-dir game/tls-tests --output-on-failure
-          python3 client/tests/test_tls.py game/tls-tests/tls_probe
+          python3 client/core/tests/test_tls.py game/tls-tests/tls_probe
 
   ds-companion:
     name: Build and test DS companion
@@ -94,31 +136,16 @@ jobs:
           persist-credentials: false
       - name: Build and run companion host tests
         run: |
-          cmake -S companion/tests -B game/companion-tests
-          cmake --build game/companion-tests --parallel 2
-          ctest --test-dir game/companion-tests --output-on-failure
+          cmake -S client/companion/tests -B game/companion-tests
+          cmake --build game/companion-tests --parallel "$(nproc)"
+          ctest --test-dir game/companion-tests --output-on-failure --parallel "$(nproc)"
       - name: Build companion with the dummy connection profile
         run: |
-          CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
+          CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
       - name: Check DS and DSi ROM header
         run: |
-          docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import struct
-          import subprocess
-
-          rom = Path("/out/dswt-companion.nds")
-          subprocess.run([os.environ["BLOCKSDS"] + "/tools/ndstool/ndstool", "-i", str(rom)], check=True)
-          data = rom.read_bytes()
-          assert data[0x12] == 0x02, "ROM must support both DS and DSi"
-          assert data[0x1C] & 1, "TWL flag must enable DSi mode"
-          for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
-              offset = struct.unpack_from("<I", data, base)[0]
-              size = struct.unpack_from("<I", data, base + 12)[0]
-              assert offset >= 0x4000 and size > 0 and offset + size <= len(data), f"Missing or truncated {name} section"
-          print("DS/DSi header and payload checks passed")
-          PY
+          docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+          python3 scripts/build/package-companion.py --check
       - name: Keep companion ROM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -135,24 +162,23 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Build pinned core and run worker and gRPC conformance tests
+      - name: Build dswt-validator-tests
+        uses: ./.github/actions/build-image
+        with:
+          file: validator/Dockerfile
+          tag: dswt-validator-tests
+          scope: dswt-validator-tests
+          target: validator-tests
+      - name: Build dswt-validator
+        uses: ./.github/actions/build-image
+        with:
+          file: validator/Dockerfile
+          tag: dswt-validator
+          scope: dswt-validator
+      - name: Run pinned core and run worker and gRPC conformance tests
         run: |
-          docker build -f validator/Dockerfile --target validator-tests -t dswt-validator-tests .
           docker run --rm --user 1654:1654 --memory 512m --cpus 2 --pids-limit 128 \
             --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
             dswt-validator-tests
-          docker build -f validator/Dockerfile -t dswt-validator .
           docker run --rm --entrypoint sh dswt-validator -c \
             'test -s /usr/share/dswt-validator/source/LICENSE && test -s /usr/share/dswt-validator/source/validator/LICENSE'
-
-  emulator-persistence:
-    name: Test durable emulator persistence
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-      - name: Test host persistence faults and build pinned emulator integration
-        run: docker build -f emulator/Dockerfile -t dswt-emulator-builder .
