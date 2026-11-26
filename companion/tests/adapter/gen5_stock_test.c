@@ -187,8 +187,8 @@ static void Sweep(enum State state)
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
     /* Two passes: the party, the CRC table, the footer and its last byte; a
-     * removal also writes the footer's save count first (LUNE-902). */
-    assert(writes == (state == ESCROW ? 10u : 8u));
+     * removal first zeroes each footer's magic and writes its count (LUNE-902). */
+    assert(writes == (state == ESCROW ? 12u : 8u));
     for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
     lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
@@ -419,11 +419,11 @@ static void IdentityCollisions(void)
         if (cut) assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
-    for (cut = 1; cut <= 11; cut += 10) {
+    for (cut = 1; cut <= 13; cut += 12) {
         Arrange(ESCROW, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 10 ? -1 : 0));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : 0));
         file.failWrite = 0;
         StockPlay(1, Impostor);
         Load();
@@ -561,7 +561,7 @@ static void HeldElsewhere(void)
     for (state = ESCROW; state <= APPLYING_RETURN; state += APPLYING_RETURN - ESCROW) {
         enum WtInventoryStep cutStep = kCutStep[state];
         held = 0;
-        unsigned writes = state == ESCROW ? 10u : 8u;
+        unsigned writes = state == ESCROW ? 12u : 8u;
         for (cut = 1; cut <= writes + 1; ++cut) {
             Arrange((enum State)state, &journal);
             entry = journal;
@@ -682,7 +682,20 @@ static void TwinAndTrain(unsigned char *loaded)
  * WT_INVENTORY_HISTORY writes nothing and answers 1 only when what the stock game
  * loaded still held the offer exactly as offered (always, when play then
  * moved it, unless play left exactly the recorded removal); a twin after the removal is refused by REMOVE too, untouched. */
-static void History(void)
+/* LUNE-902: an interrupted stock save left one copy's footer not loading: the
+ * current save count, and a CRC that is the removal's CRC table's (a 1-in-65536
+ * coincidence in life). staleCopy 1 is the main copy, 2 the backup. */
+static unsigned staleCrc, staleCopy;
+static void StaleFooter(void)
+{
+    unsigned char *base = file.bytes + (staleCopy == 2 ? FX5_BACKUP : 0);
+    Fx5W32(base + FX5_USED - 16, image.globalCounter);
+    Fx5W32(base + FX5_USED - 12, FX5_USED);
+    Fx5W32(base + FX5_USED - 8, CP_SAVE_MAGIC_GEN5);
+    Fx5W16(base + FX5_USED - 2, staleCrc);
+}
+
+static void History(unsigned stale)
 {
     static const Action actions[] = { NULL, TrainOffered, DepositOffered, BattleBoxOffered, ReleaseOffered, TradeOffered,
                                       AddTwin, TwinAndTrain, TwinInDayCare };
@@ -691,14 +704,25 @@ static void History(void)
     WtJournalEntry journal, entry;
     unsigned writes, cut, saves, action, abandoned = 0, refused = 0, held;
     int answer;
+    staleCopy = stale;
     Arrange(ESCROW, &journal);
     entry = journal; writes = file.writes;
     assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
     writes = file.writes - writes;
     assert(image.globalCounter - journal.globalCounter >= WT_ABANDON_STEP);
+    if (stale) {
+        const unsigned char *base = file.bytes + (stale == 2 ? FX5_BACKUP : 0);
+        staleCrc = Fx5R16(base + FX5_USED - 2);
+        Arrange(ESCROW, &journal);
+        StaleFooter(); Load(); /* the companion loads the save as it is */
+        entry = journal; writes = file.writes;
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == 0);
+        writes = file.writes - writes;
+    }
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves)
         for (action = 0; action < sizeof(actions) / sizeof(*actions); ++action) {
             Arrange(ESCROW, &journal);
+            if (stale) { StaleFooter(); Load(); }
             entry = journal;
             file.failWrite = file.writes + cut;
             assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= writes ? -1 : 0));
@@ -724,8 +748,9 @@ static void History(void)
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);
-    printf("PASS %s stock save after a cut removal: %u cuts x 2 stock plays x 9 plays, abandonable %u times, "
-           "only from a save that held the offer; %u twins after the removal refused\n", FX5_NAME, writes + 1,
+    printf("PASS %s stock save after a cut removal%s: %u cuts x 2 stock plays x 9 plays, abandonable %u times, "
+           "only from a save that held the offer; %u twins after the removal refused\n", FX5_NAME,
+           stale ? " over a stale footer with the removal's table CRC" : "", writes + 1,
            abandoned, refused);
 }
 
@@ -740,7 +765,9 @@ int main(void)
     IdentityCollisions();
     HeldElsewhere();
     HeldUnique();
-    History();
+    History(0);
+    History(1);
+    History(2);
     printf("PASS %s stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, %u lost "
         "(each cut before the first retail copy held the return, the games' window)\n", FX5_NAME, cases, windowLosses);
     return 0;

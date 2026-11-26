@@ -118,10 +118,11 @@ typedef struct {
     int loaded;
     uint32_t blockOffsets[CP_SAVE_GEN5_BLOCKS_MAX];
     unsigned char areas[CP_SAVE_GEN5_BLOCKS_MAX + 2];
-    /* LUNE-902: CommitBoth writes the general block's (Generation V: each
-     * copy's) footer save counter, synced, before the rest of it (the CRC and
-     * block counter that make the new party load): no torn footer can
-     * publish a removal with an older counter. */
+    /* LUNE-902: before CommitBoth writes the general block (Generation V:
+     * each copy), it zeroes that copy's footer magic and writes its new save
+     * counter, each synced: the copy cannot load again until its own footer
+     * write, under the new counter, so neither a torn footer nor a stale one
+     * left by an interrupted save can publish a removal with an older counter. */
     int counterFirst;
 } CpSaveImage;
 
