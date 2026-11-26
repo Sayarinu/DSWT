@@ -3,8 +3,9 @@
 #include <string.h>
 
 enum { READ = 0x03, RDSR = 0x05, RDID = 0x9F, WIP = 1, WEL = 2 };
-/* Allow a pending 64 KiB sector erase (M45PE40 tSE max 5 s) on re-entry. */
-enum { READY_POLLS = 6000 };
+/* Allow a pending 64 KiB sector erase (M45PE40 tSE max 5 s) on re-entry.
+ * A worn LE25FW403A takes up to 300 ms for a page erase (A1229, tPE). */
+enum { READY_POLLS = 6000, PAGE_POLLS = 400 };
 
 static CpChipResult Command(const CpCardSave *chip, uint8_t opcode, unsigned addressBytes,
                             uint32_t offset, const void *tx, void *rx, size_t size)
@@ -138,7 +139,7 @@ static CpChipResult Modify(const CpCardSave *chip, uint8_t opcode, uint32_t offs
     if (!(status & WEL)) return CP_CHIP_WRITE_DISABLED;
     result = Addressed(chip, opcode, offset, data, NULL, data ? size : 0);
     if (result != CP_CHIP_OK) return result;
-    result = Ready(chip, opcode == SECTOR_ERASE ? READY_POLLS : 150, &status);
+    result = Ready(chip, opcode == SECTOR_ERASE ? READY_POLLS : PAGE_POLLS, &status);
     if (result != CP_CHIP_OK) return result;
     return Compare(chip, offset, data, size);
 }
@@ -147,6 +148,17 @@ CpChipResult CpCardSave_Program(const CpCardSave *chip, uint32_t offset, const v
 {
     if (!InRange(chip, offset, size) || !size || !data) return CP_CHIP_RANGE;
     if (chip->pageSize && size > chip->pageSize - offset % chip->pageSize) return CP_CHIP_RANGE;
+    if (chip->type == CP_CHIP_FLASH) {
+        /* FLASH programming can only clear bits. Refuse before WREN rather
+         * than AND the new data into bytes the caller did not erase. */
+        uint8_t current[256];
+        const uint8_t *bytes = data;
+        CpChipResult result = CpCardSave_Read(chip, offset, current, size);
+        if (result != CP_CHIP_OK) return result;
+        for (size_t i = 0; i < size; ++i) {
+            if ((current[i] & bytes[i]) != bytes[i]) return CP_CHIP_MISMATCH;
+        }
+    }
     return Modify(chip, PROGRAM, offset, data, size);
 }
 

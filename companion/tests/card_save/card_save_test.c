@@ -110,8 +110,13 @@ static void TestWrites(void)
         assert(sim.elapsed == (p == SIM_FRAM ? 0 : sim.latency));
         uint8_t opposite = 0xAB;
         if (chip.type == CP_CHIP_FLASH) {
+            /* Programming would AND 0xAB into 0x54: refused before WREN. */
+            unsigned modifies = sim.modifies;
             assert(CpCardSave_Program(&chip, offset, &opposite, 1) == CP_CHIP_MISMATCH);
-            assert(sim.memory[offset] == (0x54 & 0xAB));
+            assert(sim.memory[offset] == 0x54 && sim.modifies == modifies && !sim.wel);
+            uint8_t cleared = 0x50; /* Clearing further bits is a valid program. */
+            assert(CpCardSave_Program(&chip, offset, &cleared, 1) == CP_CHIP_OK);
+            assert(sim.memory[offset] == 0x50);
             uint32_t units[] = {chip.eraseSize, chip.sectorSize};
             for (unsigned i = 0; i < 2; ++i) {
                 uint32_t unit = units[i], base = chip.size - 2 * unit;
@@ -164,7 +169,7 @@ static void TestWriteErrors(void)
     chip = Detect(SIM_M45PE40, "CPUE");
     sim.stuck = true;
     assert(CpCardSave_Program(&chip, 0, bytes, 1) == CP_CHIP_TIMEOUT);
-    assert(sim.elapsed == 150 && sim.busy && sim.memory[0] == 0xFF);
+    assert(sim.elapsed == 400 && sim.busy && sim.memory[0] == 0xFF);
     assert(CpCardSave_Erase(&chip, 0, 256) == CP_CHIP_TIMEOUT && sim.modifies == 1);
     chip = Detect(SIM_M25P40, "CPUE");
     sim.stuck = true;
@@ -172,6 +177,14 @@ static void TestWriteErrors(void)
     assert(sim.elapsed == 6000 && sim.busy);
     sim.stuck = false;
     assert(CpCardSave_Read(&chip, 0, bytes, 2) == CP_CHIP_OK && bytes[0] == 0xFF && !sim.busy);
+
+    /* A worn LE25FW403A page erase or page program may take up to 300 ms
+     * (A1229, tPE 10^5 cycles). That is not a failure. */
+    chip = Detect(SIM_LE25FW403A, "ADAE");
+    sim.latency = 300;
+    memset(sim.memory, 0, 256);
+    assert(CpCardSave_Erase(&chip, 0, 256) == CP_CHIP_OK && sim.elapsed == 300);
+    assert(CpCardSave_Program(&chip, 0, bytes, 2) == CP_CHIP_OK && sim.memory[0] == 0xFF);
 }
 
 static void TestPowerCuts(void)
