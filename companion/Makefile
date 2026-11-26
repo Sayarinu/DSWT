@@ -1,4 +1,4 @@
-# DS Companion: a DSi-mode BlocksDS ROM, ARM9 code with the stock DSWiFi ARM7 core.
+# DS Companion: a DSi-mode BlocksDS ROM, ARM9 app and DSWiFi ARM7 core.
 # Adapted from BlocksDS's rom_arm9 template (CC0-1.0). Build it through
 # scripts/build-companion.sh, which runs it in tools/companion-builder.
 #
@@ -24,8 +24,9 @@ TLS_DIR			?= ../game/mbedtls-4.1.1
 # scripts/configure-connection.py writes this header from a profile.
 CONNECTION_HEADER	?= $(BUILDDIR)/dswt-connection.h
 
-# The stock ARM7 core with DSWiFi; it also serves the microphone.
-ARM7ELF			:= $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf
+# The DSWiFi core also serves the microphone and Slot-1 power requests.
+ARM7_SOURCE := src/platform/nds/arm7/main.c
+ARM7ELF := $(BUILDDIR)/arm7.elf
 
 # The game-independent client core, compiled in place. The Nitro-only
 # flash.c, network.c and entropy_game.c and the per-game folders stay out;
@@ -56,7 +57,7 @@ TLS_INCLUDE_DIRS	:= include library tf-psa-crypto/include \
 TLS_SOURCES		:= $(sort $(foreach dir,$(TLS_SOURCE_DIRS),\
 			   $(wildcard $(TLS_DIR)/$(dir)/*.c)))
 
-APP_SOURCES		:= $(shell find src -name '*.c' | sort)
+APP_SOURCES		:= $(filter-out $(ARM7_SOURCE),$(shell find src -name '*.c' | sort))
 
 PREFIX			:= $(ARM_NONE_EABI_PATH)arm-none-eabi-
 CC			:= $(PREFIX)gcc
@@ -103,9 +104,16 @@ check-inputs:
 	@test -f $(TLS_DIR)/include/mbedtls/ssl.h || { echo "TLS_DIR must name the Mbed TLS source from scripts/prepare-tls.py" >&2; exit 2; }
 	@test -f $(CONNECTION_HEADER) || { echo "CONNECTION_HEADER must name a header from scripts/configure-connection.py" >&2; exit 2; }
 
+$(ARM7ELF): $(ARM7_SOURCE)
+	@mkdir -p $(@D)
+	$(V)$(CC) -mthumb -mcpu=arm7tdmi -std=gnu11 -Os -Wall -Wextra -Werror \
+		-specs=$(BLOCKSDS)/sys/crts/ds_arm7.specs -I$(BLOCKSDS)/libs/libnds/include \
+		-I$(BLOCKSDS)/libs/dswifi/include -L$(BLOCKSDS)/libs/dswifi/lib \
+		-L$(BLOCKSDS)/libs/libnds/lib -o $@ $< -Wl,--start-group -ldswifi7 -lnds7 -lc -Wl,--end-group
+
 # unitcode 2 runs on DS and DSi; the DSi header asks for DSi mode, which the
 # companion needs for the SD card and WPA2.
-$(ROM): $(ELF)
+$(ROM): $(ELF) $(ARM7ELF)
 	@echo "  NDSTOOL $@"
 	$(V)$(NDSTOOL) -c $@ -7 $(ARM7ELF) -9 $(ELF) -uc 2 \
 		-b $(GAME_ICON) "$(GAME_TITLE);$(GAME_SUBTITLE);$(GAME_AUTHOR)"
@@ -127,10 +135,24 @@ $(TLS_LIB): $(TLS_OBJS)
 	$(V)rm -f $@
 	$(V)$(PREFIX)ar rcs $@ $^
 
-$(BUILDDIR)/app/%.o: %.c | check-inputs
+# Changing write permission must also rebuild incremental ROMs in either direction.
+CP_CARD_SAVE_WRITES ?= 0
+ifneq ($(CP_CARD_SAVE_WRITES),1)
+ifneq ($(CP_CARD_SAVE_WRITES),0)
+$(error CP_CARD_SAVE_WRITES must be 0 or 1)
+endif
+endif
+CARD_SAVE_CONFIG := $(BUILDDIR)/card-save-config.h
+.PHONY: check-card-save-config
+$(CARD_SAVE_CONFIG): check-card-save-config
+	@mkdir -p $(@D)
+	@echo '#define CP_CARD_SAVE_WRITES $(CP_CARD_SAVE_WRITES)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+
+$(BUILDDIR)/app/%.o: %.c $(CARD_SAVE_CONFIG) | check-inputs
 	@echo "  CC      $<"
 	@mkdir -p $(@D)
-	$(V)$(CC) $(BASE_CFLAGS) -include $(CONNECTION_HEADER) -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
+	$(V)$(CC) $(BASE_CFLAGS) -include $(CARD_SAVE_CONFIG) -include $(CONNECTION_HEADER) -Wall -Wextra -Werror -MMD -MP -c -o $@ $<
 
 $(BUILDDIR)/core/%.o: $(CLIENT)/src/wonder_trade/%.c | check-inputs
 	@echo "  CC      $<"
