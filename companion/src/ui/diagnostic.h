@@ -18,6 +18,9 @@
  *   passphrase=<key>  instead of the console's saved connections
  *   write-test=1      only for a dummy file named test.sav: write its journal
  *                     banks in place and verify them from the card
+ *   card-rom=1        check Slot-1 game data and card removal (standalone);
+ *                     reads bios7.bin (or bios9i.bin) and, for TWL, bios7i.bin
+ *                     from sd:/dswt-companion/
  *   ui-demo=1         show the screens (ui/) with the made-up demo model
  *                     instead; ui-demo=tour walks through every screen by itself
  * Everything shown is also appended to <drive>/dswt-companion/diag-log.txt.

@@ -193,6 +193,20 @@ add_library(companion_adapter STATIC "${COMPANION_SRC}/adapter/platinum.c" "${CO
 target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT}/include")
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save companion_journal)
+# Exercise both read-only ROM transports against the same game archives.
+add_executable(card_rom_test card/card_rom_test.c card/sim_card.c posix_reader.c)
+target_link_libraries(card_rom_test PRIVATE companion_adapter)
+add_executable(card_slot_test card/card_slot_test.c "${COMPANION_SRC}/platform/nds/card_slot.c")
+target_include_directories(card_slot_test PRIVATE card/stub)
+foreach(card_test card_rom_test card_slot_test)
+    target_sources(${card_test} PRIVATE "${COMPANION_SRC}/platform/nds/card_key.c" "${COMPANION_SRC}/platform/nds/card_rom.c")
+    target_include_directories(${card_test} PRIVATE "${COMPANION_SRC}")
+    target_compile_options(${card_test} PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined)
+    target_link_options(${card_test} PRIVATE -fsanitize=address,undefined)
+    add_test(NAME ${card_test} COMMAND ${card_test})
+endforeach()
+set_tests_properties(card_slot_test PROPERTIES TIMEOUT 5)
+
 add_executable(platinum_adapter_test adapter/platinum_test.c)
 add_executable(platinum_receive_test adapter/platinum_receive_test.c "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c"
