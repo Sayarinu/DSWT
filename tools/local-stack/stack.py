@@ -20,6 +20,12 @@ import time
 import uuid
 
 
+from http import HTTPStatus
+
+FIRST_USER_PORT = 1024
+MAX_PORT = 65535
+
+
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = Path(__file__).with_name("compose.yaml")
 OBSERVABILITY = Path(__file__).with_name("compose.observability.yaml")
@@ -80,7 +86,7 @@ def save_manifest(workspace, manifest):
 
 
 def valid_port(value):
-    return type(value) is int and 1024 <= value <= 65535
+    return type(value) is int and FIRST_USER_PORT <= value <= MAX_PORT
 
 
 def listen_ipv4(value):
@@ -321,7 +327,7 @@ class Stack:
                                    {"Content-Type": "application/octet-stream", "Connection": "close"})
                 response = connection.getresponse()
                 packet = response.read(wire.MAX_PACKET + 1)
-                if response.status != 200 or response.getheader("Content-Type") != "application/octet-stream":
+                if response.status != HTTPStatus.OK or response.getheader("Content-Type") != "application/octet-stream":
                     raise ValueError("HTTPS trading endpoint is not ready")
                 reply = wire.decode_response(packet)
                 if (reply.request_id != request.request_id or reply.operation != request.operation

@@ -19,6 +19,8 @@ import time
 import urllib.request
 import uuid
 
+from http import HTTPStatus
+
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL = Path(subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                      text=True).strip()).parent / "game/dswt-production"  # Survives worktree removal.
@@ -350,7 +352,7 @@ class Target:
                                {"Content-Type": "application/octet-stream", "Connection": "close"})
             response = connection.getresponse()
             reply = wire.decode_response(response.read(wire.MAX_PACKET + 1))
-            if response.status != 200 or reply.request_id != request.request_id or reply.result != wire.Result.UNAUTHENTICATED:
+            if response.status != HTTPStatus.OK or reply.request_id != request.request_id or reply.result != wire.Result.UNAUTHENTICATED:
                 raise ValueError("Unexpected reply from the trading endpoint")
         finally:
             connection.close()

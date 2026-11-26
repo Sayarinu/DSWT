@@ -21,6 +21,13 @@ import uuid
 import stack
 
 
+OFFER_COMPLETE = 4
+LOCATION_APPLIED = 3
+OFFER_MATCHED = 2
+DELIVERY_RETURN = 2
+LOCATION_IN_TRANSIT = 2
+
+
 CASES = ("repeat", "cancel", "storage", "reply-loss", "interruption", "older-copy", "outages", "validator-recovery", "illegal")
 
 
@@ -192,9 +199,9 @@ class Acceptance:
         require([(row["opcode"], row["result"]) for row in snapshot["operations"]] == operations
                 and [int(row["counter"]) for row in snapshot["operations"]] == list(range(1, len(operations) + 1)),
                 "mutation count/order changed")
-        require(all(row["state"] == 4 for row in snapshot["offers"]), "offer is still pending")
+        require(all(row["state"] == OFFER_COMPLETE for row in snapshot["offers"]), "offer is still pending")
         require(len(snapshot["offers"]) == len(snapshot["receipts"]), "offer/receipt cardinality differs")
-        require(all(row["location"] == 3 and row["delivered_sha256"] == row["applied_sha256"] for row in snapshot["receipts"]),
+        require(all(row["location"] == LOCATION_APPLIED and row["delivered_sha256"] == row["applied_sha256"] for row in snapshot["receipts"]),
                 "receipt ownership or applied digest mismatch")
         self.evidence.append({"client": str(client.relative_to(self.directory)), "authoritative": snapshot})
         return snapshot
@@ -210,7 +217,7 @@ class Acceptance:
     def wait_matched(self, *clients):
         deadline = time.monotonic() + 30
         while True:
-            if all(self.snapshot(client)["offers"][-1]["state"] == 2 for client in clients):
+            if all(self.snapshot(client)["offers"][-1]["state"] == OFFER_MATCHED for client in clients):
                 return
             if time.monotonic() >= deadline:
                 raise TimeoutError("matcher did not pair case clients")
@@ -250,7 +257,7 @@ class Acceptance:
             original = (a / "inventory-0.bin").read_bytes()
             self.run(a, "submit"); self.run(a, "cancel")
             state = self.settled(a, [self.fixture_manifest["sha256"]["starter.pk4"]], [(2, 1), (4, 1), (6, 1)])
-            require(state["receipts"][0]["delivery_kind"] == 2 and state["receipts"][0]["asset_id"] == state["offers"][0]["offered_asset_id"], "cancel changed asset")
+            require(state["receipts"][0]["delivery_kind"] == DELIVERY_RETURN and state["receipts"][0]["asset_id"] == state["offers"][0]["offered_asset_id"], "cancel changed asset")
             require((a / "inventory-0.bin").read_bytes() == original, "cancel did not restore exact encrypted image")
 
     def storage(self):
@@ -261,7 +268,7 @@ class Acceptance:
         require(state["phase"] == "received" and state["inventory"] == [[], []], "full storage applied incoming payload")
         before = self.snapshot(a)
         self.run(a, "collect")
-        require(self.snapshot(a) == before and len(before["operations"]) == 1 and before["receipts"][0]["location"] == 2,
+        require(self.snapshot(a) == before and len(before["operations"]) == 1 and before["receipts"][0]["location"] == LOCATION_IN_TRANSIT,
                 "full destination ACKed or changed ownership")
         require(before["receipts"][0]["delivered_sha256"] == state["incoming_sha256"], "retained received digest mismatch")
         (a / "full").unlink()
@@ -355,7 +362,7 @@ class Acceptance:
                 try:
                     state, events = self.run(a, failure=True)
                     require(state["pending_sha256"] == pending["pending_sha256"] and state["inventory"] == [[], []], "outage released escrow")
-                    require(any(row.get("wire_result") == 11
+                    require(any(row.get("wire_result") == stack.wire.Result.UNAVAILABLE
                                 or (row.get("transport_stage") == "http" and row.get("result", 0) < 0 and row.get("tls_flags") == 0)
                                 for row in events), "outage did not fail at the authenticated service boundary")
                 finally:
@@ -387,7 +394,7 @@ class Acceptance:
                 require(len(after["operations"]) == len(before["operations"]) + 1
                         and after["operations"][-1]["request_sha256"] == original["request_sha256"], "Retry committed a different submission")
                 return
-            require(any(event.get("wire_result") == 11 for event in events)
+            require(any(event.get("wire_result") == stack.wire.Result.UNAVAILABLE for event in events)
                     and state["pending_sha256"] == original["pending_sha256"] and state["inventory"] == original["inventory"]
                     and self.snapshot(client) == before, "Dependency recovery changed pending ownership/request")
             # A new health-check channel can recover before the backend's channel leaves backoff.
@@ -408,7 +415,7 @@ class Acceptance:
             state, events = self.run(pending, failure=True)
             require(state["pending_sha256"] == original["pending_sha256"] and state["inventory"] == [[], []],
                     "validator outage changed pending submission or released escrow")
-            require(any(event.get("wire_result") == 11 for event in events), "new submission was not retryable")
+            require(any(event.get("wire_result") == stack.wire.Result.UNAVAILABLE for event in events), "new submission was not retryable")
             require(self.snapshot(pending) == before, "unavailable validation consumed a mutation")
             self.run(a, "collect"); self.run(b, "collect"); self.paired(a, b)
             self.settled(a, [self.fixture_manifest["sha256"]["wild.pk4"]], [(2, 1), (6, 1)])
@@ -431,7 +438,7 @@ class Acceptance:
             self.local.hold_archive(True)
             try:
                 state, events = self.run(a, "submit", failure=True)
-                require(any(event.get("wire_result") == 2 for event in events), "held archive did not report PROCESSING")
+                require(any(event.get("wire_result") == stack.wire.Result.PROCESSING for event in events), "held archive did not report PROCESSING")
                 require(state["phase"] != "queued" and state["pending_sha256"] and state["inventory"] == [[], []],
                         "held archive released the outcome or the escrow")
             finally:

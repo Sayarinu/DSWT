@@ -5,6 +5,9 @@ import struct
 import zlib
 
 # A ROM: the largest DS cartridge, Black 2 and White 2, holds 512 MiB.
+SOURCE_READ, TARGET_READ, SOURCE_COPY, TARGET_COPY = range(4)
+
+
 MAX_FILE = 512 * 1024 * 1024
 # A patch source: the ROM followed by its expanded code, a few MiB at most.
 MAX_SOURCE = MAX_FILE + 64 * 1024 * 1024
@@ -73,11 +76,11 @@ def _parse(patch):
             action, length = value & 3, (value >> 2) + 1
             if length > target_size - output:
                 raise BPSError(f"{ACTIONS[action]} at target offset {output} writes past the target")
-            if action == 0:
+            if action == SOURCE_READ:
                 if output + length > source_size:
                     raise BPSError(f"source_read at target offset {output} reads past the source")
                 offset = output
-            elif action == 1:
+            elif action == TARGET_READ:
                 if position + length > end:
                     raise BPSError(f"target_read at target offset {output} overruns the patch")
                 offset = position
@@ -85,7 +88,7 @@ def _parse(patch):
             else:
                 relative, position = _number(data, position, end)
                 delta = -(relative >> 1) if relative & 1 else relative >> 1
-                if action == 2:
+                if action == SOURCE_COPY:
                     source_relative += delta
                     if source_relative < 0 or source_relative + length > source_size:
                         raise BPSError(f"source_copy at target offset {output} is outside the source")
@@ -113,7 +116,7 @@ def walk(patch):
     counts = dict.fromkeys(ACTIONS, 0)
     literals = []
     for action, output, length, offset in actions:
-        if action == 1:
+        if action == TARGET_READ:
             literals.append({"target_offset": output, "patch_offset": offset, "length": length,
                              "sha256": hashlib.sha256(patch[offset:offset + length]).hexdigest()})
         counts[ACTIONS[action]] += 1
@@ -139,11 +142,11 @@ def apply(source, patch):
     target = bytearray(header["target_size"])
     with memoryview(source) as source_bytes, memoryview(patch) as patch_bytes, memoryview(target) as out:
         for action, output, length, offset in actions:
-            if action == 0:
+            if action == SOURCE_READ:
                 out[output:output + length] = source_bytes[output:output + length]
-            elif action == 1:
+            elif action == TARGET_READ:
                 out[output:output + length] = patch_bytes[offset:offset + length]
-            elif action == 2:
+            elif action == SOURCE_COPY:
                 out[output:output + length] = source_bytes[offset:offset + length]
             else:
                 # An overlapping target_copy repeats the bytes between its offset and the output:

@@ -18,6 +18,12 @@ import policy
 import stack
 
 
+VALIDATOR_CPUS = 2
+VALIDATOR_PIDS = 128
+VALIDATOR_NANOCPUS = 2_000_000_000
+TCP_STATE_COLUMN = 3
+
+
 require = policy.require
 
 
@@ -130,8 +136,8 @@ def compose_evidence(local, config):
     validator = services["validator"]
     require(services["gateway"]["environment"].get("WT_METRICS_PORT") == "9091"
             and services["backend"]["environment"].get("WT_METRICS_PORT") == "9092", "Unexpected private telemetry ports")
-    require(int(validator["mem_limit"]) == 512 * 1024 * 1024 and float(validator["cpus"]) == 2
-            and validator["pids_limit"] == 128, "Unexpected validator resource bounds")
+    require(int(validator["mem_limit"]) == 512 * 1024 * 1024 and float(validator["cpus"]) == VALIDATOR_CPUS
+            and validator["pids_limit"] == VALIDATOR_PIDS, "Unexpected validator resource bounds")
     require(len(validator["tmpfs"]) == 1 and validator["tmpfs"][0].startswith("/tmp:"), "Unexpected validator tmpfs mount")
     validator_tmpfs(validator["tmpfs"][0].split(":", 1)[1])
     return {"status": "pass", "sha256": hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest(),
@@ -175,8 +181,8 @@ def runtime_evidence(local, containers):
                     and "no-new-privileges:true" in host["SecurityOpt"] and set(host["Tmpfs"]) == {"/tmp"}, "Missing runtime restrictions")
             require(re.fullmatch(r"[1-9][0-9]*(?::[0-9]+)?", config["User"]), "Application must use a nonzero numeric UID")
         if name == "validator":
-            require(host["Memory"] == 512 * 1024 * 1024 and host["NanoCpus"] == 2_000_000_000
-                    and host["PidsLimit"] == 128, "Unexpected runtime validator limits")
+            require(host["Memory"] == 512 * 1024 * 1024 and host["NanoCpus"] == VALIDATOR_NANOCPUS
+                    and host["PidsLimit"] == VALIDATOR_PIDS, "Unexpected runtime validator limits")
             validator_tmpfs(host["Tmpfs"]["/tmp"])
         report[name] = {"container": item["Id"], "image": item["Image"], "network_mode": mode, "status": "pass"}
     return report
@@ -186,7 +192,7 @@ def listeners(text):
     result = set()
     for line in text.splitlines():
         fields = line.split()
-        if len(fields) > 3 and fields[3] == "0A":
+        if len(fields) > TCP_STATE_COLUMN and fields[3] == "0A":
             address, port = fields[1].split(":")
             result.add((address, int(port, 16)))
     return result

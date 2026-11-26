@@ -31,6 +31,19 @@ import zlib
 from .catalog import variants_by_id
 from . import aletheia, elf, link, nds
 
+ARM_ALWAYS = 0xE
+ARM_SWI = 0xF
+ARM_PC = 15
+ARM_BLOCK_TRANSFER = 4
+NITRO_COLOR_4BPP = 3
+PNG_SAMPLE_BITS = 8
+PNG_INDEXED = 3
+PNG_FILTER_UP = 2
+PNG_FILTER_AVERAGE = 3
+PNG_FILTER_PAETH = 4
+ICON_PALETTE_SIZE = 16
+
+
 ROOT = Path(__file__).resolve().parents[3]
 PATCH = ROOT / "client/games/aletheia.patch"
 PIN = ROOT / "client/games/upstream-aletheia.json"
@@ -123,14 +136,14 @@ def arm_veneer(target):
 
 def relocatable_arm(word):
     """True for an ARM instruction that runs the same at any address: not a branch and no PC operand."""
-    if word >> 28 != 0xE or (word >> 25) & 7 in (5,) or (word >> 24) & 0xF == 0xF:
+    if word >> 28 != ARM_ALWAYS or (word >> 25) & 7 in (5,) or (word >> 24) & 0xF == ARM_SWI:
         return False
-    if (word >> 26) & 3 == 1 and (word >> 16) & 0xF == 15:
+    if (word >> 26) & 3 == 1 and (word >> 16) & 0xF == ARM_PC:
         return False  # a load or store relative to the PC
-    if (word >> 26) & 3 == 0 and ((word >> 16) & 0xF == 15 or (word >> 12) & 0xF == 15
-                                  or not (word >> 25) & 1 and word & 0xF == 15):
+    if (word >> 26) & 3 == 0 and ((word >> 16) & 0xF == ARM_PC or (word >> 12) & 0xF == ARM_PC
+                                  or not (word >> 25) & 1 and word & 0xF == ARM_PC):
         return False
-    if (word >> 25) & 7 == 4 and word >> 15 & 1:
+    if (word >> 25) & 7 == ARM_BLOCK_TRANSFER and word >> 15 & 1:
         return False  # a block transfer that loads the PC
     return True
 
@@ -401,7 +414,7 @@ class Target:
 
     def _arena(self):
         """Where main RAM is free after the static binary, its BSS and every overlay."""
-        ends = [ram + size + bss for _, ram, size, bss, _, _ in nds.overlays(self.rom) if nds.ARM9_RAM <= ram < 0x02400000]
+        ends = [ram + size + bss for _, ram, size, bss, _, _ in nds.overlays(self.rom) if nds.ARM9_RAM <= ram < nds.ARM9_RAM_END]
         return nds.align(max(ends), 32)
 
     # --- 5. The cartridge ---------------------------------------------------------------------------
@@ -497,7 +510,7 @@ class Target:
         members, names = nds.narc_split(self.rom[slice(*nds.file_span(self.rom, self.icon_fid))])
         require(len(members) == ICON_MEMBER, f"{ICON_ARCHIVE} does not end at member {ICON_MEMBER}")
         template = members[ICON_TEMPLATE]
-        require(template[:4] == b"RGCN" and template[0x10:0x14] == b"RAHC" and nds.u32(template, 0x1C) == 3,
+        require(template[:4] == b"RGCN" and template[0x10:0x14] == b"RAHC" and nds.u32(template, 0x1C) == NITRO_COLOR_4BPP,
                 f"{ICON_ARCHIVE} member {ICON_TEMPLATE} is not 4-bit characters")
         size = nds.u32(template, 0x28)
         tiles = recolor(icon_tiles(ICON_PNG.read_bytes()), ICON_COLORS)
@@ -609,7 +622,7 @@ def icon_tiles(png):
             data += body
         at += 12 + length
     width, height, depth, color, _, _, interlace = header
-    require(depth == 8 and color == 3 and not interlace and width % 8 == 0 and height % 8 == 0,
+    require(depth == PNG_SAMPLE_BITS and color == PNG_INDEXED and not interlace and width % 8 == 0 and height % 8 == 0,
             "the icon must be an 8-bit indexed, non-interlaced PNG of whole tiles")
     raw, rows, previous = zlib.decompress(data), [], bytes(width)
     for y in range(height):
@@ -619,17 +632,17 @@ def icon_tiles(png):
             corner = previous[x - 1] if x else 0
             if kind == 1:
                 line[x] = (line[x] + left) & 0xFF
-            elif kind == 2:
+            elif kind == PNG_FILTER_UP:
                 line[x] = (line[x] + up) & 0xFF
-            elif kind == 3:
+            elif kind == PNG_FILTER_AVERAGE:
                 line[x] = (line[x] + (left + up) // 2) & 0xFF
-            elif kind == 4:
+            elif kind == PNG_FILTER_PAETH:
                 guess = left + up - corner
                 best = min((abs(guess - left), 0, left), (abs(guess - up), 1, up), (abs(guess - corner), 2, corner))[2]
                 line[x] = (line[x] + best) & 0xFF
         rows.append(bytes(line))
         previous = line
-    require(all(value < 16 for row in rows for value in row), "the icon uses more than 16 colors")
+    require(all(value < ICON_PALETTE_SIZE for row in rows for value in row), "the icon uses more than 16 colors")
     out = bytearray()
     for ty in range(0, height, 8):
         for tx in range(0, width, 8):

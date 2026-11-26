@@ -12,11 +12,14 @@ import struct
 import sys
 
 
+SEED_BYTES = 32
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def seed_record(seed, generation):
-    if len(seed) != 32 or not any(seed) or not 0 <= generation < 2**64:
+    if len(seed) != SEED_BYTES or not any(seed) or not 0 <= generation < 2**64:
         raise ValueError("Invalid seed or journal generation")
     record = bytearray(4096)
     struct.pack_into("<4sHHIIQ", record, 0, b"DSWJ", 1, 0, 4096, 0, generation)

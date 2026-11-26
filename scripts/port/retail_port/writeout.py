@@ -19,6 +19,30 @@ import struct
 
 from . import elf
 
+from . import nds
+
+THUMB_ADD_SUB = 3
+THUMB_ALU = 0x10
+THUMB_HIGH_REGISTER = 0x11
+HIGH_BRANCH_EXCHANGE = 3
+THUMB_REGISTER_TRANSFER = 5
+THUMB_IMMEDIATE_TRANSFER = 3
+THUMB_HALFWORD_TRANSFER = 8
+THUMB_SP_TRANSFER = 9
+THUMB_LOAD_ADDRESS = 0xA
+THUMB_ADJUST_SP = 0xB0
+THUMB_PUSH = 0x5A
+THUMB_POP = 0x5E
+THUMB_MULTIPLE_TRANSFER = 0xC
+THUMB_CONDITIONAL_BRANCH = 0xD
+FIRST_RESERVED_CONDITION = 14
+THUMB_BRANCH = 0x1C
+THUMB_PUSH_ENCODING = 0xB400
+THUMB_LITERAL_LOAD = 0x09
+THUMB_CMP_IMMEDIATE = 0x05
+THUMB_ADD_PC_ENCODING = 0x4487
+
+
 CONDITIONS = ["eq", "ne", "cs", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le"]
 ALU = ["and", "eor", "lsl", "lsr", "asr", "adc", "sbc", "ror", "tst", "neg", "cmp", "cmn", "orr", "mul", "bic", "mvn"]
 LOADS = ["str", "strh", "strb", "ldrsb", "ldr", "ldrh", "ldrb", "ldrsh"]
@@ -55,43 +79,43 @@ def _high(r):
 def instruction(x, at, label):
     """One 16-bit Thumb instruction (not BL, a literal load or a switch) as text; label(address)
     names a branch target. None if it is not one the decompilation's syntax writes."""
-    if x >> 13 == 0 and x >> 11 != 3:
+    if x >> 13 == 0 and x >> 11 != THUMB_ADD_SUB:
         return f"{['lsl', 'lsr', 'asr'][x >> 11]} r{x & 7}, r{x >> 3 & 7}, #0x{x >> 6 & 31:x}"
-    if x >> 11 == 3:
+    if x >> 11 == THUMB_ADD_SUB:
         operand = f"#0x{x >> 6 & 7:x}" if x >> 10 & 1 else f"r{x >> 6 & 7}"
         return f"{'sub' if x >> 9 & 1 else 'add'} r{x & 7}, r{x >> 3 & 7}, {operand}"
     if x >> 13 == 1:
         return f"{['mov', 'cmp', 'add', 'sub'][x >> 11 & 3]} r{x >> 8 & 7}, #0x{x & 0xFF:x}"
-    if x >> 10 == 0x10:
+    if x >> 10 == THUMB_ALU:
         return f"{ALU[x >> 6 & 15]} r{x & 7}, r{x >> 3 & 7}"
-    if x >> 10 == 0x11:
+    if x >> 10 == THUMB_HIGH_REGISTER:
         op, rd, rs = x >> 8 & 3, (x & 7) | (x >> 4 & 8), x >> 3 & 15
-        if op == 3:
+        if op == HIGH_BRANCH_EXCHANGE:
             return ("blx " if x & 0x80 else "bx ") + _high(rs)
         return f"{['add', 'cmp', 'mov'][op]} {_high(rd)}, {_high(rs)}"
-    if x >> 12 == 5:
+    if x >> 12 == THUMB_REGISTER_TRANSFER:
         return f"{LOADS[x >> 9 & 7]} r{x & 7}, [r{x >> 3 & 7}, r{x >> 6 & 7}]"
-    if x >> 13 == 3:
+    if x >> 13 == THUMB_IMMEDIATE_TRANSFER:
         byte, load = x >> 12 & 1, x >> 11 & 1
         return f"{('ldr' if load else 'str') + ('b' if byte else '')} r{x & 7}, [r{x >> 3 & 7}, #0x{(x >> 6 & 31) * (1 if byte else 4):x}]"
-    if x >> 12 == 8:
+    if x >> 12 == THUMB_HALFWORD_TRANSFER:
         return f"{'ldrh' if x >> 11 & 1 else 'strh'} r{x & 7}, [r{x >> 3 & 7}, #0x{(x >> 6 & 31) * 2:x}]"
-    if x >> 12 == 9:
+    if x >> 12 == THUMB_SP_TRANSFER:
         return f"{'ldr' if x >> 11 & 1 else 'str'} r{x >> 8 & 7}, [sp, #0x{(x & 0xFF) * 4:x}]"
-    if x >> 12 == 0xA:
+    if x >> 12 == THUMB_LOAD_ADDRESS:
         return f"add r{x >> 8 & 7}, {'sp' if x >> 11 & 1 else 'pc'}, #0x{(x & 0xFF) * 4:x}"
-    if x >> 8 == 0xB0:
+    if x >> 8 == THUMB_ADJUST_SP:
         return f"{'sub' if x & 0x80 else 'add'} sp, #0x{(x & 0x7F) * 4:x}"
-    if x >> 9 == 0x5A:
+    if x >> 9 == THUMB_PUSH:
         return "push " + _registers(x & 0xFF, "lr" if x & 0x100 else None)
-    if x >> 9 == 0x5E:
+    if x >> 9 == THUMB_POP:
         return "pop " + _registers(x & 0xFF, "pc" if x & 0x100 else None)
-    if x >> 12 == 0xC:
+    if x >> 12 == THUMB_MULTIPLE_TRANSFER:
         return f"{'ldmia' if x >> 11 & 1 else 'stmia'} r{x >> 8 & 7}!, {_registers(x & 0xFF)}"
-    if x >> 12 == 0xD and x >> 8 & 15 < 14:
+    if x >> 12 == THUMB_CONDITIONAL_BRANCH and x >> 8 & 15 < FIRST_RESERVED_CONDITION:
         offset = (x & 0xFF) - (0x100 if x & 0x80 else 0)
         return f"b{CONDITIONS[x >> 8 & 15]} {label(at + 4 + offset * 2)}"
-    if x >> 11 == 0x1C:
+    if x >> 11 == THUMB_BRANCH:
         offset = (x & 0x7FF) - (0x800 if x & 0x400 else 0)
         return f"b {label(at + 4 + offset * 2)}"
     return None
@@ -127,7 +151,7 @@ class Module:
                 found.add(word - 1)
         for at in range(low & ~3, high, 4):
             x = self.half(at)
-            if x & 0xFE00 == 0xB400 and x & 0x100:
+            if x & 0xFE00 == THUMB_PUSH_ENCODING and x & 0x100:
                 found.add(at)
         return sorted(found)
 
@@ -199,21 +223,21 @@ def write_out(us, us_source, module, rodata_at, placed, header=""):
                 k += 2
                 continue
             x = module.half(k)
-            if x >> 11 == 0x09:
+            if x >> 11 == THUMB_LITERAL_LOAD:
                 literal = ((k + 4) & ~3) + (x & 0xFF) * 4
                 if at <= literal < end:
                     pool.add(literal)
-            if x >> 11 == 0x05:
+            if x >> 11 == THUMB_CMP_IMMEDIATE:
                 last_compare = x & 0xFF
-            if x & 0xFF87 == 0x4487:  # add pc, rN: a switch's table of offsets follows
+            if x & 0xFF87 == THUMB_ADD_PC_ENCODING:  # add pc, rN: a switch's table of offsets follows
                 base = k + 2
                 labels.add(base)
                 for case in range(last_compare + 1):
                     table[base + 2 * case] = base
                     labels.add(base + struct.unpack_from("<h", module.body, base + 2 * case - module.base)[0] + 2)
-            if x >> 12 == 0xD and x >> 8 & 15 < 14:
+            if x >> 12 == THUMB_CONDITIONAL_BRANCH and x >> 8 & 15 < FIRST_RESERVED_CONDITION:
                 labels.add(k + 4 + ((x & 0xFF) - (0x100 if x & 0x80 else 0)) * 2)
-            if x >> 11 == 0x1C:
+            if x >> 11 == THUMB_BRANCH:
                 labels.add(k + 4 + ((x & 0x7FF) - (0x800 if x & 0x400 else 0)) * 2)
             target = module.call(k) if k + 4 <= end else None
             if target is not None:
@@ -228,7 +252,7 @@ def write_out(us, us_source, module, rodata_at, placed, header=""):
             if target in placed and us_name not in placed[target]:
                 raise WriteOutError(f"{name} calls {us_name} at {target:#x}, which the symbol map gives to {sorted(placed[target])}")
         words = [module.word(p) for p in sorted(pool)]
-        addresses = [w for w in words if 0x2000000 <= w < 0x2400000 and not rodata_at <= w < rodata_at + ro_size
+        addresses = [w for w in words if nds.ARM9_RAM <= w < nds.ARM9_RAM_END and not rodata_at <= w < rodata_at + ro_size
                      and not (w & 1 and w - 1 in by_address)]
         _require(len(addresses) == len(us_words), f"{name} has {len(addresses)} address literals, US {len(us_words)}")
         for value, us_name in zip(addresses, us_words):
@@ -262,7 +286,7 @@ def write_out(us, us_source, module, rodata_at, placed, header=""):
                 k += 4
                 continue
             x = module.half(k)
-            if x >> 11 == 0x09 and ((k + 4) & ~3) + (x & 0xFF) * 4 in pool:
+            if x >> 11 == THUMB_LITERAL_LOAD and ((k + 4) & ~3) + (x & 0xFF) * 4 in pool:
                 literal_at = ((k + 4) & ~3) + (x & 0xFF) * 4
                 value = module.word(literal_at)
                 op = f"ldr r{x >> 8 & 7}, _{literal_at:08X}" + ("" if literal(value) else f" ; =0x{value:08X}")

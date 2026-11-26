@@ -9,17 +9,22 @@ import re
 import sys
 
 
+MAX_HOSTNAME_LENGTH = 253
+IPV4_BROADCAST = 0xffffffff
+MAX_PORT = 65535
+
+
 def header(profile):
     if set(profile) != {"hostname", "ipv4", "port", "current_spki_sha256", "next_spki_sha256"}:
         raise ValueError("Profile must contain exactly hostname, ipv4, port, current_spki_sha256 and next_spki_sha256")
     hostname = profile["hostname"]
-    if not isinstance(hostname, str) or len(hostname) > 253 or not re.fullmatch(r"[A-Za-z0-9]+(?:[A-Za-z0-9.-]*[A-Za-z0-9])?", hostname):
+    if not isinstance(hostname, str) or len(hostname) > MAX_HOSTNAME_LENGTH or not re.fullmatch(r"[A-Za-z0-9]+(?:[A-Za-z0-9.-]*[A-Za-z0-9])?", hostname):
         raise ValueError("Invalid TLS hostname")
     address = ipaddress.IPv4Address(profile["ipv4"])
-    if address.is_unspecified or address.is_multicast or int(address) == 0xffffffff:
+    if address.is_unspecified or address.is_multicast or int(address) == IPV4_BROADCAST:
         raise ValueError("Use a unicast IPv4 server address")
     port = profile["port"]
-    if type(port) is not int or not 1 <= port <= 65535:
+    if type(port) is not int or not 1 <= port <= MAX_PORT:
         raise ValueError("Port must be 1..65535")
     pins = []
     for name in ("current_spki_sha256", "next_spki_sha256"):

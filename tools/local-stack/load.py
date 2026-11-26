@@ -29,6 +29,9 @@ import acceptance
 import stack
 
 
+VPS_CPU_COUNT = 2
+
+
 APPLICATIONS = ("gateway", "backend", "validator")
 SETTLED = "idle"
 # The gateway owns the namespace shared by the validator, collectors and clients; restarting it
@@ -962,7 +965,7 @@ def main():
     args = parser.parse_args()
     if len(args.restart) != len(args.restart_at) or not set(args.restart) <= set(RESTARTABLE):
         parser.error("give one --restart-at offset per --restart service: " + ", ".join(RESTARTABLE))
-    if args.vps_cpus and (len(cpu_list(args.vps_cpus)) != 2 or max(cpu_list(args.vps_cpus)) >= (os.cpu_count() or 0)):
+    if args.vps_cpus and (len(cpu_list(args.vps_cpus)) != VPS_CPU_COUNT or max(cpu_list(args.vps_cpus)) >= (os.cpu_count() or 0)):
         parser.error("--vps-cpus takes two host cores, such as 2,3")
     if bool(args.overload_rate) != bool(args.overload_seconds) or (args.overload_rate and args.overload_rate <= args.pairs):
         parser.error("give --overload-rate above --pairs together with --overload-seconds")

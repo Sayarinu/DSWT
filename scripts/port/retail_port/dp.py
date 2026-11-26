@@ -24,6 +24,11 @@ from . import elf, link, nds, platinum, sdk, symbols, toolchain, writeout
 from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_game
 
 # game: (make GAME_VERSION and define, decompilation version name)
+ASSIGNMENT_FIELDS = 3
+DEFINE_FIELDS = 3
+THUMB_LDR_R2_LITERAL = 0x4A
+
+
 GAMES = {"diamond": ("DIAMOND", "VERSION_DIAMOND"), "pearl": ("PEARL", "VERSION_PEARL")}
 # id: (catalogue country, language enumerator, .gmm and Wonder Trade text column, build deltas)
 # Korean was built later than US, with a newer compiler for the game's own code, and
@@ -349,7 +354,7 @@ class Target(platinum.Target):
             lines = []
             for line in (self.workspace / "files/msgdata/msg.naix").read_text().splitlines():
                 words = line.replace(",", " ").split()
-                if len(words) == 3 and words[0].startswith("NARC_msg_narc_") and words[1] == "=" and words[2].isdigit():
+                if len(words) == ASSIGNMENT_FIELDS and words[0].startswith("NARC_msg_narc_") and words[1] == "=" and words[2].isdigit():
                     number = self.bank_remap.get(int(words[2]))
                     if number is not None:
                         lines.append(f"    {words[0]} = {number},")
@@ -439,7 +444,7 @@ class Target(platinum.Target):
     def port_defines(self):
         config = git(self.pristine, "show", "HEAD:include/config.h").decode()
         numbers = {words[1]: int(words[2]) for words in (line.split() for line in config.splitlines())
-                   if len(words) >= 3 and words[0] == "#define" and words[2].isdigit()}
+                   if len(words) >= DEFINE_FIELDS and words[0] == "#define" and words[2].isdigit()}
         versions = {name: value for name, value in numbers.items() if name.startswith("VERSION_")}
         languages = {name: value for name, value in numbers.items() if name.startswith("LANGUAGE_")}
         self.code = (FAMILY << 24 | versions[GAMES[self.game][1]] << 16 | languages[self.language_name] << 8
@@ -541,7 +546,7 @@ class Target(platinum.Target):
             words = {k: struct.unpack_from("<H", body, k)[0] for k in range(offset - 2, max(offset - 12, -2), -2) if k >= 0}
             if not any(word == 0x2100 | MESSAGE_NARC for word in words.values()):
                 continue  # another archive
-            site = next((k for k, word in words.items() if word >> 8 == 0x4A), None)  # ldr r2, [pc, #imm]
+            site = next((k for k, word in words.items() if word >> 8 == THUMB_LDR_R2_LITERAL), None)  # ldr r2, [pc, #imm]
             require(site is not None, f"{ASM} loads a message bank at {offset:#x} other than from a literal")
             literal = ((site + 4) & ~3) + (words[site] & 0xFF) * 4
             bank = struct.unpack_from("<I", body, literal)[0]

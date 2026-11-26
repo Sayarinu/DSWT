@@ -9,6 +9,9 @@ import subprocess
 
 import yaml
 
+MAX_WORKFLOW_NESTING = 50
+
+
 PUBLISHER = "publish-images.yml"
 DEPLOYER = "deploy.yml"
 RELEASER = "release.yml"
@@ -66,7 +69,7 @@ def permissions(value):
 
 def strings(value, ancestors=frozenset()):
     require(id(value) not in ancestors, "Recursive workflow alias")
-    require(len(ancestors) < 50, "Workflow nesting is excessive")
+    require(len(ancestors) < MAX_WORKFLOW_NESTING, "Workflow nesting is excessive")
     parents = ancestors | {id(value)}
     if isinstance(value, str):
         yield value

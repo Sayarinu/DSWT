@@ -2,6 +2,11 @@
 
 import struct
 
+BLZ_FOOTER_BYTES = 8
+NITRO_PARAMS_SIZE = 32
+ARM9_RAM_END = 0x02400000
+
+
 ARM9_RAM = 0x02000000
 NITRO_FOOTER = 0xDEC00621
 HEADER_CRC = 0x15E
@@ -36,11 +41,11 @@ def crc16(data):
 
 def blz_decode(data):
     """Undo Nitro SDK backward LZ compression (MI_UncompressBackward)."""
-    if len(data) < 8:
+    if len(data) < BLZ_FOOTER_BYTES:
         raise RomError("compressed module is too short")
     footer, extra = struct.unpack_from("<II", data, len(data) - 8)
     header, encoded = footer >> 24, footer & 0xFFFFFF
-    if not 8 <= header <= encoded <= len(data):
+    if not BLZ_FOOTER_BYTES <= header <= encoded <= len(data):
         raise RomError("compressed module has an invalid footer")
     out = bytearray(data) + bytearray(extra)
     source, target, end = len(data) - header, len(out), len(data) - encoded
@@ -85,7 +90,7 @@ NITRO_CODE = 0x2106C0DE
 def module_params(arm9):
     """Offset of the ARM9 module parameters: autoload list, BSS, compressed end, SDK version, magic."""
     at = arm9.find(struct.pack("<I", NITRO_CODE))
-    if at < 32 or u32(arm9, at - 4) != 0xDEC00621:
+    if at < NITRO_PARAMS_SIZE or u32(arm9, at - 4) != NITRO_FOOTER:
         raise RomError("ARM9 module parameters not found")
     return at - 32
 

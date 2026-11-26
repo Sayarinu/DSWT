@@ -13,6 +13,9 @@ import threading
 import time
 
 
+MAX_HEADER_BYTES = 2048
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -53,7 +56,7 @@ def handle_peer(raw, context, args):
     try:
         with context.wrap_socket(raw, server_side=True) as peer:
             request = b""
-            while b"\r\n\r\n" not in request and len(request) < 2048:
+            while b"\r\n\r\n" not in request and len(request) < MAX_HEADER_BYTES:
                 data = peer.recv(min(512, 2048 - len(request)))
                 if not data:
                     break

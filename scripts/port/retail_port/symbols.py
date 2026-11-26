@@ -13,6 +13,11 @@ import struct
 
 from . import elf, nds
 
+SHN_ABS = 0xFFF1
+MIN_MATCH_BYTES = 16
+ARM_WORD_BYTES = 4
+
+
 FUNCTION_KINDS = (elf.STT_FUNC, elf.STT_ARM_TFUNC)
 MAPPED_KINDS = FUNCTION_KINDS + (elf.STT_OBJECT,)
 CALLS = {elf.R_ARM_THM_CALL: "thumb", elf.R_ARM_PC24: "arm", elf.R_ARM_CALL: "arm", elf.R_ARM_JUMP24: "arm"}
@@ -48,7 +53,7 @@ class UsImage:
         for symbol in self.syms:
             self.byname[symbol.name].append(symbol)
         self.absolute = {raw["name"]: raw["value"] for raw in image.symbols
-                         if raw["shndx"] == 0xFFF1 and raw["name"]}
+                         if raw["shndx"] == SHN_ABS and raw["name"]}
         names = {i: raw for i, raw in enumerate(image.symbols)}
         # (section name, address) -> [(type, symbol name, symbol value, addend)]
         self.relocs = collections.defaultdict(list)
@@ -166,7 +171,7 @@ class SymbolMap:
 
     def _anchor(self):
         for symbol in self.us.syms:
-            if symbol.kind not in FUNCTION_KINDS or self._size(symbol) < 16:
+            if symbol.kind not in FUNCTION_KINDS or self._size(symbol) < MIN_MATCH_BYTES:
                 continue
             got = self._masked(symbol)
             if got is None:
@@ -263,7 +268,7 @@ class SymbolMap:
                             continue
                         offset = placed - base + k
                         word = body[offset:offset + 4]
-                        if len(word) < 4:
+                        if len(word) < ARM_WORD_BYTES:
                             continue
                         target = reference_target(kind, word, placed + k, addend)
                         if target is not None:

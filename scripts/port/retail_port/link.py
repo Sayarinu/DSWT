@@ -8,6 +8,9 @@ import struct
 from . import elf
 
 
+NM_SYMBOL_FIELDS = 3
+
+
 class LinkError(ValueError):
     pass
 
@@ -111,7 +114,7 @@ def placements(map_text):
 
 
 def nm_symbols(nm_text):
-    return {parts[2]: int(parts[0], 16) for parts in (line.split() for line in nm_text.splitlines()) if len(parts) == 3}
+    return {parts[2]: int(parts[0], 16) for parts in (line.split() for line in nm_text.splitlines()) if len(parts) == NM_SYMBOL_FIELDS}
 
 
 class Linked:

@@ -29,6 +29,11 @@ import time
 import urllib.request
 import zipfile
 
+MIN_SCAN_BYTES = 16
+NDS_HEADER_BYTES = 0x200
+DISPLAYED_FAILURES = 3
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bps
 import bundle
@@ -503,7 +508,7 @@ def forbidden_secrets(paths):
             while position >= 0 and position + 34 <= len(der):
                 found.append((label, der[position + 2:position + 34]))
                 position = der.find(b"\x04\x20", position + 1)
-    return [(label, value) for label, value in found if len(value) >= 16]
+    return [(label, value) for label, value in found if len(value) >= MIN_SCAN_BYTES]
 
 
 def compressed_code(rom, label):
@@ -582,12 +587,12 @@ def digest_tables(rom):
     unchanged keeps its cartridge digest at a moved offset, so the patch holds the same
     digests as a literal. They are digests, not retail content, so the retail check
     leaves them out."""
-    if len(rom) < 0x200 or not rom[0x12] & 2:
+    if len(rom) < NDS_HEADER_BYTES or not rom[0x12] & 2:
         return []
     tables = []
     for field in (0x1F0, 0x1F8):
         start, length = struct.unpack_from("<2I", rom, field)
-        if length and start >= 0x200 and start + length <= len(rom):
+        if length and start >= NDS_HEADER_BYTES and start + length <= len(rom):
             tables.append((start, start + length))
     return tables
 
@@ -653,8 +658,8 @@ class Checked:
             problems.append(f"retail ROM content copied into a literal at target offset {min(self.copied):#x}")
         names = [name for name, _ in self.modules if name in self.recompressed]
         if names:
-            more = f" and {len(names) - 3} more" if len(names) > 3 else ""
-            problems.append(f"retail code recompressed in {', '.join(names[:3])}{more}; build that code uncompressed")
+            more = f" and {len(names) - DISPLAYED_FAILURES} more" if len(names) > DISPLAYED_FAILURES else ""
+            problems.append(f"retail code recompressed in {', '.join(names[:DISPLAYED_FAILURES])}{more}; build that code uncompressed")
         return "; ".join(problems) or None
 
 

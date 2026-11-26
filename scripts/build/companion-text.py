@@ -17,6 +17,17 @@ import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 
+ASCII_SPACE = 32
+ASCII_DELETE = 127
+LATIN1_NONBREAKING_SPACE = 160
+VARINT_CONTINUATION = 128
+MAX_GLYPH_DIMENSION = 64
+RUN_REPEAT = 2
+INT8_MIN = -128
+INT8_MAX = 127
+UINT8_MAX = 255
+
+
 ROOT = Path(__file__).resolve().parents[2]
 LANGUAGES = ('en_US', 'fr_FR', 'de_DE', 'it_IT', 'es_ES', 'ja_JP', 'ko_KR')
 # Release pinned in LUNE-864; Condensed source Git blob cf954a44a98aa50a679d4af5b2ee5efed5ac89d0.
@@ -44,7 +55,7 @@ def load_messages(paths):
                 value = row.get(language)
                 if not isinstance(value, str) or not value.strip():
                     raise ValueError(f'{name}: missing or empty translation for {language}')
-                if any((ord(c) < 32 and c != '\n') or 127 <= ord(c) < 160 for c in value):
+                if any((ord(c) < ASCII_SPACE and c != '\n') or ASCII_DELETE <= ord(c) < LATIN1_NONBREAKING_SPACE for c in value):
                     raise ValueError(f'{name}: unsupported control character in {language}')
                 remainder = PLACEHOLDER.sub('', value)
                 tokens = Counter(PLACEHOLDER.findall(value))
@@ -79,13 +90,13 @@ def decode_glyph(attributes):
         for shift in range(0, 21, 7):
             byte = next(data)
             value |= (byte & 127) << shift
-            if byte < 128:
+            if byte < VARINT_CONTINUATION:
                 return value
         raise ValueError('invalid bitmap dimension')
 
     try:
         height, width = dimension(), dimension()
-        if width > 64 or height > 64:
+        if width > MAX_GLYPH_DIMENSION or height > MAX_GLYPH_DIMENSION:
             raise ValueError('bitmap exceeds glyph bounds')
         pixels = []
         for command in data:
@@ -97,7 +108,7 @@ def decode_glyph(attributes):
                 pixels.extend([0] * count)
             elif kind == 1:
                 pixels.extend([255] * count)
-            elif kind == 2:
+            elif kind == RUN_REPEAT:
                 pixels.extend([next(data)] * count)
             else:
                 pixels.extend(next(data) for _ in range(count))
@@ -114,7 +125,7 @@ def decode_glyph(attributes):
             y, x = divmod(index, width)
             packed[y * stride + x // 8] |= 128 >> (x % 8)
     x, y, advance = (int(attributes[key]) for key in ('x', 'y', 'w'))
-    if not (-128 <= x <= 127 and -128 <= y <= 127 and 0 <= advance <= 255):
+    if not (INT8_MIN <= x <= INT8_MAX and INT8_MIN <= y <= INT8_MAX and 0 <= advance <= UINT8_MAX):
         raise ValueError('bitmap metrics exceed C field bounds')
     return x, y, advance, width, height, bytes(packed)
 

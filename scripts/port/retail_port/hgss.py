@@ -26,6 +26,10 @@ from . import elf, link, nds, platinum, sdk, symbols, toolchain
 from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_game
 
 # game: (define, decompilation version name)
+DEFINE_FIELDS = 3
+BYTE_RANGE = 256
+
+
 GAMES = {"heartgold": ("HEARTGOLD", "VERSION_HEARTGOLD"), "soulsilver": ("SOULSILVER", "VERSION_SOULSILVER")}
 # id: (catalogue country, language enumerator, text column, build deltas)
 # Game functions that differ from US only in reviewed, language-specific details. Each is
@@ -142,7 +146,7 @@ class Target(platinum.Target):
             lines = []
             for line in naix.splitlines():
                 words = line.split()
-                if len(words) == 3 and words[0] == "#define" and words[1].startswith("msg_") and words[2].isdigit():
+                if len(words) == DEFINE_FIELDS and words[0] == "#define" and words[1].startswith("msg_") and words[2].isdigit():
                     number = int(words[2])
                     if number == WT_BANK:
                         lines.append(f"#define {words[1]} {len(members)}")
@@ -254,11 +258,11 @@ class Target(platinum.Target):
             words = {k: struct.unpack_from("<H", body, k)[0] for k in window if k >= 0}
             if not any(word == 0x2100 | MESSAGE_NARC for word in words.values()):
                 continue  # another archive
-            site = next((k for k, word in words.items() if word >> 8 == 0x22), None)
+            site = next((k for k, word in words.items() if word >> 8 == elf.THUMB_MOVS_R2), None)
             require(site is not None, f"{ASM} loads a message bank at {offset:#x} other than by mov r2, #imm")
             bank = body[site]
             new = self.bank_remap.get(bank)
-            require(new is not None and new < 256, f"{ASM} uses message bank {bank}, which the cartridge does not have")
+            require(new is not None and new < BYTE_RANGE, f"{ASM} uses message bank {bank}, which the cartridge does not have")
             out[start + site] = new
             changed += new != bank
         self.log(f"{ASM}: {changed} message bank numbers renumbered")
@@ -419,8 +423,8 @@ class Target(platinum.Target):
         # The cartridge's own count: Japanese has no Voltorb Flip heap, so one fewer than US.
         arm9_base, arm9 = self.modules["arm9"]
         retail = arm9[site - arm9_base:site - arm9_base + 2]
-        require(retail[1] == 0x22, "unexpected heap count instruction")
-        require(retail[0] <= us_value < wt_value < 256, f"heap count {retail[0]} -> {wt_value} is not an increase")
+        require(retail[1] == elf.THUMB_MOVS_R2, "unexpected heap count instruction")
+        require(retail[0] <= us_value < wt_value < BYTE_RANGE, f"heap count {retail[0]} -> {wt_value} is not an increase")
         self.heap_site, self.heap_count = (site, retail[0]), wt_value
         self.text = self._message_archive()
         icon = self.workspace / self.build_dir / "files/wonder_trade/menu_icon.narc"

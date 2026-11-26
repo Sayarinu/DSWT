@@ -2,6 +2,15 @@
 
 import struct
 
+THUMB_BL_PREFIX = 0xF000
+THUMB_BLX_SUFFIX = 0xE800
+THUMB_BL_SUFFIX = 0xF800
+ARM_BRANCH_CLASS = 5
+ARM_UNCONDITIONAL = 0xF
+ARM_BL_OPCODE = 0xEB
+THUMB_MOVS_R2 = 0x22
+
+
 SHT_SYMTAB, SHT_NOBITS, SHT_RELA, SHT_REL = 2, 8, 4, 9
 SHF_WRITE, SHF_EXECINSTR = 1, 4
 STT_NOTYPE, STT_OBJECT, STT_FUNC, STT_SECTION, STT_ARM_TFUNC = 0, 1, 2, 3, 13
@@ -121,18 +130,18 @@ def mode_at(marks, offset):
 def thumb_bl_target(halves, at):
     """Decode a Thumb BL/BLX pair at address at; None if it is not one."""
     hi, lo = struct.unpack("<HH", halves)
-    if (hi & 0xF800) != 0xF000 or (lo & 0xE800) != 0xE800:
+    if (hi & 0xF800) != THUMB_BL_PREFIX or (lo & 0xE800) != THUMB_BLX_SUFFIX:
         return None
     offset = ((hi & 0x7FF) << 12) | ((lo & 0x7FF) << 1)
     if offset & 0x400000:
         offset -= 0x800000
     target = at + 4 + offset
-    return ("bl", target | 1) if (lo & 0xF800) == 0xF800 else ("blx", target & ~3)
+    return ("bl", target | 1) if (lo & 0xF800) == THUMB_BL_SUFFIX else ("blx", target & ~3)
 
 
 def arm_branch_target(word, at):
     """Decode an ARM B/BL at address at; None if it is not one."""
-    if (word >> 25) & 7 != 5:
+    if (word >> 25) & 7 != ARM_BRANCH_CLASS:
         return None
     offset = (word & 0xFFFFFF) << 2
     if offset & 0x2000000:
@@ -145,7 +154,7 @@ def arm_call(word, at):
     target = arm_branch_target(word, at)
     if target is None:
         return None
-    if word >> 28 == 0xF:
+    if word >> 28 == ARM_UNCONDITIONAL:
         return "blx", (target + ((word >> 23) & 2)) | 1
     return ("bl" if word & 0x01000000 else "b"), target
 
@@ -194,7 +203,7 @@ def with_inline_addends(data):
                 if addend % 4 or not -(1 << 25) <= addend < (1 << 25):
                     raise ElfError(f"ARM branch addend {addend} cannot be held in place")
                 struct.pack_into("<I", data, at, word & 0xFF000000 | (addend >> 2) & 0xFFFFFF)
-                retag = R_ARM_CALL if word >> 24 == 0xEB else R_ARM_JUMP24
+                retag = R_ARM_CALL if word >> 24 == ARM_BL_OPCODE else R_ARM_JUMP24
                 struct.pack_into("<I", data, rela["off"] + 12 * k + 4, info & ~0xFF | retag)
             else:
                 raise ElfError(f"relocation type {kind} needs an in-place addend")

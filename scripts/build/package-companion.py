@@ -7,6 +7,15 @@ import re
 import struct
 import zipfile
 
+UNIT_CODE_OFFSET = 0x12
+TWL_FLAGS_OFFSET = 0x1C
+ARM9I_HEADER_OFFSET = 0x1C0
+ARM7I_HEADER_OFFSET = 0x1D0
+PAYLOAD_LENGTH_OFFSET = 12
+NDS_HEADER_REGION = 0x4000
+DUAL_MODE_UNIT_CODE = 0x02
+
+
 ROOT = Path(__file__).resolve().parents[2]
 LICENSES = (
     "LICENSES/Apache-2.0.txt",
@@ -38,12 +47,12 @@ https://github.com/Sayarinu/DSWT/wiki/DS-Companion
 
 def checked_rom(build):
     data = (build / "dswt-companion.nds").read_bytes()
-    if len(data) < 0x4000 or data[0x12] != 0x02 or not data[0x1C] & 1:
+    if len(data) < NDS_HEADER_REGION or data[UNIT_CODE_OFFSET] != DUAL_MODE_UNIT_CODE or not data[TWL_FLAGS_OFFSET] & 1:
         raise ValueError("ROM must support both DS and DSi and enable DSi mode")
-    for name, base in (("ARM9i", 0x1C0), ("ARM7i", 0x1D0)):
+    for name, base in (("ARM9i", ARM9I_HEADER_OFFSET), ("ARM7i", ARM7I_HEADER_OFFSET)):
         offset = struct.unpack_from("<I", data, base)[0]
-        size = struct.unpack_from("<I", data, base + 12)[0]
-        if offset < 0x4000 or size == 0 or offset + size > len(data):
+        size = struct.unpack_from("<I", data, base + PAYLOAD_LENGTH_OFFSET)[0]
+        if offset < NDS_HEADER_REGION or size == 0 or offset + size > len(data):
             raise ValueError(f"Missing or truncated {name} section")
     print("DS/DSi header and payload checks passed")
     return data

@@ -21,6 +21,11 @@ import subprocess
 from .catalog import variants_by_id
 from . import elf, link, nds, sdk, symbols, toolchain
 
+MIN_NEIGHBOUR_BYTES = 8
+BYTE_RANGE = 256
+TASK_MANAGER_COUNT = 4
+
+
 ROOT = Path(__file__).resolve().parents[3]
 _spec = importlib.util.spec_from_file_location("prepare_game", ROOT / "scripts/prepare/prepare-game.py")
 prepare_game = importlib.util.module_from_spec(_spec)
@@ -145,7 +150,7 @@ def arena_literal(arm9, arena):
 
 def retail_arena(rom):
     """Where main RAM is free after the static binary, its autoloads and every overlay."""
-    ends = [ram + size + bss for _, ram, size, bss, _, _ in nds.overlays(rom) if nds.ARM9_RAM <= ram < 0x02400000]
+    ends = [ram + size + bss for _, ram, size, bss, _, _ in nds.overlays(rom) if nds.ARM9_RAM <= ram < nds.ARM9_RAM_END]
     return max(ends)
 
 
@@ -160,7 +165,7 @@ def heap_count(nef, arm9, function="InitHeapSystem"):
     base, body = arm9
     for at in range(calls[0] - 2, max(start, calls[0] - 8) - 1, -2):
         half = nds.u16(body, at - base)
-        if half >> 8 == 0x22:  # movs r2, #imm8: the third argument
+        if half >> 8 == elf.THUMB_MOVS_R2:  # movs r2, #imm8: the third argument
             return at, half & 0xFF
     raise PortError("the heap count argument of Heap_InitSystem was not found")
 
@@ -309,7 +314,7 @@ class Target:
                 # where the language grew or shrank an earlier one, the next one still follows it.
                 if last is not None:
                     yield (last[1] + last[0] + 3) & ~3
-                if size >= 16:
+                if size >= symbols.MIN_MATCH_BYTES:
                     # A function the language changes: look for this build's own bytes, once.
                     yield symbols.unique_match(self.modules, module, body, keep, 2)
 
@@ -339,7 +344,7 @@ class Target:
             at = self.map.addr.get(candidates[0].num) if candidates else None
             body = obj.section_bytes(shndx)[symbol["value"]:symbol["value"] + symbol["size"]]
             mask = relocated(obj, shndx)
-            if at is None and candidates and symbol["size"] >= 8:
+            if at is None and candidates and symbol["size"] >= MIN_NEIGHBOUR_BYTES:
                 # Data the language changes (a build delta) is not where US bytes or references
                 # place it: look for this build's own bytes, once, in the file's module.
                 keep = [symbol["value"] + i not in mask for i in range(symbol["size"])]
@@ -491,7 +496,7 @@ class Target:
             at = self.map.addr[us.num]
             return ((at & ~1) | int(us.num in self.image.thumb)) if self.image.is_code(us) else at, self.image.is_code(us)
         size = self.image.extent(us)
-        got = symbols.masked(self.image, self.us_modules, us, size) if size >= 16 else None
+        got = symbols.masked(self.image, self.us_modules, us, size) if size >= symbols.MIN_MATCH_BYTES else None
         if got is None:
             return None
         module, _, data, keep = got
@@ -743,7 +748,7 @@ class Target:
         us_at, us_value = heap_count(elf.Elf((self.pristine / "build/main.nef").read_bytes()), self.map.us_modules["arm9"])
         workspace_rom = (self.workspace / "build/pokeplatinum.us.nds").read_bytes()
         _, wt_value = heap_count(elf.Elf((self.workspace / "build/main.nef").read_bytes()), nds.modules(workspace_rom)["arm9"])
-        require(us_value < wt_value < 256, f"heap count {us_value} -> {wt_value} is not an increase")
+        require(us_value < wt_value < BYTE_RANGE, f"heap count {us_value} -> {wt_value} is not an increase")
         us_function = self.image.unique("InitHeapSystem")
         at = self.map.addr.get(us_function.num) if us_function else None
         require(at is not None, "InitHeapSystem was not found in the retail game")
@@ -798,7 +803,7 @@ class Target:
         tables = (usable + 1) * 4 + usable * 4 + usable * 4 + self.heap_count * 2 + self.heap_count
         source = (self.workspace / "src/system.c").read_text()
         tasks = [int(n) for n in re.findall(r"#define \w+_TASK_MAX\s+(\d+)", source)]
-        require(len(tasks) == 4, "system.c no longer defines four task managers")
+        require(len(tasks) == TASK_MANAGER_COUNT, "system.c no longer defines four task managers")
         reserved = PRE_HEAP_PADDING + nds.align(tables, 4) + sum(size for size, _ in rows) + sum(
             TASK_MANAGER + TASK_SLOT * n for n in tasks)
         arena_hi = self.image.byname["SDK_SECTION_ARENA_EX_START"][0].address

@@ -12,6 +12,9 @@ import queue
 import sys
 import threading
 
+MAX_SHORT_LABEL_LINES = 2
+
+
 FROZEN = getattr(sys, "frozen", False)
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if not FROZEN:
@@ -272,7 +275,7 @@ class Window:
         self.text("ROM", x, y, "label")
         name = style.wrap(Path(self.shown).name if self.shown else "None chosen", inner)
         for index, line in enumerate(name[:2]):
-            self.text(line if index == 0 or len(name) <= 2 else line[:-3] + "...", x, y + 11 + 10 * index)
+            self.text(line if index == 0 or len(name) <= MAX_SHORT_LABEL_LINES else line[:-3] + "...", x, y + 11 + 10 * index)
         self.text("VERSION", x, y + 38, "label")
         # The game on one line and its version on the next, such as "HeartGold" and "USA Rev 0".
         game = bundle.GAMES[self.entry["game_code"][:3]].removeprefix("Pokémon ") if self.entry else "-"

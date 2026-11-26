@@ -15,6 +15,9 @@ import tempfile
 # adapter and resources never do. Build patches apply to pristine workspaces too
 # and leave upstream output unchanged. Staged revisions build from inputs staged
 # from a verified local dump, so upstream lists no checksum for them.
+ADAPTER_DIRECTORY_DEPTH = 3
+
+
 GAMES = {
     "platinum": {
         "pin": "client/games/upstream.json",
@@ -92,7 +95,7 @@ def git(workspace, *args):
 
 def foreign_adapter(name, game):
     parts = PurePosixPath(name).parts
-    return (len(parts) > 3 and parts[0] in ("include", "src") and parts[1] == "wonder_trade"
+    return (len(parts) > ADAPTER_DIRECTORY_DEPTH and parts[0] in ("include", "src") and parts[1] == "wonder_trade"
             and parts[2] in ADAPTERS and parts[2] != game["adapter"])
 
 
