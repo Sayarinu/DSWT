@@ -18,6 +18,7 @@ import shutil
 import struct
 import subprocess
 
+from .catalog import variants_by_id
 from . import elf, link, nds, sdk, symbols, toolchain
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -180,7 +181,7 @@ class Target:
         self.save_magic = layout["footer_magic"]["korean" if korean else "international"]
         self.workspace, self.pristine, self.work = (Path(p).resolve() for p in (workspace, pristine, work))
         self.log = log
-        catalogue = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
+        catalogue = variants_by_id(ROOT)
         self.variant = catalogue[self.variant_id]
         self.rom = Path(rom_path).read_bytes()
         require(len(self.rom) == self.variant["size"] and sha256(self.rom) == self.variant["sha256"],

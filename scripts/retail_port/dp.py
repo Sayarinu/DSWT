@@ -19,6 +19,7 @@ import struct
 import subprocess
 import xml.etree.ElementTree as ET
 
+from .catalog import variants_by_id
 from . import elf, link, nds, platinum, sdk, symbols, toolchain, writeout
 from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_game
 
@@ -162,7 +163,7 @@ class Target(platinum.Target):
         self.log = log
         self.version = GAMES[game][0]
         self.arm9_build = f"arm9/build/{game}.us"
-        catalogue = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
+        catalogue = variants_by_id(ROOT)
         require(self.variant_id in catalogue, f"{self.variant_id} is not catalogued")
         self.variant = catalogue[self.variant_id]
         self.rom = Path(rom_path).read_bytes()

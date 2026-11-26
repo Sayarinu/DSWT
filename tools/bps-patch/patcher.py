@@ -42,7 +42,7 @@ HEADER_SIZE, GAME_CODE, ROM_VERSION = bundle.HEADER_SIZE, bundle.GAME_CODE, bund
 VERBATIM_WINDOW, VERBATIM_STRIDE = 32, 16
 RESERVED_SUFFIXES = ("localhost", "local", "test", "example", "invalid", "internal", "lan", "home.arpa", "onion")
 # Release files copied into the player archive beside the manifest and patches.
-RELEASE_DOCUMENTS = {"INSTALL.md": "patches/INSTALL.md", "LICENSE": "LICENSE", "NOTICE": "NOTICE"}
+RELEASE_DOCUMENTS = {"INSTALL.md": "tools/patcher-app/INSTALL.md", "LICENSE": "LICENSE", "NOTICE": "NOTICE"}
 FLIPS_TIMEOUT = 30 * 60
 # Flips --bps-delta holds about 9 bytes per source and target byte, plus both files.
 FLIPS_DELTA_BYTES = 10
@@ -809,9 +809,9 @@ def create(pairs, profile_path, output, version, flips, source, catalog=None, ro
     if source.get("dirty") is not False or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", "")):
         raise PatchError("Generate only from a clean, committed source tree")
     if catalog is None:
-        catalog = json.loads((root / "patches/compatibility.json").read_text())
+        catalog = json.loads((root / "client/games/compatibility.json").read_text())
         if catalog.get("schema_version") != identify_rom.SCHEMA_VERSION:
-            raise PatchError("patches/compatibility.json has an unsupported schema version")
+            raise PatchError("client/games/compatibility.json has an unsupported schema version")
     profile_bytes = read_private(profile_path, MAX_PROFILE, "Connection profile")[0]
     authority, pins = _profile_binding(profile_bytes)
     if secret_paths is None:

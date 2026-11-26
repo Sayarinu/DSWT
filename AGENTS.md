@@ -26,7 +26,6 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
 | `deploy/` | Docker Compose, Terraform and monitoring for the single VPS |
-| `patches/` | Supported cartridges and the install guide shipped in each release |
 | `scripts/` | Reused scripts: ROM build, workspace preparation and TLS tooling |
 | `tools/` | Local stack, BPS patcher and release tooling, image audit, ROM and companion builder images |
 | `licensing/` | Redistribution inventory and bundled third-party licenses |
@@ -139,7 +138,7 @@ only merge what is ready to serve players. The required check names are listed i
 - Documentation lives in the [wiki](https://github.com/Sayarinu/DSWT/wiki), written in plain terms. Keep
   `README.md` short, like a store page, and update the wiki page a change
   affects. Track only docs something depends on: this file, `README.md`,
-  `patches/INSTALL.md` (shipped in releases), `client/games/UPSTREAM.md`,
+  `tools/patcher-app/INSTALL.md` (shipped in releases), `client/games/UPSTREAM.md`,
   `validator/README.md` (in the validator image's GPL source) and license
   notices. Change docs only when necessary or beneficial, and skip routine
   progress notes.

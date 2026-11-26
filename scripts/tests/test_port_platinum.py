@@ -369,7 +369,7 @@ enum Language {
         self.assertIs(strings["messages"][-1], label)  # appended: earlier message IDs stay put
         patch = (platinum.ROOT / "client/games/pokeplatinum.patch").read_text()
         self.assertIn(f'"en_US": "{label["en_US"]}"', patch)
-        catalogue = {row["id"]: row for row in json.loads((platinum.ROOT / "patches/compatibility.json").read_text())["variants"]}
+        catalogue = {row["id"]: row for row in json.loads((platinum.ROOT / "client/games/compatibility.json").read_text())["variants"]}
         layout = json.loads((platinum.ROOT / "protocol/save-layout.json").read_text())
         for language, (variant, _, key, deltas) in platinum.LANGUAGES.items():
             with self.subTest(language=language):

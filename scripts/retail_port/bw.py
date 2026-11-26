@@ -28,6 +28,7 @@ import subprocess
 import sys
 import zlib
 
+from .catalog import variants_by_id
 from . import aletheia, elf, link, nds
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -143,7 +144,7 @@ class Target:
         self.workspace, self.tls, self.connection, self.msl, self.work = (
             Path(p).resolve() for p in (workspace, tls, connection, msl, work))
         self.log = log
-        catalogue = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
+        catalogue = variants_by_id(ROOT)
         self.variant = catalogue[self.variant_id]
         self.rom = Path(rom_path).read_bytes()
         require(len(self.rom) == self.variant["size"] and sha1(self.rom) == self.variant["sha1"],

@@ -10,7 +10,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CATALOG = ROOT / "patches/compatibility.json"
+CATALOG = ROOT / "client/games/compatibility.json"
 SCHEMA_VERSION = 2
 CHUNK = 1024 * 1024
 

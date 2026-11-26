@@ -52,7 +52,7 @@ def u32(data, offset):
 
 def load(path):
     """Read a full-size dump, or a trimmed one restored with its 0xFF padding."""
-    catalog = json.loads((ROOT / "patches/compatibility.json").read_text())
+    catalog = json.loads((ROOT / "client/games/compatibility.json").read_text())
     variant = next(row for row in catalog["variants"] if row["id"] == VARIANT)
     data = Path(path).read_bytes()
     if len(data) < variant["size"]:

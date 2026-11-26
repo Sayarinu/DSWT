@@ -21,6 +21,7 @@ import shutil
 import struct
 import subprocess
 
+from .catalog import variants_by_id
 from . import elf, link, nds, platinum, sdk, symbols, toolchain
 from .platinum import PortError, require, git, sha256, ROOT, RETAIL, prepare_game
 
@@ -86,7 +87,7 @@ class Target(platinum.Target):
         self.log = log
         self.build_dir = f"build/{game}.us"
         self.compile_options = {"build": self.build_dir, "pch": False, "required": f"-D{GAMES[game][0]}"}
-        catalogue = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
+        catalogue = variants_by_id(ROOT)
         require(self.variant_id in catalogue, f"{self.variant_id} is not catalogued")
         self.variant = catalogue[self.variant_id]
         self.rom = Path(rom_path).read_bytes()

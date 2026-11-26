@@ -11,7 +11,6 @@ written. Applied to the US dump itself, the result is the regional dump.
 
 import argparse
 import hashlib
-import json
 import os
 from pathlib import Path
 import struct
@@ -19,6 +18,9 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from retail_port.catalog import variants_by_id  # noqa: E402
+
 HEADER_AREA = 0x4000
 HEADER_CRC = 0x15E
 
@@ -146,7 +148,7 @@ def main(argv=None):
     parser.add_argument("output", help="new file to write")
     args = parser.parse_args(argv)
     try:
-        variants = {row["id"]: row for row in json.loads((ROOT / "patches/compatibility.json").read_text())["variants"]}
+        variants = variants_by_id(ROOT)
         variant = variants.get(args.variant)
         if not variant or not variant.get("build_base"):
             raise RegionError(f"{args.variant} is not a regional target built from a US cartridge")
