@@ -53,9 +53,9 @@ offer or attribution, but the zip should include
 licensing/ds-companion-libnds.txt and licensing/ds-companion-fatfs.txt. Mark altered Zlib source and preserve source
 notices. BlocksDS's ARM7 core and version library notices are also included in
 licensing/ds-companion-blocksds.txt, including Antonio Niño Díaz's 2023 ARM7
-source attribution. The skeleton selects sys/arm7/main_core/arm7_minimal.elf,
-which links libnds7 and libc without DSWiFi, Maxmod or LibXM7. Later Wi-Fi cores
-need the DSWiFi notices below. If an audio core links Maxmod, include its ISC
+source attribution. The companion adapts the DSWiFi ARM7 core to control
+Slot-1 power and links libnds7, libc and DSWiFi. Distribute the DSWiFi
+notices below. If an audio core links Maxmod, include its ISC
 notice in licensing/ds-companion-maxmod.txt even when no audio is played;
 the v1.25.0 Maxmod notice extends Antonio Niño Díaz's credit through 2026.
 
