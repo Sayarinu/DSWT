@@ -14,6 +14,8 @@
 #include <mbedtls/platform_util.h>
 #include <psa/crypto.h>
 
+#include "game/gamedata.h"
+#include "platform/nds/card_rom.h"
 #include "platform/entropy_pool.h"
 #include "platform/journal_io.h"
 #include "platform/nds/app_platform.h"
@@ -34,7 +36,7 @@ static unsigned sFrame;
 static struct {
     char sav[CP_SD_PATH_MAX], ssid[40], passphrase[72];
     unsigned attempts;
-    int writeTest, uiDemo;
+    int writeTest, uiDemo, cardRom;
 } sConfig;
 
 typedef struct Attempt {
@@ -127,6 +129,7 @@ static void LoadConfig(void)
         else if (!strcmp(line, "passphrase")) snprintf(sConfig.passphrase, sizeof(sConfig.passphrase), "%s", value);
         else if (!strcmp(line, "attempts")) sConfig.attempts = (unsigned)strtoul(value, NULL, 10);
         else if (!strcmp(line, "write-test")) sConfig.writeTest = !strcmp(value, "1");
+        else if (!strcmp(line, "card-rom")) sConfig.cardRom = !strcmp(value, "1");
         else if (!strcmp(line, "ui-demo")) sConfig.uiDemo = !strcmp(value, "tour") ? CP_DIAGNOSTIC_UI_TOUR
             : !strcmp(value, "1") ? CP_DIAGNOSTIC_UI_DEMO : 0;
     }
@@ -344,6 +347,38 @@ static int ConnectWifi(void)
     return 0;
 }
 
+/* This mode runs independently of the SD save and the network diagnostic. */
+static void CheckCardRom(void)
+{
+    static CpCardRom card;
+    CpReader reader;
+    CpGame game;
+    CpPersonal personal;
+    int result;
+    if (strcmp(CpNdsCard_Root(), "sd:/") != 0) {
+        Log("Slot-1: launch the diagnostic from the console SD card\n");
+    } else if (!CpNdsSlot_Present()) {
+        Log("Slot-1: no card detected in DSi mode\n");
+    } else if ((result = CpNdsSlot_Open(&card, &reader)) != 0) {
+        if (result == CP_CARD_NTR_KEY_MISSING) Log("Slot-1: need full bios7.bin or bios9i.bin in dswt-companion\n");
+        else if (result == CP_CARD_TWL_KEY_MISSING) Log("Slot-1: need full bios7i.bin in dswt-companion\n");
+        else Log("Slot-1: initialization failed (ID %08lx)\n", (unsigned long)card.id);
+    } else if (CpGame_Open(&reader, &game) != CP_OK || CpGame_Personal(&game, 25, 0, &personal) != CP_OK) {
+        Log("Slot-1: game archives or species 25 unreadable\n");
+    } else {
+        Log("Slot-1: %s rev %u ID %08lx, species 25 HP %u\n", game.rom.gameCode, game.rom.revision,
+            (unsigned long)card.id, personal.baseStats[0]);
+    }
+    Top(5, "A: check card   START: exit");
+    for (;;) {
+        Frame();
+        if (keysDown() & KEY_START) break;
+        if (keysDown() & KEY_A)
+            Log("Slot-1: %s\n", CpCardRom_Check(&card) == 0 ? "same card session" : "session lost");
+    }
+    CpCardRom_Close(&card);
+}
+
 int CpDiagnostic_Run(CompanionScreens *screens)
 {
     unsigned bytes = 0, i, ok = 0, number = 0;
@@ -363,6 +398,10 @@ int CpDiagnostic_Run(CompanionScreens *screens)
     Log("server %s (%s)\n", WONDER_TRADE_AUTHORITY, inet_ntoa((struct in_addr){ htonl((uint32_t)WONDER_TRADE_IPV4) }));
     Top(2, "Drive: %s", fat ? fatGetDefaultDrive() : "none");
     if (fat) LoadConfig();
+    if (sConfig.cardRom) {
+        CheckCardRom();
+        return 0;
+    }
     if (sConfig.uiDemo) {
         Log("ui-demo: showing the screens with made-up data\n");
         irqSet(IRQ_VBLANK, NULL);

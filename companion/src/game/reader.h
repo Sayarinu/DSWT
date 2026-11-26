@@ -15,7 +15,7 @@ enum {
     CP_ERR_RANGE = -5        /* an argument or a caller's buffer is out of range */
 };
 
-/* Random access to one file, such as the player's ROM on the SD card. The
+/* Random access to a ROM image on SD or the game card in Slot-1. The
  * platform layer implements it; readAt fills all `size` bytes or fails. */
 typedef struct CpReader {
     void *context;
