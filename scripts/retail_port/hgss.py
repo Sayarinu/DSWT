@@ -98,7 +98,7 @@ class Target(platinum.Target):
         self.us_rom = us_path.read_bytes()
         require(sha256(self.us_rom) == catalogue[base]["sha256"],
                 f"{us_path} is not a pristine {base} build; build it with ROM_GAME={game} --pristine")
-        pin = json.loads((ROOT / "client/upstream-pokeheartgold.json").read_text())["revision"]
+        pin = json.loads((ROOT / "client/games/upstream-pokeheartgold.json").read_text())["revision"]
         for tree in (self.workspace, self.pristine):
             require(git(tree, "rev-parse", "HEAD").decode().strip() == pin, f"{tree} is not at upstream {pin}")
         self.modules = nds.modules(self.rom)
@@ -432,7 +432,7 @@ class Target(platinum.Target):
         work = self.work / "text"
         shutil.rmtree(work, ignore_errors=True)
         work.mkdir(parents=True)
-        strings = json.loads((ROOT / "client/files/msgdata/msg/msg_0829.json").read_bytes())
+        strings = json.loads((ROOT / "client/games/files/msgdata/msg/msg_0829.json").read_bytes())
         for message in strings["messages"]:
             message["en_US"] = message[self.text_key]
         (work / "wonder_trade.json").write_text(json.dumps(strings, ensure_ascii=False, indent=2))

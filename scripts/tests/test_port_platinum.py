@@ -364,10 +364,10 @@ enum Language {
         self.assertEqual(platinum.text_bank_ids(header), {"TEXT_BANK_START_MENU": 367, "TEXT_BANK_WONDER_TRADE": 724})
 
     def test_every_language_has_a_menu_label_and_build_deltas(self):
-        strings = json.loads((platinum.ROOT / "client/res/text/wonder_trade.json").read_text())
+        strings = json.loads((platinum.ROOT / "client/games/res/text/wonder_trade.json").read_text())
         label = next(message for message in strings["messages"] if message["id"] == platinum.MENU_LABEL)
         self.assertIs(strings["messages"][-1], label)  # appended: earlier message IDs stay put
-        patch = (platinum.ROOT / "client/pokeplatinum.patch").read_text()
+        patch = (platinum.ROOT / "client/games/pokeplatinum.patch").read_text()
         self.assertIn(f'"en_US": "{label["en_US"]}"', patch)
         catalogue = {row["id"]: row for row in json.loads((platinum.ROOT / "patches/compatibility.json").read_text())["variants"]}
         layout = json.loads((platinum.ROOT / "protocol/save-layout.json").read_text())

@@ -3,7 +3,7 @@
 aletheia links every region of both cartridges from source at its original
 address, so its link output is the retail game's own symbol map. Wonder Trade
 (the shared core, the Black/White adapter and Mbed TLS) and the aletheia
-sources client/aletheia.patch changes are compiled with aletheia's compiler,
+sources client/games/aletheia.patch changes are compiled with aletheia's compiler,
 linked against those addresses into one module, and loaded by a new ARM9
 autoload entry at the start of the main arena. Each changed game function
 starts with a jump into the module: in ARM9 main the jump is written into the
@@ -31,8 +31,8 @@ import zlib
 from . import aletheia, elf, link, nds
 
 ROOT = Path(__file__).resolve().parents[2]
-PATCH = ROOT / "client/aletheia.patch"
-PIN = ROOT / "client/upstream-aletheia.json"
+PATCH = ROOT / "client/games/aletheia.patch"
+PIN = ROOT / "client/games/upstream-aletheia.json"
 # Enroll's game variant: family 4 (Black/White) << 24, the game version (White 20, Black 21)
 # << 16, the language (English 2) << 8 and the revision.
 TARGETS = {"black": ("black-us", 21), "white": ("white-us", 20)}
@@ -51,8 +51,8 @@ TLS_INCLUDE_DIRS = ["include", "library", "tf-psa-crypto/include", "tf-psa-crypt
                     "tf-psa-crypto/drivers/everest/include"]
 # The adapter, with the Black 2/White 2 files it shares: the musical area
 # check and the English text.
-ADAPTER_SOURCES = ["client/src/wonder_trade/bw/*.c", "client/src/wonder_trade/bw2/musical_area.c",
-                   "client/src/wonder_trade/bw2/text.c"]
+ADAPTER_SOURCES = ["client/games/src/wonder_trade/bw/*.c", "client/games/src/wonder_trade/bw2/musical_area.c",
+                   "client/games/src/wonder_trade/bw2/text.c"]
 # Load-time overlay hooks: the module's table and the SDK function they follow.
 HOOK_TABLE, HOOK_MAX, HOOK_SIZE = "gWtOverlayHooks", 48, 20
 OVERLAY_START = "FS_StartOverlay"
@@ -75,7 +75,7 @@ TWL_ALIGN = 0x80000
 # Wonder Trade's X-menu icon: Black 2/White 2's art, as a new member of the
 # field menu's graphics archive in the format of the Pokémon button's characters.
 ICON_ARCHIVE, ICON_TEMPLATE, ICON_MEMBER = "a/0/7/1", 8, 39
-ICON_PNG = ROOT / "client/res-bw2/graphics/field_menu/43.png"
+ICON_PNG = ROOT / "client/games/res-bw2/graphics/field_menu/43.png"
 # The icon's colours 1 to 3 are Black 2/White 2's near black, brown and orange
 # (their Pokémon button's palette). Black/White's Pokémon cells draw the first
 # frame with palette 6 and the second with 7, whose colours 1 to 3 are brown and
@@ -163,9 +163,9 @@ class Target:
 
     # --- 2. aletheia's changed sources ---------------------------------------------------------
     def compile_game_sources(self):
-        """Compile each source client/aletheia.patch changes, as aletheia has it and as changed."""
+        """Compile each source client/games/aletheia.patch changes, as aletheia has it and as changed."""
         self.sources = [name.removeprefix("src/game/") for name in patched_paths(PATCH)]
-        require(all(name.endswith(".c") for name in self.sources), "client/aletheia.patch changes a header")
+        require(all(name.endswith(".c") for name in self.sources), "client/games/aletheia.patch changes a header")
         dirty = subprocess.run(["git", "-C", str(self.workspace), "status", "--porcelain", "--", "src"],
                                capture_output=True, text=True).stdout
         require(not dirty.strip(), f"{self.workspace}/src has local changes")
@@ -293,14 +293,15 @@ class Target:
         include.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(self.connection, include / "wonder_trade_config.h")
         flags = [*CC_FLAGS, "-ir", str(self.msl / "MSL_C/MSL_Common/Include"),
-                 "-ir", str(self.msl / "MSL_C/MSL_ARM/Include"), "-i", str(ROOT / "client/include"), "-i", str(include),
+                 "-ir", str(self.msl / "MSL_C/MSL_ARM/Include"), "-i", str(ROOT / "client/core/include"), "-i", str(ROOT / "client/games/include"), "-i", str(include),
                  *[a for d in TLS_INCLUDE_DIRS for a in ("-i", str(self.tls / d))],
                  '-DMBEDTLS_CONFIG_FILE="wonder_trade/tls_config.h"',
                  '-DTF_PSA_CRYPTO_CONFIG_FILE="wonder_trade/crypto_config.h"']
-        game = ["-i", str(ROOT / "client/include/wonder_trade/bw/sdk"), "-i", str(self.workspace / "src/game"),
+        game = ["-i", str(ROOT / "client/games/include/wonder_trade/bw/sdk"), "-i", str(self.workspace / "src/game"),
                 "-prefix", "wonder_trade/bw/sdk_prefix.h", f"-DWT_GAME_VARIANT={self.code:#010x}u",
                 f"-DWT_GAME_VERSION={self.version}"]
-        core = sorted((ROOT / "client/src/wonder_trade").glob("*.c"))
+        core = sorted([*(ROOT / "client/core/src/wonder_trade").glob("*.c"),
+                       *(ROOT / "client/games/src/wonder_trade").glob("*.c")], key=lambda path: path.name)
         adapter = sorted(p for pattern in ADAPTER_SOURCES for p in ROOT.glob(pattern))
         tls = sorted(p for d in TLS_SOURCE_DIRS for p in (self.tls / d).glob("*.c"))
         out = self.work / "wt-obj"

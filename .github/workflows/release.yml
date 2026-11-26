@@ -157,7 +157,7 @@ jobs:
           persist-credentials: false
       - name: Build with the public production profile
         env:
-          CONNECTION_PROFILE: companion/production-connection-profile.json
+          CONNECTION_PROFILE: client/companion/production-connection-profile.json
         run: scripts/build-companion.sh
       - name: Inspect and package the DS and DSi ROM
         env:

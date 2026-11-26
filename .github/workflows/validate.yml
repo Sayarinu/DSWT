@@ -29,8 +29,8 @@ jobs:
 
       - name: Validate changed data and build script
         run: |
-          python3 -m json.tool client/res/text/wonder_trade.json >/dev/null
-          python3 -m json.tool client/upstream.json >/dev/null
+          python3 -m json.tool client/games/res/text/wonder_trade.json >/dev/null
+          python3 -m json.tool client/games/upstream.json >/dev/null
           python3 -m json.tool licensing/redistribution.json >/dev/null
           bash -n scripts/build-rom.sh
           python3 -m unittest discover -s scripts/tests
@@ -78,10 +78,10 @@ jobs:
       - name: Build pinned TLS profile and run conformance tests
         run: |
           tls_source="$(python3 scripts/prepare-tls.py)"
-          cmake -S client/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
+          cmake -S client/core/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
           cmake --build game/tls-tests --parallel 2
           ctest --test-dir game/tls-tests --output-on-failure
-          python3 client/tests/test_tls.py game/tls-tests/tls_probe
+          python3 client/core/tests/test_tls.py game/tls-tests/tls_probe
 
   ds-companion:
     name: Build and test DS companion
@@ -94,12 +94,12 @@ jobs:
           persist-credentials: false
       - name: Build and run companion host tests
         run: |
-          cmake -S companion/tests -B game/companion-tests
+          cmake -S client/companion/tests -B game/companion-tests
           cmake --build game/companion-tests --parallel 2
           ctest --test-dir game/companion-tests --output-on-failure
       - name: Build companion with the dummy connection profile
         run: |
-          CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
+          CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build-companion.sh
       - name: Check DS and DSi ROM header
         run: |
           docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'

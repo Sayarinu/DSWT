@@ -170,9 +170,9 @@ class WireTests(unittest.TestCase):
 
 
 class SaveLayoutTests(unittest.TestCase):
-    LAYOUTS = (("protocol/save-layout.json", "client/upstream.json"),
-               ("protocol/save-layout-hgss.json", "client/upstream-pokeheartgold.json"),
-               ("protocol/save-layout-dp.json", "client/upstream-pokediamond.json"))
+    LAYOUTS = (("protocol/save-layout.json", "client/games/upstream.json"),
+               ("protocol/save-layout-hgss.json", "client/games/upstream-pokeheartgold.json"),
+               ("protocol/save-layout-dp.json", "client/games/upstream-pokediamond.json"))
 
     def test_journal_erase_sectors_do_not_overlap_any_retail_block(self):
         for path, pin in self.LAYOUTS:
@@ -181,7 +181,7 @@ class SaveLayoutTests(unittest.TestCase):
                                   json.loads((ROOT / pin).read_text()))
 
     def test_journal_codec_names_every_record_section(self):
-        source = (ROOT / "client/src/wonder_trade/journal.c").read_text()
+        source = (ROOT / "client/core/src/wonder_trade/journal.c").read_text()
         layout = json.loads((ROOT / "protocol/save-layout.json").read_text())
         body = re.search(r"enum \{\n(    WT_REC_.*?)\n\};", source, re.S).group(1)
         offsets = {name: int(value) for name, value in re.findall(r"(WT_REC_\w+) = (\d+)", body)}
@@ -355,8 +355,8 @@ class GenVSaveLayoutTests(unittest.TestCase):
 
     def test_client_family_constants_match_the_layouts(self):
         """wonder_trade/game_family.h and persistence.h take their save values from the layout files."""
-        persistence = (ROOT / "client/include/wonder_trade/persistence.h").read_text()
-        family = (ROOT / "client/include/wonder_trade/game_family.h").read_text()
+        persistence = (ROOT / "client/core/include/wonder_trade/persistence.h").read_text()
+        family = (ROOT / "client/core/include/wonder_trade/game_family.h").read_text()
         for path, name in (("protocol/save-layout-bw.json", "BW"), ("protocol/save-layout-b2w2.json", "B2W2")):
             with self.subTest(layout=path):
                 layout = self.load(path)

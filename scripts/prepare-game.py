@@ -17,9 +17,9 @@ import tempfile
 # from a verified local dump, so upstream lists no checksum for them.
 GAMES = {
     "platinum": {
-        "pin": "client/upstream.json",
-        "patch": "client/pokeplatinum.patch",
-        "build_patches": ("client/europe.patch",),
+        "pin": "client/games/upstream.json",
+        "patch": "client/games/pokeplatinum.patch",
+        "build_patches": ("client/games/europe.patch",),
         "staged_revisions": ("10",),
         "workspace": "pokeplatinum",
         "adapter": "platinum",
@@ -27,8 +27,8 @@ GAMES = {
         "rom_sha1": "platinum.us/rom_rev{}.sha1",
     },
     "hgss": {
-        "pin": "client/upstream-pokeheartgold.json",
-        "patch": "client/pokeheartgold.patch",
+        "pin": "client/games/upstream-pokeheartgold.json",
+        "patch": "client/games/pokeheartgold.patch",
         "build_patches": (),
         "staged_revisions": (),
         "workspace": "pokeheartgold",
@@ -37,11 +37,11 @@ GAMES = {
         "rom_sha1": "{}.us/rom.sha1",
     },
     # pret/pokediamond builds Diamond and Pearl with Make; ARM9 sources live
-    # under arm9/, so client/src lands in arm9/src, and its own text overlay
-    # client/files-dp lands in files/.
+    # under arm9/, so client/core/src lands in arm9/src, and its own text overlay
+    # client/games/files-dp lands in files/.
     "dp": {
-        "pin": "client/upstream-pokediamond.json",
-        "patch": "client/pokediamond.patch",
+        "pin": "client/games/upstream-pokediamond.json",
+        "patch": "client/games/pokediamond.patch",
         "build_patches": (),
         "staged_revisions": (),
         "workspace": "pokediamond",
@@ -54,8 +54,8 @@ GAMES = {
     # configure.py and Ninja, from the player's own dumps in orig/. The core
     # and the bw2 adapter land in src/ and include/ as in Platinum.
     "bw2": {
-        "pin": "client/upstream-pokebw2.json",
-        "patch": "client/pokebw2.patch",
+        "pin": "client/games/upstream-pokebw2.json",
+        "patch": "client/games/pokebw2.patch",
         "build_patches": (),
         "staged_revisions": (),
         "workspace": "pokebw2",
@@ -70,12 +70,12 @@ GAMES = {
     # the player's dump with aletheia's link as the map (scripts/port-bw.py),
     # so its only workspace is the pristine one.
     "bw": {
-        "pin": "client/upstream-aletheia.json",
+        "pin": "client/games/upstream-aletheia.json",
         "patch": None,
         # Runs the linker through Wine off Windows, as aletheia runs the compiler,
         # includes generated data through a drive path there, and builds without the
         # DSi key, keeping the dump's DSi block.
-        "build_patches": ("client/aletheia-build.patch",),
+        "build_patches": ("client/games/aletheia-build.patch",),
         "staged_revisions": (),
         "workspace": "aletheia",
         "adapter": "bw",
@@ -84,7 +84,6 @@ GAMES = {
     },
 }
 ADAPTERS = {game["adapter"] for game in GAMES.values()}
-RESOURCES = sorted({name for game in GAMES.values() for name in game["resources"]})
 
 
 def git(workspace, *args):
@@ -132,17 +131,17 @@ def overlay_files(root, workspace, game=GAMES["platinum"], pristine=False):
             )
         desired = {name: (stage / name).read_bytes() for name in paths}
 
-    for directory in () if pristine else ("include", "src", *RESOURCES):
-        if directory in RESOURCES and directory not in game["resources"]:
-            continue
-        source = root / "client" / directory
-        if source.is_symlink():
+    overlays = [(group, directory) for group in ("core", "games") for directory in ("include", "src")]
+    overlays.extend(("games", directory) for directory in game["resources"])
+    for group, directory in () if pristine else overlays:
+        source = root / "client" / group / directory
+        if source.parent.is_symlink() or source.is_symlink():
             raise RuntimeError(f"Client overlays must not contain symlinks: {source}")
         for path in sorted(source.rglob("*")):
             if path.is_symlink():
                 raise RuntimeError(f"Client overlays must not contain symlinks: {path}")
             if path.is_file():
-                name = path.relative_to(root / "client").as_posix()
+                name = path.relative_to(source.parent).as_posix()
                 if foreign_adapter(name, game):
                     continue
                 if directory in game.get("destinations", {}):

@@ -5,7 +5,7 @@
 
 // Byte offsets and sizes of the v1 DS envelope described in
 // https://github.com/Sayarinu/DSWT/wiki/Protocol.
-// Mirrors client/include/wonder_trade/wire_layout.h name for name (WT_WIRE_SNAPSHOT_STATE
+// Mirrors client/core/include/wonder_trade/wire_layout.h name for name (WT_WIRE_SNAPSHOT_STATE
 // is kSnapshotState); scripts/tests/test_wire_layout.py checks both against
 // protocol/wire.py. Offsets are relative to the start of the named header, body or record.
 namespace dswt::server::wire {

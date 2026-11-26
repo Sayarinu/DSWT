@@ -233,8 +233,8 @@ class TlsToolTests(unittest.TestCase):
     def test_tls_cache_detects_edits_and_escaping_symlinks(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "client").mkdir()
-            (root / "client/tls-dependency.json").write_text(json.dumps({"version": "test", "sha256": "expected"}))
+            (root / "client/core").mkdir(parents=True)
+            (root / "client/core/tls-dependency.json").write_text(json.dumps({"version": "test", "sha256": "expected"}))
             source = root / "game/mbedtls-test"
             source.mkdir(parents=True)
             (source / "source.c").write_text("original")

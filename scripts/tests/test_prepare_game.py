@@ -40,9 +40,10 @@ class PrepareGameTests(unittest.TestCase):
             "tree": self.git("rev-parse", "HEAD^{tree}").decode().strip(),
             "rom_sha1": {"0": "0" * 40, "1": "1" * 40, "10": "a" * 40},
         }
-        client = self.root / "client"
-        (client / "src/wonder_trade").mkdir(parents=True)
-        (client / "src/wonder_trade/application.c").write_text("project addition\n")
+        client = self.root / "client/games"
+        client.mkdir(parents=True)
+        (self.root / "client/core/src/wonder_trade").mkdir(parents=True)
+        (self.root / "client/core/src/wonder_trade/application.c").write_text("project addition\n")
         (client / "upstream.json").write_text(json.dumps(self.pin))
         (client / "pokeplatinum.patch").write_text(
             "diff --git a/src/start_menu.c b/src/start_menu.c\n"
@@ -73,7 +74,7 @@ class PrepareGameTests(unittest.TestCase):
         self.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "CRLF")
         self.pin.update(revision=self.git("rev-parse", "HEAD").decode().strip(),
                         tree=self.git("rev-parse", "HEAD^{tree}").decode().strip())
-        (self.root / "client/upstream.json").write_text(json.dumps(self.pin))
+        (self.root / "client/games/upstream.json").write_text(json.dumps(self.pin))
         workspace = prepare_game.prepare(self.root)
         self.assertEqual((workspace / "src/start_menu.c").read_text(), "patched\n")
         self.assertEqual(prepare_game.prepare(self.root), workspace)
@@ -124,7 +125,7 @@ class PrepareGameTests(unittest.TestCase):
             prepare_game.prepare(self.root)
 
     def test_failed_patch_does_not_install_a_partial_workspace(self):
-        patch = self.root / "client/pokeplatinum.patch"
+        patch = self.root / "client/games/pokeplatinum.patch"
         patch.write_text(patch.read_text().replace("-original", "-wrong input"))
         with self.assertRaises(subprocess.CalledProcessError):
             prepare_game.prepare(self.root)
@@ -141,7 +142,7 @@ class PrepareGameTests(unittest.TestCase):
         self.assertEqual(prepare_game.prepare(self.root, pristine=True), pristine)
 
     def test_each_game_overlays_only_its_own_adapter_and_resources(self):
-        client = self.root / "client"
+        client = self.root / "client/games"
         for name in ("src/wonder_trade/platinum/game_save.c", "src/wonder_trade/hgss/game_save.c",
                      "include/wonder_trade/hgss/game_save.h", "res/text/wonder_trade.json",
                      "files/msgdata/msg/msg_0829.json"):
@@ -195,7 +196,7 @@ class PrepareGameTests(unittest.TestCase):
             prepare_game.prepare(self.root, name="hgss")
 
     def test_diamond_and_pearl_sources_land_in_the_arm9_tree(self):
-        client = self.root / "client"
+        client = self.root / "client/games"
         for name in ("src/wonder_trade/dp/game_save.c", "src/wonder_trade/hgss/game_save.c",
                      "include/wonder_trade/dp/game_save.h", "files/msgdata/msg/msg_0829.json",
                      "files-dp/msgdata/msg/narc_0624.gmm"):
@@ -242,8 +243,8 @@ class PrepareGameTests(unittest.TestCase):
         self.assertFalse((pristine / "arm9/src/wonder_trade").exists())
 
     def test_black2_and_white2_workspaces(self):
-        (self.root / "client/src/wonder_trade/bw2").mkdir(parents=True)
-        (self.root / "client/src/wonder_trade/bw2/game_save.c").write_text("bw2 adapter\n")
+        (self.root / "client/games/src/wonder_trade/bw2").mkdir(parents=True)
+        (self.root / "client/games/src/wonder_trade/bw2/game_save.c").write_text("bw2 adapter\n")
         upstream = Path(self.temp.name) / "bw2-upstream"
         upstream.mkdir()
         for name, text in {
@@ -265,8 +266,8 @@ class PrepareGameTests(unittest.TestCase):
             "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
             "rom_sha1": {"b2_us": "7" * 40, "w2_us": "8" * 40},
         }
-        (self.root / "client/upstream-pokebw2.json").write_text(json.dumps(pin))
-        (self.root / "client/pokebw2.patch").write_text(
+        (self.root / "client/games/upstream-pokebw2.json").write_text(json.dumps(pin))
+        (self.root / "client/games/pokebw2.patch").write_text(
             "diff --git a/src/main.c b/src/main.c\n"
             "--- a/src/main.c\n+++ b/src/main.c\n"
             "@@ -1 +1 @@\n-original\n+patched\n"
@@ -290,7 +291,7 @@ class PrepareGameTests(unittest.TestCase):
         platinum = prepare_game.prepare(self.root)
         self.assertFalse((platinum / "src/wonder_trade/bw2").exists())
         pin["rom_sha1"]["w2_us"] = "9" * 40
-        (self.root / "client/upstream-pokebw2.json").write_text(json.dumps(pin))
+        (self.root / "client/games/upstream-pokebw2.json").write_text(json.dumps(pin))
         with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
             prepare_game.prepare(self.root, pristine=True, name="bw2")
 
@@ -315,8 +316,8 @@ class PrepareGameTests(unittest.TestCase):
             "tree": subprocess.check_output([*git, "rev-parse", "HEAD^{tree}"]).decode().strip(),
             "rom_sha1": {"black": "a" * 40, "white": "b" * 40},
         }
-        (self.root / "client/upstream-aletheia.json").write_text(json.dumps(pin))
-        (self.root / "client/aletheia-build.patch").write_text(
+        (self.root / "client/games/upstream-aletheia.json").write_text(json.dumps(pin))
+        (self.root / "client/games/aletheia-build.patch").write_text(
             "diff --git a/src/game/main.c b/src/game/main.c\n"
             "--- a/src/game/main.c\n+++ b/src/game/main.c\n"
             "@@ -1 +1 @@\n-original\n+linked through wine\n"
@@ -329,7 +330,7 @@ class PrepareGameTests(unittest.TestCase):
         (bw / "black.nds").write_bytes(b"dump")
         self.assertEqual(prepare_game.prepare(self.root, pristine=True, name="bw"), bw)
         pin["rom_sha1"]["white"] = "c" * 40
-        (self.root / "client/upstream-aletheia.json").write_text(json.dumps(pin))
+        (self.root / "client/games/upstream-aletheia.json").write_text(json.dumps(pin))
         with self.assertRaisesRegex(RuntimeError, "Pristine ROM checksums"):
             prepare_game.prepare(self.root, pristine=True, name="bw")
 

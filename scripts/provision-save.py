@@ -41,9 +41,9 @@ TARGETS = ("us-rev0", "us-rev1", "europe", "france", "germany", "italy", "spain"
 # keeps the musical distribution's marker (set: the game reads the area that
 # holds the journal banks).
 MAIN_SAVES = {
-    "client/upstream-aletheia.json": {"blocks": 69, "trainer_block": 27, "trainer_offset": 0x19400,
+    "client/games/upstream-aletheia.json": {"blocks": 69, "trainer_block": 27, "trainer_offset": 0x19400,
                                       "trainer_size": 0x68, "musical_marker": 0x3C},
-    "client/upstream-pokebw2.json": {"blocks": 74, "trainer_block": 27, "trainer_offset": 0x19400,
+    "client/games/upstream-pokebw2.json": {"blocks": 74, "trainer_block": 27, "trainer_offset": 0x19400,
                                      "trainer_size": 0xB0, "musical_marker": 0x3C},
 }
 MARKER_SET = 0xC21E

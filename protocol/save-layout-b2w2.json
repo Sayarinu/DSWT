@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "upstream_pin": "client/upstream-pokebw2.json",
+  "upstream_pin": "client/games/upstream-pokebw2.json",
   "upstream_repository": "https://github.com/fuddlesworth/pokebw2.git",
   "upstream_revision": "1a66adc6a1105e1c05c40321bb31494faf47682d",
   "verified_targets": ["black2-us", "white2-us"],

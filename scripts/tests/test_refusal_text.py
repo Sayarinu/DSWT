@@ -29,9 +29,9 @@ def gmm_bank(path):
 
 
 BANKS = {
-    "Platinum": json_bank("client/res/text/wonder_trade.json"),
-    "HeartGold and SoulSilver": json_bank("client/files/msgdata/msg/msg_0829.json"),
-    "Diamond and Pearl": gmm_bank("client/files-dp/msgdata/msg/narc_0624.gmm"),
+    "Platinum": json_bank("client/games/res/text/wonder_trade.json"),
+    "HeartGold and SoulSilver": json_bank("client/games/files/msgdata/msg/msg_0829.json"),
+    "Diamond and Pearl": gmm_bank("client/games/files-dp/msgdata/msg/narc_0624.gmm"),
 }
 
 

@@ -165,7 +165,7 @@ def releaser(data):
     require("if" not in companion, "Every release must build and check the companion")
     builds = [step for step in companion.get("steps", []) if step.get("run") == "scripts/build-companion.sh"]
     require(len(builds) == 1 and "if" not in builds[0]
-            and builds[0].get("env") == {"CONNECTION_PROFILE": "companion/production-connection-profile.json"},
+            and builds[0].get("env") == {"CONNECTION_PROFILE": "client/companion/production-connection-profile.json"},
             "Build the companion from source with only the tracked public production profile")
     uploads = [step for step in companion.get("steps", [])
                if str(step.get("uses", "")).startswith("actions/upload-artifact@")]

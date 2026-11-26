@@ -988,7 +988,7 @@ def audit(patch_path, evidence=None, root=ROOT):
 def source_state(root=ROOT):
     def git(*arguments):
         return subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True, check=True).stdout.strip()
-    upstream = json.loads((root / "client/upstream.json").read_text())
+    upstream = json.loads((root / "client/games/upstream.json").read_text())
     return {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
             "upstream_repository": upstream["repository"], "upstream_revision": upstream["revision"]}
 

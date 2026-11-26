@@ -471,7 +471,7 @@ class Load:
         tls = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare-tls.py")], check=True, text=True,
                              capture_output=True, timeout=120).stdout.strip()
         build = self.directory / "native-build"
-        result = self.container("sh", "-euc", 'cmake -G Ninja -S "$1/client/tests" -B "$2" -DMBEDTLS_SOURCE="$3" >/dev/null '
+        result = self.container("sh", "-euc", 'cmake -G Ninja -S "$1/client/core/tests" -B "$2" -DMBEDTLS_SOURCE="$3" >/dev/null '
                                 '&& cmake --build "$2" --target trade_probe --parallel 4 >/dev/null', "build",
                                 str(stack.ROOT), str(build), tls, timeout=900)
         acceptance.require(result.returncode == 0, "native client build failed")

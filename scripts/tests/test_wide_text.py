@@ -10,7 +10,8 @@ HEX = re.compile(r"\\x([0-9A-Fa-f]*)")
 
 
 def wide_literals():
-    for source in sorted([*(ROOT / "client/src").rglob("*.[ch]"), *(ROOT / "client/include").rglob("*.h")]):
+    for source in sorted(path for group in ("core", "games") for folder in ("src", "include")
+                         for path in (ROOT / "client" / group / folder).rglob("*.[ch]")):
         for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
             for literal in WIDE.findall(line):
                 yield f"{source.relative_to(ROOT)}:{number}", literal

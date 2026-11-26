@@ -33,7 +33,7 @@ the zip or a working link to that exact source with the release. Maintain the
 matching source download for recipients. Preserve source notices. MPL permits
 the larger application under its own terms.
 
-The companion/Makefile is adapted from BlocksDS v1.25.0's rom_arm9 template,
+The client/companion/Makefile is adapted from BlocksDS v1.25.0's rom_arm9 template,
 SPDX-FileContributor: Antonio Niño Díaz, 2023-2026, under CC0-1.0. The full
 CC0 dedication and fallback licence are in licensing/ds-companion-cc0.txt;
 include it as project policy. CC0 requires no attribution or source offer.
@@ -73,8 +73,8 @@ preserve applicable notices and identify redistributed source modifications.
 This selection imposes no GPL application copyleft or source-offer obligation.
 
 The companion also links its own bounded Mbed TLS 4.1.1 / TF-PSA-Crypto 1.2.0
-through libwt_tls.a, built from the checksum-pinned client/tls-dependency.json
-source using client/include/wonder_trade/tls_config.h and crypto_config.h.
+through libwt_tls.a, built from the checksum-pinned client/core/tls-dependency.json
+source using client/core/include/wonder_trade/tls_config.h and crypto_config.h.
 This dependency selects Apache-2.0; Copyright The Mbed TLS Contributors.
 Ship licensing/mbedtls.txt with every .nds zip and preserve applicable notices.
 The bounded profile leaves MBEDTLS_ECDH_VARIANT_EVEREST_ENABLED and

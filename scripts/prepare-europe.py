@@ -59,7 +59,7 @@ def load(path):
         data += b"\xff" * (variant["size"] - len(data))
     if len(data) != variant["size"] or hashlib.sha256(data).hexdigest() != variant["sha256"]:
         raise ValueError(f"{path} is not the verified {variant['game']} {variant['name']} dump")
-    pin = json.loads((ROOT / "client/upstream.json").read_text())
+    pin = json.loads((ROOT / "client/games/upstream.json").read_text())
     if (data[0x0C:0x10], data[0x1E]) != (b"CPUE", REVISION) or variant["sha1"] != pin["rom_sha1"][str(REVISION)]:
         raise ValueError("Catalogue and build records disagree on the European cartridge")
     return data, variant

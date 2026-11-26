@@ -174,7 +174,7 @@ class Target(platinum.Target):
         self.us_rom = us_path.read_bytes()
         require(sha256(self.us_rom) == catalogue[base]["sha256"],
                 f"{us_path} is not a pristine {base} build; build it with ROM_GAME={game} --pristine")
-        pin = json.loads((ROOT / "client/upstream-pokediamond.json").read_text())["revision"]
+        pin = json.loads((ROOT / "client/games/upstream-pokediamond.json").read_text())["revision"]
         for tree in (self.workspace, self.pristine):
             require(git(tree, "rev-parse", "HEAD").decode().strip() == pin, f"{tree} is not at upstream {pin}")
         self.modules = nds.modules(self.rom)
@@ -673,12 +673,12 @@ class Target(platinum.Target):
         lines = (work / "start_menu.txt").read_text(encoding="utf-8").splitlines()
         wt_rows = list(ET.parse(self.workspace / f"files/msgdata/msg/narc_{START_MENU_BANK:04d}.gmm").getroot().iter("row"))
         require(len(wt_rows) == len(lines) + 1, f"the retail start menu has {len(lines)} entries, not {len(wt_rows) - 1}")
-        strings = json.loads((ROOT / "client/res/text/wonder_trade.json").read_text())
+        strings = json.loads((ROOT / "client/games/res/text/wonder_trade.json").read_text())
         self.menu_label = next(m for m in strings["messages"] if m["id"] == platinum.MENU_LABEL)[self.text_key]
         (work / "start_menu_wt.txt").write_text("\n".join([*lines, self.menu_label]) + "\n", encoding="utf-8")
         self._msgenc(work, "-e", "start_menu_wt.txt", "start_menu_wt.bin", "-k", hex(gmm_key(msg_mk, START_MENU_BANK)))
         # Wonder Trade's own bank, in the cartridge's language.
-        source = (ROOT / f"client/files-dp/msgdata/msg/narc_{WT_BANK:04d}.gmm").read_text()
+        source = (ROOT / f"client/games/files-dp/msgdata/msg/narc_{WT_BANK:04d}.gmm").read_text()
         (work / "wonder_trade.gmm").write_text(localized_gmm(source, self.gmm_language))
         self._msgenc(work, "-e", "wonder_trade.gmm", "wonder_trade.bin", "--gmm", "-H", "wonder_trade.h",
                      "-k", hex(gmm_key(msg_mk, WT_BANK)))

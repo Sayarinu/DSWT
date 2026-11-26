@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("prepare_game", ROOT / "scripts/prepare-game.py")
 prepare_game = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(prepare_game)
-RETAIL = ROOT / "client/retail"
+RETAIL = ROOT / "client/games/retail"
 # Port-only source changes: keep the retail StartMenu layout that unpatched code reads.
 PORT_PATCH = RETAIL / "platinum-port.patch"
 # id: (catalogue variant, language enumerator, text column, build deltas)
@@ -190,7 +190,7 @@ class Target:
         self.us_rom = us_path.read_bytes()
         require(sha256(self.us_rom) == catalogue[US_VARIANT]["sha256"],
                 f"{us_path} is not a pristine {US_VARIANT} build; build it with ROM_REVISION=1 --pristine")
-        pin = json.loads((ROOT / "client/upstream.json").read_text())["revision"]
+        pin = json.loads((ROOT / "client/games/upstream.json").read_text())["revision"]
         for tree in (self.workspace, self.pristine):
             require(git(tree, "rev-parse", "HEAD").decode().strip() == pin, f"{tree} is not at upstream {pin}")
         self.modules = nds.modules(self.rom)

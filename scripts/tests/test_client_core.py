@@ -10,8 +10,8 @@ SDK = re.compile(r"(std\w+|string|stdio)\.h|nitro\.h|nnsys/fnd\.h|nitroWiFi/\w+\
 class SharedCoreTests(unittest.TestCase):
     def test_core_uses_no_game_headers(self):
         """Only the game adapter subdirectories may include decompilation headers."""
-        sources = [*sorted((ROOT / "client/src/wonder_trade").glob("*.c")),
-                   *sorted((ROOT / "client/include/wonder_trade").glob("*.h"))]
+        sources = [*sorted((ROOT / "client/core/src/wonder_trade").glob("*.c")),
+                   *sorted((ROOT / "client/core/include/wonder_trade").glob("*.h"))]
         self.assertTrue(sources)
         for source in sources:
             for quoted, angled in re.findall(r'^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)', source.read_text(), re.M):
@@ -37,7 +37,7 @@ def function(source, signature):
 
 class AdapterDeliveryTests(unittest.TestCase):
     """Every game adapter decides deliveries, recoveries and uniqueness with the
-    shared code in wonder_trade/delivery.h, which client/tests/delivery_test.c
+    shared code in wonder_trade/delivery.h, which client/core/tests/delivery_test.c
     drives through the engine. The adapters' Nitro code cannot run on a host,
     so this checks that each one still hands those decisions over: deleting a
     call here turns a test red."""
@@ -45,7 +45,7 @@ class AdapterDeliveryTests(unittest.TestCase):
     def test_adapters_route_decisions_to_shared_code(self):
         for game, battle_box in ADAPTERS.items():
             with self.subTest(game=game):
-                source = (ROOT / f"client/src/wonder_trade/{game}/game_save.c").read_text()
+                source = (ROOT / f"client/games/src/wonder_trade/{game}/game_save.c").read_text()
                 self.assertIn('#include "wonder_trade/delivery.h"', source)
                 inventory = function(source, "int WtGame_Inventory(")
                 self.assertIn("!WtDelivery_Bound(entry)) return -1;", inventory)

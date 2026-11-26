@@ -1,6 +1,6 @@
 /game/
-# Direct `make` runs in companion/ (scripts/build-companion.sh writes to game/).
-/companion/build/
+# Direct `make` runs in client/companion/ (scripts/build-companion.sh writes to game/).
+/client/companion/build/
 # Scripts used only for testing stay local (AGENTS.md).
 /testing-scripts/
 /.vscode/

@@ -149,7 +149,7 @@ class WorkflowTests(unittest.TestCase):
             lambda d: jobs(d)["companion"]["steps"][-1].pop("if"),
             lambda d: jobs(d)["companion"]["steps"][1]["env"].update(GH_TOKEN="${{ github.token }}"),
             lambda d: jobs(d)["companion"]["steps"][1]["env"].update(PROFILE="${{ secrets.PROFILE }}"),
-            lambda d: jobs(d)["companion"]["steps"][1]["env"].update(CONNECTION_PROFILE="companion/connection-profile.json"),
+            lambda d: jobs(d)["companion"]["steps"][1]["env"].update(CONNECTION_PROFILE="client/companion/connection-profile.json"),
             lambda d: jobs(d)["companion"]["steps"][1].update({"if": "inputs.companion"}),
             lambda d: jobs(d)["publish"]["steps"][-1]["env"].update(COMPANION="true"),
             lambda d: jobs(d)["publish"]["steps"][-1].update(run="publish --version x --companion true"),

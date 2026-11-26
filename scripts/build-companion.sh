@@ -10,7 +10,7 @@ if [[ $# != 0 ]]; then
 fi
 # The tracked profile names no real server; set CONNECTION_PROFILE to your
 # public endpoint/pins JSON (see https://github.com/Sayarinu/DSWT/wiki/Local-Testing).
-profile="${CONNECTION_PROFILE:-$repo_root/companion/connection-profile.json}"
+profile="${CONNECTION_PROFILE:-$repo_root/client/companion/connection-profile.json}"
 build_jobs="${COMPANION_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
     echo "COMPANION_BUILD_JOBS must be a positive integer without leading zeros" >&2
@@ -42,11 +42,10 @@ builder="$repo_root/tools/companion-builder"
 docker build -f "$builder/Dockerfile" -t "$image" "$builder"
 # The sources are read-only; everything the build writes goes to /out.
 docker run --rm --user "$(id -u):$(id -g)" \
-    -v "$repo_root/companion:/dswt/companion:ro" \
     -v "$repo_root/client:/dswt/client:ro" \
     -v "$tls_workspace:/tls:ro" \
     -v "$output:/out" \
-    -w /dswt/companion "$image" \
+    -w /dswt/client/companion "$image" \
     make -j"$build_jobs" BUILDDIR=/out/build ROM=/out/dswt-companion.nds \
         TLS_DIR=/tls CONNECTION_HEADER=/out/dswt-connection.h
 echo "$output/dswt-companion.nds"

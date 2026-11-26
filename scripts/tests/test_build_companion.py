@@ -22,8 +22,8 @@ class BuildCompanionTests(unittest.TestCase):
         # The real profile tool and the tracked placeholder profile.
         for name in ('build-companion.sh', 'configure-connection.py'):
             shutil.copy2(ROOT / 'scripts' / name, self.scripts)
-        (self.root / 'companion').mkdir()
-        shutil.copy2(ROOT / 'companion/connection-profile.json', self.root / 'companion')
+        (self.root / 'client/companion').mkdir(parents=True)
+        shutil.copy2(ROOT / 'client/companion/connection-profile.json', self.root / 'client/companion')
         self.tls = self.root / 'TLS source'
         self.tls.mkdir()
         self.log = self.root / 'calls.jsonl'
@@ -99,10 +99,9 @@ def record(tool, args):
                                  'dswt-companion-builder', str(builder)])
         self.assertEqual(run[run.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         mounts = [run[i + 1] for i, arg in enumerate(run) if arg == '-v']
-        self.assertEqual(mounts, [f'{self.root}/companion:/dswt/companion:ro',
-                                  f'{self.root}/client:/dswt/client:ro',
+        self.assertEqual(mounts, [f'{self.root}/client:/dswt/client:ro',
                                   f'{self.tls}:/tls:ro', f'{self.output}:/out'])
-        self.assertEqual(run[run.index('-w') + 1], '/dswt/companion')
+        self.assertEqual(run[run.index('-w') + 1], '/dswt/client/companion')
         make = run[run.index('dswt-companion-builder'):]
         self.assertEqual(make, ['dswt-companion-builder', 'make', '-j3', 'BUILDDIR=/out/build',
                                 'ROM=/out/dswt-companion.nds', 'TLS_DIR=/tls',
@@ -159,7 +158,7 @@ class CompanionBuilderTests(unittest.TestCase):
             r'^FROM skylyrac/blocksds:slim-v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$', re.M))
 
     def test_placeholder_profile_names_no_real_server(self):
-        profile = json.loads((ROOT / 'companion/connection-profile.json').read_text())
+        profile = json.loads((ROOT / 'client/companion/connection-profile.json').read_text())
         self.assertTrue(profile['hostname'].endswith('.invalid'))
         self.assertTrue(profile['ipv4'].startswith('192.0.2.'))  # TEST-NET-1
 

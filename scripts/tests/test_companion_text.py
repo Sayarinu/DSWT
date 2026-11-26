@@ -35,10 +35,10 @@ class CompanionTextTests(unittest.TestCase):
         return path
 
     def test_every_real_message_has_seven_languages(self):
-        messages = self.tool.load_messages([ROOT / 'client/res/text/wonder_trade.json',
-                                           ROOT / 'companion/res/text/companion.json'])
+        messages = self.tool.load_messages([ROOT / 'client/games/res/text/wonder_trade.json',
+                                           ROOT / 'client/companion/res/text/companion.json'])
         self.assertGreater(len(messages), 60)
-        companion = json.loads((ROOT / 'companion/res/text/companion.json').read_text())
+        companion = json.loads((ROOT / 'client/companion/res/text/companion.json').read_text())
         self.assertIn('native review', companion['comment'])
         self.assertTrue(all(set(self.tool.LANGUAGES) <= row.keys() for row in messages))
 
@@ -115,7 +115,7 @@ class CompanionTextTests(unittest.TestCase):
                 download.assert_called_once()
 
     def test_make_explains_missing_text_for_default_and_cleaned_builds(self):
-        shutil.copy2(ROOT / 'companion/Makefile', self.directory)
+        shutil.copy2(ROOT / 'client/companion/Makefile', self.directory)
         (self.directory / 'src').mkdir()
         for build in ('build', 'custom-build'):
             with self.subTest(build=build):
@@ -126,7 +126,7 @@ class CompanionTextTests(unittest.TestCase):
                         (text / name).touch()
                     subprocess.run(['make', 'clean', f'BUILDDIR={build}'],
                                    cwd=self.directory, capture_output=True, check=True)
-                result = subprocess.run(['make', f'BUILDDIR={build}', f'CLIENT={ROOT / "client"}'], cwd=self.directory,
+                result = subprocess.run(['make', f'BUILDDIR={build}', f'CLIENT={ROOT / "client/core"}'], cwd=self.directory,
                                         text=True, capture_output=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('scripts/build-companion.sh', result.stderr)

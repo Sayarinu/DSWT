@@ -118,7 +118,7 @@ class Acceptance:
         with (self.directory / "native-build.log").open("x") as log:
             source = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare-tls.py")],
                                     check=True, text=True, stdout=subprocess.PIPE, stderr=log, timeout=120).stdout.strip()
-            for args in (["cmake", "-S", str(stack.ROOT / "client/tests"), "-B", str(self.probe.parent), "-DMBEDTLS_SOURCE=" + source],
+            for args in (["cmake", "-S", str(stack.ROOT / "client/core/tests"), "-B", str(self.probe.parent), "-DMBEDTLS_SOURCE=" + source],
                          ["cmake", "--build", str(self.probe.parent), "--target", "trade_probe", "--parallel", "2"]):
                 subprocess.run(args, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=300)
         self.fixtures.mkdir(mode=0o700)
@@ -484,7 +484,7 @@ def main():
                   "sdk_evolution_pokedex_retail_save": "not_run", "substitution": "POSIX I/O and persisted synthetic inventory"}
         try:
             runner.build()
-            report.update(native_sha256=sha(runner.probe), tls=json.loads((stack.ROOT / "client/tls-dependency.json").read_text()),
+            report.update(native_sha256=sha(runner.probe), tls=json.loads((stack.ROOT / "client/core/tls-dependency.json").read_text()),
                           fixtures=runner.fixture_manifest, fixture_image=runner.fixture_image)
             everything = CASES + (("archive-hold",) if local.production else ())
             for case in everything if args.case == "all" else (args.case,):

@@ -12,15 +12,16 @@ and the [wiki](https://github.com/Sayarinu/DSWT/wiki) explains how to install, b
   ignored `game/` directory. Never commit
   anything under `game/`, or any ROM, BIOS, firmware, save, key or `.env` file.
 - Project additions and integration changes to the game live in `client/`.
-  Preserve upstream notices, and record the new revision in `client/UPSTREAM.md`
-  and the matching `client/upstream*.json` when refreshing a workspace.
+  Preserve upstream notices, and record the new revision in `client/games/UPSTREAM.md`
+  and the matching `client/games/upstream*.json` when refreshing a workspace.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `client/` | Game-independent client core, the Platinum, HeartGold/SoulSilver and Diamond/Pearl adapters (`platinum/`, `hgss/` and `dp/`, behind `game_adapter.h`), their integration patches and native client tests |
-| `companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build-companion.sh` on the client core, with host tests in `companion/tests/` |
+| `client/core/` | Shared DS client code and native tests |
+| `client/games/` | Game adapters, integration patches, resources and upstream pins |
+| `client/companion/` | DS Companion: a DSi-mode BlocksDS homebrew ROM that trades from a game's save on the SD card, built with `scripts/build-companion.sh` on the client core, with host tests in `client/companion/tests/` |
 | `server/` | C++ trade service: HTTPS gateway for the DS, gRPC backend, matcher, ledger |
 | `validator/` | Isolated PKHeX.Core legality service in .NET (GPL; see its `LICENSE` and `NOTICE`) |
 | `protocol/` | Wonder Trade v1 contract, DS wire envelope oracle and save layout |
@@ -74,16 +75,16 @@ docker build -f server/Dockerfile -t dswt-server .
 
 # Test bounded TLS transport (client host/native tests)
 tls_source="$(python3 scripts/prepare-tls.py)"
-cmake -S client/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
+cmake -S client/core/tests -B game/tls-tests -DMBEDTLS_SOURCE="$tls_source"
 cmake --build game/tls-tests --parallel 2
 ctest --test-dir game/tls-tests --output-on-failure
-python3 client/tests/test_tls.py game/tls-tests/tls_probe
+python3 client/core/tests/test_tls.py game/tls-tests/tls_probe
 
 # Build and test DS companion
-cmake -S companion/tests -B game/companion-tests
+cmake -S client/companion/tests -B game/companion-tests
 cmake --build game/companion-tests --parallel 2
 ctest --test-dir game/companion-tests --output-on-failure
-CONNECTION_PROFILE=companion/connection-profile.json scripts/build-companion.sh
+CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build-companion.sh
 docker run --rm --network none -i -v "$PWD/game/companion:/out:ro" dswt-companion-builder python3 - <<'PY'
 import os
 from pathlib import Path
@@ -138,7 +139,7 @@ only merge what is ready to serve players. The required check names are listed i
 - Documentation lives in the [wiki](https://github.com/Sayarinu/DSWT/wiki), written in plain terms. Keep
   `README.md` short, like a store page, and update the wiki page a change
   affects. Track only docs something depends on: this file, `README.md`,
-  `patches/INSTALL.md` (shipped in releases), `client/UPSTREAM.md`,
+  `patches/INSTALL.md` (shipped in releases), `client/games/UPSTREAM.md`,
   `validator/README.md` (in the validator image's GPL source) and license
   notices. Change docs only when necessary or beneficial, and skip routine
   progress notes.

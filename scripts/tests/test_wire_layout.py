@@ -14,7 +14,7 @@ spec.loader.exec_module(wire)
 
 
 def client_layout():
-    text = (ROOT / "client/include/wonder_trade/wire_layout.h").read_text()
+    text = (ROOT / "client/core/include/wonder_trade/wire_layout.h").read_text()
     return {name: int(value, 0) for name, value in re.findall(r"^#define WT_WIRE_(\w+) (\d\w*)$", text, re.M)}
 
 
@@ -50,7 +50,7 @@ class WireLayoutTests(unittest.TestCase):
         self.assertEqual(client["VERSION_SERVER_RETURNS"], wire.VERSION_SERVER_RETURNS)
         self.assertEqual(client["VERSION_REFUSAL_REASON"], wire.VERSION_REFUSAL_REASON)
         magic = '"WTDS\\1"'
-        self.assertIn(f"#define WT_WIRE_MAGIC {magic}", (ROOT / "client/include/wonder_trade/wire_layout.h").read_text())
+        self.assertIn(f"#define WT_WIRE_MAGIC {magic}", (ROOT / "client/core/include/wonder_trade/wire_layout.h").read_text())
         self.assertIn(f"kMagic{{{magic}, 5}}", (ROOT / "server/src/wire_layout.h").read_text())
 
     def test_layout_matches_the_reference_codec(self):
@@ -93,7 +93,7 @@ class WireLayoutTests(unittest.TestCase):
         self.assertEqual((c["PK4_SIZE"], c["PK4_SANITY"], c["PK4_CHECKSUM"], c["PK4_BLOCKS"]), (136, 4, 6, 8))
 
     def test_client_bounds_cover_the_largest_frames(self):
-        header = (ROOT / "client/include/wonder_trade/wire.h").read_text()
+        header = (ROOT / "client/core/include/wonder_trade/wire.h").read_text()
         request_max = int(re.search(r"#define WT_WIRE_REQUEST_MAX (\d+)", header)[1])
         reply_max = int(re.search(r"#define WT_WIRE_REPLY_MAX (\d+)", header)[1])
         c = client_layout()

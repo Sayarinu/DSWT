@@ -165,9 +165,11 @@ class FakeGitHub:
         if arguments[0] == "api" and "/compare/" in arguments[1]:
             return self.merges
         if arguments[0] == "api" and "/contents/client?ref=" in arguments[1]:
+            return json.dumps([{"name": name} for name in ("core", "games", "companion")])
+        if arguments[0] == "api" and "/contents/client/games?ref=" in arguments[1]:
             return json.dumps([{"name": name} for name in [*self.upstreams, "README.md", "upstream-notes.txt"]])
         if arguments[0] == "api" and "/contents/client/" in arguments[1]:
-            return json.dumps(self.upstreams[arguments[1].split("/contents/client/")[1].split("?")[0]])
+            return json.dumps(self.upstreams[arguments[1].split("/contents/client/games/")[1].split("?")[0]])
         if arguments[:2] == ("release", "download"):
             directory = Path(arguments[arguments.index("--dir") + 1])
             (directory / "dswt-0.1.0.zip").write_bytes(self.archive.read_bytes())

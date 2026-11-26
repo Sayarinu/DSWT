@@ -144,7 +144,7 @@ class IdentifyRomTests(unittest.TestCase):
                 self.assertRegex(row[key], f"^[0-9a-f]{{{length}}}$")
             if row["planned_patch"] is not None:
                 self.assertRegex(row["planned_patch"], r"^dswt-[a-z0-9-]+\.bps$")
-        pin = json.loads((SCRIPT.parent.parent / "client/upstream.json").read_text())
+        pin = json.loads((SCRIPT.parent.parent / "client/games/upstream.json").read_text())
         built = [row for row in variants if row["pristine_verified"] and row["planned_patch"] is not None]
         self.assertEqual([row["id"] for row in built], ["us-rev0", "us-rev1", "europe", "diamond-us-rev5", "pearl-us-rev5",
                                                         "heartgold-us-rev0", "soulsilver-us-rev0", "diamond-europe-rev5",
@@ -181,20 +181,20 @@ class IdentifyRomTests(unittest.TestCase):
                 self.assertNotEqual(base["game_code"], row["game_code"])
             elif row["build_revision"] is None:
                 self.assertTrue(row["planned_patch"] is None or not row["pristine_verified"], row["id"])
-        hgss = json.loads((SCRIPT.parent.parent / "client/upstream-pokeheartgold.json").read_text())
+        hgss = json.loads((SCRIPT.parent.parent / "client/games/upstream-pokeheartgold.json").read_text())
         rows = {row["id"]: row for row in variants}
         self.assertEqual({version: rows[f"{version}-us-rev0"]["sha1"] for version in ("heartgold", "soulsilver")},
                          hgss["rom_sha1"])
-        dp = json.loads((SCRIPT.parent.parent / "client/upstream-pokediamond.json").read_text())
+        dp = json.loads((SCRIPT.parent.parent / "client/games/upstream-pokediamond.json").read_text())
         self.assertEqual({version: rows[f"{version}-us-rev5"]["sha1"] for version in ("diamond", "pearl")},
                          dp["rom_sha1"])
         for version in ("diamond", "pearl"):
             self.assertIn(dp["revision"], rows[f"{version}-us-rev5"]["reference"])
-        bw2 = json.loads((SCRIPT.parent.parent / "client/upstream-pokebw2.json").read_text())
+        bw2 = json.loads((SCRIPT.parent.parent / "client/games/upstream-pokebw2.json").read_text())
         self.assertEqual({"b2_us": rows["black2-us"]["sha1"], "w2_us": rows["white2-us"]["sha1"]}, bw2["rom_sha1"])
         for version, key in (("black2", "b2_us"), ("white2", "w2_us")):
             self.assertIn(f"{bw2['revision']}/{key}.sha1", rows[f"{version}-us"]["reference"])
-        bw = json.loads((SCRIPT.parent.parent / "client/upstream-aletheia.json").read_text())
+        bw = json.loads((SCRIPT.parent.parent / "client/games/upstream-aletheia.json").read_text())
         self.assertEqual({"black": rows["black-us"]["sha1"], "white": rows["white-us"]["sha1"]}, bw["rom_sha1"])
         for version in ("black", "white"):
             self.assertIn(f"{bw['revision']}/docs/ROMS.md", rows[f"{version}-us"]["reference"])

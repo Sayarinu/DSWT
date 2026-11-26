@@ -82,7 +82,7 @@ class PackageCompanionTests(unittest.TestCase):
         self.assertFalse((self.build / "release").exists())
 
     def test_release_profile_has_only_public_connection_fields(self):
-        profile = json.loads((ROOT / "companion/production-connection-profile.json").read_text())
+        profile = json.loads((ROOT / "client/companion/production-connection-profile.json").read_text())
         header = connection.header(profile)  # Rejects extra fields, bad pins and identical pins.
         self.assertTrue(ipaddress.IPv4Address(profile["ipv4"]).is_global)
         self.assertFalse(profile["hostname"].endswith((".invalid", ".test", ".localhost")))

@@ -3,7 +3,7 @@
 
 aletheia rebuilds both cartridges byte for byte, so its link output is the
 game's own symbol map. This compiles Wonder Trade and the aletheia sources
-client/aletheia.patch changes, links them against those addresses and adds
+client/games/aletheia.patch changes, links them against those addresses and adds
 them to the dump; see scripts/retail_port/bw.py. The ROM is written only if
 every check passes. It runs in DS mode only: the DSi digests stay stale.
 

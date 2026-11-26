@@ -25,7 +25,7 @@ def inventory(directory):
 
 
 def prepare(root):
-    pin = json.loads((root / "client/tls-dependency.json").read_text())
+    pin = json.loads((root / "client/core/tls-dependency.json").read_text())
     parent = root / "game"
     if parent.is_symlink():
         raise ValueError("TLS cache must not be a symlink")

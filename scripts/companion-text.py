@@ -222,8 +222,8 @@ def generate(paths, cache, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--wonder-trade', type=Path, default=ROOT / 'client/res/text/wonder_trade.json')
-    parser.add_argument('--companion', type=Path, default=ROOT / 'companion/res/text/companion.json')
+    parser.add_argument('--wonder-trade', type=Path, default=ROOT / 'client/games/res/text/wonder_trade.json')
+    parser.add_argument('--companion', type=Path, default=ROOT / 'client/companion/res/text/companion.json')
     parser.add_argument('--font-cache', type=Path, default=ROOT / 'game/companion/font/Galmuri11-Condensed.kbitx')
     parser.add_argument('--output', type=Path, default=ROOT / 'game/companion/build/text')
     args = parser.parse_args()
