@@ -132,8 +132,8 @@ only merge what is ready to serve players. The required check names are listed i
 - Do not add AI or tool attribution anywhere: no `Co-Authored-By` trailers,
   "Generated with" lines or tool mentions in commits, PRs, code, comments or docs.
 - One ticket per PR. Keep PRs focused and self-contained, and fill in the PR
-  template: problem, changes, validation, material risks and ticket ID. Do not
-  link to the tracker; the ID is enough.
+  template with a ticket link, a bullet list explaining what changed and why,
+  and any material risks.
 - PRs merge into `main` with a merge commit once the required checks pass and
   review conversations are resolved. Squash and rebase merges are disabled.
 - `scripts/` holds only scripts that are reused, with their tests in

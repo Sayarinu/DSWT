@@ -1,8 +1,11 @@
-Ticket: ABC-123
-<!-- Use your branch name: the ticket ID, such as ABC-123. -->
+## Ticket
 
-Describe the problem and the resulting behavior.
+[LUNE-123](https://linear.app/nouvelle-lune-atelier/issue/LUNE-123)
 
-Validation: list the relevant checks and results.
+## Description
 
-Risks: note material limits, or state none.
+- <!-- Describe what changed and why. -->
+
+## Risks
+
+- None
