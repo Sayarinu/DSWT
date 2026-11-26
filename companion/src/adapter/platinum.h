@@ -37,14 +37,25 @@
  *
  * Between companion sessions the player may load and save the save in the
  * stock game before an interrupted step could resume, so the save matches
- * neither inventory the journal recorded. REMOVE and RECEIVE then decide by
- * the Pokémon's exact image: an offer still in the party exactly as offered
- * is removed from this save, one already gone is removed; a delivery or
- * returned offer already in the save exactly as applied is recorded where it
- * is, one not there yet is received into this save. A Pokémon that shares
- * the identity (personality and trainer ID) without being that image (another
+ * neither inventory the journal recorded. REMOVE then decides by the
+ * offer's exact image: still in the party exactly as offered, it is removed
+ * from this save; already gone, it is removed. A Pokémon that shares the
+ * identity (personality and trainer ID) without being that image (another
  * Pokémon, or this one trained in the stock game) is never proof either way:
  * the step fails closed and changes nothing.
+ *
+ * RECEIVE follows the games' rule (client wonder_trade/delivery.h,
+ * WtDelivery_Recover; LUNE-906): a delivery or returned offer is never added
+ * to a save another game wrote since, because a save where it never arrived
+ * and one where the player released it, traded it away or moved it look the
+ * same. The save is accepted as it is. The one Pokémon with the delivery's
+ * identity, in any state play left it, is recorded where it is (the ACK
+ * reports its digest); with none, nothing is added. Two with the identity
+ * (a Pokémon with a fixed personality and trainer ID can meet another copy
+ * of itself, LUNE-914) refuse the step: it never picks one. The cost, as in
+ * the games: a cut after the journal recorded the delivery and before the
+ * first retail copy holding it was complete, followed by a stock-game save
+ * before the companion resumes, loses that Pokémon.
  *
  * The stock game can also move a Pokémon where no journal locator reaches:
  * the Day Care, the GTS deposit, the HeartGold/SoulSilver Pokéwalker (and
@@ -52,10 +63,6 @@
  * identity a step decides by is never proof either way (LUNE-913): the step
  * fails closed and writes nothing until the player takes it back. Deliveries
  * still go only to the party or the PC.
- *
- * Known limit: a delivery the stock game loaded already applied and the
- * player then released or traded away looks exactly like one never applied,
- * and is received again.
  *
  * A Black/White or Black 2/White 2 image goes to adapter/gen5.h instead. */
 struct WtGame {

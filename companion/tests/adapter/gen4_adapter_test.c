@@ -664,13 +664,15 @@ static void StockGame(void)
     assert(entry.globalCounter == image.globalCounter);
     BothCopies();
     assert(Step(WT_INVENTORY_VERIFY_REMOVED, &entry, 2) == 0);
-    /* A delivery prepared, then the stock game saved: received into this save, once. */
+    /* A delivery prepared, then the stock game saved before it was written:
+     * the save is accepted as it is and the delivery never added (LUNE-906,
+     * the games' never-duplicate rule; this is the window that loses it). */
     Match(&entry, &spec);
     assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 0);
     StockSave();
     assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0);
     assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
-    assert(FxImageCount(&image) == 4);
+    assert(FxImageCount(&image) == 3);
     BothCopies();
     /* Applied, then the stock game saved before RECEIVE was recorded: only a
      * checkpoint, the record rebuilt from where the save holds it. */
@@ -683,11 +685,81 @@ static void StockGame(void)
         assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0);
         StockSave();
         assert(Step(WT_INVENTORY_RECEIVE, &recorded, 0) == 0);
-        assert(FxImageCount(&image) == 5 && recorded.destination.kind == 1 && recorded.destination.slot == 4);
-        assert(WtPokemon_Decode(FxImageParty(&image, 4), canonical) == 0 && R16(canonical + 8) == 26);
+        assert(FxImageCount(&image) == 4 && recorded.destination.kind == 1 && recorded.destination.slot == 3);
+        assert(WtPokemon_Decode(FxImageParty(&image, 3), canonical) == 0 && R16(canonical + 8) == 26);
         assert(Step(WT_INVENTORY_VERIFY_RECEIVED, &recorded, 0) == 0);
     }
-    printf("PASS %s stock game: removal and both receive recoveries decide by the Pokémon, once\n", FX_GAME_NAME);
+    printf("PASS %s stock game: removal and both receive recoveries decide by the Pokémon, never twice\n", FX_GAME_NAME);
+}
+
+/* Pokémon with the target's identity in the loaded party and PC. */
+static unsigned Copies(const unsigned char target[136])
+{
+    unsigned char canonical[136];
+    unsigned i, copies = 0, count = FxImageCount(&image);
+    for (i = 0; i < count + 18 * 30; ++i) {
+        const unsigned char *slot = i < count ? FxImageParty(&image, i) : FxImageBox(&image, (i - count) / 30, (i - count) % 30);
+        if (WtPokemon_Decode(slot, canonical) != 0 || !R16(canonical + 8)) continue;
+        copies += memcmp(canonical, target, 4) == 0 && memcmp(canonical + 12, target + 12, 4) == 0;
+    }
+    return copies;
+}
+
+/* LUNE-906: a matched delivery's RECEIVE cut before each write and after the
+ * last, then the stock game loads the save and the player keeps the
+ * delivery, releases it or trades it away before saving; RECEIVE resumes from
+ * the journal. It is never added again: kept, it is there once when the save
+ * the game loaded held it, else lost (the games' window); let go, it stays
+ * gone. */
+static unsigned char gone[136];
+static int goneTrade;
+static void LetGo(unsigned char *general) { (void)FxGone(general, FxBoxes(&file, image.currentHalf[1]), gone, goneTrade); }
+
+static void StockFates(void)
+{
+    static const char *const fates[] = { "kept", "released", "traded away" };
+    FxSpec specs[6];
+    WtJournalEntry journal, entry;
+    Spec spec = { 25, 0, 0, 2, 0x6001 };
+    unsigned writes, cut, fate, held, lost, first;
+    Defaults(specs, 4); Setup(specs, 4);
+    Match(&journal, &spec);
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &journal, 0) == 0);
+    entry = journal; writes = file.writes;
+    assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0);
+    writes = file.writes - writes;
+    for (fate = 0; fate < 3; ++fate) {
+        lost = 0; first = 0;
+        for (cut = 1; cut <= writes + 1; ++cut) {
+            Defaults(specs, 4); Setup(specs, 4);
+            Match(&journal, &spec);
+            assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &journal, 0) == 0);
+            entry = journal;
+            file.failWrite = file.writes + cut;
+            assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == (cut <= writes ? -1 : 0));
+            file.failWrite = 0;
+            assert(FxLoad(&image, &cpFile) == CP_SAVE_OK);
+            held = Copies(journal.incoming);
+            assert(held <= 1);
+            if (held && !first) first = cut;
+            /* Once a retail copy holds it, every later cut's does too. */
+            assert(held == (first && cut >= first));
+            memcpy(gone, journal.incoming, 136); goneTrade = fate == 2;
+            stockAction = fate ? LetGo : NULL;
+            StockSave();
+            stockAction = NULL;
+            entry = journal;
+            assert(Step(WT_INVENTORY_RECEIVE, &entry, 0) == 0 && Step(WT_INVENTORY_VERIFY_RECEIVED, &entry, 0) == 0);
+            assert(Copies(journal.incoming) == (fate ? 0 : held));
+            BothCopies();
+            entry.phase = WT_JOURNAL_APPLIED;
+            assert(WtGame_CanLeave(&game, &entry));
+            lost += !fate && !held;
+        }
+        assert(first > 1);
+        printf("PASS %s stock save after a cut in RECEIVE, delivery %s: %u cuts, 0 duplicates, %u lost "
+            "(cuts before write %u, the first retail copy holding it)\n", FX_GAME_NAME, fates[fate], writes + 1, lost, first - 1);
+    }
 }
 
 static void Resum(unsigned char pk[136])
@@ -760,17 +832,7 @@ static void HeldStock(void (*action)(unsigned char *general))
 }
 
 /* Copies of the offered Pokémon, by identity, in the loaded party and PC. */
-static unsigned HeldCopies(void)
-{
-    unsigned char canonical[136];
-    unsigned i, copies = 0, count = FxImageCount(&image);
-    for (i = 0; i < count + 18 * 30; ++i) {
-        const unsigned char *slot = i < count ? FxImageParty(&image, i) : FxImageBox(&image, (i - count) / 30, (i - count) % 30);
-        if (WtPokemon_Decode(slot, canonical) != 0 || !R16(canonical + 8)) continue;
-        copies += memcmp(canonical, offered, 4) == 0 && memcmp(canonical + 12, offered + 12, 4) == 0;
-    }
-    return copies;
-}
+static unsigned HeldCopies(void) { return Copies(offered); }
 
 #include "gen4_held.h"
 
@@ -788,6 +850,7 @@ int main(void)
     FormHistory();
     Returns();
     StockGame();
+    StockFates();
     FxHeldSweep();
     FxHeldUnique();
     CanHold();

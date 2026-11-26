@@ -248,6 +248,41 @@ static inline unsigned char *FxImageBox(CpSaveImage *image, unsigned box, unsign
     return FxPcSlot(CpSaveImage_Block(image, 1), box * 30 + slot);
 }
 
+/* LUNE-906: in the stock game the player lets go of the Pokémon with the
+ * target's identity: released (the party closes up behind it, or its PC slot
+ * empties) or, with trade, traded away for another Pokémon (FxDefault(40))
+ * that takes its slot. 0 when the save does not hold it. */
+static inline int FxGone(unsigned char *general, unsigned char *boxes, const unsigned char target[136], int trade)
+{
+    unsigned char canonical[136], *party = general + FX_PARTY;
+    FxSpec other = FxDefault(40);
+    unsigned count = Fx32(party + 4), slot, i;
+    for (slot = 0; slot < count + 18 * 30; ++slot) {
+        unsigned char *at = slot < count ? party + 8 + slot * FX_MON : FxPcSlot(boxes, slot - count);
+        if (WtPokemon_Decode(at, canonical) != 0 || !(canonical[8] | canonical[9])
+            || memcmp(canonical, target, 4) != 0 || memcmp(canonical + 12, target + 12, 4) != 0) continue;
+        if (slot >= count) {
+            if (trade) { FxCanonical(&other, canonical); assert(WtPokemon_Encode(canonical, at) == 0); }
+            else FxEmpty(at, FX_BOX_MON);
+            return 1;
+        }
+        if (trade) { FxPartyMon(&other, at); return 1; }
+        for (i = slot; i + 1 < count; ++i) {
+            memcpy(party + 8 + i * FX_MON, party + 8 + (i + 1) * FX_MON, FX_MON);
+#if FX_GAME == 2
+            memcpy(general + FX_APRIJUICE + 5 * i, general + FX_APRIJUICE + 5 * (i + 1), 5);
+#endif
+        }
+        FxEmpty(party + 8 + (count - 1) * FX_MON, FX_MON);
+#if FX_GAME == 2
+        memset(general + FX_APRIJUICE + 5 * (count - 1), 0, 5);
+#endif
+        FxPut32(party + 4, count - 1);
+        return 1;
+    }
+    return 0;
+}
+
 static inline int FxSha(const unsigned char *bytes, size_t size, unsigned char digest[32])
 {
     CpSaveSha256 hash;

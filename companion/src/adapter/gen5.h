@@ -17,11 +17,13 @@
  *   retail games' trades register it);
  * - an older save is judged by its one save count, which the journal records
  *   in all three counters;
- * - between companion sessions the stock game may have saved: REMOVE and
- *   RECEIVE then decide by the Pokémon's exact image (LUNE-899). A delivery
- *   the stock game moved to the Battle Box is recorded there (journal locator
- *   kind 3), as the game's WtDelivery_Found records it; nothing is ever
- *   delivered to the Battle Box, and an offer moved there is refused;
+ * - between companion sessions the stock game may have saved: REMOVE then
+ *   decides by the offer's exact image (LUNE-899), and RECEIVE by the games'
+ *   rule (LUNE-906): never added again, the one Pokémon with the delivery's
+ *   identity recorded where it is, two refused. A delivery the stock game
+ *   moved to the Battle Box is recorded there (journal locator kind 3), as
+ *   the game's WtDelivery_Found records it; nothing is ever delivered to the
+ *   Battle Box, and an offer moved there is refused;
  * - a Pokémon held where no locator reaches (the Day Care, the Dream World,
  *   the GTS deposit, Black 2/White 2's DNA Splicers partner) with the
  *   identity a step decides by fails that step closed (LUNE-913).
