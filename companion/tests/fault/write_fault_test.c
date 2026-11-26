@@ -493,6 +493,20 @@ static int JournalOffset(uint32_t offset)
         || (offset >= area->bank[1] && offset < area->bank[1] + area->reserved);
 }
 
+/* A write of the footer that carries the save counter of the block holding
+ * the party (Platinum, Diamond/Pearl, HeartGold/SoulSilver: the general
+ * block's; Black/White, Black 2/White 2: each copy's save footer). */
+static int CounterFooter(uint32_t offset, size_t size)
+{
+#ifdef FX_GEN5
+    (void)offset;
+    return size <= 16;
+#else
+    uint32_t at = offset % CP_SAVE_HALF_SIZE;
+    return size <= FX_FOOTER && at >= FX_GENERAL + FX_GENERAL_SIZE - FX_FOOTER && at < FX_GENERAL + FX_GENERAL_SIZE;
+#endif
+}
+
 static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
 {
     int result;
@@ -543,6 +557,11 @@ static int WriteAt(void *arg, uint32_t offset, const void *bytes, size_t size)
             if (full || tear < 513)
                 Tear(tear, offset, bytes, size, 1);
         }
+        /* LUNE-902: byte-granular tears, both persistence orders, of the
+         * footer writes carrying the counter of the block that holds the
+         * party: no torn footer may publish a removal with an older counter. */
+        if (Changing() && !journalWrite && CounterFooter(offset, size))
+            for (tear = 1; tear < size; ++tear) { Tear(tear, offset, bytes, size, 0); Tear(tear, offset, bytes, size, 1); }
     }
     result = disk.writeAt(disk.context, offset, bytes, size);
     assert(result == 0);
@@ -1031,6 +1050,22 @@ static void Setup(void)
     }
 #else
     FxBuild(&fixture, specs, 4);
+    if (Leaving() || scenario == OFFER_TRAINED) {
+        /* LUNE-902: the stock game's last save wrote the general block only,
+         * so both halves hold the same save under one global counter (block
+         * counters apart). A removal's footer torn so that it keeps that
+         * global (its first bytes) would otherwise load as the newer copy. */
+        unsigned block;
+        for (block = 0; block < 2; ++block) {
+            unsigned offset = block ? FX_BOXES : FX_GENERAL, size = block ? FX_BOXES_SIZE : FX_GENERAL_SIZE;
+            memcpy(fixture.bytes + offset, fixture.bytes + CP_SAVE_HALF_SIZE + offset, size - FX_FOOTER);
+        }
+#if FX_SHARED
+        FxSeal(&fixture, 0, 0, 11, 0); FxSeal(&fixture, 0, 1, 11, 0);
+#else
+        FxSeal(&fixture, 0, 0, 11, 20); FxSeal(&fixture, 0, 1, 11, 30);
+#endif
+    }
 #endif
 #ifdef FX_GEN5
     if (scenario == MUSICAL) {
@@ -1082,9 +1117,9 @@ static void Setup(void)
             unsigned requests[8], bank;
             WtJournalEntry marked = ReadEntry(), unmarked = marked;
             /* As a game or an older companion records it: inventoryBefore unmasked, no mark. */
-            assert(WtEngine_EscrowInventoryBefore(&unmarked, Hash, unmarked.inventoryBefore) == 1);
+            assert(WtEngine_EscrowInventories(&unmarked, Hash, unmarked.inventoryBefore, unmarked.inventoryAfter) == 1);
             unmarked.operation[9] ^= 0x5A; unmarked.request[8 + 9] ^= 0x5A;
-            assert(WtEngine_EscrowInventoryBefore(&unmarked, Hash, unmarked.inventoryBefore) == 0);
+            assert(WtEngine_EscrowInventories(&unmarked, Hash, unmarked.inventoryBefore, unmarked.inventoryAfter) == 0);
             assert(WtJournal_Encode(&unmarked, Hash, record) == 0);
             for (bank = 0; bank < 2; ++bank) assert(journalIO.write(journalIO.arg, (int)bank, record) == 0);
             memcpy(saved, live, sizeof(saved)); memcpy(requests, server.requests, sizeof(requests));

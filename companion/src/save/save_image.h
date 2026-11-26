@@ -118,6 +118,11 @@ typedef struct {
     int loaded;
     uint32_t blockOffsets[CP_SAVE_GEN5_BLOCKS_MAX];
     unsigned char areas[CP_SAVE_GEN5_BLOCKS_MAX + 2];
+    /* LUNE-902: CommitBoth writes the general block's (Generation V: each
+     * copy's) footer save counter, synced, before the rest of it (the CRC and
+     * block counter that make the new party load): no torn footer can
+     * publish a removal with an older counter. */
+    int counterFirst;
 } CpSaveImage;
 
 /* magic comes from the ROM's region: international or Korean.

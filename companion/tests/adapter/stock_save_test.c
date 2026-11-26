@@ -145,7 +145,9 @@ static void Sweep(enum State state)
     entry = journal; writes = file.writes;
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
-    assert(writes == 12); /* two passes over two blocks: body, footer tail, footer */
+    /* Two passes over two blocks: body, footer tail, footer; a removal also
+     * writes the general block's counter first (LUNE-902). */
+    assert(writes == (state == ESCROW ? 14u : 12u));
     for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
     lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
@@ -348,11 +350,11 @@ static void IdentityCollisions(void)
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
     /* An escrow, removed or not: refused either way. */
-    for (cut = 1; cut <= 13; cut += 12) {
+    for (cut = 1; cut <= 15; cut += 14) {
         Arrange(ESCROW, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 12 ? -1 : 0));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 14 ? -1 : 0));
         file.failWrite = 0;
         assert(FxStockPlay(&file, 1, 0, Impostor));
         Load();
@@ -486,23 +488,53 @@ static void History(void)
             assert(memcmp(before, file.bytes, sizeof(before)) == 0);
             /* Never abandoned unless what the stock game loaded held the
              * offer; never taken as removed when it did. */
-            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
-            else assert(answer == WT_HISTORY_REMOVED);
+            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT);
+            else assert(answer == WT_HISTORY_REMOVED || answer == WT_HISTORY_AFTER);
             /* Once play moved, released or traded it, it is left: never sent. */
-            if (held && action) assert(answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
-            abandoned += answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER;
-            if (!held && action >= TWINS) {
-                Load();
-                entry = journal;
-                assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
-                assert(memcmp(before, file.bytes, sizeof(before)) == 0);
-                ++refused;
-            }
+            if (held && action) assert(answer == WT_HISTORY_LEFT);
+            abandoned += answer == WT_HISTORY_LEFT;
+            /* A twin after the removal: taken as removed, so REMOVE never runs
+             * and the twin is never taken for the offer. */
+            if (!held && action >= TWINS) ++refused;
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);
     printf("PASS stock save after a cut removal: %u cuts x 2 stock plays x 8 plays, abandonable %u times, "
            "only from a save that held the offer; %u twins after the removal refused\n", writes + 1, abandoned, refused);
+}
+
+/* LUNE-902: the counter ranges are bounded. Fewer than WT_ABANDON_SAVES saves
+ * past the escrow's counter: before the removal; WT_ABANDON_STEP to
+ * WT_ABANDON_STEP + WT_ABANDON_SAVES past it: after; anything else, or a
+ * counter recorded within reach of the top of its range: unproved. */
+static void HistoryBounds(void)
+{
+    static const struct { uint32_t past; int answer; } cases[] = {
+        { 1, WT_HISTORY_LEFT }, { WT_ABANDON_SAVES - 1, WT_HISTORY_LEFT }, { WT_ABANDON_SAVES, WT_HISTORY_UNPROVEN },
+        { WT_ABANDON_STEP - 1, WT_HISTORY_UNPROVEN }, { WT_ABANDON_STEP, WT_HISTORY_REMOVED },
+        { WT_ABANDON_STEP + WT_ABANDON_SAVES - 1, WT_HISTORY_REMOVED },
+        { WT_ABANDON_STEP + WT_ABANDON_SAVES, WT_HISTORY_UNPROVEN }, { UINT32_C(0xFFFFFFFF), WT_HISTORY_UNPROVEN }
+    };
+    WtJournalEntry journal, entry;
+    unsigned i;
+    for (i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        Arrange(ESCROW, &journal);
+        assert(FxStockPlay(&file, 1, 0, TrainOffered));
+        Load();
+        entry = journal;
+        image.globalCounter = entry.globalCounter + cases[i].past;
+        image.blockCounters[0] = entry.generalCounter + 1; image.blockCounters[1] = entry.boxCounter + 1;
+        assert(Step(WT_INVENTORY_HISTORY, &entry) == cases[i].answer);
+    }
+    /* Recorded too near the top: the removal never moved it, nothing is proved. */
+    Arrange(ESCROW, &journal);
+    assert(FxStockPlay(&file, 1, 0, TrainOffered));
+    Load();
+    entry = journal;
+    entry.globalCounter = WT_ABANDON_LIMIT + 1;
+    image.globalCounter = entry.globalCounter + 1;
+    assert(Step(WT_INVENTORY_HISTORY, &entry) == WT_HISTORY_UNPROVEN);
+    puts("PASS the save counter's ranges: before the removal, after it, and nothing proved between or past them");
 }
 
 int main(void)
@@ -516,6 +548,7 @@ int main(void)
     cases += FxHeldSweep();
     FxHeldUnique();
     History();
+    HistoryBounds();
     printf("PASS stock save recovery: %u cut and stock-save cases, 0 stuck, 0 duplicates, %u lost "
         "(each cut before the first retail copy held the return, the games' window)\n", cases, windowLosses);
     return 0;

@@ -381,6 +381,9 @@ static int Save(CpSaveImage *image, const CpFile *file)
         Write32(image->bytes + footer + 8, CP_SAVE_MAGIC_GEN5);
         Write16(image->bytes + footer + 14, CpGen5Save_Crc(0xFFFF, image->bytes + table, CrcTableSize(g)));
         area = image->areas[n + 1];
+        /* LUNE-902 (counterFirst): the save count first, synced, so the
+         * footer that makes the new CRC table load never carries an older one. */
+        if (image->counterFirst && WriteSync(file, CopyAddress(g, area) + footer, image->bytes + footer, 4) != 0) return -1;
         if (WriteSync(file, CopyAddress(g, area) + footer, image->bytes + footer, FOOTER_SIZE - 1) != 0
             || WriteSync(file, CopyAddress(g, area) + footer + FOOTER_SIZE - 1, image->bytes + footer + FOOTER_SIZE - 1,
                 1) != 0) return -1;

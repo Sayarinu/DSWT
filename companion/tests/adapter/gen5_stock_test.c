@@ -186,8 +186,9 @@ static void Sweep(enum State state)
     entry = journal; writes = file.writes;
     assert(Step(kCutStep[state], &entry) == 0);
     writes = file.writes - writes;
-    /* Two passes: the party, the CRC table, the footer and its last byte. */
-    assert(writes == 8);
+    /* Two passes: the party, the CRC table, the footer and its last byte; a
+     * removal also writes the footer's save count first (LUNE-902). */
+    assert(writes == (state == ESCROW ? 10u : 8u));
     for (fate = KEPT; fate < (state == ESCROW ? RELEASED : FATES); ++fate) {
     lost = 0;
     for (cut = 1; cut <= writes + 1; ++cut) for (saves = 1; saves <= 2; ++saves) {
@@ -418,11 +419,11 @@ static void IdentityCollisions(void)
         if (cut) assert(Step(WT_INVENTORY_RECEIVE, &entry) == -1);
         assert(memcmp(before, file.bytes, sizeof(before)) == 0);
     }
-    for (cut = 1; cut <= 9; cut += 8) {
+    for (cut = 1; cut <= 11; cut += 10) {
         Arrange(ESCROW, &journal);
         entry = journal;
         file.failWrite = file.writes + cut;
-        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 8 ? -1 : 0));
+        assert(Step(WT_INVENTORY_REMOVE, &entry) == (cut <= 10 ? -1 : 0));
         file.failWrite = 0;
         StockPlay(1, Impostor);
         Load();
@@ -560,11 +561,12 @@ static void HeldElsewhere(void)
     for (state = ESCROW; state <= APPLYING_RETURN; state += APPLYING_RETURN - ESCROW) {
         enum WtInventoryStep cutStep = kCutStep[state];
         held = 0;
-        for (cut = 1; cut <= 9; ++cut) {
+        unsigned writes = state == ESCROW ? 10u : 8u;
+        for (cut = 1; cut <= writes + 1; ++cut) {
             Arrange((enum State)state, &journal);
             entry = journal;
             file.failWrite = file.writes + cut;
-            assert(Step(cutStep, &entry) == (cut <= 8 ? -1 : 0));
+            assert(Step(cutStep, &entry) == (cut <= writes ? -1 : 0));
             file.failWrite = 0;
             StockPlay(1, HoldOffered);
             Load();
@@ -711,18 +713,14 @@ static void History(void)
             assert(memcmp(before, file.bytes, sizeof(before)) == 0);
             /* Never abandoned unless what the stock game loaded held the
              * offer; never taken as removed when it did. */
-            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
-            else assert(answer == WT_HISTORY_REMOVED);
+            if (held) assert(answer == WT_HISTORY_UNCHANGED || answer == WT_HISTORY_LEFT);
+            else assert(answer == WT_HISTORY_REMOVED || answer == WT_HISTORY_AFTER);
             /* Once play moved, released or traded it, it is left: never sent. */
-            if (held && action) assert(answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER);
-            abandoned += answer == WT_HISTORY_LEFT || answer == WT_HISTORY_AFTER;
-            if (!held && action >= TWINS) {
-                Load();
-                entry = journal;
-                assert(Step(WT_INVENTORY_REMOVE, &entry) == -1);
-                assert(memcmp(before, file.bytes, sizeof(before)) == 0);
-                ++refused;
-            }
+            if (held && action) assert(answer == WT_HISTORY_LEFT);
+            abandoned += answer == WT_HISTORY_LEFT;
+            /* A twin after the removal: taken as removed, so REMOVE never runs
+             * and the twin is never taken for the offer. */
+            if (!held && action >= TWINS) ++refused;
             ++cases;
         }
     assert(abandoned > 0 && refused > 0);

@@ -324,8 +324,12 @@ static int WriteSync(const CpFile *file, uint32_t address, const unsigned char *
 }
 
 /* One block into the other half, written in its game's order. */
+/* counterFirst (LUNE-902): the footer's global counter, the first 4 bytes,
+ * is written and synced before the rest of it. The body, which differs, is
+ * already written, so until the rest lands the old CRC does not match it and
+ * the block does not load; once it loads, its counter is the new one. */
 static int WriteBlock(const CpFile *file, const CpSaveLayout *layout, unsigned block, uint32_t address,
-                      const unsigned char *body, const unsigned char *footer)
+                      const unsigned char *body, const unsigned char *footer, int counterFirst)
 {
     uint32_t bodySize = BodySize(layout, block), offset;
     if (layout->footer == CP_SAVE_FOOTER_SHARED_COUNTER) {
@@ -338,11 +342,13 @@ static int WriteBlock(const CpFile *file, const CpSaveLayout *layout, unsigned b
         } else if (WriteSync(file, address, body, bodySize) != 0) {
             return -1;
         }
+        if (counterFirst && WriteSync(file, address + bodySize, footer, 4) != 0) return -1;
         return WriteSync(file, address + bodySize, footer, layout->footerSize);
     }
     /* Retail publishes the CRC and counters together in the full footer. */
     return WriteSync(file, address, body, bodySize) != 0
         || WriteSync(file, address + bodySize + 8, footer + 8, 8) != 0
+        || (counterFirst && WriteSync(file, address + bodySize, footer, 4) != 0)
         || WriteSync(file, address + bodySize, footer, layout->footerSize) != 0 ? -1 : 0;
 }
 
@@ -388,7 +394,9 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
                 footer[16] = (unsigned char)block;
                 Write16(footer + 18, crc);
             }
-            if (WriteBlock(file, layout, block, address, body, footer) != 0) {
+            /* Only the general block holds the party; the PC block's body is
+             * unchanged by a removal, so its old CRC would still match. */
+            if (WriteBlock(file, layout, block, address, body, footer, image->counterFirst && block == 0) != 0) {
                 image->loaded = 0;
                 return CP_SAVE_IO_ERROR;
             }

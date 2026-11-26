@@ -275,6 +275,10 @@ static int Build(void *arg, void *data, WtJournalEntry *entry, int prepare)
     return 0;
 }
 
+/* LUNE-902: the DS Companion's removal moves the counter 2^28 ahead
+ * (wonder_trade/engine.h WT_ABANDON_STEP, a companion-only constant). */
+static const uint32_t kStep = UINT32_C(0x10000000);
+
 static const WtDeliveryOps sOps = {
     NULL, &live, Sha, PartyCount, Slot, Occupied, Hash, Verify, Checkpoint, Copy, Discard, Commit, Counters, Build, Empty
 };
@@ -295,10 +299,47 @@ static void InsertSlot(Save *save, unsigned slot, const unsigned char image[236]
     memcpy(save->party[slot], image, 236); ++save->count;
 }
 
+/* The adapters' party steps PREPARE_REMOVE and REMOVE (game_save.c, the same
+ * in all five games): REMOVE runs only on a save that is exactly the recorded
+ * inventoryBefore (it removes the offer) or inventoryAfter (removed already);
+ * anything else fails before any write. */
+static int GameRemove(enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot, int jump)
+{
+    unsigned char digest[32], canonical[BOX];
+    if (Digest(&live, digest) != 0) return -1;
+    scratch = live;
+    if (step == WT_INVENTORY_PREPARE_REMOVE) {
+        if (slot >= scratch.count || WtPokemon_Decode(scratch.party[slot], canonical) != 0) return -1;
+        entry->source.kind = 1; entry->source.box = 0; entry->source.slot = (unsigned char)slot; entry->source.length = PARTY;
+        memset(entry->original, 0, sizeof(entry->original)); memcpy(entry->original, scratch.party[slot], PARTY);
+        memcpy(entry->outgoing, canonical, BOX);
+        if (Sha(entry->original, PARTY, entry->originalDigest) != 0) return -1;
+        memcpy(entry->inventoryBefore, digest, 32);
+        RemoveSlot(&scratch, slot);
+        if (WtDelivery_Unique(&sOps, &scratch, entry->outgoing) != 0 || Digest(&scratch, entry->inventoryAfter) != 0) return -1;
+        WtDelivery_Store(&sOps, entry);
+        return 0;
+    }
+    if (memcmp(digest, entry->inventoryBefore, 32) == 0) {
+        if (slot >= scratch.count || memcmp(scratch.party[slot], entry->original, PARTY) != 0) return -1;
+        RemoveSlot(&scratch, slot);
+        if (Digest(&scratch, digest) != 0) return -1;
+    }
+    if (memcmp(digest, entry->inventoryAfter, 32) != 0) return -1;
+    live = scratch;
+    /* LUNE-902: the companion's removal moves the counter far ahead. */
+    if (jump && Verify(NULL, digest) != 0 && live.counter - entry->globalCounter < kStep)
+        live.counter = entry->globalCounter + kStep - 1;
+    if (SaveBoth(digest) != 0) return -1;
+    WtDelivery_Store(&sOps, entry);
+    return 0;
+}
+
 static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
 {
     unsigned char digest[32];
     (void)arg;
+    if (step == WT_INVENTORY_PREPARE_REMOVE || step == WT_INVENTORY_REMOVE) return GameRemove(step, entry, slot, 0);
     if (step != WT_INVENTORY_RESTORE) return WtDelivery_Step(&sOps, step, entry);
     if (!WtDelivery_Bound(entry) || Digest(&live, digest) != 0) return -1;
     scratch = live;
@@ -777,6 +818,156 @@ static void Refusals(void)
     puts("refused without writes: an older save, a changed save with the recorded counters, a matched delivery's offer back");
 }
 
+#ifdef WT_COMPANION_ESCROWS
+/* ---- LUNE-902: the patched games never advance a DS Companion escrow ---- */
+
+/* The DS Companion's engine, built into this test with WT_ABANDON_UNSENT and
+ * its public names prefixed (companion_engine_rename.h). */
+int CpEngine_Open(WtEngine *, WtJournalIO, WtEngineIO);
+void CpEngine_Close(WtEngine *);
+int CpEngine_Deposit(WtEngine *, unsigned slot);
+int CpEngine_Settle(WtEngine *);
+int CpEngine_EscrowInventories(const WtJournalEntry *, WtJournalHash, unsigned char before[32], unsigned char after[32]);
+/* The companion engine's WT_INVENTORY_HISTORY and its answers (engine.h). */
+enum { HISTORY_STEP = WT_INVENTORY_PREPARE_RESTORE + 1, HISTORY_UNPROVEN = -1, HISTORY_UNCHANGED = 0,
+       HISTORY_LEFT = 1, HISTORY_REMOVED = 2, HISTORY_AFTER = 3 };
+static const uint32_t kSaves = UINT32_C(0x8000000);
+
+/* The companion adapter's steps, as adapter/platinum.c and gen5.c take them. */
+static int CompanionInventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry, unsigned slot)
+{
+    unsigned char digest[32];
+    uint32_t past;
+    (void)arg;
+    if ((unsigned)step == HISTORY_STEP) {
+        if (Digest(&live, digest) != 0) return HISTORY_UNPROVEN;
+        if (memcmp(digest, entry->inventoryBefore, 32) == 0) return HISTORY_UNCHANGED;
+        if (memcmp(digest, entry->inventoryAfter, 32) == 0) return HISTORY_AFTER;
+        past = live.counter - entry->globalCounter;
+        if (past >= kStep && past - kStep < kSaves) return HISTORY_REMOVED;
+        if (past == 0 || past >= kSaves) return HISTORY_UNPROVEN;
+        return Copies(&live, entry->outgoing) ? HISTORY_UNCHANGED : HISTORY_LEFT;
+    }
+    if (step == WT_INVENTORY_PREPARE_REMOVE || step == WT_INVENTORY_REMOVE) return GameRemove(step, entry, slot, 1);
+    return Inventory(arg, step, entry, slot);
+}
+
+/* The journal's current entry. */
+static WtJournalEntry Current(void)
+{
+    WtJournal store;
+    WtJournalEntry entry;
+    WtJournalIO io = { NULL, JournalRead, JournalWrite, Sha };
+    CHECK(WtJournal_Open(&store, io) == 0 && WtJournal_Read(&store, &entry) == 0);
+    WtJournal_Close(&store);
+    return entry;
+}
+
+/* An enrolled, idle save with the offer in party slot 1. */
+static void Idle(void)
+{
+    WtJournalEntry entry;
+    Save save;
+    Seed();
+    Mon(offered, 0x22222222, 0x01020304, 150, 120);
+    Scene(&save);
+    Flash(&save); live = save;
+    CHECK(WtTest_JournalEntry(WT_JOURNAL_IDLE, Sha, &entry) == 0);
+    CHECK(WtJournal_Encode(&entry, Sha, journal[0]) == 0);
+    memcpy(journal[1], journal[0], sizeof(journal[0]));
+}
+
+static void Deposit(void)
+{
+    WtEngine engine;
+    WtJournalIO io = { NULL, JournalRead, JournalWrite, Sha };
+    WtEngineIO companion = { NULL, Random, CompanionInventory, CanHold };
+    CHECK(Load(&live) >= 0);
+    CHECK(CpEngine_Open(&engine, io, companion) == 0);
+    engine.synchronized = 1;
+    CHECK(CpEngine_Deposit(&engine, 1) == 0);
+    CpEngine_Close(&engine);
+}
+
+/* The Submit was rejected: the journal as Reconcile leaves it (RESTORING). */
+static void Rejected(void)
+{
+    WtJournal store;
+    WtJournalEntry entry = Current(), next;
+    WtJournalIO io = { NULL, JournalRead, JournalWrite, Sha };
+    CHECK(entry.phase == WT_JOURNAL_SUBMIT_READY);
+    next = entry;
+    memcpy(next.lastOperation, next.operation, 16); next.lastOperationCounter = next.operationCounter;
+    next.nextCounter = next.operationCounter + 1; next.phase = WT_JOURNAL_RESTORING;
+    memset(next.request, 0, sizeof(next.request)); next.requestLength = 0;
+    next.generation = entry.generation + 1;
+    CHECK(WtJournal_Open(&store, io) == 0 && WtJournal_Commit(&store, &next) == 0);
+    WtJournal_Close(&store);
+}
+
+/* Every cut of the companion's deposit (its ESCROW, its removal moving the
+ * counter, its SUBMIT_READY), each with and without a stock-game save after
+ * it, then the patched game's boot with the game adapters' own decisions:
+ * in ESCROW it blocks before writing anything (both inventory hashes are
+ * masked, so REMOVE matches neither); from SUBMIT_READY, which records the
+ * true hashes, it settles, and a rejected offer is restored exactly once. */
+static void CompanionEscrows(void)
+{
+    WtEngine engine;
+    unsigned total, cut, mode, stock, escrows = 0, restored = 0;
+    Idle(); Deposit(); total = events;
+    CHECK(Current().phase == WT_JOURNAL_SUBMIT_READY && Copies(&live, offered) == 0);
+    {
+        /* The companion's ESCROW stores both hashes masked; SUBMIT_READY true ones. */
+        WtJournalEntry entry = Current();
+        unsigned char before[32], after[32];
+        CHECK(CpEngine_EscrowInventories(&entry, Sha, before, after) == 0);
+    }
+    for (cut = 1; cut <= total + 1; ++cut) for (mode = 0; mode < 3; ++mode) for (stock = 0; stock < 2; ++stock) {
+        static unsigned char flashBefore[sizeof(flash)];
+        WtJournalEntry entry;
+        unsigned writes;
+        int result;
+        if (cut > total && mode) continue;
+        Idle();
+        cutAt = cut <= total ? cut : 0; cutMode = mode; events = 0;
+        if (!setjmp(power)) Deposit();
+        cutAt = 0; scratchUsed = 0;
+        if (stock) { CHECK(Load(&live) >= 0); ++live.playTime; Write(&live); }
+        entry = Current();
+        memcpy(flashBefore, flash, sizeof(flash));
+        writes = saveWrites;
+        result = Boot(&engine);
+        if (entry.phase == WT_JOURNAL_ESCROW) {
+            unsigned char before[32], after[32];
+            CHECK(CpEngine_EscrowInventories(&entry, Sha, before, after) == 1);
+            CHECK(memcmp(before, entry.inventoryBefore, 32) != 0 && memcmp(after, entry.inventoryAfter, 32) != 0);
+            /* Blocked; the save untouched; the journal, which the engine's open
+             * may only mirror between its banks, still this escrow. */
+            if (result != -1 || !engine.blocked || saveWrites != writes || memcmp(flashBefore, flash, sizeof(flash)) != 0
+                || Current().generation != entry.generation || Current().phase != WT_JOURNAL_ESCROW
+                || memcmp(Current().inventoryBefore, entry.inventoryBefore, 32) != 0) {
+                fprintf(stderr, "companion escrow cut %u mode %u stock %u: the game advanced it\n", cut, mode, stock);
+                exit(1);
+            }
+            CHECK(!WtDelivery_CanLeave(&sOps, &entry));
+            ++escrows;
+        } else if (entry.phase == WT_JOURNAL_SUBMIT_READY) {
+            CHECK(result == 0 && !engine.blocked && Copies(&live, offered) == 0);
+            WtEngine_Close(&engine);
+            /* Rejected: the patched game restores it, once. */
+            Rejected();
+            CHECK(Boot(&engine) == 0 && engine.entry.phase == WT_JOURNAL_IDLE && Copies(&live, offered) == 1);
+            ++restored;
+        } else CHECK(entry.phase == WT_JOURNAL_IDLE && result == 0 && Copies(&live, offered) == 1);
+        WtEngine_Close(&engine);
+    }
+    CHECK(escrows > 0 && restored > 0);
+    printf("companion escrows: %u cuts (and stock saves) left in ESCROW, the game blocked without a write every "
+        "time; %u from SUBMIT_READY rejected and restored once\n", escrows, restored);
+}
+#endif
+
 int main(void)
 {
     ScanCases();
@@ -786,5 +977,8 @@ int main(void)
     BattleBoxRecord();
     Refusals();
     Sweep();
+#ifdef WT_COMPANION_ESCROWS
+    CompanionEscrows();
+#endif
     return 0;
 }

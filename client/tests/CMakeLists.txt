@@ -126,10 +126,18 @@ foreach(family GEN4 BW B2W2)
 endforeach()
 # The adapters' delivery decisions (wonder_trade/delivery.h) through the engine,
 # over a synthetic save, per family: Generation V adds the Battle Box.
+# LUNE-902: each also links the DS Companion's engine (WT_ABANDON_UNSENT,
+# renamed by companion_engine_rename.h) to write the journals the games' engine
+# must refuse to advance.
 foreach(family GEN4 BW B2W2)
+    add_library(companion_engine_${family} OBJECT ../src/wonder_trade/engine.c)
+    target_compile_definitions(companion_engine_${family} PRIVATE WT_GAME_FAMILY=WT_FAMILY_${family} WT_ABANDON_UNSENT)
+    target_link_libraries(companion_engine_${family} PRIVATE wt_transport)
+    target_compile_options(companion_engine_${family} PRIVATE -include "${CMAKE_CURRENT_SOURCE_DIR}/companion_engine_rename.h"
+        -Wall -Wextra -Werror -fsanitize=address,undefined)
     add_executable(delivery_test_${family} delivery_test.c ../src/wonder_trade/engine.c ../src/wonder_trade/journal.c
-        ../src/wonder_trade/wire.c ../src/wonder_trade/pokemon_codec.c)
-    target_compile_definitions(delivery_test_${family} PRIVATE WT_GAME_FAMILY=WT_FAMILY_${family})
+        ../src/wonder_trade/wire.c ../src/wonder_trade/pokemon_codec.c $<TARGET_OBJECTS:companion_engine_${family}>)
+    target_compile_definitions(delivery_test_${family} PRIVATE WT_GAME_FAMILY=WT_FAMILY_${family} WT_COMPANION_ESCROWS)
     target_link_libraries(delivery_test_${family} PRIVATE wt_transport)
     target_compile_options(delivery_test_${family} PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
     target_link_options(delivery_test_${family} PRIVATE -fsanitize=address,undefined)

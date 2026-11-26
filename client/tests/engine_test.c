@@ -91,6 +91,7 @@ static int Inventory(void *arg, enum WtInventoryStep step, WtJournalEntry *entry
         Mirrored(fixture, WT_JOURNAL_ESCROW);
         /* The adapter always sees the escrow's true inventoryBefore. */
         assert(entry->inventoryBefore[0] == 1 && entry->inventoryBefore[31] == 1);
+        assert(entry->inventoryAfter[0] == 2 && entry->inventoryAfter[31] == 2);
         if (fixture->removeAnswer) return fixture->removeAnswer;
         fixture->removed = 1; entry->globalCounter = entry->generalCounter = entry->boxCounter = 2;
         return 0;
@@ -904,9 +905,9 @@ static void Unmark(Fixture *fixture)
     WtJournalEntry entry;
     unsigned bank;
     assert(WtJournal_Decode(fixture->banks[0], Hash, &entry) == 0 && entry.phase == WT_JOURNAL_ESCROW);
-    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 1);
+    assert(WtEngine_EscrowInventories(&entry, Hash, entry.inventoryBefore, entry.inventoryAfter) == 1);
     entry.operation[9] ^= 0x5A; entry.request[8 + 9] ^= 0x5A;
-    assert(WtEngine_EscrowInventoryBefore(&entry, Hash, entry.inventoryBefore) == 0);
+    assert(WtEngine_EscrowInventories(&entry, Hash, entry.inventoryBefore, entry.inventoryAfter) == 0);
     for (bank = 0; bank < 2; ++bank) assert(WtJournal_Encode(&entry, Hash, fixture->banks[bank]) == 0);
     WtEngine_Close(&fixture->engine); Open(fixture);
 }
@@ -967,22 +968,23 @@ static void UnsentEscrow(void)
     KeptEscrow(&fixture, WT_INVENTORY_KEPT);
     {
         WtJournalEntry stored;
-        unsigned char truth[32];
-        memset(truth, 1, 32);
+        unsigned char truth[32], after[32];
+        memset(truth, 1, 32); memset(after, 2, 32);
         assert(WtJournal_Decode(fixture.banks[0], Hash, &stored) == 0 && memcmp(stored.inventoryBefore, truth, 32) != 0);
-        assert(WtEngine_EscrowInventoryBefore(&stored, Hash, stored.inventoryBefore) == 1);
-        assert(memcmp(stored.inventoryBefore, truth, 32) == 0);
+        assert(memcmp(stored.inventoryAfter, after, 32) != 0);
+        assert(WtEngine_EscrowInventories(&stored, Hash, stored.inventoryBefore, stored.inventoryAfter) == 1);
+        assert(memcmp(stored.inventoryBefore, truth, 32) == 0 && memcmp(stored.inventoryAfter, after, 32) == 0);
         Init(&fixture, 1, 25); Enroll(&fixture);
         assert(WtEngine_Deposit(&fixture.engine, 0) == 0);
         assert(WtJournal_Decode(fixture.banks[0], Hash, &stored) == 0 && stored.phase == WT_JOURNAL_SUBMIT_READY);
-        assert(memcmp(stored.inventoryBefore, truth, 32) == 0);
+        assert(memcmp(stored.inventoryBefore, truth, 32) == 0 && memcmp(stored.inventoryAfter, after, 32) == 0);
     }
     /* The history decides. Unproved (or anything unknown): blocked, nothing
-     * written. Unchanged, or descended from the removal: REMOVE as before.
-     * Left through play, or exactly the recorded removal without the
-     * companion's counter: abandoned (the KEPT path below). */
+     * written. Unchanged: REMOVE as before. Descended from the removal, or
+     * exactly the recorded removal: removed, verified as it is, REMOVE never
+     * run. Left through play: abandoned (the KEPT path below). */
     {
-        const int unproved[] = { WT_HISTORY_UNPROVEN, 4, -7 }, proceed[] = { WT_HISTORY_UNCHANGED, WT_HISTORY_REMOVED };
+        const int unproved[] = { WT_HISTORY_UNPROVEN, 4, -7 }, removed[] = { WT_HISTORY_REMOVED, WT_HISTORY_AFTER };
         unsigned k;
         for (k = 0; k < 3; ++k) {
             KeptEscrow(&fixture, 0);
@@ -991,25 +993,31 @@ static void UnsentEscrow(void)
             assert(WtEngine_Settle(&fixture.engine) == -1 && fixture.engine.blocked);
             assert(memcmp(before, fixture.banks, sizeof(before)) == 0 && !fixture.removed);
         }
-        for (k = 0; k < 2; ++k) {
-            KeptEscrow(&fixture, 0);
-            fixture.history = proceed[k];
-            assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed);
-            Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
-        }
         KeptEscrow(&fixture, 0);
-        fixture.history = WT_HISTORY_AFTER;
-        assert(WtEngine_Settle(&fixture.engine) == WT_INVENTORY_KEPT && !fixture.removed);
+        assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed);
+        Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
+        for (k = 0; k < 2; ++k) {
+            KeptEscrow(&fixture, -1); /* REMOVE must not run */
+            fixture.history = removed[k]; fixture.removed = 1;
+            assert(WtEngine_Settle(&fixture.engine) == 0 && !fixture.engine.blocked);
+            Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
+            /* Not removed after all (an exact copy is back): verification refuses it. */
+            KeptEscrow(&fixture, -1);
+            fixture.history = removed[k];
+            memcpy(before, fixture.banks, sizeof(before));
+            assert(WtEngine_Settle(&fixture.engine) == -1 && fixture.engine.blocked);
+            assert(memcmp(before, fixture.banks, sizeof(before)) == 0);
+        }
     }
 
     /* Unmarked (a game's or an older companion's escrow, whose removal may not
      * have moved the counter): never abandoned. Exactly the recorded removal
      * is taken as removed, as before; left through play it now blocks rather
      * than send what the player no longer has. */
-    KeptEscrow(&fixture, 0);
+    KeptEscrow(&fixture, -1);
     Unmark(&fixture);
-    fixture.history = WT_HISTORY_AFTER;
-    assert(WtEngine_Settle(&fixture.engine) == 0 && fixture.removed);
+    fixture.history = WT_HISTORY_AFTER; fixture.removed = 1;
+    assert(WtEngine_Settle(&fixture.engine) == 0 && !fixture.engine.blocked);
     Mirrored(&fixture, WT_JOURNAL_SUBMIT_READY);
     KeptEscrow(&fixture, WT_INVENTORY_KEPT);
     Unmark(&fixture);

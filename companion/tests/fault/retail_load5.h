@@ -66,11 +66,11 @@ static int Ownership(const unsigned char *bytes, const WtJournalEntry *entry,
     case WT_JOURNAL_ESCROW: case WT_JOURNAL_RESTORING:
         if (played) { escrow = counts[1] == 0; break; }
         {
-            unsigned char before[32];
-            assert(WtEngine_EscrowInventoryBefore(entry, Hash, before) >= 0);
-            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, entry->inventoryAfter, 32) == 0);
+            unsigned char before[32], after[32];
+            assert(WtEngine_EscrowInventories(entry, Hash, before, after) >= 0);
+            assert(memcmp(inventory, before, 32) == 0 || memcmp(inventory, after, 32) == 0);
+            escrow = memcmp(inventory, after, 32) == 0;
         }
-        escrow = memcmp(inventory, entry->inventoryAfter, 32) == 0;
         break;
     case WT_JOURNAL_SUBMIT_READY: case WT_JOURNAL_QUEUED: case WT_JOURNAL_RECEIVED:
         escrow = 1;

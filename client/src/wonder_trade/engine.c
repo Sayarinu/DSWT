@@ -80,15 +80,18 @@ static int Random(WtEngine *engine, unsigned char *bytes, size_t size)
  *   them, the save, the counter, the save before the deposit and the offer
  *   (CompanionMark): an escrow without it (a game's, an older companion's) is
  *   never abandoned;
- * - its inventoryBefore is stored masked with SHA-256 of a label and the
- *   request ID (BeforeMask). The games' REMOVE (and an older companion's)
- *   finds the save matching neither recorded inventory and fails, changing
- *   nothing, unless the companion's own removal already landed; only this
- *   engine unmasks it, and it records the true hash once the removal is
- *   proven (SUBMIT_READY). The games accept any nonzero request ID and any
- *   nonzero inventory hash; nothing else is stored. */
-static const char kCompanionDeposit[] = "DSWT LUNE-902 companion deposit v2";
-static const char kBeforeMask[] = "DSWT LUNE-902 masked inventoryBefore";
+ * - both its inventory hashes are stored masked with SHA-256 of a label and
+ *   the request ID (InventoryMask). The games' REMOVE runs only on a save
+ *   matching inventoryBefore (then removes) or inventoryAfter (then takes
+ *   it as removed); it finds neither, writes nothing and blocks, so a patched
+ *   game never advances a companion escrow, at any cut. Only this engine
+ *   unmasks them, and it records the true hashes with SUBMIT_READY, the
+ *   first phase the games may advance (or a rejected offer restore). The
+ *   games accept any nonzero request ID and inventory hash; nothing else is
+ *   stored. The companion is unreleased: no older companion build exists to
+ *   remove such an escrow without moving the counter. */
+static const char kCompanionDeposit[] = "DSWT LUNE-902 companion deposit v3";
+static const char kInventoryMask[2][40] = { "DSWT LUNE-902 masked inventoryBefore", "DSWT LUNE-902 masked inventoryAfter" };
 
 static int CompanionMark(WtJournalHash hash, const WtJournalEntry *entry, const unsigned char before[32],
                          const unsigned char id[16], unsigned char mark[32])
@@ -108,35 +111,46 @@ static int CompanionMark(WtJournalHash hash, const WtJournalEntry *entry, const 
     return result;
 }
 
-static int BeforeMask(WtJournalHash hash, const unsigned char id[16], unsigned char mask[32])
+/* XOR both inventory hashes with their masks (InventoryMask): masks or unmasks. */
+static int MaskInventories(WtJournalHash hash, const unsigned char id[16], unsigned char before[32],
+                           unsigned char after[32])
 {
-    unsigned char bytes[sizeof(kBeforeMask) + 16];
-    memcpy(bytes, kBeforeMask, sizeof(kBeforeMask)); memcpy(bytes + sizeof(kBeforeMask), id, 16);
-    return hash(bytes, sizeof(bytes), mask);
+    unsigned char bytes[40 + 16], mask[32];
+    unsigned which, i;
+    int result = 0;
+    for (which = 0; which < 2 && result == 0; ++which) {
+        unsigned char *target = which ? after : before;
+        memcpy(bytes, kInventoryMask[which], 40); memcpy(bytes + 40, id, 16);
+        result = hash(bytes, sizeof(bytes), mask);
+        for (i = 0; result == 0 && i < 32; ++i) target[i] ^= mask[i];
+    }
+    Clear(mask, sizeof(mask));
+    return result;
 }
 
-/* 1 when an ESCROW entry is the companion's, with `before` its true
- * inventoryBefore; 0 for any other escrow (`before` is then the stored one). */
-static int CompanionEscrow(WtJournalHash hash, const WtJournalEntry *entry, unsigned char before[32])
+/* 1 when an ESCROW entry is the companion's, with `before` and `after` its
+ * true inventory hashes; 0 for any other escrow (they are then the stored ones). */
+static int CompanionEscrow(WtJournalHash hash, const WtJournalEntry *entry, unsigned char before[32],
+                           unsigned char after[32])
 {
-    unsigned char mask[32], mark[32];
-    unsigned i;
+    unsigned char trueBefore[32], trueAfter[32], mark[32];
     int companion = 0;
-    memcpy(before, entry->inventoryBefore, 32);
+    memcpy(trueBefore, entry->inventoryBefore, 32); memcpy(trueAfter, entry->inventoryAfter, 32);
     if (entry->phase == WT_JOURNAL_ESCROW && entry->requestLength && entry->request[5] == WT_OP_SUBMIT
-        && memcmp(entry->request + 8, entry->operation, 16) == 0 && BeforeMask(hash, entry->operation, mask) == 0) {
-        for (i = 0; i < 32; ++i) mask[i] ^= entry->inventoryBefore[i];
-        companion = CompanionMark(hash, entry, mask, entry->operation, mark) == 0
+        && memcmp(entry->request + 8, entry->operation, 16) == 0
+        && MaskInventories(hash, entry->operation, trueBefore, trueAfter) == 0)
+        companion = CompanionMark(hash, entry, trueBefore, entry->operation, mark) == 0
             && memcmp(mark, entry->operation + 4, 12) == 0;
-        if (companion) memcpy(before, mask, 32);
-    }
-    Clear(mask, sizeof(mask)); Clear(mark, sizeof(mark));
+    if (companion) { memcpy(before, trueBefore, 32); memcpy(after, trueAfter, 32); }
+    else { memmove(before, entry->inventoryBefore, 32); memmove(after, entry->inventoryAfter, 32); }
+    Clear(trueBefore, sizeof(trueBefore)); Clear(trueAfter, sizeof(trueAfter)); Clear(mark, sizeof(mark));
     return companion;
 }
 
-int WtEngine_EscrowInventoryBefore(const WtJournalEntry *entry, WtJournalHash hash, unsigned char before[32])
+int WtEngine_EscrowInventories(const WtJournalEntry *entry, WtJournalHash hash, unsigned char before[32],
+                               unsigned char after[32])
 {
-    return entry && hash && before ? CompanionEscrow(hash, entry, before) : -1;
+    return entry && hash && before && after ? CompanionEscrow(hash, entry, before, after) : -1;
 }
 #endif
 
@@ -229,25 +243,29 @@ static int Resume(WtEngine *engine)
 #ifdef WT_ABANDON_UNSENT
         /* The companion only. An escrow whose fence is recorded (Fence) is
          * being abandoned whatever the save holds now. Otherwise the save's
-         * history decides (WT_INVENTORY_HISTORY): REMOVE runs only on the
-         * escrow's own save, the offer still in the party as offered, or a
-         * save that provably descends from the removal. The companion's own
-         * escrow whose offer left the save through play, before any removal,
-         * waits for WtEngine_Request to fence its counter and abandon it: its
-         * Submit must never go out. Any other escrow then blocks, as does
-         * anything unproved: nothing written, nothing sent. */
+         * history decides (WT_INVENTORY_HISTORY):
+         * - the escrow's own save, or the offer still in the party exactly as
+         *   offered: REMOVE, as before (a byte-identical copy the player put
+         *   there is taken for the offer: a clone they made);
+         * - a save that descends from the removal, or holds exactly the
+         *   recorded removal: removed. REMOVE never runs again there (it
+         *   could take a Pokémon the stock game received since); the
+         *   removal is verified as it is;
+         * - the offer left the save through play before any removal: the
+         *   companion's own escrow waits for WtEngine_Request to fence its
+         *   counter and abandon it, so its Submit never goes out; any other
+         *   escrow blocks;
+         * - anything unproved blocks. Nothing written, nothing sent. */
         if (next.request[5] == WT_OP_CANCEL) { result = WT_INVENTORY_KEPT; goto done; }
         {
-            int companion = CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore);
+            int companion = CompanionEscrow(engine->journal.io.hash, &next, next.inventoryBefore, next.inventoryAfter);
             int history = engine->io.inventory(engine->io.arg, WT_INVENTORY_HISTORY, &next, next.source.slot);
-            if (companion && (history == WT_HISTORY_LEFT || history == WT_HISTORY_AFTER)) {
-                result = WT_INVENTORY_KEPT; goto done;
-            }
-            if (history != WT_HISTORY_UNCHANGED && history != WT_HISTORY_REMOVED
-                && !(history == WT_HISTORY_AFTER && !companion)) { Block(engine); goto done; }
+            if (companion && history == WT_HISTORY_LEFT) { result = WT_INVENTORY_KEPT; goto done; }
+            if (history == WT_HISTORY_UNCHANGED) {
+                if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0) goto done;
+            } else if (history != WT_HISTORY_REMOVED && history != WT_HISTORY_AFTER) { Block(engine); goto done; }
         }
-        if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
-            || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
+        if (Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
 #else
         if (Inventory(engine, WT_INVENTORY_REMOVE, &next, next.source.slot) != 0
             || Inventory(engine, WT_INVENTORY_VERIFY_REMOVED, &next, next.source.slot) != 0) goto done;
@@ -364,15 +382,13 @@ int WtEngine_Deposit(WtEngine *engine, unsigned slot)
     memcpy(next.operation, request.requestID, 16); next.operationCounter = next.nextCounter;
 #ifdef WT_ABANDON_UNSENT
     {
-        unsigned char mark[32], mask[32];
-        unsigned i;
+        unsigned char mark[32];
         int marked = CompanionMark(engine->journal.io.hash, &next, next.inventoryBefore, request.requestID, mark) == 0;
         if (marked) {
             memcpy(request.requestID + 4, mark, 12); memcpy(next.operation, request.requestID, 16);
-            marked = BeforeMask(engine->journal.io.hash, next.operation, mask) == 0;
-            for (i = 0; i < 32; ++i) next.inventoryBefore[i] ^= mask[i];
+            marked = MaskInventories(engine->journal.io.hash, next.operation, next.inventoryBefore, next.inventoryAfter) == 0;
         }
-        Clear(mark, sizeof(mark)); Clear(mask, sizeof(mask));
+        Clear(mark, sizeof(mark));
         if (!marked) { Block(engine); goto done; }
     }
 #endif

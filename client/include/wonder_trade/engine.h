@@ -37,12 +37,16 @@ enum WtInventoryStep {
 #define WT_INVENTORY_KEPT 2
 #ifdef WT_ABANDON_UNSENT
 /* How far the companion's removal moves the save counter ahead of the one the
- * escrow recorded, and the most a game may have saved over the save before
- * the removal for WT_INVENTORY_HISTORY to accept it. Counters near the top of their
- * range are never moved (WT_ABANDON_LIMIT), and such escrows never abandoned. */
-#define WT_ABANDON_STEP UINT32_C(0x100000)
-#define WT_ABANDON_SAVES UINT32_C(0x80000)
-#define WT_ABANDON_LIMIT (UINT32_C(0xFFFFFFFF) - 4 * WT_ABANDON_STEP)
+ * escrow recorded (2^28), and how many saves a game may have made over a save
+ * on either side of it for WT_INVENTORY_HISTORY to tell which (2^27): past
+ * that it proves nothing and the escrow blocks. 134 million saves cannot be
+ * made between an interrupted companion offer and the next visit in practice
+ * (one save takes seconds), and no lineage can wrap into the other range:
+ * counters above WT_ABANDON_LIMIT are never moved, and their escrows never
+ * abandoned or taken as removed by the counter. */
+#define WT_ABANDON_STEP UINT32_C(0x10000000)
+#define WT_ABANDON_SAVES UINT32_C(0x8000000)
+#define WT_ABANDON_LIMIT (UINT32_C(0xFFFFFFFF) - 2 * WT_ABANDON_STEP)
 /* WT_INVENTORY_HISTORY's answers. The companion's removal writes the save
  * counter (the one the game compares to pick its copies and adds one to at
  * every save) WT_ABANDON_STEP past the one the escrow recorded, so the
@@ -57,17 +61,19 @@ enum WtEscrowHistory {
     /* A game saved over the save before the removal, and the offer is not
      * where REMOVE takes it: play changed, moved, released or traded it. */
     WT_HISTORY_LEFT = 1,
-    /* The save descends from the removal: REMOVE records it as removed. */
+    /* The save descends from the removal: removed, verified as it is (REMOVE
+     * never runs again: it could take a Pokémon received since). */
     WT_HISTORY_REMOVED = 2,
-    /* Exactly the recorded removal, without the counter the companion's own
-     * removal writes: another writer's (a game's, an older companion's). */
+    /* Exactly the recorded removal (a game's or an earlier writer's), with a
+     * counter that proves nothing: also taken as removed, never as left. */
     WT_HISTORY_AFTER = 3
 };
 
-/* An ESCROW entry's true inventoryBefore (masked in the journal for the
+/* An ESCROW entry's true inventory hashes (masked in the journal for the
  * companion's own escrows): 1 for the companion's escrow, 0 for any other,
  * -1 on bad arguments. For tests and tools. */
-int WtEngine_EscrowInventoryBefore(const WtJournalEntry *, WtJournalHash, unsigned char before[32]);
+int WtEngine_EscrowInventories(const WtJournalEntry *, WtJournalHash, unsigned char before[32],
+                               unsigned char after[32]);
 #endif
 
 /* PREPARE only computes checked images/locators/hashes in the candidate entry.

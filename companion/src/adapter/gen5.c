@@ -617,11 +617,15 @@ static int SaveRemoval(WtGame *game, const WtJournalEntry *entry, const unsigned
     CpSaveImage *image = game->image;
     unsigned char actual[32];
     uint32_t recorded = entry->globalCounter;
+    int result;
     if (Hash(image, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
     if (CpSaveImage_Verify(image, game->file, expected) == CP_SAVE_OK) return 0;
     if (recorded <= WT_ABANDON_LIMIT && (uint32_t)(image->globalCounter - recorded) < WT_ABANDON_STEP)
         image->globalCounter = recorded + WT_ABANDON_STEP - 1;
-    return CpSaveImage_CommitBoth(image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
+    image->counterFirst = 1;
+    result = CpSaveImage_CommitBoth(image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
+    image->counterFirst = 0;
+    return result;
 }
 
 /* WT_INVENTORY_HISTORY (wonder_trade/engine.h enum WtEscrowHistory): what the
@@ -640,9 +644,10 @@ static int History(WtGame *game, const WtJournalEntry *entry)
     Found found;
     if (!party || Hash(image, digest) != 0) return WT_HISTORY_UNPROVEN;
     if (memcmp(digest, entry->inventoryBefore, 32) == 0) return WT_HISTORY_UNCHANGED;
+    /* Exactly the recorded removal is the removal, whatever the counter. */
+    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return WT_HISTORY_AFTER;
     if (ranged && past >= WT_ABANDON_STEP && past - WT_ABANDON_STEP < WT_ABANDON_SAVES) return WT_HISTORY_REMOVED;
     if (!ranged || past >= WT_ABANDON_SAVES) return WT_HISTORY_UNPROVEN;
-    if (memcmp(digest, entry->inventoryAfter, 32) == 0) return WT_HISTORY_AFTER;
     if (!Moved(image, entry)) return WT_HISTORY_UNPROVEN;
     Sha(entry->outgoing, BOX_MON_SIZE, digests[0]);
     return Locate(image, entry->outgoing, digests, 1, &found) == 1 && found.party
