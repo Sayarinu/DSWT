@@ -158,13 +158,13 @@ jobs:
       - name: Build with the public production profile
         env:
           CONNECTION_PROFILE: client/companion/production-connection-profile.json
-        run: scripts/build-companion.sh
+        run: scripts/build/build-companion.sh
       - name: Inspect and package the DS and DSi ROM
         env:
           VERSION: ${{ inputs.version }}
         run: |
           docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
-          python3 scripts/package-companion.py --version "$VERSION" --output game/apps
+          python3 scripts/build/package-companion.py --version "$VERSION" --output game/apps
       - name: Keep the companion only when requested
         if: inputs.companion
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

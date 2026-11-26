@@ -59,7 +59,7 @@ def certificate_pin(certificate):
 
 def create_keys(hostname, ipv4):
     """Create both pinned keys once. The ROM builds them in, so they are never replaced."""
-    connection = load_module("connection", ROOT / "scripts/configure-connection.py")
+    connection = load_module("connection", ROOT / "scripts/build/configure-connection.py")
     LOCAL.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory = LOCAL / "tls"
     if directory.exists():

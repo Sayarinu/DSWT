@@ -385,7 +385,7 @@ class ListenAndConsoleProfileTests(StackFixture):
         self.assertEqual(expected["port"], 18443)
         self.assertEqual((self.workspace / "tls/connection.json").read_bytes(), original)
         header = self.workspace / "connection.h"
-        subprocess.run([stack.sys.executable, str(SCRIPT.parents[2] / "scripts/configure-connection.py"),
+        subprocess.run([stack.sys.executable, str(SCRIPT.parents[2] / "scripts/build/configure-connection.py"),
                         str(output), str(header)], check=True, capture_output=True, text=True)
         self.assertIn('#define WONDER_TRADE_HOSTNAME "localhost"', header.read_text())
         self.assertIn("#define WONDER_TRADE_IPV4 0xc0a80119UL", header.read_text())

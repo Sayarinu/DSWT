@@ -5,7 +5,7 @@
 #include "wonder_trade/bw/game.h"
 #include "wonder_trade/bw/game_save.h"
 
-/* The port sets each version's enrolled variant (scripts/retail_port/bw.py):
+/* The port sets each version's enrolled variant (scripts/port/retail_port/bw.py):
  * 0x04150200 for Black and 0x04140200 for White. */
 #ifndef WT_GAME_VARIANT
 #error "The port sets WT_GAME_VARIANT, the enrolled game variant"
@@ -95,7 +95,7 @@ void WtGame_SampleInput(WtEntropySample *sample)
 u32 gWtFlashRefused;
 
 /* Overlay entries into the module, written each time their overlay loads
- * (scripts/retail_port/bw.py fills the table): the overlay, the address and
+ * (scripts/port/retail_port/bw.py fills the table): the overlay, the address and
  * the bytes. An overlay file stays the cartridge's own, so the SDK's digest
  * check of it passes; the entries go in after the check. */
 typedef struct WtOverlayHook {

@@ -163,7 +163,7 @@ def releaser(data):
     require(jobs["publish"].get("needs") == list(RELEASE_BUILDERS), "Publish only after every build")
     companion = jobs["companion"]
     require("if" not in companion, "Every release must build and check the companion")
-    builds = [step for step in companion.get("steps", []) if step.get("run") == "scripts/build-companion.sh"]
+    builds = [step for step in companion.get("steps", []) if step.get("run") == "scripts/build/build-companion.sh"]
     require(len(builds) == 1 and "if" not in builds[0]
             and builds[0].get("env") == {"CONNECTION_PROFILE": "client/companion/production-connection-profile.json"},
             "Build the companion from source with only the tracked public production profile")

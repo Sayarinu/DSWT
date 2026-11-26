@@ -12,7 +12,7 @@ import tempfile
 def main():
     save_test, sha_probe = sys.argv[1:]
     root = Path(__file__).resolve().parents[4]
-    spec = importlib.util.spec_from_file_location("demo", root / "scripts/verify-demo-trade.py")
+    spec = importlib.util.spec_from_file_location("demo", root / "tools/local-stack/verify-demo-trade.py")
     demo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(demo)
     with tempfile.TemporaryDirectory(prefix="dswt-save-test-") as directory:

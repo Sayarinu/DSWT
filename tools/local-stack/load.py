@@ -468,7 +468,7 @@ class Load:
 
     def build_probe(self):
         """Build the same sanitizer-instrumented native client inside the service toolchain image."""
-        tls = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare-tls.py")], check=True, text=True,
+        tls = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare/prepare-tls.py")], check=True, text=True,
                              capture_output=True, timeout=120).stdout.strip()
         build = self.directory / "native-build"
         result = self.container("sh", "-euc", 'cmake -G Ninja -S "$1/client/core/tests" -B "$2" -DMBEDTLS_SOURCE="$3" >/dev/null '

@@ -156,14 +156,14 @@ add_test(NAME cp_journal_integration_test
         "$<TARGET_FILE:save_image_test>" "$<TARGET_FILE:journal_save_test>")
 
 # --- Screens (LUNE-872): state machine and renderer -------------------------
-# With the generated text tables (scripts/companion-text.py; the pinned font
+# With the generated text tables (scripts/build/companion-text.py; the pinned font
 # downloads once into game/companion/font).
 set(COMPANION_TEXT_DIR "${CMAKE_CURRENT_BINARY_DIR}/text")
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 add_custom_command(
     OUTPUT "${COMPANION_TEXT_DIR}/companion_text.c" "${COMPANION_TEXT_DIR}/companion_text.h"
-    COMMAND "${Python3_EXECUTABLE}" "${REPO_ROOT}/scripts/companion-text.py" --output "${COMPANION_TEXT_DIR}"
-    DEPENDS "${REPO_ROOT}/scripts/companion-text.py" "${REPO_ROOT}/client/games/res/text/wonder_trade.json"
+    COMMAND "${Python3_EXECUTABLE}" "${REPO_ROOT}/scripts/build/companion-text.py" --output "${COMPANION_TEXT_DIR}"
+    DEPENDS "${REPO_ROOT}/scripts/build/companion-text.py" "${REPO_ROOT}/client/games/res/text/wonder_trade.json"
         "${REPO_ROOT}/client/companion/res/text/companion.json"
     VERBATIM)
 add_library(companion_ui STATIC "${COMPANION_TEXT_DIR}/companion_text.c"

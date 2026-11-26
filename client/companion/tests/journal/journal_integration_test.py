@@ -17,8 +17,8 @@ def load(name, path):
 def main():
     save_test, journal_test = sys.argv[1:]
     root = Path(__file__).resolve().parents[4]
-    provision = load("provision", root / "scripts/provision-save.py")
-    demo = load("demo", root / "scripts/verify-demo-trade.py")
+    provision = load("provision", root / "scripts/prepare/provision-save.py")
+    demo = load("demo", root / "tools/local-stack/verify-demo-trade.py")
     with tempfile.TemporaryDirectory(prefix="dswt-journal-") as directory:
         path = Path(directory) / "synthetic.sav"
         path.write_bytes(bytes(524288))

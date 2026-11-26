@@ -15,7 +15,7 @@ upstream workspace.
 - Each pin records the upstream revision, tree and pristine US ROM checksums.
 - Platinum revision `10` is European English, which upstream does not build:
   [`europe.patch`](europe.patch) adds that revision to every Platinum workspace
-  without changing US output, and `scripts/prepare-europe.py` stages its
+  without changing US output, and `scripts/prepare/prepare-europe.py` stages its
   differing inputs from a verified local dump.
 - Upstream build and development instructions: `INSTALL.md` and `CONTRIBUTING.md`
   in each local workspace.
@@ -26,11 +26,11 @@ upstream workspace.
 The build script prepares the workspace automatically. To prepare source alone:
 
 ```sh
-python3 scripts/prepare-game.py               # Platinum
-python3 scripts/prepare-game.py --game hgss   # HeartGold and SoulSilver
-python3 scripts/prepare-game.py --game dp     # Diamond and Pearl
-python3 scripts/prepare-game.py --game bw2 --pristine  # Black 2 and White 2
-python3 scripts/prepare-game.py --game bw --pristine   # Black and White
+python3 scripts/prepare/prepare-game.py               # Platinum
+python3 scripts/prepare/prepare-game.py --game hgss   # HeartGold and SoulSilver
+python3 scripts/prepare/prepare-game.py --game dp     # Diamond and Pearl
+python3 scripts/prepare/prepare-game.py --game bw2 --pristine  # Black 2 and White 2
+python3 scripts/prepare/prepare-game.py --game bw --pristine   # Black and White
 ```
 
 Preparation is repeatable and rejects incompatible source or local edits. Keep
@@ -42,15 +42,15 @@ resources (`res/` for Platinum, `files/` for HeartGold and SoulSilver,
 `build/heartgold.us/` and `build/soulsilver.us/`:
 
 ```sh
-ROM_GAME=heartgold ./scripts/build-rom.sh --pristine
-ROM_GAME=soulsilver ./scripts/build-rom.sh --pristine
+ROM_GAME=heartgold ./scripts/build/build-rom.sh --pristine
+ROM_GAME=soulsilver ./scripts/build/build-rom.sh --pristine
 ```
 
 The Diamond/Pearl workspace builds `build/diamond.us/` and `build/pearl.us/`
 with upstream's Make build (`ROM_GAME=diamond` or `ROM_GAME=pearl`). Its ARM9
 sources live under `arm9/`, so the shared core and `dp` adapter land in
 `arm9/src/`. Upstream requires Metrowerks compilers and Nitro SDK 3.2 tools it
-does not ship in source; `tools/rom-builder-dp/Dockerfile` fetches the archives
+does not ship in source; `tools/builders/rom-builder-dp/Dockerfile` fetches the archives
 upstream's own CI uses, by checksum from a fixed commit of its `assets/workflow`
 branch, and runs them under Wine. They are copied into the workspace's ignored
 `tools/` and `arm*/` paths and stay local.
@@ -82,14 +82,14 @@ per version from the player's own dump, which `build-rom.sh` copies into the
 ignored `orig/`:
 
 ```sh
-ROM_GAME=black2 DSWT_BW2_ROM=/path/to/black2.nds ./scripts/build-rom.sh --pristine
-ROM_GAME=white2 DSWT_BW2_ROM=/path/to/white2.nds ./scripts/build-rom.sh --pristine
+ROM_GAME=black2 DSWT_BW2_ROM=/path/to/black2.nds ./scripts/build/build-rom.sh --pristine
+ROM_GAME=white2 DSWT_BW2_ROM=/path/to/white2.nds ./scripts/build/build-rom.sh --pristine
 ```
 
 Its `configure.py` and Ninja extract and delink the dump, compile with
 Metrowerks compilers run through wibo, rebuild the ROM to
 `build/pokeblack2_us.nds` or `build/pokewhite2_us.nds` and check its SHA-1.
-`tools/rom-builder-bw2/Dockerfile` fetches the tools `configure.py` would
+`tools/builders/rom-builder-bw2/Dockerfile` fetches the tools `configure.py` would
 download, by checksum, and the build runs it with `--no-download`. wibo needs
 32-bit code segments, which Docker's Rosetta and QEMU emulation lack, so on an
 Apple silicon Mac build natively instead: `python3 configure.py` and `ninja`
@@ -103,8 +103,8 @@ compilers its README lists (`tools/mwccarm/mwccarm/`, with `1.2` the 1.2 base
 release) and Wine, and builds each cartridge from the player's dump:
 
 ```sh
-ROM_GAME=black DSWT_BW_ROM=/path/to/black.nds ./scripts/build-rom.sh --pristine
-ROM_GAME=white DSWT_BW_ROM=/path/to/white.nds ./scripts/build-rom.sh --pristine
+ROM_GAME=black DSWT_BW_ROM=/path/to/black.nds ./scripts/build/build-rom.sh --pristine
+ROM_GAME=white DSWT_BW_ROM=/path/to/white.nds ./scripts/build/build-rom.sh --pristine
 ```
 
 The script extracts the dump, disassembles it for the data links and relinks

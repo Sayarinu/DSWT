@@ -1,9 +1,9 @@
 # DS Companion: a DSi-mode BlocksDS ROM, ARM9 code with the stock DSWiFi ARM7 core.
 # Adapted from BlocksDS's rom_arm9 template (CC0-1.0). Build it through
-# scripts/build-companion.sh, which runs it in tools/companion-builder.
+# scripts/build/build-companion.sh, which runs it in tools/builders/companion-builder.
 #
 # From the repository root:
-#   scripts/build-companion.sh
+#   scripts/build/build-companion.sh
 #
 # Every output goes under BUILDDIR, so the sources may be read-only.
 
@@ -19,9 +19,9 @@ GAME_ICON		:= $(BLOCKSDS)/sys/icon.gif
 
 BUILDDIR		?= build
 ROM			?= $(BUILDDIR)/$(NAME).nds
-# scripts/prepare-tls.py prints this directory.
+# scripts/prepare/prepare-tls.py prints this directory.
 TLS_DIR			?= ../game/mbedtls-4.1.1
-# scripts/configure-connection.py writes this header from a profile.
+# scripts/build/configure-connection.py writes this header from a profile.
 CONNECTION_HEADER	?= $(BUILDDIR)/dswt-connection.h
 
 # The stock ARM7 core with DSWiFi; it also serves the microphone.
@@ -100,8 +100,8 @@ endif
 all: $(ROM)
 
 check-inputs:
-	@test -f $(TLS_DIR)/include/mbedtls/ssl.h || { echo "TLS_DIR must name the Mbed TLS source from scripts/prepare-tls.py" >&2; exit 2; }
-	@test -f $(CONNECTION_HEADER) || { echo "CONNECTION_HEADER must name a header from scripts/configure-connection.py" >&2; exit 2; }
+	@test -f $(TLS_DIR)/include/mbedtls/ssl.h || { echo "TLS_DIR must name the Mbed TLS source from scripts/prepare/prepare-tls.py" >&2; exit 2; }
+	@test -f $(CONNECTION_HEADER) || { echo "CONNECTION_HEADER must name a header from scripts/build/configure-connection.py" >&2; exit 2; }
 
 # unitcode 2 runs on DS and DSi; the DSi header asks for DSi mode, which the
 # companion needs for the SD card and WPA2.
@@ -179,7 +179,7 @@ clean:
 
 -include $(APP_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(TLS_OBJS:.o=.d)
 
-# LUNE-868: tables/font are prepared by scripts/build-companion.sh on the host.
+# LUNE-868: tables/font are prepared by scripts/build/build-companion.sh on the host.
 # The no-gc link check above verifies every generated symbol even before UI use.
 TEXT_DIR                := $(BUILDDIR)/text
 TEXT_OBJ                := $(TEXT_DIR)/companion_text.o
@@ -197,7 +197,7 @@ $(TEXT_OBJ): $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
 
 check-inputs: $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h
 $(TEXT_DIR)/companion_text.c $(TEXT_DIR)/companion_text.h:
-	@echo "Missing $@; run scripts/build-companion.sh from the repository root, or generate text with: python3 scripts/companion-text.py --output $(abspath $(TEXT_DIR))" >&2
+	@echo "Missing $@; run scripts/build/build-companion.sh from the repository root, or generate text with: python3 scripts/build/companion-text.py --output $(abspath $(TEXT_DIR))" >&2
 	@exit 2
 
 # LUNE-872: the screens' project-original 8x8 tiles (res/gfx/*.png, each with

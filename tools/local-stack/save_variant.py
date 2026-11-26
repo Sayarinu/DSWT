@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stack
 
-VERIFY = stack.load_module("variant_verify", stack.ROOT / "scripts/verify-demo-trade.py")
+VERIFY = stack.load_module("variant_verify", stack.ROOT / "tools/local-stack/verify-demo-trade.py")
 PARTY, SLOT, BOX = 152, 236, 136
 FIELDS = {"egg", "hp", "item", "capsule", "move"}
 

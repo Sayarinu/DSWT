@@ -116,7 +116,7 @@ class Acceptance:
                 "retained pending offers exist; recover their original clients before starting another run")
         require(not (self.local.workspace / "control/matcher-hold").exists(), "matcher is already held by another test")
         with (self.directory / "native-build.log").open("x") as log:
-            source = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare-tls.py")],
+            source = subprocess.run([sys.executable, str(stack.ROOT / "scripts/prepare/prepare-tls.py")],
                                     check=True, text=True, stdout=subprocess.PIPE, stderr=log, timeout=120).stdout.strip()
             for args in (["cmake", "-S", str(stack.ROOT / "client/core/tests"), "-B", str(self.probe.parent), "-DMBEDTLS_SOURCE=" + source],
                          ["cmake", "--build", str(self.probe.parent), "--target", "trade_probe", "--parallel", "2"]):

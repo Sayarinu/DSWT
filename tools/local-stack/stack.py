@@ -42,7 +42,7 @@ def load_module(name, path):
 
 
 wire = load_module("local_stack_wire", ROOT / "protocol/wire.py")
-connection_profile = load_module("local_stack_connection", ROOT / "scripts/configure-connection.py")
+connection_profile = load_module("local_stack_connection", ROOT / "scripts/build/configure-connection.py")
 
 
 def workspace_path(value):
@@ -129,7 +129,7 @@ def initialize(workspace, port=DEFAULT_PORT, observability=None, production=Fals
     (workspace / "control").mkdir(mode=0o700)
     # Docker cannot create a nested socket mount below the read-only control bind.
     (workspace / "control/run").mkdir(mode=0o700)
-    peer = load_module("local_stack_tls_peer", ROOT / "scripts/tls-test-server.py")
+    peer = load_module("local_stack_tls_peer", ROOT / "tools/local-stack/tls-test-server.py")
     peer.prepare(workspace / "tls", "10.64.0.1", "localhost", port)
     manifest = {
         "version": 1, "project": "dswt-local-" + uuid.uuid4().hex,

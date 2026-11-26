@@ -4,7 +4,7 @@
 /* Byte offsets and sizes of the v1 DS envelope described in the wiki:
  * https://github.com/Sayarinu/DSWT/wiki/Protocol
  * server/src/wire_layout.h mirrors these values for the gateway, and
- * scripts/tests/test_wire_layout.py checks both against protocol/wire.py.
+ * client/core/tests/contracts/test_wire_layout.py checks both against protocol/wire.py.
  * Offsets are relative to the start of the named header, body or record. */
 
 #define WT_WIRE_MAGIC "WTDS\1" /* ASCII magic followed by version 1 */

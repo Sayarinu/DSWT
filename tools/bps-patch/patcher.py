@@ -68,8 +68,8 @@ def _load(name, path):
     return module
 
 
-configure_connection = _load("configure_connection", ROOT / "scripts/configure-connection.py")
-identify_rom = _load("identify_rom", ROOT / "scripts/identify-rom.py")
+configure_connection = _load("configure_connection", ROOT / "scripts/build/configure-connection.py")
+identify_rom = _load("identify_rom", ROOT / "scripts/port/identify-rom.py")
 
 
 def sha256(data):
