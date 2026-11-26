@@ -5,9 +5,14 @@
 #include <iostream>
 #include <string>
 
+
+namespace {
+constexpr int kMigrateArgc = 3;
+} // namespace
+
 int main(int argc, char **argv) {
   if (argc < 2 || (std::string(argv[1]) == "migrate"
-                       ? argc != 3
+                       ? argc != kMigrateArgc
                        : std::string(argv[1]) != "verify" || argc != 2)) {
     std::cerr << "Usage: dswt-ledger migrate DIRECTORY | verify\n";
     return 2;

@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "admission.h"
 
 #include <openssl/crypto.h>
@@ -13,6 +14,11 @@
 
 namespace dswt::server::detail {
 namespace {
+constexpr std::size_t kMappedZeroBytes = 10;
+constexpr std::size_t kIpv4Bytes = 4;
+constexpr std::size_t kIpv6PrefixBytes = 8;
+constexpr auto kNetworkEnrollmentWindow = std::chrono::hours(24);
+constexpr std::size_t kEnrollmentKeyBytes = 16;
 constexpr std::size_t kMaximumQuotaKeys = 4096;
 constexpr std::size_t kMaximumEnrollmentNetworks = 4096;
 constexpr std::size_t kMaximumKeyBytes = 64;
@@ -102,21 +108,21 @@ EnrollmentBudget::EnrollmentBudget(Limits limits, Quota::Now now)
 bool EnrollmentBudget::Allow(const std::string &network, std::string_view request) {
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
   std::size_t size = 0;
-  if (EVP_Q_digest(nullptr, "SHA256", nullptr, request.data(), request.size(), digest.data(), &size) != 1 || size != 32)
+  if (EVP_Q_digest(nullptr, "SHA256", nullptr, request.data(), request.size(), digest.data(), &size) != 1 || size != wire::kDigestSize)
     throw std::runtime_error("admission hashing unavailable");
-  const std::string key(reinterpret_cast<const char *>(digest.data()), 16);
+  const std::string key(reinterpret_cast<const char *>(digest.data()), kEnrollmentKeyBytes);
   const auto now = now_();
   std::lock_guard<std::mutex> lock(mutex_);
   if (now - hour_started_ >= std::chrono::hours(1)) { hour_started_ = now; hour_count_ = 0; }
   auto found = networks_.find(network);
-  if (found != networks_.end() && now - found->second.started >= std::chrono::hours(24)) {
+  if (found != networks_.end() && now - found->second.started >= kNetworkEnrollmentWindow) {
     networks_.erase(found);
     found = networks_.end();
   }
   if (found == networks_.end()) {
     if (networks_.size() >= kMaximumEnrollmentNetworks) {
       for (auto it = networks_.begin(); it != networks_.end();) {
-        if (now - it->second.started >= std::chrono::hours(24)) it = networks_.erase(it);
+        if (now - it->second.started >= kNetworkEnrollmentWindow) it = networks_.erase(it);
         else ++it;
       }
       if (networks_.size() >= kMaximumEnrollmentNetworks) return false;
@@ -136,16 +142,16 @@ std::unique_ptr<Quota::Permit> ServiceAdmission::Acquire(RequestKind kind) {
 }
 
 bool ServiceAdmission::Authorize(Quota::Permit &permit, std::string_view identity, std::string_view credential) {
-  if (identity.size() != 16 || credential.size() != 32) return false;
-  std::array<unsigned char, 49> input{};
+  if (identity.size() != wire::kIdSize || credential.size() != wire::kCredentialSize) return false;
+  std::array<unsigned char, 1 + wire::kIdSize + wire::kCredentialSize> input{};
   input[0] = 2;
   std::copy(identity.begin(), identity.end(), input.begin() + 1);
-  std::copy(credential.begin(), credential.end(), input.begin() + 17);
+  std::copy(credential.begin(), credential.end(), input.begin() + 1 + wire::kIdSize);
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
   std::size_t size = 0;
   const auto result = EVP_Q_digest(nullptr, "SHA256", nullptr, input.data(), input.size(), digest.data(), &size);
   OPENSSL_cleanse(input.data(), input.size());
-  if (result != 1 || size != 32) throw std::runtime_error("admission hashing unavailable");
+  if (result != 1 || size != wire::kDigestSize) throw std::runtime_error("admission hashing unavailable");
   const std::string key(reinterpret_cast<const char *>(digest.data()), size);
   OPENSSL_cleanse(digest.data(), digest.size());
   return permit.Bind(key);
@@ -157,10 +163,10 @@ std::string NetworkKey(const boost::asio::ip::address &address) {
     return std::string(1, '\4') + std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size());
   }
   const auto bytes = address.to_v6().to_bytes();
-  const bool mapped = std::all_of(bytes.begin(), bytes.begin() + 10, [](auto byte) { return byte == 0; }) &&
-      bytes[10] == 255 && bytes[11] == 255;
+  const bool mapped = std::all_of(bytes.begin(), bytes.begin() + kMappedZeroBytes, [](auto byte) { return byte == 0; }) &&
+      bytes[kMappedZeroBytes] == UINT8_MAX && bytes[kMappedZeroBytes + 1] == UINT8_MAX;
   return std::string(1, mapped ? '\4' : '\6') +
-      std::string(reinterpret_cast<const char *>(bytes.data() + (mapped ? 12 : 0)), mapped ? 4 : 8);
+      std::string(reinterpret_cast<const char *>(bytes.data() + (mapped ? bytes.size() - kIpv4Bytes : 0)), mapped ? kIpv4Bytes : kIpv6PrefixBytes);
 }
 
 } // namespace dswt::server::detail

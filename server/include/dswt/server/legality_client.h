@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dswt/server/wire_layout.h"
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -8,6 +9,8 @@
 #include <vector>
 
 namespace dswt::server {
+
+inline constexpr auto kMaximumLegalityTimeout = std::chrono::milliseconds(1500);
 
 enum class LegalityVerdict { Legal, Illegal, Unavailable };
 
@@ -53,13 +56,13 @@ int RefusalFor(const std::vector<std::string> &reasons);
 class LegalityClient {
 public:
   LegalityClient(const std::string &address, const std::string &expected_policy,
-                 std::chrono::milliseconds timeout = std::chrono::milliseconds(1500));
+                 std::chrono::milliseconds timeout = kMaximumLegalityTimeout);
   ~LegalityClient();
   LegalityClient(const LegalityClient &) = delete;
   LegalityClient &operator=(const LegalityClient &) = delete;
 
   // A reply naming a game outside the format's generation is malformed (Unavailable).
-  LegalityDecision CheckNewSubmission(const std::array<unsigned char, 136> &data,
+  LegalityDecision CheckNewSubmission(const std::array<unsigned char, wire::kPk4Size> &data,
                                       PokemonFormat format = PokemonFormat::PK4);
 
 private:

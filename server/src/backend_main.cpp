@@ -18,6 +18,15 @@
 #include <mutex>
 #include <thread>
 
+
+namespace {
+constexpr int kBackendThreads = 32;
+constexpr int kBackendMemoryBytes = 16 * 1024 * 1024;
+constexpr int kMaximumPollers = 8;
+constexpr auto kShutdownGrace = std::chrono::seconds(3);
+constexpr auto kScreeningInterval = std::chrono::seconds(10);
+} // namespace
+
 int main() {
   try {
     using namespace dswt::server;
@@ -36,14 +45,14 @@ int main() {
     grpc::ServerBuilder builder;
     int port = 0;
     builder.AddListeningPort(config.address, grpc::InsecureServerCredentials(), &port);
-    builder.SetMaxReceiveMessageSize(4096);
-    builder.SetMaxSendMessageSize(4096);
+    builder.SetMaxReceiveMessageSize(kGrpcMessageLimit);
+    builder.SetMaxSendMessageSize(kGrpcMessageLimit);
     grpc::ResourceQuota resources;
-    resources.SetMaxThreads(32).Resize(16 * 1024 * 1024);
+    resources.SetMaxThreads(kBackendThreads).Resize(kBackendMemoryBytes);
     builder.SetResourceQuota(resources);
     builder.SetSyncServerOption(grpc::ServerBuilder::NUM_CQS, 2);
     builder.SetSyncServerOption(grpc::ServerBuilder::MIN_POLLERS, 2);
-    builder.SetSyncServerOption(grpc::ServerBuilder::MAX_POLLERS, 8);
+    builder.SetSyncServerOption(grpc::ServerBuilder::MAX_POLLERS, kMaximumPollers);
     builder.RegisterService(&identities);
     builder.RegisterService(&trades);
     auto server = builder.BuildAndStart();
@@ -57,7 +66,7 @@ int main() {
     const auto stop = [&] {
       { std::lock_guard<std::mutex> lock(mutex); stopping = true; }
       changed.notify_all();
-      server->Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(3));
+      server->Shutdown(std::chrono::system_clock::now() + kShutdownGrace);
       io.stop();
     };
     signals.async_wait([&](boost::system::error_code, int) { stop(); });
@@ -67,9 +76,9 @@ int main() {
       while (!stopping) {
         lock.unlock();
         std::size_t screened = 0;
-        try { screened = screener.Poll(16, &stopping); } catch (const std::exception &) {}
+        try { screened = screener.Poll(OfferScreener::kBatchSize, &stopping); } catch (const std::exception &) {}
         lock.lock();
-        changed.wait_for(lock, std::chrono::seconds(screened ? 0 : 10), [&] { return stopping.load(); });
+        changed.wait_for(lock, screened ? std::chrono::seconds::zero() : kScreeningInterval, [&] { return stopping.load(); });
       }
     });
     io.run();

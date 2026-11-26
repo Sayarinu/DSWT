@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "dswt/server/config.h"
 
 #include <cstdlib>
@@ -7,6 +8,9 @@
 
 namespace dswt::server {
 namespace {
+constexpr unsigned kMaximumEnrollments = 1000000;
+constexpr unsigned kMaximumSubmissionWorkers = 16;
+constexpr unsigned kMaximumMatcherWorkers = 8;
 
 std::string Environment(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
@@ -17,7 +21,7 @@ unsigned short HttpPort() {
   const auto value = Environment("WT_HTTP_PORT", "8080");
   std::size_t parsed = 0;
   const auto port = std::stoul(value, &parsed);
-  if (parsed != value.size() || port > 65535) {
+  if (parsed != value.size() || port > UINT16_MAX) {
     throw std::invalid_argument("WT_HTTP_PORT must be between 0 and 65535");
   }
   return static_cast<unsigned short>(port);
@@ -31,7 +35,7 @@ void PrivateAddress(const std::string &address, bool listener) {
   const std::string_view port(address.data() + separator + 1, address.size() - separator - 1);
   unsigned value = 0;
   const auto parsed = std::from_chars(port.data(), port.data() + port.size(), value);
-  if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() || value > 65535 || (!listener && value == 0))
+  if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() || value > UINT16_MAX || (!listener && value == 0))
     throw std::invalid_argument("invalid internal gRPC port");
 }
 
@@ -47,7 +51,7 @@ unsigned short LoadMetricsPort() {
   const auto port = Environment("WT_METRICS_PORT", "0");
   unsigned value = 0;
   const auto parsed = std::from_chars(port.data(), port.data() + port.size(), value);
-  if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() || value > 65535)
+  if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() || value > UINT16_MAX)
     throw std::invalid_argument("WT_METRICS_PORT must be between 0 and 65535");
   return static_cast<unsigned short>(value);
 }
@@ -58,7 +62,7 @@ static unsigned EnrollmentLimit(const char *name, unsigned fallback) {
   const std::string_view view(text);
   unsigned value = 0;
   const auto parsed = std::from_chars(view.data(), view.data() + view.size(), value);
-  if (parsed.ec != std::errc{} || parsed.ptr != view.data() + view.size() || value < 1 || value > 1000000)
+  if (parsed.ec != std::errc{} || parsed.ptr != view.data() + view.size() || value < 1 || value > kMaximumEnrollments)
     throw std::invalid_argument(std::string(name) + " must be between 1 and 1000000");
   return value;
 }
@@ -68,7 +72,7 @@ unsigned LoadSubmissionWorkers() {
   if (workers.empty() && !std::getenv("WT_SUBMISSION_WORKERS")) return kDefaultSubmissionWorkers;
   unsigned value = 0;
   const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), value);
-  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || value < 1 || value > 16)
+  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || value < 1 || value > kMaximumSubmissionWorkers)
     throw std::invalid_argument("WT_SUBMISSION_WORKERS must be between 1 and 16");
   return value;
 }
@@ -113,7 +117,7 @@ MatcherConfig LoadMatcherConfig() {
   config.metrics_port = LoadMetricsPort();
   const auto workers = Environment("WT_MATCHER_WORKERS", "1");
   const auto parsed = std::from_chars(workers.data(), workers.data() + workers.size(), config.workers);
-  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || config.workers < 1 || config.workers > 8)
+  if (parsed.ec != std::errc{} || parsed.ptr != workers.data() + workers.size() || config.workers < 1 || config.workers > kMaximumMatcherWorkers)
     throw std::invalid_argument("WT_MATCHER_WORKERS must be between 1 and 8");
   return config;
 }

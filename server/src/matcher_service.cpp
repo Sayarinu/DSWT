@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/matcher_service.h"
 
 #include "postgres.h"
@@ -17,6 +18,9 @@
 
 namespace dswt::server {
 namespace {
+constexpr int kSelectedGameColumn = 3;
+constexpr std::size_t kRememberedPairLimit = 4096;
+constexpr int kMatchAttempts = 3;
 
 using detail::Database;
 using detail::HexBytes;
@@ -86,7 +90,7 @@ Offer Locked(Database &database, const detail::Result &selected) {
   if (PQntuples(row.get()) == 0) throw SelectionChanged();
   return Offer{UnhexBytes(PQgetvalue(selected.get(), 0, 0)), UnhexBytes(PQgetvalue(selected.get(), 0, 1)),
       UnhexBytes(PQgetvalue(row.get(), 0, 0)), detail::Unsigned(PQgetvalue(row.get(), 0, 1)),
-      PQgetvalue(selected.get(), 0, 2), PQgetvalue(selected.get(), 0, 3)};
+      PQgetvalue(selected.get(), 0, 2), PQgetvalue(selected.get(), 0, kSelectedGameColumn)};
 }
 
 // The oldest unlocked offer with a compatible counterpart anchors each pair; a
@@ -138,7 +142,7 @@ std::string BatchOperation(const std::string &operation, std::size_t index) {
   input.push_back(static_cast<char>(index));
   unsigned char digest[SHA256_DIGEST_LENGTH];
   SHA256(reinterpret_cast<const unsigned char *>(input.data()), input.size(), digest);
-  return std::string(reinterpret_cast<const char *>(digest), 16);
+  return std::string(reinterpret_cast<const char *>(digest), wire::kIdSize);
 }
 
 // The pair an operation chose before, relocked. Anything that changed since
@@ -224,7 +228,7 @@ public:
   void Remember(const std::string &operation, const Pairs &pairs) {
     std::lock_guard<std::mutex> lock(mutex_);
     // Forgetting only costs a later retry its head start, never safety.
-    if (pairs_.size() >= 4096 && !pairs_.count(operation)) pairs_.erase(pairs_.begin());
+    if (pairs_.size() >= kRememberedPairLimit && !pairs_.count(operation)) pairs_.erase(pairs_.begin());
     auto &trades = pairs_[operation];
     trades.clear();
     for (const auto &pair : pairs) trades.emplace_back(pair.first.trade, pair.second.trade);
@@ -258,9 +262,9 @@ grpc::Status MatcherService::MatchNext(grpc::ServerContext *context, const v1::M
   RpcTelemetry trace(Operation::Match, context, [reply] { return reply->result(); }, request->operation_id());
   reply->Clear();
   if (context && context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "request cancelled"};
-  if (!detail::NonzeroBytes(request->operation_id(), 16)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return grpc::Status::OK; }
+  if (!detail::NonzeroBytes(request->operation_id(), wire::kIdSize)) { Result(*reply, v1::RESULT_INVALID_REQUEST); return grpc::Status::OK; }
   try {
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    for (int attempt = 0; attempt < kMatchAttempts; ++attempt) {
       try {
         Database database(connection_info_);
         detail::Transaction transaction(database);

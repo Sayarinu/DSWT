@@ -1,3 +1,4 @@
+#include "dswt/server/wire_layout.h"
 #include "http_services.h"
 #include "dswt/server/telemetry.h"
 
@@ -7,13 +8,19 @@
 
 namespace dswt::server {
 
+namespace {
+constexpr unsigned kSubmissionBurst = 64;
+constexpr unsigned kSubmissionsPerSecond = 32;
+} // namespace
+
+
 HttpServices::HttpServices(std::shared_ptr<HttpRequestHandler> handler, boost::asio::thread_pool &submissions,
                            boost::asio::thread_pool &recovery,
                            std::shared_ptr<boost::asio::ssl::context> tls, unsigned submission_workers,
                            unsigned enrollments_per_hour, unsigned enrollments_per_network)
     : handler_(std::move(handler)), submissions_(submissions), recovery_(recovery), tls_(std::move(tls)),
       // One network can hold half of the jobs, so it cannot starve everyone else.
-      submission_jobs_({2 * submission_workers, submission_workers, 64, 32}),
+      submission_jobs_({2 * submission_workers, submission_workers, kSubmissionBurst, kSubmissionsPerSecond}),
       enrollments_({enrollments_per_network, enrollments_per_hour}) {}
 
 std::unique_ptr<HttpConnection> HttpServices::Connect(const boost::asio::ip::address &peer) {
@@ -27,10 +34,10 @@ bool HttpServices::Dispatch(Request request, std::shared_ptr<grpc::ClientContext
                             std::string_view network, std::function<void(Response)> complete) {
   const auto &body = request.body();
   // Classification reserves workers, never grants authentication or ownership.
-  const bool recovering = secure && request.target() == "/wt/v1" && body.size() >= 80 &&
-      body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] >= 3 && body[5] <= 7;
-  const bool enrolling = secure && request.target() == "/wt/v1" && body.size() >= 6 &&
-      body.compare(0, 5, "WTDS\1", 5) == 0 && body[5] == 1;
+  const bool recovering = secure && request.target() == "/wt/v1" && body.size() >= wire::kRequestHeaderSize &&
+      body.compare(0, wire::kMagic.size(), wire::kMagic) == 0 && body[wire::kRequestOperation] >= wire::kStatus && body[wire::kRequestOperation] <= wire::kReconcile;
+  const bool enrolling = secure && request.target() == "/wt/v1" && body.size() > wire::kRequestOperation &&
+      body.compare(0, wire::kMagic.size(), wire::kMagic) == 0 && body[wire::kRequestOperation] == wire::kEnroll;
   if (enrolling && !enrollments_.Allow(std::string(network), body)) { Telemetry::Global().Refused(); return false; }
   auto permit = (recovering ? recovery_jobs_ : submission_jobs_).Acquire(network);
   if (!permit) { Telemetry::Global().Refused(); return false; }

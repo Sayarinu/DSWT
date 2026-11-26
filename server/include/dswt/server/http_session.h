@@ -1,6 +1,7 @@
 #ifndef DSWT_SERVER_HTTP_SESSION_H
 #define DSWT_SERVER_HTTP_SESSION_H
 
+#include "dswt/server/http_limits.h"
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/beast/ssl.hpp>
@@ -37,13 +38,13 @@ private:
   Stream stream_;
   boost::asio::any_io_executor executor_;
   boost::asio::steady_timer deadline_;
-  boost::beast::flat_buffer buffer_{6144};
+  boost::beast::flat_buffer buffer_{kHeaderLimitBytes + wire::kMaxPacket};
   boost::beast::http::request_parser<boost::beast::http::string_body> parser_;
   boost::beast::http::response<boost::beast::http::string_body> response_;
   std::shared_ptr<grpc::ClientContext> context_ = std::make_shared<grpc::ClientContext>();
   Phase phase_ = Phase::Reading;
   char probe_[1]{};
-  unsigned version_ = 11;
+  unsigned version_ = kHttp11;
 };
 
 } // namespace dswt::server

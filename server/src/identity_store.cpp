@@ -1,3 +1,5 @@
+#include "hex_digits.h"
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/identity_store.h"
 
 #include "game_variant.h"
@@ -16,6 +18,7 @@
 
 namespace dswt::server {
 namespace {
+constexpr int kIdentityAttempts = 8;
 
 template <std::size_t N>
 bool Nonzero(const std::array<unsigned char, N> &bytes) {
@@ -29,8 +32,8 @@ std::string Hex(const std::array<unsigned char, N> &bytes) {
   std::string result;
   result.reserve(N * 2);
   for (auto value : bytes) {
-    result += digits[value >> 4];
-    result += digits[value & 15];
+    result += digits[value >> kNibbleBits];
+    result += digits[value & kNibbleMask];
   }
   return result;
 }
@@ -43,12 +46,12 @@ std::array<unsigned char, N> Unhex(std::string_view text) {
     if (value >= '0' && value <= '9')
       return value - '0';
     if (value >= 'a' && value <= 'f')
-      return value - 'a' + 10;
+      return value - 'a' + kHexLetterBase;
     throw std::runtime_error("invalid stored identity data");
   };
   std::array<unsigned char, N> result{};
   for (std::size_t index = 0; index < N; ++index)
-    result[index] = static_cast<unsigned char>(nibble(text[index * 2]) * 16 +
+    result[index] = static_cast<unsigned char>(nibble(text[index * 2]) * kHexRadix +
                                                nibble(text[index * 2 + 1]));
   return result;
 }
@@ -63,17 +66,17 @@ IdentityId RandomId() {
 SaveCredential Verifier(const IdentityId &id,
                         const SaveCredential &credential) {
   constexpr char domain[] = "DSWT save credential v1";
-  std::array<unsigned char, sizeof(domain) + 16 + 32> input{};
+  std::array<unsigned char, sizeof(domain) + wire::kIdSize + wire::kCredentialSize> input{};
   std::copy_n(domain, sizeof(domain), input.begin());
   std::copy(id.begin(), id.end(), input.begin() + sizeof(domain));
   std::copy(credential.begin(), credential.end(),
-            input.begin() + sizeof(domain) + 16);
+            input.begin() + sizeof(domain) + wire::kIdSize);
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
   std::size_t size = 0;
   const int status = EVP_Q_digest(nullptr, "SHA256", nullptr, input.data(),
                                   input.size(), digest.data(), &size);
   OPENSSL_cleanse(input.data(), input.size());
-  if (status != 1 || size != 32)
+  if (status != 1 || size != wire::kDigestSize)
     throw std::runtime_error("credential verification unavailable");
   SaveCredential result{};
   std::copy_n(digest.begin(), result.size(), result.begin());
@@ -84,7 +87,7 @@ SaveCredential Verifier(const IdentityId &id,
 bool Matches(const IdentityId &id, const SaveCredential &credential,
              std::string_view stored) {
   const auto expected = Verifier(id, credential);
-  const auto actual = stored.empty() ? SaveCredential{} : Unhex<32>(stored);
+  const auto actual = stored.empty() ? SaveCredential{} : Unhex<wire::kDigestSize>(stored);
   return CRYPTO_memcmp(expected.data(), actual.data(), actual.size()) == 0;
 }
 
@@ -93,7 +96,7 @@ bool Matches(const IdentityId &id, const SaveCredential &credential,
 bool detail::CredentialMatches(std::string_view save_id,
                                std::string_view credential,
                                std::string_view stored_hex) {
-  if (save_id.size() != 16 || credential.size() != 32)
+  if (save_id.size() != wire::kIdSize || credential.size() != wire::kCredentialSize)
     return false;
   IdentityId id{};
   SaveCredential secret{};
@@ -122,7 +125,7 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
   if (!Nonzero(enrollment_id) || !Nonzero(credential) ||
       !detail::ValidVariant(variant))
     return std::nullopt;
-  for (int attempt = 0; attempt < 8; ++attempt) {
+  for (int attempt = 0; attempt < kIdentityAttempts; ++attempt) {
     try {
       detail::Transaction transaction(impl_->database);
       auto existing = impl_->database.Parameters(
@@ -132,7 +135,7 @@ IdentityStore::Enroll(const IdentityId &enrollment_id,
           "USING (save_id) WHERE enrollment_id = $1::uuid",
           {Hex(enrollment_id)});
       if (PQntuples(existing.get()) == 1) {
-        const auto id = Unhex<16>(PQgetvalue(existing.get(), 0, 0));
+        const auto id = Unhex<wire::kIdSize>(PQgetvalue(existing.get(), 0, 0));
         if (!Matches(id, credential, PQgetvalue(existing.get(), 0, 1)) ||
             !detail::SameVariant(static_cast<std::uint32_t>(std::stoul(
                                      PQgetvalue(existing.get(), 0, 2))),

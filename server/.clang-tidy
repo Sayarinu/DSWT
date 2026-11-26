@@ -1,0 +1,5 @@
+Checks: '-*,readability-magic-numbers'
+WarningsAsErrors: 'readability-magic-numbers'
+HeaderFilterRegex: '(/src/|/include/dswt/)'
+CheckOptions:
+  readability-magic-numbers.IgnoredIntegerValues: '0;1;2'

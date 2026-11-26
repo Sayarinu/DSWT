@@ -19,7 +19,7 @@ def client_layout():
 
 
 def server_layout():
-    text = (ROOT / "server/src/wire_layout.h").read_text()
+    text = (ROOT / "server/include/dswt/server/wire_layout.h").read_text()
     values = dict(re.findall(r"\b(k\w+) = (\w+)[,;]", text))
     return {name: int(value, 0) for name, value in values.items()}
 
@@ -51,7 +51,7 @@ class WireLayoutTests(unittest.TestCase):
         self.assertEqual(client["VERSION_REFUSAL_REASON"], wire.VERSION_REFUSAL_REASON)
         magic = '"WTDS\\1"'
         self.assertIn(f"#define WT_WIRE_MAGIC {magic}", (ROOT / "client/core/include/wonder_trade/wire_layout.h").read_text())
-        self.assertIn(f"kMagic{{{magic}, 5}}", (ROOT / "server/src/wire_layout.h").read_text())
+        self.assertIn(f"kMagic{{{magic}, 5}}", (ROOT / "server/include/dswt/server/wire_layout.h").read_text())
 
     def test_layout_matches_the_reference_codec(self):
         c = client_layout()

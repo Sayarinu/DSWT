@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dswt/server/wire_layout.h"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -71,7 +72,7 @@ public:
   ~RpcTelemetry();
   RpcTelemetry(const RpcTelemetry &) = delete;
   RpcTelemetry &operator=(const RpcTelemetry &) = delete;
-  void Trade(std::string_view id) noexcept { try { if (id.size() == 16) trade_id_.assign(id); } catch (...) {} }
+  void Trade(std::string_view id) noexcept { try { if (id.size() == wire::kIdSize) trade_id_.assign(id); } catch (...) {} }
 private:
   Operation operation_;
   std::function<unsigned()> result_;

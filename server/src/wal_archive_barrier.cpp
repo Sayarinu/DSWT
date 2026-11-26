@@ -1,3 +1,4 @@
+#include "hex_digits.h"
 #include "dswt/server/wal_archive_barrier.h"
 
 #include "bounded_query.h"
@@ -12,6 +13,9 @@
 
 namespace dswt::server {
 namespace {
+constexpr std::size_t kWalFieldDigits = 8;
+constexpr std::size_t kWalNameDigits = 3 * kWalFieldDigits;
+constexpr std::uint64_t kWalLogBytes = 0x100000000ULL;
 
 struct Segment {
   std::uint32_t timeline;
@@ -20,21 +24,21 @@ struct Segment {
 
 std::uint32_t Hex(std::string_view text) {
   std::uint32_t value = 0;
-  for (const char c : text) value = value << 4 | static_cast<std::uint32_t>(c <= '9' ? c - '0' : c - 'A' + 10);
+  for (const char c : text) value = value << kNibbleBits | static_cast<std::uint32_t>(c <= '9' ? c - '0' : c - 'A' + kHexLetterBase);
   return value;
 }
 
 // Backup and timeline history files also appear as the last archived name.
 std::optional<Segment> ParseSegment(std::string_view name) {
-  if (name.size() != 24 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+  if (name.size() != kWalNameDigits || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
         return std::isdigit(c) || (c >= 'A' && c <= 'F');
       })) return std::nullopt;
-  return Segment{Hex(name.substr(0, 8)), Hex(name.substr(8, 8)), Hex(name.substr(16, 8))};
+  return Segment{Hex(name.substr(0, kWalFieldDigits)), Hex(name.substr(kWalFieldDigits, kWalFieldDigits)), Hex(name.substr(2 * kWalFieldDigits, kWalFieldDigits))};
 }
 
 // PostgreSQL's segment names count segments within 4 GiB logical files.
 std::uint64_t SegmentEnd(const Segment &segment, std::uint64_t size) {
-  return (segment.log * (0x100000000ULL / size) + segment.number + 1) * size;
+  return (segment.log * (kWalLogBytes / size) + segment.number + 1) * size;
 }
 
 constexpr auto kQuery = "SELECT a.last_archived_wal, pg_walfile_name(pg_current_wal_flush_lsn()), "
@@ -86,15 +90,16 @@ struct WalArchiveBarrier::Impl {
   Observation Observe(const std::string &database, WalCoverage coverage) const {
     const auto row = detail::BoundedQuery(database, kQuery, "dswt-recovery", stopped);
     if (!row || PQntuples(row.get()) != 1) return {};
-    for (const int column : {1, 2, 3, 4}) if (PQgetisnull(row.get(), 0, column)) return {};
+    enum Column { LastArchived, CurrentSegment, SegmentSize, Flushed, ArchiveFailing };
+    for (const int column : {CurrentSegment, SegmentSize, Flushed, ArchiveFailing}) if (PQgetisnull(row.get(), 0, column)) return {};
     std::optional<std::string> last;
-    if (!PQgetisnull(row.get(), 0, 0)) last = PQgetvalue(row.get(), 0, 0);
+    if (!PQgetisnull(row.get(), 0, LastArchived)) last = PQgetvalue(row.get(), 0, LastArchived);
     try {
       Observation observed;
-      observed.force.segment_size = std::stoull(PQgetvalue(row.get(), 0, 2));
-      observed.force.flushed = std::stoull(PQgetvalue(row.get(), 0, 3));
-      observed.force.archive_failing = std::string_view(PQgetvalue(row.get(), 0, 4)) == "t";
-      observed.coverage = NextWalCoverage(coverage, last, PQgetvalue(row.get(), 0, 1), observed.force.segment_size);
+      observed.force.segment_size = std::stoull(PQgetvalue(row.get(), 0, SegmentSize));
+      observed.force.flushed = std::stoull(PQgetvalue(row.get(), 0, Flushed));
+      observed.force.archive_failing = std::string_view(PQgetvalue(row.get(), 0, ArchiveFailing)) == "t";
+      observed.coverage = NextWalCoverage(coverage, last, PQgetvalue(row.get(), 0, CurrentSegment), observed.force.segment_size);
       // A history file can hide a segment archived since the last poll, so coverage may be
       // stale. Treating it as unknown still gets a waiter out of an otherwise idle segment.
       observed.force.covered = last && ParseSegment(*last) ? observed.coverage.end : 0;

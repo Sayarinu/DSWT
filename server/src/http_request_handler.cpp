@@ -1,7 +1,10 @@
+#include "dswt/server/http_limits.h"
 #include "dswt/server/http_request_handler.h"
 
 #include "dswt/server/connectivity_service.h"
 #include "dswt/server/telemetry.h"
+
+#include "trade.pb.h"
 
 #include <algorithm>
 #include <chrono>
@@ -47,9 +50,9 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
       response.result(http::status::method_not_allowed);
       response.set(http::field::allow, "POST");
     } else if (!secure) response.result(http::status::forbidden);
-    else if (request.version() != 11 || request.count(http::field::host) != 1 || request[http::field::host].empty() ||
+    else if (request.version() != kHttp11 || request.count(http::field::host) != 1 || request[http::field::host].empty() ||
         request.count(http::field::content_length) != 1 || !valid_length ||
-        size != request.body().size() || size > 4096 || request.chunked() || request.count(http::field::transfer_encoding) != 0 ||
+        size != request.body().size() || size > wire::kMaxPacket || request.chunked() || request.count(http::field::transfer_encoding) != 0 ||
         request.count(http::field::content_encoding) != 0 || request.count(http::field::expect) != 0 ||
         request.count(http::field::upgrade) != 0 || request.count(http::field::content_type) != 1 ||
         request[http::field::content_type] != "application/octet-stream" || request.count(http::field::connection) != 1 ||
@@ -89,7 +92,7 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
 
   response.prepare_payload();
   if (request.target() == "/wt/v1" && !exchanged)
-    Telemetry::Global().Record(Operation::Invalid, response.result() == http::status::service_unavailable ? 11 : 3,
+    Telemetry::Global().Record(Operation::Invalid, response.result() == http::status::service_unavailable ? v1::RESULT_UNAVAILABLE : v1::RESULT_INVALID_REQUEST,
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - begin));
   return response;
 }

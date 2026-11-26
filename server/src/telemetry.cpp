@@ -1,3 +1,5 @@
+#include "hex_digits.h"
+#include "dswt/server/wire_layout.h"
 #include "dswt/server/telemetry.h"
 
 #include <algorithm>
@@ -11,6 +13,7 @@
 
 namespace dswt::server {
 namespace {
+constexpr int kMetricPrecision = 12;
 constexpr const char *kOperationNames[] = {"invalid", "enroll", "submit", "status", "cancel", "collect", "acknowledge", "reconcile", "match", "legality"};
 constexpr const char *kResultNames[] = {"transport_error", "ok", "processing", "invalid_request", "unauthenticated", "conflict", "not_found",
                                   "capacity", "illegal_pokemon", "counter_mismatch", "cursor_ahead", "unavailable"};
@@ -23,12 +26,12 @@ unsigned Index(Operation operation) {
 }
 
 std::string HexId(std::string_view bytes) {
-  if (bytes.size() != 16 || std::all_of(bytes.begin(), bytes.end(), [](char byte) { return byte == 0; })) return {};
+  if (bytes.size() != wire::kIdSize || std::all_of(bytes.begin(), bytes.end(), [](char byte) { return byte == 0; })) return {};
   constexpr char digits[] = "0123456789abcdef";
-  std::string value(32, '0');
-  for (unsigned i = 0; i < 16; ++i) {
+  std::string value(2 * wire::kIdSize, '0');
+  for (unsigned i = 0; i < wire::kIdSize; ++i) {
     const auto byte = static_cast<unsigned char>(bytes[i]);
-    value[i * 2] = digits[byte >> 4]; value[i * 2 + 1] = digits[byte & 15];
+    value[i * 2] = digits[byte >> kNibbleBits]; value[i * 2 + 1] = digits[byte & kNibbleMask];
   }
   return value;
 }
@@ -119,7 +122,7 @@ std::string Telemetry::LogLine(Operation operation, unsigned result, std::uint64
   output << "{\"event\":\"trade_request\",\"service\":\"" << RoleName(role) << "\",\"timestamp_ms\":"
          << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()
          << ",\"operation\":\"" << kOperationNames[Index(operation)]
-         << "\",\"result\":\"" << kResultNames[result < 12 ? result : 0] << "\",\"duration_us\":" << elapsed;
+         << "\",\"result\":\"" << kResultNames[result < std::size(kResultNames) ? result : 0] << "\",\"duration_us\":" << elapsed;
   for (const auto &field : {std::pair{"request_id", request}, std::pair{"operation_id", mutation}, std::pair{"trade_id", trade}}) {
     const auto identifier = HexId(field.second);
     if (!identifier.empty()) output << ",\"" << field.first << "\":\"" << identifier << '"';
@@ -154,7 +157,7 @@ void Telemetry::SetLedger(LedgerMetrics metrics) {
 std::string Telemetry::Render() const {
   std::ostringstream output;
   output.imbue(std::locale::classic());
-  output << std::setprecision(12);
+  output << std::setprecision(kMetricPrecision);
   const char *role = RoleName(role_);
   output << "# HELP dswt_requests_total Completed API/legality attempts; not committed trades.\n# TYPE dswt_requests_total counter\n";
   for (unsigned op = 0; op < kOperations; ++op) {
@@ -168,12 +171,12 @@ std::string Telemetry::Render() const {
     std::uint64_t count = 0;
     for (unsigned bucket = 0; bucket < kBuckets; ++bucket) {
       count += latency_[op][bucket].load();
-      output << "dswt_request_duration_seconds_bucket{" << labels << ",le=\"" << kBounds[bucket] / 1000000.0 << "\"} " << count << '\n';
+      output << "dswt_request_duration_seconds_bucket{" << labels << ",le=\"" << kBounds[bucket] / static_cast<double>(std::micro::den) << "\"} " << count << '\n';
     }
     count += latency_[op][kBuckets].load();
     output << "dswt_request_duration_seconds_bucket{" << labels << ",le=\"+Inf\"} " << count << '\n';
     output << "dswt_request_duration_seconds_count{" << labels << "} " << count << '\n';
-    output << "dswt_request_duration_seconds_sum{" << labels << "} " << elapsed_us_[op].load() / 1000000.0 << '\n';
+    output << "dswt_request_duration_seconds_sum{" << labels << "} " << elapsed_us_[op].load() / static_cast<double>(std::micro::den) << '\n';
   }
   output << "# TYPE dswt_operation_replays_total counter\ndswt_operation_replays_total{service=\"" << role << "\"} " << replays_.load() << '\n';
   output << "# TYPE dswt_dropped_logs_total counter\ndswt_dropped_logs_total{service=\"" << role << "\"} " << dropped_logs_.load() + log_queue_->dropped.load() << '\n';
@@ -203,12 +206,12 @@ RpcTelemetry::RpcTelemetry(Operation operation, grpc::ServerContext *context, st
                            std::string_view mutation, std::string_view trade, std::string_view request) noexcept
     : operation_(operation), result_(std::move(result)) {
   try {
-    if (mutation.size() == 16) operation_id_.assign(mutation);
-    if (trade.size() == 16) trade_id_.assign(trade);
-    if (request.size() == 16) request_id_.assign(request);
+    if (mutation.size() == wire::kIdSize) operation_id_.assign(mutation);
+    if (trade.size() == wire::kIdSize) trade_id_.assign(trade);
+    if (request.size() == wire::kIdSize) request_id_.assign(request);
     if (context) {
       const auto found = context->client_metadata().find("x-dswt-request-id-bin");
-      if (found != context->client_metadata().end() && found->second.size() == 16) request_id_.assign(found->second.data(), 16);
+      if (found != context->client_metadata().end() && found->second.size() == wire::kIdSize) request_id_.assign(found->second.data(), wire::kIdSize);
     }
   } catch (...) {}
 }

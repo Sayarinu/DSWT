@@ -1,3 +1,4 @@
+#include "dswt/server/http_limits.h"
 #include "dswt/server/metrics_server.h"
 
 #include "bounded_query.h"
@@ -15,11 +16,15 @@ namespace http = beast::http;
 using tcp = asio::ip::tcp;
 
 namespace {
+constexpr unsigned kMetricsHeaderBytes = 1024;
+constexpr std::size_t kMetricsBufferBytes = 2048;
+constexpr unsigned kConcurrentScrapes = 16;
+constexpr auto kSampleInterval = std::chrono::seconds(5);
 class Scrape : public std::enable_shared_from_this<Scrape> {
 public:
   Scrape(tcp::socket socket, std::shared_ptr<std::atomic<unsigned>> active)
       : stream_(std::move(socket)), active_(std::move(active)) {
-    parser_.header_limit(1024); parser_.body_limit(0);
+    parser_.header_limit(kMetricsHeaderBytes); parser_.body_limit(0);
   }
   ~Scrape() { active_->fetch_sub(1); }
   void Run() {
@@ -27,7 +32,7 @@ public:
     http::async_read(stream_, buffer_, parser_, [self = shared_from_this()](beast::error_code error, std::size_t) {
       if (error) return;
       const auto &request = self->parser_.get();
-      self->response_.version(11);
+      self->response_.version(kHttp11);
       self->response_.keep_alive(false);
       self->response_.set(http::field::cache_control, "no-store");
       if (request.method() != http::verb::get) self->response_.result(http::status::method_not_allowed);
@@ -47,7 +52,7 @@ public:
   }
 private:
   beast::tcp_stream stream_;
-  beast::flat_buffer buffer_{2048};
+  beast::flat_buffer buffer_{kMetricsBufferBytes};
   http::request_parser<http::empty_body> parser_;
   http::response<http::string_body> response_;
   std::shared_ptr<std::atomic<unsigned>> active_;
@@ -60,7 +65,7 @@ public:
   void Run() {
     acceptor_.async_accept([self = shared_from_this()](beast::error_code error, tcp::socket socket) {
       if (!error) {
-        if (self->active_->fetch_add(1) < 16) std::make_shared<Scrape>(std::move(socket), self->active_)->Run();
+        if (self->active_->fetch_add(1) < kConcurrentScrapes) std::make_shared<Scrape>(std::move(socket), self->active_)->Run();
         else self->active_->fetch_sub(1);
       }
       if (self->acceptor_.is_open()) self->Run();
@@ -92,16 +97,17 @@ LedgerMetrics SampleLedgerMetrics(const std::string &database, const std::atomic
       "dswt-metrics", stopped);
   if (!row || PQntuples(row.get()) != 1) return metrics;
   try {
-    metrics.queued = std::stoull(PQgetvalue(row.get(), 0, 0));
-    metrics.pending = std::stoull(PQgetvalue(row.get(), 0, 1));
-    metrics.oldest_queue_seconds = std::stod(PQgetvalue(row.get(), 0, 2));
-    metrics.oldest_delivery_seconds = std::stod(PQgetvalue(row.get(), 0, 3));
-    metrics.unknown_queue_ages = std::stoull(PQgetvalue(row.get(), 0, 4));
-    metrics.unknown_delivery_ages = std::stoull(PQgetvalue(row.get(), 0, 5));
-    metrics.matched = std::stoull(PQgetvalue(row.get(), 0, 6));
-    metrics.completed = std::stoull(PQgetvalue(row.get(), 0, 7));
-    metrics.acknowledged = std::stoull(PQgetvalue(row.get(), 0, 8));
-    metrics.up = std::string_view(PQgetvalue(row.get(), 0, 9)) == "t";
+    enum Column { Queued, Pending, OldestQueue, OldestDelivery, UnknownQueue, UnknownDelivery, Matched, Completed, Acknowledged, Up };
+    metrics.queued = std::stoull(PQgetvalue(row.get(), 0, Queued));
+    metrics.pending = std::stoull(PQgetvalue(row.get(), 0, Pending));
+    metrics.oldest_queue_seconds = std::stod(PQgetvalue(row.get(), 0, OldestQueue));
+    metrics.oldest_delivery_seconds = std::stod(PQgetvalue(row.get(), 0, OldestDelivery));
+    metrics.unknown_queue_ages = std::stoull(PQgetvalue(row.get(), 0, UnknownQueue));
+    metrics.unknown_delivery_ages = std::stoull(PQgetvalue(row.get(), 0, UnknownDelivery));
+    metrics.matched = std::stoull(PQgetvalue(row.get(), 0, Matched));
+    metrics.completed = std::stoull(PQgetvalue(row.get(), 0, Completed));
+    metrics.acknowledged = std::stoull(PQgetvalue(row.get(), 0, Acknowledged));
+    metrics.up = std::string_view(PQgetvalue(row.get(), 0, Up)) == "t";
   } catch (const std::exception &) { return {}; }
   return metrics;
 }
@@ -124,7 +130,7 @@ struct MetricsServer::Impl {
           lock.unlock();
           Telemetry::Global().SetLedger(SampleLedgerMetrics(database, stopped));
           lock.lock();
-          changed.wait_for(lock, std::chrono::seconds(5), [this] { return stopped.load(); });
+          changed.wait_for(lock, kSampleInterval, [this] { return stopped.load(); });
         }
       });
     } catch (...) { Stop(); throw; }

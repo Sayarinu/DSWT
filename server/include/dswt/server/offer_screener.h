@@ -21,7 +21,8 @@ public:
   // Screen up to `limit` offers and return how many were recorded. It never holds
   // a database transaction while waiting on the validator, and setting `stopped`
   // ends a wait on a stalled database.
-  std::size_t Poll(std::size_t limit = 16, const std::atomic<bool> *stopped = nullptr);
+  static constexpr std::size_t kBatchSize = 16;
+  std::size_t Poll(std::size_t limit = kBatchSize, const std::atomic<bool> *stopped = nullptr);
 
 private:
   std::string connection_info_;

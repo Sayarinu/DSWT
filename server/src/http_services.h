@@ -33,10 +33,12 @@ private:
   std::shared_ptr<HttpRequestHandler> handler_;
   boost::asio::thread_pool &submissions_, &recovery_;
   std::shared_ptr<boost::asio::ssl::context> tls_;
-  detail::Quota connections_{{1024, 64, 128, 64}};
+  static constexpr detail::Quota::Limits kConnectionLimits{1024, 64, 128, 64};
+  detail::Quota connections_{kConnectionLimits};
   detail::Quota submission_jobs_;
   detail::EnrollmentBudget enrollments_;
-  detail::Quota recovery_jobs_{{16, 8, 256, 128}};
+  static constexpr detail::Quota::Limits kRecoveryJobLimits{16, 8, 256, 128};
+  detail::Quota recovery_jobs_{kRecoveryJobLimits};
 };
 
 } // namespace dswt::server

@@ -11,6 +11,8 @@
 
 namespace dswt::server {
 namespace {
+constexpr std::size_t kMaxMigrationBytes = 1024 * 1024;
+constexpr std::size_t kMigrationVersionDigits = 4;
 
 using detail::Transaction;
 
@@ -27,7 +29,7 @@ std::vector<Migration> ReadMigrations(const std::filesystem::path &directory) {
       continue;
     if (entry.is_symlink() || !entry.is_regular_file() ||
         !std::regex_match(entry.path().filename().string(), name) ||
-        entry.file_size() > 1024 * 1024) {
+        entry.file_size() > kMaxMigrationBytes) {
       throw std::runtime_error("invalid migration input");
     }
     paths.push_back(entry.path());
@@ -35,7 +37,7 @@ std::vector<Migration> ReadMigrations(const std::filesystem::path &directory) {
   std::sort(paths.begin(), paths.end());
   std::vector<Migration> migrations;
   for (const auto &path : paths) {
-    const auto version = path.filename().string().substr(0, 4);
+    const auto version = path.filename().string().substr(0, kMigrationVersionDigits);
     if (std::stoul(version) != migrations.size() + 1) {
       throw std::runtime_error(
           "migrations must start at one and be contiguous");

@@ -1,7 +1,9 @@
+#include <climits>
+#include "dswt/server/http_limits.h"
 #include "dswt/server/trade_gateway.h"
 
 #include "trade_encoding.h"
-#include "wire_layout.h"
+#include "dswt/server/wire_layout.h"
 #include "trade.grpc.pb.h"
 #include "dswt/server/telemetry.h"
 
@@ -23,10 +25,10 @@ void Require(bool condition) {
 }
 
 std::uint64_t Number(std::string_view bytes, std::size_t offset, std::size_t size) {
-  if (size > 8 || offset > bytes.size() || size > bytes.size() - offset) throw InvalidFrame();
+  if (size > sizeof(std::uint64_t) || offset > bytes.size() || size > bytes.size() - offset) throw InvalidFrame();
   std::uint64_t value = 0;
   for (std::size_t i = 0; i < size; ++i)
-    value |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[offset + i])) << (8 * i);
+    value |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[offset + i])) << (CHAR_BIT * i);
   return value;
 }
 
@@ -53,7 +55,7 @@ Frame Decode(std::string_view packet) {
       packet[wire::kMagic.size() - 1] < wire::kMagic.back() || packet[wire::kMagic.size() - 1] > wire::kVersionRefusalReason ||
       Number(packet, wire::kRequestBodyLength, 2) != packet.size() - wire::kRequestHeaderSize) throw InvalidFrame();
   Frame frame{static_cast<unsigned char>(packet[wire::kMagic.size() - 1]), static_cast<unsigned char>(packet[wire::kRequestOperation]),
-              std::string(packet.substr(wire::kRequestId, wire::kIdSize)), {}, Number(packet, wire::kRequestCounter, 8),
+              std::string(packet.substr(wire::kRequestId, wire::kIdSize)), {}, Number(packet, wire::kRequestCounter, sizeof(std::uint64_t)),
               packet.substr(wire::kRequestHeaderSize)};
   frame.auth.set_save_id(std::string(packet.substr(wire::kRequestSaveId, wire::kIdSize)));
   frame.auth.set_credential(std::string(packet.substr(wire::kRequestCredential, wire::kCredentialSize)));
@@ -73,9 +75,9 @@ Frame Decode(std::string_view packet) {
   // Cancel, Collect and Acknowledge bodies all start with the trade ID.
   if ((frame.operation == wire::kCancel || frame.operation == wire::kCollect || frame.operation == wire::kAcknowledge) &&
       !detail::NonzeroBytes(frame.body.substr(wire::kAckTrade, wire::kIdSize), wire::kIdSize)) throw InvalidFrame();
-  if (frame.operation == wire::kSubmit && Number(frame.body, wire::kSubmitGeneration, 8) == 0) throw InvalidFrame();
+  if (frame.operation == wire::kSubmit && Number(frame.body, wire::kSubmitGeneration, sizeof(std::uint64_t)) == 0) throw InvalidFrame();
   if (frame.operation == wire::kAcknowledge && (!detail::NonzeroBytes(frame.body.substr(wire::kAckReceipt, wire::kIdSize), wire::kIdSize) ||
-      Number(frame.body, wire::kAckGeneration, 8) == 0)) throw InvalidFrame();
+      Number(frame.body, wire::kAckGeneration, sizeof(std::uint64_t)) == 0)) throw InvalidFrame();
   if (frame.operation == wire::kReconcile && (Number(frame.body, wire::kReconcileLimit, 1) < 1 ||
       Number(frame.body, wire::kReconcileLimit, 1) > wire::kReconcileLimitMax)) throw InvalidFrame();
   return frame;
@@ -135,7 +137,7 @@ std::string Event(const v1::TradeEvent &event, bool server_returns) {
     }
   }
   std::string bytes;
-  detail::AppendUnsigned(bytes, event.sequence(), 8);
+  detail::AppendUnsigned(bytes, event.sequence(), sizeof(std::uint64_t));
   bytes += static_cast<char>(kind);
   for (const auto &field : {std::pair{&event.trade_id(), wire::kIdSize}, std::pair{&event.operation_id(), wire::kIdSize},
        std::pair{&event.asset_id(), wire::kIdSize}, std::pair{&event.payload_sha256(), wire::kDigestSize},
@@ -167,8 +169,8 @@ std::string Envelope(const Frame &frame, const v1::ReplyContext &context, const 
        (frame.operation == wire::kCollect && context.result() == v1::RESULT_OK));
   Require(refusal || context.refusal() == v1::REFUSAL_UNSPECIFIED || frame.version < wire::kVersionRefusalReason);
   detail::AppendUnsigned(bytes, refusal ? context.refusal() : 0, 2);
-  detail::AppendUnsigned(bytes, context.next_counter(), 8);
-  detail::AppendUnsigned(bytes, context.event_highwater(), 8);
+  detail::AppendUnsigned(bytes, context.next_counter(), sizeof(std::uint64_t));
+  detail::AppendUnsigned(bytes, context.event_highwater(), sizeof(std::uint64_t));
   Require(bytes.size() == wire::kReplyHeaderSize);
   bytes += body;
   Require(bytes.size() <= wire::kMaxPacket);
@@ -202,7 +204,7 @@ std::string Outcome(const Frame &frame, const v1::MutationReply &reply) {
   if (frame.operation == wire::kAcknowledge) Require(reply.outcome().receipt_id() == frame.body.substr(wire::kAckReceipt, wire::kIdSize) &&
       reply.outcome().received_sha256() == frame.body.substr(wire::kAckDeliveredDigest, wire::kDigestSize));
   std::string bytes;
-  detail::AppendUnsigned(bytes, reply.operation_event(), 8);
+  detail::AppendUnsigned(bytes, reply.operation_event(), sizeof(std::uint64_t));
   return bytes + Snapshot(reply.outcome(), reply.context().event_highwater());
 }
 
@@ -229,12 +231,12 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
     RpcTelemetry trace(static_cast<Operation>(frame.operation), nullptr, [&] { return observed; },
                        mutation ? std::string_view(frame.request_id) : std::string_view{}, trade, frame.request_id);
     context.AddMetadata("x-dswt-request-id-bin", frame.request_id);
-    context.set_deadline(std::min(context.deadline(), std::chrono::system_clock::now() + std::chrono::seconds(4)));
+    context.set_deadline(std::min(context.deadline(), std::chrono::system_clock::now() + kBackendTimeout));
     if (frame.operation == wire::kEnroll) {
       v1::EnrollRequest request;
       request.set_enrollment_id(frame.request_id);
       request.set_credential(frame.auth.credential());
-      request.set_client_build(Number(frame.body, wire::kEnrollBuild, 4));
+      request.set_client_build(Number(frame.body, wire::kEnrollBuild, sizeof(std::uint32_t)));
       request.set_hints(std::string(frame.body.substr(wire::kEnrollHints)));
       v1::EnrollReply reply;
       const auto status = impl_->identities->Enroll(&context, request, &reply);
@@ -246,7 +248,7 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
     if (frame.operation == wire::kSubmit) {
       v1::SubmitRequest request;
       *request.mutable_context() = frame.Mutation();
-      request.set_escrow_generation(Number(frame.body, wire::kSubmitGeneration, 8));
+      request.set_escrow_generation(Number(frame.body, wire::kSubmitGeneration, sizeof(std::uint64_t)));
       request.mutable_pokemon()->set_pk4(std::string(frame.body.substr(wire::kSubmitPokemon, wire::kPk4Size)));
       request.mutable_pokemon()->set_sha256(std::string(frame.body.substr(wire::kSubmitDigest, wire::kDigestSize)));
       v1::MutationReply reply;
@@ -294,14 +296,14 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
       request.set_receipt_id(std::string(frame.body.substr(wire::kAckReceipt, wire::kIdSize)));
       request.set_delivered_sha256(std::string(frame.body.substr(wire::kAckDeliveredDigest, wire::kDigestSize)));
       request.set_applied_sha256(std::string(frame.body.substr(wire::kAckAppliedDigest, wire::kDigestSize)));
-      request.set_applied_generation(Number(frame.body, wire::kAckGeneration, 8));
+      request.set_applied_generation(Number(frame.body, wire::kAckGeneration, sizeof(std::uint64_t)));
       v1::MutationReply reply;
       const auto status = impl_->trades->Acknowledge(&context, request, &reply);
       return Finish(frame, status, reply, observed, [&](const auto &value) { return Outcome(frame, value); });
     }
     v1::ReconcileRequest request;
     *request.mutable_auth() = frame.auth;
-    request.set_after_event(Number(frame.body, wire::kReconcileAfter, 8));
+    request.set_after_event(Number(frame.body, wire::kReconcileAfter, sizeof(std::uint64_t)));
     request.set_limit(Number(frame.body, wire::kReconcileLimit, 1));
     v1::ReconcileReply reply;
     const auto status = impl_->trades->Reconcile(&context, request, &reply);
@@ -315,11 +317,11 @@ GatewayReply TradeGateway::Exchange(std::string_view packet, grpc::ClientContext
           (!value.has_more() || value.events_size() == static_cast<int>(request.limit())));
       std::string bytes;
       bytes += static_cast<char>(value.events_size()); bytes += static_cast<char>(value.has_more());
-      detail::AppendUnsigned(bytes, sequence, 8);
+      detail::AppendUnsigned(bytes, sequence, sizeof(std::uint64_t));
       return bytes + events;
     });
   } catch (const InvalidFrame &) {
-    Telemetry::Global().Record(Operation::Invalid, 3, std::chrono::microseconds(0));
+    Telemetry::Global().Record(Operation::Invalid, v1::RESULT_INVALID_REQUEST, std::chrono::microseconds(0));
     return {GatewayReply::Status::Invalid, {}};
   } catch (const std::exception &) {
     return {};

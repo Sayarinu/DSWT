@@ -1,3 +1,4 @@
+#include "dswt/server/http_limits.h"
 #include "dswt/server/http_session.h"
 
 #include "http_services.h"
@@ -12,12 +13,9 @@ namespace beast = boost::beast;
 namespace http = beast::http;
 using tcp = asio::ip::tcp;
 namespace {
-constexpr std::uint32_t kHeaderLimitBytes = 2048;
-constexpr std::uint64_t kBodyLimitBytes = 4096;
 constexpr auto kHandshakeTimeout = std::chrono::seconds(30);
 constexpr auto kRequestTimeout = std::chrono::seconds(15);
 constexpr auto kIoTimeout = std::chrono::seconds(5);
-constexpr auto kBackendTimeout = std::chrono::seconds(4);
 constexpr auto kShutdownTimeout = std::chrono::seconds(2);
 } // namespace
 
@@ -28,7 +26,7 @@ HttpSession::HttpSession(tcp::socket socket, std::shared_ptr<HttpServices> servi
                                 Stream(std::in_place_index<0>, std::move(socket))),
       executor_(Lowest().get_executor()), deadline_(executor_) {
   parser_.header_limit(kHeaderLimitBytes);
-  parser_.body_limit(kBodyLimitBytes);
+  parser_.body_limit(wire::kMaxPacket);
   parser_.eager(true);
 }
 
