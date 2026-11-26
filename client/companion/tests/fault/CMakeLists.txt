@@ -17,7 +17,8 @@ target_link_libraries(companion_write_fault_test PRIVATE companion_core_journal)
 # All recovery assertions are mandatory; only exact, still-failing ticketed
 # exceptions are accepted. The full sweep remains an opt-in diagnostic.
 add_test(NAME companion_write_fault_test COMMAND companion_write_fault_test)
-set_tests_properties(companion_write_fault_test PROPERTIES TIMEOUT 600
+# COST starts these minutes-long matrices first under `ctest --parallel`.
+set_tests_properties(companion_write_fault_test PROPERTIES TIMEOUT 600 COST 180
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # LUNE-880: the same matrix over Diamond/Pearl and HeartGold/SoulSilver saves.
@@ -41,7 +42,7 @@ foreach(fault_game 1 2)
     target_link_libraries(${fault_target} PRIVATE companion_core_journal)
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/game${fault_game}")
     add_test(NAME ${fault_target} COMMAND ${fault_target})
-    set_tests_properties(${fault_target} PROPERTIES TIMEOUT 900
+    set_tests_properties(${fault_target} PROPERTIES TIMEOUT 900 COST 180
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/game${fault_game}")
 endforeach()
 
@@ -66,6 +67,6 @@ foreach(fault_game 0 1)
     target_link_libraries(${fault_target} PRIVATE companion_core_journal)
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gen5-game${fault_game}")
     add_test(NAME ${fault_target} COMMAND ${fault_target})
-    set_tests_properties(${fault_target} PROPERTIES TIMEOUT 900
+    set_tests_properties(${fault_target} PROPERTIES TIMEOUT 900 COST 180
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gen5-game${fault_game}")
 endforeach()

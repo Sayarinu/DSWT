@@ -137,8 +137,8 @@ jobs:
       - name: Build and run companion host tests
         run: |
           cmake -S client/companion/tests -B game/companion-tests
-          cmake --build game/companion-tests --parallel 2
-          ctest --test-dir game/companion-tests --output-on-failure
+          cmake --build game/companion-tests --parallel "$(nproc)"
+          ctest --test-dir game/companion-tests --output-on-failure --parallel "$(nproc)"
       - name: Build companion with the dummy connection profile
         run: |
           CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
