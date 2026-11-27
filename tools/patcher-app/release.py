@@ -164,7 +164,7 @@ def publish(version, repository, directory, companion=False):
     directory = Path(directory)
     names = {f"dswt-patcher-{version}-{name}.zip" for name in PLATFORMS}
     if companion:
-        names.add(f"dswt-companion-{version}.zip")
+        names.update({"dswt.nds", f"dswt-companion-{version}.zip", f"dswt-companion-{version}.html"})
     found = {path.name for path in directory.iterdir() if path.is_file()}
     if found != names | {archive_name(version)}:
         raise build.BuildError(f"Release files differ from the expected set: {sorted(found ^ (names | {archive_name(version)}))}")

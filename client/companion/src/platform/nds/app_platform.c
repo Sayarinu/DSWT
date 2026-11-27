@@ -1,6 +1,9 @@
 #include "platform/nds/app_platform.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +16,9 @@
 
 #include "app/model.h"
 #include "game/twilight.h"
+#include "platform/nds/card_rom.h"
+#include "platform/nds/card_save.h"
+#include "platform/nds/card_store.h"
 #include "platform/entropy_pool.h"
 #include "platform/nds/entropy_nds.h"
 #include "platform/nds/net.h"
@@ -20,6 +26,7 @@
 #include "platform/nds/wifi.h"
 #include "platform/nds/worker.h"
 #include "ui/app.h"
+#include "wonder_trade/flash.h"
 
 /* melonDS's DS-mode Wi-Fi can take close to a minute to associate. */
 #define MILLISECONDS_PER_SECOND 1000
@@ -36,6 +43,12 @@ static struct {
     char root[16];
 } sCard;
 
+static CpCardRom sCardRom;
+static CpReader sHandoffReader;
+#if CP_CARD_SAVE_WRITES
+static CpSdFile sCardCopy, sCardIntent;
+static CpCardStore *sCardStore;
+#endif
 static CpSdFile sSave;
 static int sSaveOpen;
 static FILE *sRom[CP_APP_ROM_SLOTS];
@@ -137,6 +150,16 @@ static int OpenSave(void *arg, const char *path, CpPlatformFile *out)
 static void CloseSave(void *arg)
 {
     (void)arg;
+#if CP_CARD_SAVE_WRITES
+    if (sCardStore) {
+        CpCardStore_Close(sCardStore);
+        sCardStore = NULL;
+        CpSdFile_Close(&sCardCopy);
+        CpSdFile_Close(&sCardIntent);
+        CpCardRom_Close(&sCardRom);
+        return;
+    }
+#endif
     if (!sSaveOpen) return;
     CpSdFile_Close(&sSave);
     sSaveOpen = 0;
@@ -179,6 +202,146 @@ static void CloseRom(void *arg, int slot)
     fclose(sRom[slot]);
     sRom[slot] = NULL;
 }
+
+static int ChipRead(void *arg, uint32_t offset, void *data, size_t size)
+{
+    return CpCardSave_Read(arg, offset, data, size) == CP_CHIP_OK ? 0 : -1;
+}
+
+static int ChipSize(void *arg, uint32_t *size)
+{
+    *size = ((CpCardSave *)arg)->size;
+    return 0;
+}
+
+static int IdentifyCard(CpRomInfo *info)
+{
+    if (CpNdsSlot_Handoff(&sCardRom, &sHandoffReader) == 0) {
+        Logf("slot-1: verified White IRAO rev 0 launcher handoff\n");
+        return CpRom_FromCode((const char *)sCardRom.header + 12, sCardRom.header[0x1e], info);
+    }
+    uint8_t header[CP_CARD_PAGE] __attribute__((aligned(4)));
+    for (unsigned attempt = 1; attempt <= 2; ++attempt) {
+        uint32_t chipId = 0;
+        if (CpNdsSlot_Header(header, attempt == 2 ? &chipId : NULL) != 0) {
+            Logf("slot-1: header transfer failed on attempt %u (SCFG_MC=%04x)\n", attempt, (unsigned)REG_SCFG_MC);
+            if (attempt == 1 && CpNdsSlot_Present()) continue;
+            return CP_ERR_IO;
+        }
+        if (attempt == 2) Logf("slot-1: cold reset chip ID %08lx, header code bytes %08lx\n",
+            (unsigned long)chipId, (unsigned long)CpLe32(header + 12));
+        unsigned expected = CpLe16(header + 0x15e);
+        unsigned actual = swiCRC16(0xffff, header, 0x15e);
+        if (actual == expected) break;
+        Logf("slot-1: header CRC mismatch on attempt %u (read %04x, calculated %04x)\n",
+            attempt, expected, actual);
+        if (attempt == 2) return CP_ERR_IO;
+    }
+    int result = CpRom_FromCode((const char *)header + 12, header[0x1e], info);
+    if (result != CP_OK) {
+        Logf("slot-1: unsupported game code (hex %02x %02x %02x %02x), revision %u\n",
+            header[12], header[13], header[14], header[15], header[0x1e]);
+        return result;
+    }
+    return CP_OK;
+}
+
+static int PreviewCardRom(CpReader *reader)
+{
+    if (!sCardRom.inherited || CpCardRom_Check(&sCardRom)) return CP_ERR_UNSUPPORTED;
+    *reader = sHandoffReader;
+    return CP_OK;
+}
+
+static int GameCard(void *arg, CpRomInfo *info, CpPlatformFile *file)
+{
+    static CpCardSave chip;
+    (void)arg;
+    if (!CpNdsSlot_Present()) {
+        Logf("slot-1: no card visible (SCFG_MC=%04x)\n", (unsigned)REG_SCFG_MC);
+        return CP_ERR_NOT_FOUND;
+    }
+    int result = IdentifyCard(info);
+    if (result != CP_OK) return result;
+    Logf("slot-1: %.4s revision %u\n", info->gameCode, info->revision);
+    if (!file) return CP_OK;
+    CpChipResult detected = CpCardSave_Detect(info->gameCode, &chip);
+    Logf("slot-1: save detection %d, %lu bytes\n", detected, (unsigned long)chip.size);
+    if (detected != CP_CHIP_OK || chip.size != CP_SAVE_SIZE) return CP_ERR_IO;
+    *file = (CpPlatformFile){ .arg = &chip, .size = ChipSize, .readAt = ChipRead, .readDurable = ChipRead };
+    return CP_OK;
+}
+
+#if CP_CARD_SAVE_WRITES
+static int OpenCardFile(CpSdFile *file, const char *path)
+{
+    static const uint8_t zeros[4096] = {0};
+    struct stat st;
+    if (stat(path, &st) == 0) return CpSdFile_Open(file, path, 1);
+    if (errno != ENOENT) return -1;
+    char temp[112];
+    int n = snprintf(temp, sizeof(temp), "%s.tmp", path);
+    if (n < 0 || (size_t)n >= sizeof(temp)) return -1;
+    /* A cut during allocation leaves only the temporary file. A live
+     * transaction file is never truncated, even if its contents are bad. */
+    int fd = open(temp, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    if (fd < 0) return -1;
+    int ok = 1;
+    for (unsigned i = 0; ok && i < CP_SAVE_SIZE; i += sizeof(zeros))
+        ok = write(fd, zeros, sizeof(zeros)) == (ssize_t)sizeof(zeros);
+    if (fsync(fd) != 0) ok = 0;
+    if (close(fd) != 0 || !ok || rename(temp, path) != 0) return -1;
+    return CpSdFile_Open(file, path, 1);
+}
+
+static int CheckCard(void *arg) { return CpCardRom_Check(arg); }
+
+static int OpenCardTrade(void *arg, const CpRomInfo *info, CpReader *reader, CpPlatformFile *file)
+{
+    char path[96];
+    CpCardSave chip;
+    (void)arg;
+    if (sCardStore || sSaveOpen) return CP_ERR_IO;
+    int result;
+    if (sCardRom.active && sCardRom.inherited) {
+        if (CpCardRom_Check(&sCardRom) != 0) return CP_ERR_IO;
+        *reader = sHandoffReader;
+        result = 0;
+    } else {
+        result = CpNdsSlot_Open(&sCardRom, reader);
+    }
+    if (result != 0) {
+        Logf("slot-1: ROM data open failed %d\n", result);
+        if (result == CP_CARD_NTR_KEY_MISSING) Logf("slot-1: need full bios7.bin or bios9i.bin in sd:/dswt-companion\n");
+        if (result == CP_CARD_TWL_KEY_MISSING) Logf("slot-1: need full bios7i.bin in sd:/dswt-companion\n");
+        return CP_ERR_UNSUPPORTED; /* The previously identified card may still be previewed. */
+    }
+    if (memcmp(sCardRom.header + 12, info->gameCode, 4) || sCardRom.header[0x1e] != info->revision ||
+        CpCardSave_Detect(info->gameCode, &chip) != CP_CHIP_OK) goto fail;
+    Logf("slot-1: save chip %02x%02x%02x erase %lu\n", chip.jedec[0], chip.jedec[1],
+        chip.jedec[2], (unsigned long)chip.eraseSize);
+    if (chip.eraseSize != 256 && chip.eraseSize != 4096) {
+        CpCardRom_Close(&sCardRom);
+        return CP_ERR_UNSUPPORTED;
+    }
+    const char *folder = "sd:/_nds/dswt/cards";
+    if (mkdir(folder, 0777) != 0 && errno != EEXIST) goto fail;
+    snprintf(path, sizeof(path), "%s/%.4s-%08lx.txn", folder, info->gameCode, (unsigned long)sCardRom.id);
+    if (OpenCardFile(&sCardIntent, path)) goto fail;
+    memcpy(path + strlen(path) - 3, "sav", 3);
+    if (!OpenCardFile(&sCardCopy, path)) {
+        sCardCopy.bulkVerify = sCardIntent.bulkVerify = 1;
+        CpPlatformFile copy = CpSdFile_Platform(&sCardCopy), intent = CpSdFile_Platform(&sCardIntent);
+        sCardStore = CpCardStore_Open(&chip, sCardRom.id, info->buildCode, &copy, &intent, CheckCard, &sCardRom, file);
+        if (sCardStore) return CP_OK;
+        CpSdFile_Close(&sCardCopy);
+    }
+    CpSdFile_Close(&sCardIntent);
+fail:
+    CpCardRom_Close(&sCardRom);
+    return CP_ERR_IO;
+}
+#endif
 
 static int FreeSpace(void *context, const char *path, uint64_t *available)
 {
@@ -318,7 +481,9 @@ static int Random(void *arg, unsigned char *bytes, size_t size)
 static int Seed(void *arg, unsigned char out[32])
 {
     (void)arg;
-    return CpEntropy_Seed(out);
+    char path[64];
+    snprintf(path, sizeof(path), "%s_nds/dswt/seeds.bin", CpNdsCard_Root());
+    return CpEntropy_SeedFromFile(path, WtFlash_Hash, out);
 }
 
 static void Frame(void *arg)
@@ -360,6 +525,16 @@ void CpNdsApp_Run(void)
     memset(&sPlatform, 0, sizeof(sPlatform));
     sPlatform.root = root;
     sPlatform.list = List;
+    /* Resetting Slot-1 while a flashcart supplies the filesystem would
+     * disconnect the drive. Probe only when running from the internal SD. */
+    if (isDSiMode() && !strcmp(root, "sd:/")) {
+        sPlatform.gameCard = GameCard;
+        sPlatform.previewCardRom = PreviewCardRom;
+    }
+#if CP_CARD_SAVE_WRITES
+    if (sPlatform.gameCard) sPlatform.openCardTrade = OpenCardTrade;
+#endif
+    Logf("slot-1: retail header probe v3 %s\n", sPlatform.gameCard ? "enabled" : "disabled");
     sPlatform.openSave = OpenSave; sPlatform.closeSave = CloseSave;
     sPlatform.openRom = OpenRom; sPlatform.closeRom = CloseRom;
     sPlatform.start = Start; sPlatform.finished = Finished; sPlatform.cancel = Cancel;

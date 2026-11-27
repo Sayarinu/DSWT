@@ -17,7 +17,7 @@ static CpCardSave Detect(enum SimPart part, const char *game)
         assert(chip.eraseSize == 0 && chip.sectorSize == 0);
     } else {
         assert(chip.type == CP_CHIP_FLASH && chip.sectorSize == 65536);
-        assert(chip.eraseSize == (part == SIM_M25P40 ? 65536u : 256u));
+        assert(chip.eraseSize == (part == SIM_M25P40 ? 65536u : part == SIM_MX25L4005 ? 4096u : 256u));
     }
     return chip;
 }
@@ -26,7 +26,7 @@ static void TestRead(void)
 {
     static const char *const games[] = {"ADAE","APAE","CPUE","IPKE","IPGE","IRBO","IRAO","IREO","IRDO"};
     for (size_t g = 0; g < sizeof(games) / sizeof(*games); ++g) {
-        for (enum SimPart p = SIM_EEPROM; p <= SIM_M25P40; ++p) {
+        for (enum SimPart p = SIM_EEPROM; p <= SIM_MX25L4005; ++p) {
             CpCardSave chip = Detect(p, games[g]);
             for (size_t i = 0; i < sim.capacity; ++i)
                 sim.memory[i] = (uint8_t)(i * 13 + (i >> 8) + (i >> 16));
@@ -46,7 +46,8 @@ static void TestRead(void)
 
 static void TestDetectionFailures(void)
 {
-    CpCardSave chip = Detect(SIM_M45PE40, "CPUE");
+    CpCardSave chip;
+    chip = Detect(SIM_M45PE40, "CPUE");
     assert(CpCardSave_Detect("CPUE", NULL) == CP_CHIP_RANGE);
     assert(CpCardSave_Detect(NULL, &chip) == CP_CHIP_RANGE && chip.size == 0);
     for (unsigned n = 1; n <= 2; ++n) {
@@ -101,7 +102,7 @@ static void TestWrites(void)
 {
     uint8_t page[256];
     memset(page, 0x54, sizeof(page));
-    for (enum SimPart p = SIM_EEPROM; p <= SIM_M25P40; ++p) {
+    for (enum SimPart p = SIM_EEPROM; p <= SIM_MX25L4005; ++p) {
         CpCardSave chip = Detect(p, "IPGE");
         uint32_t n = chip.pageSize ? chip.pageSize : sizeof(page);
         uint32_t offset = chip.size - n;

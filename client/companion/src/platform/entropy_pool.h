@@ -37,5 +37,7 @@ int CpEntropy_Seed(unsigned char output[32]);
 int CpEntropy_Mix(unsigned char seed[32]);
 /* Nonzero once the boot sample started the pool and no frame has failed. */
 int CpEntropy_Ready(void);
+/* Consume one computer-generated seed if fresh input is still needed. */
+int CpEntropy_SeedFromFile(const char *path, WtJournalHash hash, unsigned char output[32]);
 
 #endif

@@ -641,6 +641,56 @@
       "es_ES": "No se ha podido borrar la red\nguardada de la tarjeta SD. Comprueba\nque no esté bloqueada e inténtalo\nde nuevo, o borra _nds/dswt/wifi.cfg\nen un ordenador.",
       "ja_JP": "ほぞんした　ネットワークを\nSDカードから　けせませんでした\nカードの　ロックを　かくにんして\nもういちど　ためすか　パソコンで\n_nds/dswt/wifi.cfgを　けしてください",
       "ko_KR": "저장된 네트워크를\nSD 카드에서 삭제할 수 없었습니다\n카드 잠금을 확인하고 다시 시도하거나\n컴퓨터에서 _nds/dswt/wifi.cfg를\n삭제해 주십시오"
+    },
+    {
+      "id": "Companion_Text_GameCard",
+      "en_US": "Game Card",
+      "fr_FR": "Carte de jeu",
+      "de_DE": "Spielkarte",
+      "it_IT": "Scheda di gioco",
+      "es_ES": "Tarjeta de juego",
+      "ja_JP": "ゲームカード",
+      "ko_KR": "게임 카드"
+    },
+    {
+      "id": "Companion_Text_GameCardParty",
+      "en_US": "{game} party (read only)",
+      "fr_FR": "Équipe de {game} (lecture seule)",
+      "de_DE": "{game}-Team (nur lesen)",
+      "it_IT": "Squadra di {game} (sola lettura)",
+      "es_ES": "Equipo de {game} (solo lectura)",
+      "ja_JP": "{game}の　てもち（みるだけ）",
+      "ko_KR": "{game}의 지닌 포켓몬 (보기 전용)"
+    },
+    {
+      "id": "Companion_Text_CardRecovery",
+      "en_US": "Could not verify the Game Card.\nRetry with the same card and SD\nused for its last trade.",
+      "fr_FR": "Vérification impossible. Réessaie\navec la carte de jeu et la carte SD\ndu dernier échange.",
+      "de_DE": "Prüfung fehlgeschlagen. Nutze die\nSpielkarte und die SD-Karte vom\nletzten Tausch.",
+      "it_IT": "Verifica fallita. Riprova con la\nscheda di gioco e la scheda SD\ndell’ultimo scambio.",
+      "es_ES": "No se pudo verificar. Usa la\ntarjeta de juego y la tarjeta SD\ndel último intercambio.",
+      "ja_JP": "ゲームカードを　かくにんできません。\nまえの　こうかんで　つかった\nカードと　SDカードで　ためしてください。",
+      "ko_KR": "게임 카드를 확인할 수 없습니다.\n마지막 교환에 사용한 게임 카드와\nSD 카드로 다시 시도해 주세요."
+    },
+    {
+      "id": "Companion_Text_GameCardError",
+      "en_US": "Could not read the Game Card. Reinsert it and try again.",
+      "fr_FR": "Lecture impossible. Réinsérez la carte de jeu et réessayez.",
+      "de_DE": "Lesefehler. Stecke die Spielkarte erneut ein.",
+      "it_IT": "Lettura fallita. Reinserisci la scheda e riprova.",
+      "es_ES": "Error de lectura. Inserta la tarjeta de nuevo.",
+      "ja_JP": "ゲームカードを　さしなおしてください。",
+      "ko_KR": "게임 카드를 다시 꽂고 시도해 주세요."
+    },
+    {
+      "id": "Companion_Text_SeedGesture",
+      "en_US": "First setup: draw wide loops on the touch screen for about 15 seconds. Then go back and open the save again.",
+      "fr_FR": "Tracez de grands cercles pendant environ 15 secondes. Revenez en arrière et rouvrez la sauvegarde.",
+      "de_DE": "Zeichne etwa 15 Sekunden lang große Kreise. Gehe zurück und öffne den Spielstand erneut.",
+      "it_IT": "Disegna cerchi ampi per circa 15 secondi. Torna indietro e riapri il salvataggio.",
+      "es_ES": "Dibuja círculos grandes durante unos 15 segundos. Vuelve y abre la partida de nuevo.",
+      "ja_JP": "タッチペンで　15びょうほど　おおきなまるを　かいてください。もどって　レポートを　えらびなおしてください。",
+      "ko_KR": "터치 화면에 약 15초 동안 큰 원을 그리세요. 돌아가서 저장 데이터를 다시 여세요."
     }
   ]
 }

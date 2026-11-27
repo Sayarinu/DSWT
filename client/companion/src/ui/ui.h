@@ -135,6 +135,7 @@ enum CpUiCard {
     CP_UI_CARD_RECEIVED, /* the received Pokémon's card */
     CP_UI_CARD_SAVES,    /* the save list */
     CP_UI_CARD_FULL_TEXT, /* one framed body of text (errors, recovery, Info) */
+    CP_UI_CARD_GAME_CARD, /* read-only cartridge party */
     CP_UI_CARD_NETWORKS,  /* the Wi-Fi network list */
     CP_UI_CARD_PASSWORD   /* the network's name, the typed password and where it is kept */
 };

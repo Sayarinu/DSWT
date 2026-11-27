@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Plain header timing used by TWiLight Menu++ on retail cards, before the
+ * header can supply its own bus timing. ROMCTRL gap1 and gap2 are maximal. */
+#define SLOT_HEADER_TIMING ((1u << 27) | (0x3fu << 16) | 0x1fffu)
+
 /* GBATEK, SCFG_MC (DSi cartridge power), ROMCTRL and Gamecard Bus.
  * Only ROM transfers are enabled; AUXSPIDATA is never touched. */
 int CpNdsSlot_Present(void)
@@ -33,7 +37,7 @@ static void Delay(void *context, unsigned us)
     while (systemCounterGetTicks() < end) { }
 }
 
-static int Reset(void *context)
+static int ResetSlot(unsigned powerOffUs)
 {
     if (!CpNdsSlot_Present()) return -1;
     sysSetCardOwner(true);
@@ -41,15 +45,21 @@ static int Reset(void *context)
     if (state != SCFG_MC_PWR_OFF && state != SCFG_MC_PWR_REQUEST_OFF &&
         !fifoSendValue32(FIFO_USER_01, SCFG_MC_PWR_REQUEST_OFF)) return -1;
     if (WaitPower(SCFG_MC_PWR_OFF) != 0) return -1;
-    Delay(context, 1000);
+    Delay(NULL, powerOffUs);
     if (!fifoSendValue32(FIFO_USER_01, SCFG_MC_PWR_RESET) || WaitPower(SCFG_MC_PWR_RESET) != 0) return -1;
-    Delay(context, 10000);
+    Delay(NULL, 10000);
     if (!fifoSendValue32(FIFO_USER_01, SCFG_MC_PWR_ON) || WaitPower(SCFG_MC_PWR_ON) != 0) return -1;
-    Delay(context, 27000);
+    Delay(NULL, 27000);
     REG_AUXSPICNT = CARD_ENABLE;
     REG_ROMCTRL = CARD_nRESET;
-    Delay(context, 270000);
+    Delay(NULL, 270000);
     return Powered() ? 0 : -1;
+}
+
+static int Reset(void *context)
+{
+    (void)context;
+    return ResetSlot(1000);
 }
 
 static int Transfer(void *context, uint64_t command, uint32_t flags, void *out, unsigned bytes)
@@ -112,8 +122,42 @@ static int LoadKey(void *context, int twl, uint32_t *table)
     return ReadTable("sd:/dswt-companion/bios9i.bin", 0x99a0, table);
 }
 
+static CpCardBus sBus = { NULL, Reset, Transfer, Seed, Delay, LoadKey, 0 };
+
+int CpNdsSlot_Header(uint8_t header[CP_CARD_PAGE], uint32_t *retryChipId)
+{
+    /* The plain header identifies the save protocol before KEY1. */
+    ++sBus.generation;
+    if (ResetSlot(retryChipId ? 420000 : 1000) != 0 ||
+        Transfer(NULL, UINT64_C(0x9f) << 56, SLOT_HEADER_TIMING, NULL, CP_CARD_PAGE) != 0)
+        return -1;
+    if (retryChipId) {
+        /* TWiLight's retail initialization idles the controller for 25
+         * frames, then clocks the full libnds reset before reading the ID. */
+        REG_ROMCTRL = 0;
+        REG_AUXSPICNT = 0;
+        Delay(NULL, 420000);
+        REG_AUXSPICNT = CARD_ENABLE | CARD_IRQ;
+        REG_ROMCTRL = CARD_nRESET | CARD_SEC_SEED;
+        unsigned slow = 1u << 27;
+        if (Transfer(NULL, UINT64_C(0x9f) << 56, slow | (0x18u << 16), NULL, 8192) != 0 ||
+            Transfer(NULL, UINT64_C(0x90) << 56, slow, retryChipId, 4) != 0) return -1;
+    }
+    return Transfer(NULL, 0, SLOT_HEADER_TIMING, header, CP_CARD_PAGE);
+}
+
+int CpNdsSlot_Handoff(CpCardRom *card, CpReader *reader)
+{
+    card->active = 0;
+    if (!CpNdsSlot_Present() || !Powered()) return -1;
+    sysSetCardOwner(true);
+    uint32_t control = REG_ROMCTRL;
+    if (control & CARD_BUSY) return -1;
+    REG_AUXSPICNT = CARD_ENABLE;
+    return CpCardRom_OpenHandoff(card, &sBus, control, reader);
+}
+
 int CpNdsSlot_Open(CpCardRom *card, CpReader *reader)
 {
-    static CpCardBus bus = { NULL, Reset, Transfer, Seed, Delay, LoadKey, 0 };
-    return CpCardRom_Open(card, &bus, reader);
+    return CpCardRom_Open(card, &sBus, reader);
 }

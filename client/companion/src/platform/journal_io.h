@@ -52,6 +52,8 @@ typedef struct CpJournalStore {
  * every cache. The file must be exactly 512 KiB before and after. */
 int CpJournal_ReadBank(void *store, int bank, unsigned char record[WT_JOURNAL_RECORD_SIZE]);
 int CpJournal_WriteBank(void *store, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE]);
+/* Only for writes backed by CpCardStore sector recovery. */
+int CpJournal_WriteCardBank(void *, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE]);
 WtJournalIO CpJournal_IO(CpJournalStore *, WtJournalHash);
 /* Nonzero when torn, which is not a valid record, holds bytes of only two
  * records: an EMPTY record and the initial ENROLLING record that follows it,

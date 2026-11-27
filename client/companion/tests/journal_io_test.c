@@ -147,6 +147,13 @@ static void TestStagingOrder(void)
     assert(card->disk[CP_JOURNAL_BANK_0] == 0xFF);
     assert(CpJournal_ReadBank(&store, 1, back) == 0 && memcmp(back, record, sizeof(back)) == 0);
     assert(CpJournal_ReadBank(&store, 0, back) == 0);
+    printf("SD journal stages: %s\n", card->trace);
+    card->trace[0] = 0;
+    assert(CpJournal_WriteCardBank(&store, 1, record) == 0);
+    assert(strcmp(card->trace, "W70000+4096 S D70000+4096 ") == 0);
+    printf("Cartridge journal stages: %s\n", card->trace);
+    card->corruptDurable = 1;
+    assert(CpJournal_WriteCardBank(&store, 1, record) != 0 && store.error == CP_JOURNAL_ERROR_VERIFY);
     free(card);
 }
 

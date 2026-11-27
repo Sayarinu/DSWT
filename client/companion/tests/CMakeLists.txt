@@ -184,7 +184,7 @@ foreach(test ui_state_test ui_render_test ui_layout_test)
 endforeach()
 
 # --- Platinum offer adapter and visit driver (LUNE-871) ---------------------
-add_library(companion_adapter STATIC "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
+add_library(companion_adapter STATIC "${COMPANION_SRC}/game/portrait.c" "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
     "${COMPANION_SRC}/adapter/gen5.c" "${COMPANION_SRC}/adapter/gen5_receive.c"
     "${COMPANION_SRC}/adapter/platinum_receive.c" "${COMPANION_SRC}/adapter/rom_data.c"
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"
@@ -194,10 +194,15 @@ target_include_directories(companion_adapter PUBLIC "${COMPANION_SRC}" "${CLIENT
 target_compile_definitions(companion_adapter PUBLIC WT_GAME_FAMILY=WT_FAMILY_GEN4)
 target_link_libraries(companion_adapter PUBLIC companion_save companion_journal)
 # Exercise both read-only ROM transports against the same game archives.
+add_executable(portrait_test ui/portrait_test.c posix_reader.c)
+target_link_libraries(portrait_test PRIVATE companion_adapter companion_ui)
+add_test(NAME portrait_test COMMAND portrait_test)
+
 add_executable(card_rom_test card/card_rom_test.c card/sim_card.c posix_reader.c)
 target_link_libraries(card_rom_test PRIVATE companion_adapter)
 add_executable(card_slot_test card/card_slot_test.c "${COMPANION_SRC}/platform/nds/card_slot.c")
 target_include_directories(card_slot_test PRIVATE card/stub)
+target_link_libraries(card_slot_test PRIVATE companion_save)
 foreach(card_test card_rom_test card_slot_test)
     target_sources(${card_test} PRIVATE "${COMPANION_SRC}/platform/nds/card_key.c" "${COMPANION_SRC}/platform/nds/card_rom.c")
     target_include_directories(${card_test} PRIVATE "${COMPANION_SRC}")
@@ -283,6 +288,9 @@ add_executable(app_model_test app/model_test.c posix_reader.c "${COMPANION_SRC}/
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/wire.c"
     "${CLIENT}/src/wonder_trade/session.c" "${CLIENT}/src/wonder_trade/boot.c"
     "${CLIENT}/src/wonder_trade/recovery.c")
+target_sources(app_model_test PRIVATE card_save/sim.c "${COMPANION_SRC}/platform/nds/card_store.c"
+    "${COMPANION_SRC}/platform/nds/card_save.c")
+target_compile_definitions(app_model_test PRIVATE CP_CARD_SAVE_WRITES=1)
 target_include_directories(app_model_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/app/stub" "${CLIENT}/tests")
 set_target_properties(app_model_test PROPERTIES C_STANDARD 11)
 target_compile_options(app_model_test PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)

@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "game/reader.h"
+#include "game/rom.h"
 #include "platform/file.h"
 #include "platform/wifi_status.h"
 #include "save/backup_save.h"
@@ -38,6 +38,13 @@ typedef struct CpAppPlatform {
     /* Open a ROM for reading into a slot. */
     int (*openRom)(void *arg, int slot, const char *path, CpReader *out);
     void (*closeRom)(void *arg, int slot);
+
+    /* Identify Slot-1. With a file, also open its read-only save chip.
+     * CP_ERR_NOT_FOUND for an empty slot, CP_ERR_UNSUPPORTED for other games. */
+    int (*gameCard)(void *arg, CpRomInfo *info, CpPlatformFile *file);
+    /* Upgrade the preview to an authenticated ROM and a verified writable save.
+     * CP_ERR_UNSUPPORTED keeps the preview. Close successful opens with closeSave. */
+    int (*openCardTrade)(void *arg, const CpRomInfo *info, CpReader *rom, CpPlatformFile *file);
 
     /* Run job on the worker. journal, when set, is the open engine journal the
      * TLS NV seed lives in for the whole job (worker.h CP_SEED_JOURNAL).
@@ -84,6 +91,7 @@ typedef struct CpAppPlatform {
     int (*wifiFailure)(void *arg);
     /* Nonzero when WPA2 networks can be joined (DSi mode). */
     int wifiWpa2;
+    int (*previewCardRom)(CpReader *); /* existing read-only Slot-1 session */
 } CpAppPlatform;
 
 #endif

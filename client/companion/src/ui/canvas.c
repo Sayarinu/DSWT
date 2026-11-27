@@ -287,6 +287,12 @@ void CpGameText_FromAscii(uint16_t *out, size_t capacity, const char *ascii)
     out[i] = CP_CHAR_EOS;
 }
 
+void CpCanvas_UnicodeText(CpCanvas *canvas, int x, int y, const uint16_t *text, size_t capacity, CpInk ink)
+{
+    for (size_t i = 0; i < capacity && text[i] != CP_CHAR_EOS && text[i]; ++i)
+        x += DrawGlyph(canvas, x, y + Baseline(), text[i], ink);
+}
+
 int CpCanvas_GameText(CpCanvas *canvas, int x, int y, const uint16_t *text, size_t capacity, const CpFont *font, CpInk ink)
 {
     int pen = x;

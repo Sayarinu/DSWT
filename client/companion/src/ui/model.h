@@ -5,6 +5,7 @@
 
 #include "companion_text.h"
 #include "game/text.h"
+#include "game/portrait.h"
 #include "platform/wifi_status.h"
 
 /* What the screens show and what they can ask for. The UI never touches the
@@ -37,6 +38,8 @@ typedef struct CpUiSave {
     char name[CP_UI_SAVE_NAME_MAX]; /* the file name, UTF-8 */
     uint8_t status;                 /* enum CpUiSaveStatus */
     uint8_t version, language;      /* CP_VERSION_* and CP_LANGUAGE_* of the ROM */
+    uint8_t gameCard;               /* physical Slot-1 save */
+    uint8_t writableCard;           /* set after the verified card copy opens */
 } CpUiSave;
 
 /* Why a party Pokémon cannot be offered, as platinum/game_save.c decides. */
@@ -54,7 +57,7 @@ enum CpUiGender { CP_UI_MALE, CP_UI_FEMALE, CP_UI_GENDERLESS };
 
 typedef struct CpUiPokemon {
     uint16_t species; /* national dex number; 0 for an empty slot */
-    uint8_t level, gender, shiny, isEgg;
+    uint8_t level, gender, shiny, isEgg, form;
     uint8_t ineligible; /* enum CpUiIneligible */
     uint16_t heldItem;  /* 0 for none */
     /* The species name in the game's language (CpGame_SpeciesName) and the
@@ -64,6 +67,7 @@ typedef struct CpUiPokemon {
     /* The held item's name from the ROM, or empty (CP_CHAR_EOS first) to show
      * only the held-item mark. */
     uint16_t itemName[CP_UI_ITEM_NAME_MAX];
+    CpPortrait portrait;
 } CpUiPokemon;
 
 /* The Pokémon a completed trade delivered, for its card. */
@@ -73,6 +77,7 @@ typedef struct CpUiReceived {
     uint16_t speciesName[CP_UI_NAME_MAX];
     uint16_t nickname[CP_UI_NAME_MAX];
     uint16_t originalTrainer[CP_UI_TRAINER_MAX];
+    CpPortrait portrait;
 } CpUiReceived;
 
 /* The session's state: WonderTradeNetwork.state, reduced to what the UI reads. */

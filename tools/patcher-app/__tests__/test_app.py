@@ -315,6 +315,10 @@ class ReleaseTests(AppFixture):
             release.publish("0.1.0", "owner/repo", directory, companion=True)
         self.assertEqual(github.calls, [])
         companion.write_bytes(b"companion zip")
+        installer = companion.with_suffix(".html")
+        installer.write_bytes(b"installer")
+        rom = directory / "dswt.nds"
+        rom.write_bytes(b"companion ROM")
         for opt_in in (None, False):
             with self.subTest(companion=opt_in):
                 github = FakeGitHub()
@@ -326,12 +330,14 @@ class ReleaseTests(AppFixture):
         github = FakeGitHub()
         with patch.object(release, "gh", github):
             result = release.publish("0.1.0", "owner/repo", directory, companion=True)
-        expected = {"SHA256SUMS", companion.name, *(f"dswt-patcher-0.1.0-{p}.zip" for p in release.PLATFORMS)}
+        expected = {"SHA256SUMS", companion.name, installer.name, rom.name,
+                    *(f"dswt-patcher-0.1.0-{p}.zip" for p in release.PLATFORMS)}
         self.assertEqual(set(result["files"]), expected)
         self.assertEqual(set(github.assets), expected)
         sums = (directory / "SHA256SUMS").read_text()
         self.assertIn(f"{hashlib.sha256(companion.read_bytes()).hexdigest()}  {companion.name}\n", sums)
-        self.assertEqual(len(sums.splitlines()), 4)
+        self.assertIn(f"{hashlib.sha256(rom.read_bytes()).hexdigest()}  {rom.name}\n", sums)
+        self.assertEqual(len(sums.splitlines()), 6)
 
     def test_publish_cli_defaults_companion_to_false_and_passes_explicit_boolean(self):
         for flag, expected in (([], False), (["--companion", "false"], False), (["--companion", "true"], True)):

@@ -53,6 +53,7 @@ void CpText_Replace(char *out, size_t size, const char *text, const char *token,
 /* Game-encoded text (CP_CHAR_EOS-terminated). With a font it draws the game's
  * own glyphs; without one it draws letters, digits and spaces with the
  * companion font and other codes as '?'. Returns the width drawn. */
+void CpCanvas_UnicodeText(CpCanvas *, int x, int y, const uint16_t *text, size_t capacity, CpInk);
 int CpCanvas_GameText(CpCanvas *, int x, int y, const uint16_t *text, size_t capacity, const CpFont *, CpInk);
 /* Convert ASCII letters, digits and spaces to game codes, for test data. */
 void CpGameText_FromAscii(uint16_t *out, size_t capacity, const char *ascii);

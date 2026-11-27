@@ -11,6 +11,8 @@
 *.dsv
 *.dswt/
 *.dswt.lock
+seeds.bin
+DSWT-SD*.zip
 .dswt-pending-*
 *.nef
 bios7.bin

@@ -100,6 +100,7 @@ jobs:
       - name: Build with the public production profile
         env:
           CONNECTION_PROFILE: client/companion/production-connection-profile.json
+          CP_CARD_SAVE_WRITES: "1"
         run: scripts/build/build-companion.sh
       - name: Inspect and package the DS and DSi ROM
         env:
@@ -112,7 +113,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-companion
-          path: game/apps/dswt-companion-*.zip
+          path: |
+            game/apps/dswt.nds
+            game/apps/dswt-companion-*.zip
+            game/apps/dswt-companion-*.html
           if-no-files-found: error
           retention-days: 7
 

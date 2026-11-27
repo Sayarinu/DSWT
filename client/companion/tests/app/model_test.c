@@ -7,6 +7,7 @@
 #define _DARWIN_C_SOURCE
 #define _DEFAULT_SOURCE
 #include "../posix_reader.h"
+#include "../card_save/store_fixture.h"
 #include "../session/fake_server.h"
 #include "../synthetic_rom.h"
 #include "../adapter/gen5_fixture.h"
@@ -81,6 +82,9 @@ typedef struct Fake {
     size_t logUsed;
 } Fake;
 
+static CpCardStore *cartStore;
+static TestCardFile cartCopy, cartIntent;
+static PosixReader cartRom;
 static Fake fake;
 static CpAppPlatform platform;
 static CpApp app;
@@ -157,6 +161,12 @@ static int OpenSave(void *arg, const char *path, CpPlatformFile *out)
 static void CloseSave(void *arg)
 {
     (void)arg;
+    if (cartStore) {
+        CpCardStore_Close(cartStore);
+        cartStore = NULL;
+        PosixReader_Close(&cartRom);
+        return;
+    }
     assert(fake.saveFd >= 0);
     close(fake.saveFd);
     fake.saveFd = -1;
@@ -1721,6 +1731,121 @@ static void TwilightSelectsActiveSlot(void)
     puts("PASS TWiLight game picker: default slot, trade writes only the active slot 2, beside-ROM and central saves, missing active slot");
 }
 
+static int cartPresent;
+static int CartSize(void *arg, uint32_t *out) { (void)arg; *out = CP_SAVE_SIZE; return 0; }
+
+static int FakeGameCard(void *arg, CpRomInfo *info, CpPlatformFile *out)
+{
+    (void)arg;
+    if (!cartPresent) return CP_ERR_NOT_FOUND;
+    assert(CpRom_FromCode(platform.openCardTrade ? "IRAO" : "IRBO", 0, info) == CP_OK);
+    if (out) {
+        if (!platform.openCardTrade) ReadFile("slot1.bin", gen5Save.bytes, sizeof(gen5Save.bytes));
+        *out = (CpPlatformFile){ .arg = &gen5Save, .readAt = Fx5Read, .size = CartSize };
+    }
+    return CP_OK;
+}
+
+static void GameCardPreview(void)
+{
+    CpUi ui;
+    CpUiInput input = {0};
+    WriteBlackSave("slot1.bin", 3, 0);
+    platform.gameCard = FakeGameCard;
+    cartPresent = 1;
+    Rescan();
+    CpUi_Start(&ui, model);
+    CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_SAVE_PICKER && model->saves[0].gameCard);
+    input.pressed = CP_UI_KEY_A;
+    CpUi_Frame(&ui, model, &input);
+    input.pressed = 0;
+    CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_MESSAGE && ui.message == Companion_Text_GameCardParty);
+    assert(model->gameVersion == CP_VERSION_BLACK && model->partyCount == 3 && model->party[0].species);
+    assert(!fake.romOpen[CP_APP_ROM_GAME] && fake.saveFd < 0);
+    model->ops->trade(model->context, 0);
+    assert(!fake.pending && model->error == CP_APP_ERROR_SAVE);
+    input.pressed = CP_UI_KEY_B;
+    CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_SAVE_PICKER && !app.loaded);
+    cartPresent = 0;
+    model->ops->load(model->context, 0);
+    Pump();
+    assert(model->loadMessage == Companion_Text_GameCardError);
+    Rescan();
+    assert(!model->saves[0].gameCard);
+    puts("PASS physical Black preview lists three party members, forbids trades, handles removal and returns to SD saves");
+}
+
+static char cardRomPath[512];
+
+static int OpenWritableCard(void *arg, const CpRomInfo *info, CpReader *rom, CpPlatformFile *file)
+{
+    (void)arg;
+    assert(info->version == CP_VERSION_WHITE && !cartStore);
+    assert(PosixReader_Open(&cartRom, cardRomPath) == 0);
+    *rom = cartRom.reader;
+    cartStore = OpenTestStore(&cartCopy, &cartIntent, file);
+    return cartStore ? CP_OK : CP_ERR_IO;
+}
+
+static void WhiteMovesBetweenConsoles(void)
+{
+    Bytes rom = SyntheticGen5("IRAO", 0);
+    WriteFile("physical-white.rom", rom.data, rom.size);
+    free(rom.data);
+    Path(cardRomPath, sizeof(cardRomPath), "physical-white.rom");
+    WriteBlackSave("slot1.bin", 3, 0);
+    SimInsert(SIM_MX25L4005, true);
+    memcpy(sim.memory, gen5Save.bytes, CP_SAVE_SIZE);
+    memset(&server, 0, sizeof(server));
+    platform.openCardTrade = OpenWritableCard;
+    cartPresent = 1;
+    Rescan();
+    model->ops->load(model->context, 0);
+    Pump();
+    assert(model->saves[0].writableCard && model->partyCount == 3 && model->gameVersion == CP_VERSION_WHITE);
+    Connect();
+    Visit(-1, 0, 0);
+    Visit(1, 0, 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 2 && model->canLeave);
+    unsigned enroll = server.requests[WT_OP_ENROLL], submit = server.requests[WT_OP_SUBMIT];
+    assert(enroll && submit == 1 && sim.modifies);
+    CloseSession();
+
+    /* Fresh SD tree, backups, app RAM and SD transaction files. Only the
+     * physical card and server persist. */
+    char next[] = "/tmp/dswt-second-console-XXXXXX";
+    assert(mkdtemp(next));
+    snprintf(fake.root, sizeof(fake.root), "%s/", next);
+    snprintf(backupRoot, sizeof(backupRoot), "%s/backups", next);
+    memset(&cartCopy, 0, sizeof(cartCopy));
+    memset(&cartIntent, 0, sizeof(cartIntent));
+    CpApp_Init(&app, &platform, Companion_Language_en_US);
+    model->ops->scan(model->context);
+    Pump();
+    assert(model->saveCount == 1);
+    model->ops->load(model->context, 0);
+    Pump();
+    assert(model->saves[0].writableCard && model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 2);
+    Connect();
+    Visit(-1, 0, 0);
+    assert(model->tradePhase == WT_JOURNAL_QUEUED && !model->error);
+    Fx5Spec partner = Fx5Default(5);
+    uint8_t delivery[136];
+    partner.species = 495;
+    Fx5Canonical(&partner, delivery);
+    FsMatch(delivery);
+    Visit(-1, 1, 0);
+    assert(model->completed && !model->returned && model->partyCount == 3 && model->tradePhase == WT_JOURNAL_IDLE);
+    assert(model->hasReceived && model->party[2].species == partner.species && server.requests[WT_OP_ACKNOWLEDGE] == 1);
+    assert(enroll == server.requests[WT_OP_ENROLL] && submit == server.requests[WT_OP_SUBMIT]);
+    assert(!memcmp(sim.memory, sim.memory + 0x24000, 0x23f9c));
+    CloseSession();
+    puts("PASS White Game Card offer travels to a second console with empty SD; same trade, one submission, one matched delivery, both retail copies verified");
+}
+
 int main(void)
 {
     Setup();
@@ -1747,6 +1872,8 @@ int main(void)
     WifiSettingsDropTheConnection();
     WifiForgetFailureKeepsTheNetwork();
     TwilightSelectsActiveSlot();
+    GameCardPreview();
+    WhiteMovesBetweenConsoles();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

@@ -53,6 +53,8 @@ enum {
 
 typedef struct CpScreen {
     CpCanvas text;
+    uint16_t textMap[CP_CANVAS_TILES];
+    const CpPortrait *portraits[CP_UI_PARTY_MAX];
     uint16_t map[CP_MAP_SIZE]; /* layer 1: tile | flip bits | palette << 12 */
 } CpScreen;
 
@@ -65,6 +67,7 @@ void CpRender_Message(const CpUi *, const CpUiModel *, char *out, size_t size);
 int CpRender_MessageLines(const char *text, int *width);
 
 /* Draw both screens for the UI's current state. */
+unsigned CpRender_PortraitPalette(unsigned slot);
 void CpRender_Draw(const CpUi *, const CpUiModel *, CpScreen *top, CpScreen *bottom);
 
 /* Where the spinner sits on the bottom screen (tiles), shown while CpUi_Busy. */

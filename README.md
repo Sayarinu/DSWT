@@ -34,6 +34,8 @@ DSWT is tested on melonDS with the US versions of Pokémon Platinum, Diamond, Pe
 
 Get **DSWT Patcher** for Windows, macOS or Linux from the **[Releases page](https://github.com/Sayarinu/DSWT/releases)**, open it, choose your ROM and save the patched copy. Play it in melonDS 1.1.
 
+For the companion on DSi or 3DS, choose the companion HTML installer from a release that includes it. Open it in your browser and select **Download SD card kit**. Your browser generates private seeds for first-time setup. Extract the kit and merge its folders into the root of your SD card.
+
 Step-by-step install and trading instructions are in the **[guide](https://github.com/Sayarinu/DSWT/wiki/Install)**.
 
 ## FAQ

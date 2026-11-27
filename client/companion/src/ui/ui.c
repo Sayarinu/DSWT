@@ -211,6 +211,7 @@ enum CpUiCard CpUi_Card(const CpUi *ui, const CpUiModel *model)
     case CP_UI_WIFI_KEYBOARD:
         return CP_UI_CARD_PASSWORD;
     case CP_UI_MESSAGE:
+        if (ui->message == Companion_Text_GameCardParty) return CP_UI_CARD_GAME_CARD;
         return ui->message == WonderTrade_Text_Explanation ? CP_UI_CARD_FULL_TEXT : CP_UI_CARD_NONE;
     default:
         return CP_UI_CARD_NONE;
@@ -648,7 +649,7 @@ static void Activate(CpUi *ui, CpUiModel *model, int choice)
 static void Respond(CpUi *ui, CpUiModel *model)
 {
     ui->selectedSlot = -1;
-    if (model->needsEntropy) ShowMessage(ui, WonderTrade_Text_KeepPlaying, CP_UI_MENU);
+    if (model->needsEntropy) ShowMessage(ui, Companion_Text_SeedGesture, CP_UI_MENU);
     else if (model->completed && model->returned)
         ShowMessage(ui, RefusalText(model->refusal, WonderTrade_Text_Returned), CP_UI_MENU);
     else if (model->completed) {
@@ -778,6 +779,7 @@ void CpUi_Frame(CpUi *ui, CpUiModel *model, const CpUiInput *input)
         } else {
             ui->loading = 0;
             if (model->loadMessage >= 0) ShowMessage(ui, model->loadMessage, CP_UI_SAVE_PICKER);
+            else if (model->saves[ui->listCursor].gameCard && !model->saves[ui->listCursor].writableCard) ShowMessage(ui, Companion_Text_GameCardParty, CP_UI_SAVE_PICKER);
             else Show(ui, CP_UI_GAME_CONFIRM, Companion_Text_GameConfirm);
         }
         return;

@@ -2,6 +2,8 @@
 """Check the built DS/DSi homebrew and zip only its reviewed release files."""
 
 import argparse
+import base64
+import io
 from pathlib import Path
 import re
 import struct
@@ -35,7 +37,12 @@ LICENSES = (
 )
 INSTALL = """DSWT
 
-Back up your save before you start. Copy dswt.nds to your SD card
+Open Install-DSWT.html in your browser and download your own SD card kit.
+Copy its roms and _nds folders to the root of your SD card. The browser creates
+private seeds for first-time setup. Share the public installer with other players.
+The Game Card entry shows the party on an inserted supported DS cartridge.
+
+For a manual installation, back up your save first. Copy dswt.nds to your SD card
 and launch it in DSi mode through TWiLight Menu++ on your DSi or 3DS.
 Keep your own game ROM and its save on the SD card. The app reads game data
 from your ROM and opens the active TWiLight save slot for that game.
@@ -58,6 +65,25 @@ def checked_rom(build):
     return data
 
 
+def download_installer(members):
+    """Embed the complete SD kit. Its first, uncompressed ZIP entry is filled by the browser."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as bundle:
+        seed_path = "_nds/dswt/seeds.bin"
+        bundle.writestr(zipfile.ZipInfo(seed_path), bytes(32 * 64))
+        for name, content in sorted(members.items()):
+            path = "roms/nds/dswt.nds" if name == "dswt.nds" else f"_nds/dswt/{name}"
+            if name != "INSTALL.txt":
+                bundle.writestr(zipfile.ZipInfo(path), content, compress_type=zipfile.ZIP_DEFLATED)
+    with zipfile.ZipFile(stream) as bundle:
+        central_crc = bundle.start_dir + 16
+    # No ZIP extra field or data descriptor on this seekable output.
+    seed_offset = 30 + len(seed_path.encode("ascii"))
+    template = Path(__file__).with_name("companion-download.html").read_text(encoding="utf-8")
+    return (template.replace("__ZIP_BASE64__", base64.b64encode(stream.getvalue()).decode("ascii"))
+            .replace("__SEED_OFFSET__", str(seed_offset)).replace("__CENTRAL_CRC__", str(central_crc)))
+
+
 def package(version, build, output):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?", version):
         raise ValueError("Use a release version such as 0.4.1")
@@ -67,6 +93,10 @@ def package(version, build, output):
                "font-manifest.json": (build / "build/text/font-manifest.json").read_bytes()}
     members.update({name: (ROOT / name).read_bytes() for name in LICENSES})
     output.mkdir(parents=True, exist_ok=True)
+    (output / "dswt.nds").write_bytes(data)
+    installer = download_installer(members).encode("utf-8")
+    (output / f"dswt-companion-{version}.html").write_bytes(installer)
+    members["Install-DSWT.html"] = installer
     target = output / f"dswt-companion-{version}.zip"
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in sorted(members.items()):

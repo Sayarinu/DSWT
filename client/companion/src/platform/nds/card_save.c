@@ -46,12 +46,13 @@ CpChipResult CpCardSave_Detect(const char gameCode[4], CpCardSave *out)
 
     static const uint8_t fram[] = {0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0xC2,0x22,0x08};
     uint32_t id = (uint32_t)chip.jedec[0] << 16 | (uint32_t)chip.jedec[1] << 8 | chip.jedec[2];
-    if (id == 0x621100 || id == 0x204013 || id == 0x208013 || id == 0x202013) {
+    if (id == 0x621100 || id == 0x204013 || id == 0x208013 || id == 0x202013 || id == 0xc22013) {
         chip.type = CP_CHIP_FLASH;
         chip.size = 512 * 1024;
         chip.pageSize = 256;
         chip.sectorSize = 64 * 1024;
         chip.eraseSize = id == 0x202013 ? chip.sectorSize : chip.pageSize;
+        if (id == 0xc22013) chip.eraseSize = 4096; /* MX25L4005(A), SE 20h. */
         chip.jedecLength = 3;
     } else if ((status & 0xF0) == 0xF0 && id == 0xFFFFFF) {
         chip.type = CP_CHIP_EEPROM;
@@ -124,7 +125,7 @@ CpChipResult CpCardSave_Verify(const CpCardSave *chip, uint32_t offset, const vo
 }
 
 #if CP_CARD_SAVE_WRITES
-enum { WREN = 0x06, PROGRAM = 0x02, PAGE_ERASE = 0xDB, SECTOR_ERASE = 0xD8 };
+enum { WREN = 0x06, PROGRAM = 0x02, PAGE_ERASE = 0xDB, SMALL_SECTOR_ERASE = 0x20, SECTOR_ERASE = 0xD8 };
 
 static CpChipResult Modify(const CpCardSave *chip, uint8_t opcode, uint32_t offset,
                            const void *data, size_t size)
@@ -139,7 +140,7 @@ static CpChipResult Modify(const CpCardSave *chip, uint8_t opcode, uint32_t offs
     if (!(status & WEL)) return CP_CHIP_WRITE_DISABLED;
     result = Addressed(chip, opcode, offset, data, NULL, data ? size : 0);
     if (result != CP_CHIP_OK) return result;
-    result = Ready(chip, opcode == SECTOR_ERASE ? READY_POLLS : PAGE_POLLS, &status);
+    result = Ready(chip, (opcode == SECTOR_ERASE || opcode == SMALL_SECTOR_ERASE) ? READY_POLLS : PAGE_POLLS, &status);
     if (result != CP_CHIP_OK) return result;
     return Compare(chip, offset, data, size);
 }
@@ -147,6 +148,7 @@ static CpChipResult Modify(const CpCardSave *chip, uint8_t opcode, uint32_t offs
 CpChipResult CpCardSave_Program(const CpCardSave *chip, uint32_t offset, const void *data, size_t size)
 {
     if (!InRange(chip, offset, size) || !size || !data) return CP_CHIP_RANGE;
+    if (chip->type == CP_CHIP_FLASH && !chip->pageSize) return CP_CHIP_WRITE_DISABLED;
     if (chip->pageSize && size > chip->pageSize - offset % chip->pageSize) return CP_CHIP_RANGE;
     if (chip->type == CP_CHIP_FLASH) {
         /* FLASH programming can only clear bits. Refuse before WREN rather
@@ -167,6 +169,7 @@ CpChipResult CpCardSave_Erase(const CpCardSave *chip, uint32_t offset, uint32_t 
     if (!InRange(chip, offset, size) || !size) return CP_CHIP_RANGE;
     if (chip->type != CP_CHIP_FLASH) return CP_CHIP_UNSUPPORTED;
     if ((size != chip->eraseSize && size != chip->sectorSize) || offset % size) return CP_CHIP_RANGE;
-    return Modify(chip, size == chip->sectorSize ? SECTOR_ERASE : PAGE_ERASE, offset, NULL, size);
+    uint8_t opcode = size == chip->sectorSize ? SECTOR_ERASE : size == 4096 ? SMALL_SECTOR_ERASE : PAGE_ERASE;
+    return Modify(chip, opcode, offset, NULL, size);
 }
 #endif

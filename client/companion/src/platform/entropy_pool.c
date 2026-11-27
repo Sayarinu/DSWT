@@ -1,6 +1,8 @@
 #include "platform/entropy_pool.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 static WtEntropyPool sPool;
 
@@ -66,4 +68,32 @@ int CpEntropy_Mix(unsigned char seed[32])
 int CpEntropy_Ready(void)
 {
     return sPool.valid != 0;
+}
+
+int CpEntropy_SeedFromFile(const char *path, WtJournalHash hash, unsigned char output[32])
+{
+    int result = CpEntropy_Seed(output);
+    if (result != WT_ENTROPY_WAIT || !path || !hash) return result;
+    FILE *file = fopen(path, "r+b");
+    if (!file) return WT_ENTROPY_WAIT;
+    unsigned char record[64], digest[32], zero[64] = {0};
+    /* Each independent seed has a checksum. A torn consumption makes just
+     * that record unusable. Commit its erasure before deriving any output. */
+    int consumed = 0;
+    if (fseek(file, 0, SEEK_END) == 0 && ftell(file) == 32 * 64 && fseek(file, 0, SEEK_SET) == 0) {
+        while (fread(record, 1, sizeof(record), file) == sizeof(record)) {
+            if (!memcmp(record, zero, 32) || hash(record, 32, digest) != 0 ||
+                memcmp(record + 32, digest, 32)) continue;
+            long at = ftell(file) - (long)sizeof(record);
+            consumed = at >= 0 && fseek(file, at, SEEK_SET) == 0 &&
+                fwrite(zero, 1, sizeof(zero), file) == sizeof(zero) &&
+                fflush(file) == 0 && fsync(fileno(file)) == 0;
+            break;
+        }
+    }
+    if (fclose(file) == 0 && consumed)
+        result = WtEntropy_Mix(&sPool, record, output);
+    Clear(record, sizeof(record));
+    Clear(digest, sizeof(digest));
+    return result;
 }

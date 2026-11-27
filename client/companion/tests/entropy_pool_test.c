@@ -6,10 +6,13 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 
 static unsigned char gBoot[64];
 static int gInits, gFrames, gFailFrame, gFailHash;
+static int gWait;
 static WtEntropyPool *gPool;
 static WtEntropySample gSample;
 
@@ -39,6 +42,7 @@ int WtEntropy_Seed(const WtEntropyPool *pool, unsigned char output[32])
 {
     assert(pool == gPool);
     if (!pool->valid) { memset(output, 0, 32); return -1; }
+    if (gWait) { memset(output, 0, 32); return WT_ENTROPY_WAIT; }
     memcpy(output, pool->digest, 32);
     return 0;
 }
@@ -133,10 +137,35 @@ static void TestFrames(void)
     assert(CpEntropy_Seed(seed) != 0 && CpEntropy_Mix(mixed) != 0);
 }
 
+static void TestPrivateSeedFile(void)
+{
+    char path[] = "/tmp/dswt-seeds-XXXXXX";
+    int fd = mkstemp(path);
+    assert(fd >= 0);
+    unsigned char records[32 * 64] = {0}, first[32], second[32], boot[64];
+    memset(records, 0x43, 32); /* Bad checksum. */
+    memset(records + 64, 0x45, 32);
+    memset(records + 128, 0x46, 32);
+    assert(!Hash(records + 64, 32, records + 96) && !Hash(records + 128, 32, records + 160));
+    assert(write(fd, records, sizeof(records)) == sizeof(records) && close(fd) == 0);
+    Boot(records, 16, boot);
+    gWait = 1;
+    assert(CpEntropy_SeedFromFile(path, Hash, first) == 0);
+    assert(CpEntropy_SeedFromFile(path, Hash, second) == 0 && memcmp(first, second, 32));
+    assert(CpEntropy_SeedFromFile(path, Hash, second) == WT_ENTROPY_WAIT);
+    FILE *file = fopen(path, "rb");
+    assert(file && fread(records, 1, sizeof(records), file) == sizeof(records) && !fclose(file));
+    for (unsigned i = 64; i < sizeof(records); ++i) assert(records[i] == 0);
+    assert(unlink(path) == 0 && CpEntropy_SeedFromFile(path, Hash, second) == WT_ENTROPY_WAIT);
+    gWait = 0;
+    puts("PASS zero-input enrollment consumes separate private seeds, skips torn records, falls back after exhaustion");
+}
+
 int main(void)
 {
     TestBootSample();
     TestFrames();
+    TestPrivateSeedFile();
     assert(gInits > 0);
     printf("entropy_pool_test: ok\n");
     return 0;

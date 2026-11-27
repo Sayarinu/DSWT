@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>DSWT for DSi and 3DS</title>
+<style>
+  :root { color-scheme: light dark; font: 100%/1.55 "Inter", system-ui, sans-serif; }
+  body { margin: 0 auto; padding: 8vh 1.5rem; max-width: 34rem; }
+  h1 { font-size: 3rem; letter-spacing: -.04em; margin-bottom: 0; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; }
+  button { font: inherit; font-weight: 650; border: 0; border-radius: .45rem; padding: .75rem 1.3rem;
+    color: white; background: #2355aa; cursor: pointer; }
+  button:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+  li { padding: .22rem 0; }
+</style>
+<main>
+<h1>DSWT</h1>
+<p>Wonder Trade for Nintendo DSi and 3DS with TWiLight Menu++.</p>
+<p>Your browser creates private random seeds for your SD card. DSWT uses one when you set up a new save, so you can skip the touchscreen movements. Each download gets fresh seeds, generated on this device.</p>
+<button type="button" id="download">Download SD card kit</button>
+<p role="status" id="status"></p>
+<h2>Install on your SD card</h2>
+<ol>
+<li>Extract the ZIP. Copy its <code>roms</code> and <code>_nds</code> folders to the root of your SD card, merging them with the existing folders.</li>
+<li>In TWiLight Menu++, open <code>roms/nds/dswt.nds</code> in DSi mode. Choose your game to trade from its active SD save or select <strong>Game Card</strong> to view the inserted cartridge’s party.</li>
+</ol>
+<p>One kit covers 32 new saves. Keep your kit private. Share this installer so each player gets their own kit.</p>
+<noscript>Enable JavaScript in this browser to generate your kit.</noscript>
+</main>
+<script>
+const template = '__ZIP_BASE64__';
+const seedOffset = __SEED_OFFSET__;
+const centralCrcOffset = __CENTRAL_CRC__;
+const button = document.getElementById('download');
+const status = document.getElementById('status');
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const value of bytes) {
+    crc ^= value;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  try {
+    const zip = Uint8Array.from(atob(template), c => c.charCodeAt(0));
+    const records = zip.subarray(seedOffset, seedOffset + 32 * 64);
+    for (let offset = 0; offset < records.length; offset += 64) {
+      const seed = records.subarray(offset, offset + 32);
+      crypto.getRandomValues(seed);
+      records.set(new Uint8Array(await crypto.subtle.digest('SHA-256', seed)), offset + 32);
+    }
+    const crc = crc32(records);
+    const view = new DataView(zip.buffer);
+    view.setUint32(14, crc, true);
+    view.setUint32(centralCrcOffset, crc, true);
+    const url = URL.createObjectURL(new Blob([zip], {type: 'application/zip'}));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'DSWT-SD.zip';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    status.textContent = 'Your SD card kit is ready. Extract DSWT-SD.zip to install.';
+  } catch {
+    status.textContent = 'Could not generate private seeds. Open this installer in a current browser and try again.';
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</html>
