@@ -21,11 +21,11 @@ class BuildCompanionTests(unittest.TestCase):
         self.scripts.mkdir()
         for group in ('build', 'prepare', 'port'):
             (self.scripts / group).mkdir()
-        # The real profile tool and the tracked placeholder profile.
+        # The real profile tool and the production profile.
         for name in ('build-companion.sh', 'configure-connection.py'):
             shutil.copy2(ROOT / 'scripts/build' / name, self.scripts / 'build')
         (self.root / 'client/companion').mkdir(parents=True)
-        shutil.copy2(ROOT / 'client/companion/connection-profile.json', self.root / 'client/companion')
+        shutil.copy2(ROOT / 'client/companion/production-connection-profile.json', self.root / 'client/companion')
         self.tls = self.root / 'TLS source'
         self.tls.mkdir()
         self.log = self.root / 'calls.jsonl'
@@ -89,8 +89,8 @@ def record(tool, args):
 
     def assert_built(self, result, hostname):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-1], str(self.output / 'dswt-companion.nds'))
-        self.assertEqual((self.output / 'dswt-companion.nds').read_bytes(), b'companion ROM')
+        self.assertEqual(result.stdout.splitlines()[-1], str(self.output / 'dswt.nds'))
+        self.assertEqual((self.output / 'dswt.nds').read_bytes(), b'companion ROM')
         self.assertIn(f'#define WONDER_TRADE_HOSTNAME "{hostname}"', (self.output / 'dswt-connection.h').read_text())
         self.assertFalse((self.output / 'dswt-connection.h.new').exists())
         self.assertEqual(self.calls_for('tls'), [[]])
@@ -106,11 +106,11 @@ def record(tool, args):
         self.assertEqual(run[run.index('-w') + 1], '/dswt/client/companion')
         make = run[run.index('dswt-companion-builder'):]
         self.assertEqual(make, ['dswt-companion-builder', 'make', '-j3', 'BUILDDIR=/out/build',
-                                'ROM=/out/dswt-companion.nds', 'TLS_DIR=/tls',
+                                'ROM=/out/dswt.nds', 'TLS_DIR=/tls',
                                 'CONNECTION_HEADER=/out/dswt-connection.h'])
 
-    def test_default_build_uses_the_placeholder_profile(self):
-        self.assert_built(self.run_build(), 'companion.invalid')
+    def test_default_build_uses_the_production_profile(self):
+        self.assert_built(self.run_build(), 'dswt.nouvellelune.studio')
 
     def test_connection_profile_configures_the_server(self):
         profile = self.root / 'my profile.json'
@@ -123,10 +123,10 @@ def record(tool, args):
                       (self.output / 'dswt-connection.h').read_text())
 
     def test_an_unchanged_profile_keeps_the_header_for_incremental_builds(self):
-        self.assert_built(self.run_build(), 'companion.invalid')
+        self.assert_built(self.run_build(), 'dswt.nouvellelune.studio')
         header = self.output / 'dswt-connection.h'
         os.utime(header, ns=(1, 1))
-        self.assert_built(self.run_build(), 'companion.invalid')
+        self.assert_built(self.run_build(), 'dswt.nouvellelune.studio')
         self.assertEqual(header.stat().st_mtime_ns, 1)
 
     def test_an_invalid_profile_stops_before_docker(self):

@@ -12,6 +12,7 @@
 #include <psa/crypto.h>
 
 #include "app/model.h"
+#include "game/twilight.h"
 #include "platform/entropy_pool.h"
 #include "platform/nds/entropy_nds.h"
 #include "platform/nds/net.h"
@@ -345,7 +346,7 @@ void CpNdsApp_Run(void)
         snprintf(sLog, sizeof(sLog), "%s_nds/dswt/companion-log.txt", root);
         snprintf(backups, sizeof(backups), "%s_nds/dswt/backups", root);
     }
-    Logf("=== DSWT Companion, %s mode, drive %s, server %s\n", isDSiMode() ? "DSi" : "DS", root[0] ? root : "none",
+    Logf("=== DSWT, %s mode, drive %s, server %s\n", isDSiMode() ? "DSi" : "DS", root[0] ? root : "none",
         WONDER_TRADE_AUTHORITY);
     CpNdsEntropy_Jitter();
     if (CpWifi_Init() != 0) Logf("wifi: driver failed to start\n");
@@ -388,5 +389,32 @@ void CpNdsApp_Run(void)
     CpApp_StartWifi(&sApp);
     CpUiApp_Run(&sApp.model, NULL);
     Logf("exit\n");
+    CpNdsApp_ReturnToMenu();
     CpWifi_Disconnect();
+}
+
+/* TWiLight's installed 3DS launcher accepts a CNLT title request across a
+ * TWL warmboot. RSET bit 2 skips the last game so the menu stays open. */
+void CpNdsApp_ReturnToMenu(void)
+{
+    if (!isDSiMode() || strcmp(CpNdsCard_Root(), "sd:/")) return;
+    int console = CpTwilight_Setting("sd:/" CP_TWL_SETTINGS, "SRLOADER", "CONSOLE_MODEL", -1);
+    if (console != 2 && console != 3) return;
+    static const uint32_t titleRequest[8] = {
+        0x434E4C54, 0xEB871801, 0x53524C41, 0x00030004,
+        0x53524C41, 0x00030004, 0x17, 0
+    };
+    uint32_t *params = (uint32_t *)0x02000000;
+    void *request = (void *)0x02000300;
+    Logf("exit: returning to TWiLight Menu++ on 3DS\n");
+    params[0] = BIT(2);
+    params[1] = 0x54455352; /* RSET */
+    memcpy(request, titleRequest, sizeof(titleRequest));
+    DC_FlushRange(params, 8);
+    DC_FlushRange(request, sizeof(titleRequest));
+    if (fifoSendValue32(FIFO_USER_02, 1)) {
+        uint64_t end = systemCounterGetTicks() + systemCounterMsecsToTicks(2000);
+        while (systemCounterGetTicks() < end) swiDelay(1000);
+    }
+    Logf("exit: warmboot did not complete, returning to loader\n");
 }

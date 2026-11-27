@@ -8,9 +8,8 @@ if [[ $# != 0 ]]; then
     echo "Usage: [CONNECTION_PROFILE=profile.json] [COMPANION_BUILD_JOBS=n] $0" >&2
     exit 2
 fi
-# The tracked profile names no real server; set CONNECTION_PROFILE to your
-# public endpoint/pins JSON (see https://github.com/Sayarinu/DSWT/wiki/Local-Testing).
-profile="${CONNECTION_PROFILE:-$repo_root/client/companion/connection-profile.json}"
+# Local stacks can override the public release profile.
+profile="${CONNECTION_PROFILE:-$repo_root/client/companion/production-connection-profile.json}"
 build_jobs="${COMPANION_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
     echo "COMPANION_BUILD_JOBS must be a positive integer without leading zeros" >&2
@@ -46,6 +45,6 @@ docker run --rm -e "CP_CARD_SAVE_WRITES=${CP_CARD_SAVE_WRITES:-0}" --user "$(id 
     -v "$tls_workspace:/tls:ro" \
     -v "$output:/out" \
     -w /dswt/client/companion "$image" \
-    make -j"$build_jobs" BUILDDIR=/out/build ROM=/out/dswt-companion.nds \
+    make -j"$build_jobs" BUILDDIR=/out/build ROM=/out/dswt.nds \
         TLS_DIR=/tls CONNECTION_HEADER=/out/dswt-connection.h
-echo "$output/dswt-companion.nds"
+echo "$output/dswt.nds"

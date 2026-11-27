@@ -4,13 +4,13 @@
   "messages": [
     {
       "id": "Companion_Text_SavePickerTitle",
-      "en_US": "Choose a save",
-      "fr_FR": "Choisissez une sauvegarde",
-      "de_DE": "Wähle einen Spielstand",
-      "it_IT": "Scegli un salvataggio",
-      "es_ES": "Elige una partida guardada",
-      "ja_JP": "レポートを　えらんでください",
-      "ko_KR": "리포트를 선택해 주십시오"
+      "en_US": "Choose a game",
+      "fr_FR": "Choisissez un jeu",
+      "de_DE": "Wähle ein Spiel",
+      "it_IT": "Scegli un gioco",
+      "es_ES": "Elige un juego",
+      "ja_JP": "ゲームを　えらんでください",
+      "ko_KR": "게임을 선택해 주십시오"
     },
     {
       "id": "Companion_Text_NoSaves",

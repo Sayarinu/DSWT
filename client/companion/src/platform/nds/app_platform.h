@@ -20,5 +20,6 @@ int CpNdsApp_DiagnosticRequested(void);
 /* Start Wi-Fi and the entropy pool, then run the screens on the real model
  * until the player exits. Call after CpNdsEntropy_Start and CpNdsCard_Mount. */
 void CpNdsApp_Run(void);
+void CpNdsApp_ReturnToMenu(void);
 
 #endif

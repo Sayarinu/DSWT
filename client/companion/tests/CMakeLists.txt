@@ -277,7 +277,7 @@ endforeach()
 # --- Session model (LUNE-895): saves, ROMs, adapter and visits together ----
 # A synchronous fake worker, files in a temporary folder and the in-memory
 # server; boot.c and recovery.c see a stub Mbed TLS header.
-add_executable(app_model_test app/model_test.c posix_reader.c
+add_executable(app_model_test app/model_test.c posix_reader.c "${COMPANION_SRC}/game/twilight.c"
     "${COMPANION_SRC}/app/model.c" "${COMPANION_SRC}/platform/wifi_config.c"
     "${COMPANION_SRC}/session/visit.c"
     "${CLIENT}/src/wonder_trade/engine.c" "${CLIENT}/src/wonder_trade/wire.c"

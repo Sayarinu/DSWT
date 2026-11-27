@@ -1668,6 +1668,59 @@ static void WifiSettingsDropTheConnection(void)
     puts("PASS model: leaving the Wi-Fi settings reconnects, whatever the driver last reported");
 }
 
+/* Competing saves have deliberately different parties. TWiLight's settings
+ * alone select the file, including after a change of slot or location. */
+static void TwilightSelectsActiveSlot(void)
+{
+    const char *settings = "_nds/TWiLightMenu/settings.ini";
+    const char *perGame = "_nds/TWiLightMenu/gamesettings/Black.nds.ini";
+    const char slot2[] = "\xEF\xBB\xBF[GAMESETTINGS]\r\nSAVE_NUMBER = 0x2\r\n[OTHER]\r\nSAVE_NUMBER=1\r\n";
+    const char beside[] = "[SRLOADER]\nSAVE_LOCATION=1\n";
+    const char central[] = "[SRLOADER]\nSAVE_LOCATION=2\n";
+    MakeDirectories("_nds/TWiLightMenu/gamesettings");
+    MakeDirectories("_nds/TWiLightMenu/saves");
+    WriteBlackSave("roms/nds/saves/Black.sav", 3, 0);
+    WriteBlackSave("roms/nds/saves/Black.sav1", 1, 0);
+    WriteBlackSave("roms/nds/saves/Black.sav2", 2, 0);
+    Rescan();
+    LoadByName("Black");
+    assert(model->loadMessage == -1 && model->partyCount == 3);
+    WriteFile(perGame, slot2, sizeof(slot2) - 1);
+    Rescan();
+    unsigned games = 0;
+    for (unsigned i = 0; i < model->saveCount; ++i) games += !strcmp(model->saves[i].name, "Black");
+    assert(games == 1);
+    LoadByName("Black");
+    assert(model->loadMessage == -1 && model->partyCount == 2);
+    assert(strstr(app.saves[app.index].path, "/saves/Black.sav2"));
+    static unsigned char inactive[CP_SAVE_FILE_SIZE], check[CP_SAVE_FILE_SIZE];
+    ReadFile("roms/nds/saves/Black.sav", inactive, sizeof(inactive));
+    memset(&server, 0, sizeof(server));
+    fake.wifiConnected = 1;
+    Connect();
+    Visit(-1, 0, 0);
+    Visit(1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->error == 0 && model->partyCount == 1);
+    ReadFile("roms/nds/saves/Black.sav", check, sizeof(check));
+    assert(!memcmp(inactive, check, sizeof(check)));
+    ReadFile("roms/nds/saves/Black.sav2", check, sizeof(check));
+    assert(!memcmp(check + 0x74000, "DSWJ", 4));
+    CloseSession();
+    WriteFile(settings, beside, sizeof(beside) - 1);
+    WriteBlackSave("roms/nds/Black.sav", 4, 0);
+    Rescan();
+    LoadByName("Black");
+    assert(model->loadMessage == -1 && model->partyCount == 4);
+    WriteFile(settings, central, sizeof(central) - 1);
+    Rescan();
+    assert(FindSave("Black") < 0); /* Active path missing; no substitute slot. */
+    WriteBlackSave("_nds/TWiLightMenu/saves/Black.sav2", 5, 0);
+    Rescan();
+    LoadByName("Black");
+    assert(model->loadMessage == -1 && model->partyCount == 5);
+    puts("PASS TWiLight game picker: default slot, trade writes only the active slot 2, beside-ROM and central saves, missing active slot");
+}
+
 int main(void)
 {
     Setup();
@@ -1693,6 +1746,7 @@ int main(void)
     WifiConfigOnTheCard();
     WifiSettingsDropTheConnection();
     WifiForgetFailureKeepsTheNetwork();
+    TwilightSelectsActiveSlot();
     assert(fake.logLines > 0);
     puts("PASS session model");
     return 0;

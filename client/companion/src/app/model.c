@@ -3,9 +3,11 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <string.h>
 
 #include "adapter/gen5.h"
+#include "game/twilight.h"
 #include "adapter/holdable.h"
 #include "core/journal_family.h"
 #include "platform/wifi_status.h"
@@ -163,6 +165,7 @@ typedef struct ScanState {
     const char *directory;
     char subdirectories[CP_UI_SAVES_MAX][CP_PATH_MAX];
     unsigned subdirectoryCount;
+    int twilight, location;
 } ScanState;
 
 static ScanState sScan;
@@ -178,28 +181,32 @@ static int Join(char out[CP_PATH_MAX], const char *a, const char *b, const char 
     return 1;
 }
 
-static void AddSave(CpApp *app, const char *path)
+static void AddSave(CpApp *app, const char *path, const char *rom)
 {
     char candidates[CP_PAIR_CANDIDATES][CP_PATH_MAX];
     unsigned index = app->result.saveCount;
+    if (index >= CP_UI_SAVES_MAX) return;
     CpAppSave *save = &app->saves[index];
     CpUiSave *shown = &app->result.saves[index];
     CpReader reader;
     size_t count, i;
     int opened = 0;
-    if (index >= CP_UI_SAVES_MAX || strlen(path) >= sizeof(save->path)) return;
+    if (strlen(path) >= sizeof(save->path)) return;
     memset(save, 0, sizeof(*save));
     memset(shown, 0, sizeof(*shown));
     strcpy(save->path, path);
     {
-        const char *base = Basename(path);
-        size_t length = strlen(base);
+        const char *base = Basename(rom ? rom : path);
+        size_t length = strlen(base) - (rom ? 4 : 0);
         if (length >= sizeof(shown->name)) length = sizeof(shown->name) - 1;
         memcpy(shown->name, base, length);
         shown->name[length] = 0;
     }
     shown->status = CP_UI_SAVE_NO_ROM;
-    count = CpPair_RomCandidates(path, candidates);
+    if (rom) {
+        strcpy(candidates[0], rom);
+        count = 1;
+    } else count = CpPair_RomCandidates(path, candidates);
     for (i = 0; i < count && !opened; ++i) {
         if (app->platform->openRom(app->platform->arg, CP_APP_ROM_SCAN, candidates[i], &reader) != 0) continue;
         opened = 1;
@@ -213,6 +220,7 @@ static void AddSave(CpApp *app, const char *path)
         }
         app->platform->closeRom(app->platform->arg, CP_APP_ROM_SCAN);
     }
+    if (rom && shown->status != CP_UI_SAVE_READY) return;
     Log(app, "scan: %s rom=%s status=%u\n", path, opened ? save->rom : "-", shown->status);
     app->result.saveCount = index + 1;
 }
@@ -225,8 +233,16 @@ static void ScanEntry(void *context, const char *name, int directory, uint32_t s
     if (directory) {
         if (scan->subdirectoryCount < CP_UI_SAVES_MAX && !SameFolded(name, "saves"))
             strcpy(scan->subdirectories[scan->subdirectoryCount++], path);
+    } else if (scan->twilight) {
+        const char *ext = strrchr(name, '.');
+        struct stat info;
+        char save[CP_PATH_MAX];
+        if (ext && SameFolded(ext, ".nds")
+            && CpTwilight_SavePath(scan->app->platform->root, scan->directory, name, scan->location, save)
+            && stat(save, &info) == 0 && S_ISREG(info.st_mode) && info.st_size == CP_SAVE_SIZE)
+            AddSave(scan->app, save, path);
     } else if (EndsWithSav(name) && size == CP_SAVE_SIZE) {
-        AddSave(scan->app, path);
+        AddSave(scan->app, path, NULL);
     }
 }
 
@@ -249,17 +265,24 @@ static int ScanJob(void *arg)
     scan->app = app;
     app->result.saveCount = 0;
     if (!Join(roms, app->platform->root, "roms/nds/", "")) return -1;
-    if (Join(path, roms, "saves/", "")) ScanDirectory(scan, path);
+    struct stat info;
+    if (Join(path, app->platform->root, "_nds/TWiLightMenu", "") && stat(path, &info) == 0 && S_ISDIR(info.st_mode)) {
+        scan->twilight = 1;
+        if (!Join(path, app->platform->root, CP_TWL_SETTINGS, "")) return -1;
+        scan->location = CpTwilight_Setting(path, "SRLOADER", "SAVE_LOCATION", CP_TWL_SAVES_FOLDER);
+    }
+    if (!scan->twilight && Join(path, roms, "saves/", "")) ScanDirectory(scan, path);
     scan->subdirectoryCount = 0;
     ScanDirectory(scan, roms);
     subdirectories = scan->subdirectoryCount;
     for (i = 0; i < subdirectories; ++i) {
         char folder[CP_PATH_MAX];
         strcpy(folder, scan->subdirectories[i]);
-        if (Join(path, folder, "saves/", "")) ScanDirectory(scan, path);
+        if (!scan->twilight && Join(path, folder, "saves/", "")) ScanDirectory(scan, path);
         ScanDirectory(scan, folder);
         scan->subdirectoryCount = subdirectories;
     }
+    scan->twilight = 0; /* Explicit standalone save/ROM pairs. */
     if (Join(own, app->platform->root, "_nds/dswt/", "")) ScanDirectory(scan, own);
     Log(app, "scan: %u saves\n", app->result.saveCount);
     return 0;

@@ -35,7 +35,7 @@ class PackageCompanionTests(unittest.TestCase):
         (self.build / "build/text/font-manifest.json").write_text('{"name": "DSWT Companion Pixel"}\n')
 
     def pack(self, version="0.4.1"):
-        (self.build / "dswt-companion.nds").write_bytes(self.rom)
+        (self.build / "dswt.nds").write_bytes(self.rom)
         return package.package(version, self.build, self.build / "release")
 
     def test_zip_contains_only_homebrew_notices_and_install_text(self):
@@ -47,10 +47,10 @@ class PackageCompanionTests(unittest.TestCase):
         self.assertEqual(target.name, "dswt-companion-0.4.1.zip")
         with zipfile.ZipFile(target) as archive:
             prefix = "dswt-companion-0.4.1/"
-            expected = {"dswt-companion.nds", "NOTICE", "LICENSE", "INSTALL.txt", "font-manifest.json",
+            expected = {"dswt.nds", "NOTICE", "LICENSE", "INSTALL.txt", "font-manifest.json",
                         *package.LICENSES}
             self.assertEqual(set(archive.namelist()), {prefix + name for name in expected})
-            self.assertEqual(archive.read(prefix + "dswt-companion.nds"), self.rom)
+            self.assertEqual(archive.read(prefix + "dswt.nds"), self.rom)
             for name in ("NOTICE", "LICENSE", *package.LICENSES):
                 self.assertEqual(archive.read(prefix + name), (ROOT / name).read_bytes())
             self.assertIn(b"https://github.com/Sayarinu/DSWT/wiki/DS-Companion",
