@@ -86,8 +86,8 @@ python3 client/core/tests/test_tls.py game/tls-tests/tls_probe
 cmake -S client/companion/tests -B game/companion-tests
 cmake --build game/companion-tests --parallel 2
 ctest --test-dir game/companion-tests --output-on-failure
-CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
-docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+scripts/build/build-companion.sh
+docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt.nds'
 python3 scripts/build/package-companion.py --check
 
 # Build and test isolated legality validator

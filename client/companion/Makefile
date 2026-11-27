@@ -11,10 +11,8 @@ BLOCKSDS		?= /opt/blocksds/core
 WONDERFUL_TOOLCHAIN	?= /opt/wonderful
 ARM_NONE_EABI_PATH	?= $(WONDERFUL_TOOLCHAIN)/toolchain/gcc-arm-none-eabi/bin/
 
-NAME			:= dswt-companion
-GAME_TITLE		:= DSWT Companion
-GAME_SUBTITLE		:= Wonder Trade
-GAME_AUTHOR		:= DSWT
+NAME			:= dswt
+GAME_TITLE		:= DSWT
 GAME_ICON		:= $(BLOCKSDS)/sys/icon.gif
 
 BUILDDIR		?= build
@@ -116,7 +114,7 @@ $(ARM7ELF): $(ARM7_SOURCE)
 $(ROM): $(ELF) $(ARM7ELF)
 	@echo "  NDSTOOL $@"
 	$(V)$(NDSTOOL) -c $@ -7 $(ARM7ELF) -9 $(ELF) -uc 2 \
-		-b $(GAME_ICON) "$(GAME_TITLE);$(GAME_SUBTITLE);$(GAME_AUTHOR)"
+		-b $(GAME_ICON) "$(GAME_TITLE)"
 
 # The specs link with --gc-sections, which drops unused code before the linker
 # looks for its symbols. This link keeps every section, so a core symbol the

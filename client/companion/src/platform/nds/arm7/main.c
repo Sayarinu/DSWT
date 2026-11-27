@@ -6,6 +6,7 @@
  * Copyright (C) 2023 Antonio Niño Díaz
  */
 #include <nds.h>
+#include <nds/arm7/i2c.h>
 #include <dswifi7.h>
 
 static volatile bool exiting;
@@ -56,7 +57,14 @@ int main(void)
     initClockIRQTimer(LIBNDS_DEFAULT_TIMER_RTC);
     irqSet(IRQ_VBLANK, VBlank);
     irqEnable(IRQ_VBLANK);
-    while (!exiting && (REG_KEYINPUT & (KEY_SELECT | KEY_START | KEY_L | KEY_R)))
+    while (!exiting && (REG_KEYINPUT & (KEY_SELECT | KEY_START | KEY_L | KEY_R))) {
+        if (isDSiMode() && fifoCheckValue32(FIFO_USER_02) && fifoGetValue32(FIFO_USER_02) == 1) {
+            /* Keep the 3DS in TWL mode while the launcher title restarts. */
+            u8 mode = i2cReadRegister(I2C_PM, I2CREGPM_MMCPWR);
+            i2cWriteRegister(I2C_PM, I2CREGPM_MMCPWR, mode | 1);
+            systemReboot();
+        }
         swiWaitForVBlank();
+    }
     return 0;
 }

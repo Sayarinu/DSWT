@@ -107,7 +107,7 @@ static void Header(CpScreen *screen)
         Put(screen, x, 1, ENTRY(CP_TILE_HEADER, CP_PAL_BACKDROP));
         Put(screen, x, 2, ENTRY(CP_TILE_HEADER_EDGE, CP_PAL_BACKDROP));
     }
-    CpCanvas_Text(&screen->text, TITLE_X * 8, TITLE_Y * 8, T(WonderTrade_Text_Title), kLight);
+    CpCanvas_Text(&screen->text, TITLE_X * 8, TITLE_Y * 8, "DSWT", kLight);
 }
 
 static void Clear(CpScreen *screen)

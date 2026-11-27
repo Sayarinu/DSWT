@@ -33,12 +33,12 @@ LICENSES = (
     "licensing/ds-companion-picolibc.txt",
     "licensing/mbedtls.txt",
 )
-INSTALL = """DSWT Companion
+INSTALL = """DSWT
 
-Back up your save before you start. Copy dswt-companion.nds to your SD card
+Back up your save before you start. Copy dswt.nds to your SD card
 and launch it in DSi mode through TWiLight Menu++ on your DSi or 3DS.
 Keep your own game ROM and its save on the SD card. The app reads game data
-from your ROM; no game data is included in this download.
+from your ROM and opens the active TWiLight save slot for that game.
 
 Setup, supported games and recovery:
 https://github.com/Sayarinu/DSWT/wiki/DS-Companion
@@ -46,7 +46,7 @@ https://github.com/Sayarinu/DSWT/wiki/DS-Companion
 
 
 def checked_rom(build):
-    data = (build / "dswt-companion.nds").read_bytes()
+    data = (build / "dswt.nds").read_bytes()
     if len(data) < NDS_HEADER_REGION or data[UNIT_CODE_OFFSET] != DUAL_MODE_UNIT_CODE or not data[TWL_FLAGS_OFFSET] & 1:
         raise ValueError("ROM must support both DS and DSi and enable DSi mode")
     for name, base in (("ARM9i", ARM9I_HEADER_OFFSET), ("ARM7i", ARM7I_HEADER_OFFSET)):
@@ -62,7 +62,7 @@ def package(version, build, output):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?", version):
         raise ValueError("Use a release version such as 0.4.1")
     data = checked_rom(build)
-    members = {"dswt-companion.nds": data, "INSTALL.txt": INSTALL.encode(),
+    members = {"dswt.nds": data, "INSTALL.txt": INSTALL.encode(),
                "NOTICE": (ROOT / "NOTICE").read_bytes(), "LICENSE": (ROOT / "LICENSE").read_bytes(),
                "font-manifest.json": (build / "build/text/font-manifest.json").read_bytes()}
     members.update({name: (ROOT / name).read_bytes() for name in LICENSES})

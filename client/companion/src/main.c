@@ -23,6 +23,8 @@ int main(void)
 #ifdef CP_UI_DEMO
     /* A build for looking at the screens: make CP_UI_DEMO=1 (buttons) or 2 (tour). */
     RunDemo(CP_UI_DEMO == 2);
+    CpNdsCard_Mount();
+    CpNdsApp_ReturnToMenu();
     return 0;
 #endif
     /* The SD card's mount time is one of the entropy pool's boot samples. */
@@ -35,8 +37,9 @@ int main(void)
         CompanionScreens_Init(&screens);
         demo = CpDiagnostic_Run(&screens);
         if (demo) RunDemo(demo == CP_DIAGNOSTIC_UI_TOUR);
-        return 0;
+        CpNdsApp_ReturnToMenu();
+    } else {
+        CpNdsApp_Run();
     }
-    CpNdsApp_Run();
     return 0;
 }

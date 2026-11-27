@@ -136,7 +136,7 @@ size_t CpWifiConfig_Format(const CpWifiConfig *config, char *out, size_t size)
     if (!Escape(config->ssid, ssid, sizeof(ssid))) return 0;
     Escape(config->key, key, sizeof(key));
     written = snprintf(out, size,
-        "# DSWT Companion: the Wi-Fi network chosen in its Wi-Fi settings.\n"
+        "# DSWT: the Wi-Fi network chosen in its Wi-Fi settings.\n"
         "# The password is stored here as plain text. Choose Forget network\n"
         "# in the companion, or delete this file, to remove it.\n"
         "version=1\nsecurity=%s\nssid=%s\nkey=%s\n", security, ssid, key);

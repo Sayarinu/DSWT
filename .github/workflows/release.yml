@@ -105,7 +105,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt.nds'
           python3 scripts/build/package-companion.py --version "$VERSION" --output game/apps
       - name: Keep the companion only when requested
         if: inputs.companion

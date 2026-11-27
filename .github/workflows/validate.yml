@@ -141,16 +141,16 @@ jobs:
           ctest --test-dir game/companion-tests --output-on-failure --parallel "$(nproc)"
       - name: Build companion with the dummy connection profile
         run: |
-          CONNECTION_PROFILE=client/companion/connection-profile.json scripts/build/build-companion.sh
+          scripts/build/build-companion.sh
       - name: Check DS and DSi ROM header
         run: |
-          docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt-companion.nds'
+          docker run --rm --network none -v "$PWD/game/companion:/out:ro" dswt-companion-builder sh -c '"$BLOCKSDS/tools/ndstool/ndstool" -i /out/dswt.nds'
           python3 scripts/build/package-companion.py --check
       - name: Keep companion ROM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dswt-companion
-          path: game/companion/dswt-companion.nds
+          path: game/companion/dswt.nds
           if-no-files-found: error
 
   legality-validator:

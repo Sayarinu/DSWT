@@ -386,7 +386,7 @@ int CpDiagnostic_Run(CompanionScreens *screens)
     unsigned char mac[6];
     sScreens = screens;
     irqSet(IRQ_VBLANK, Pulse);
-    Top(0, "DSWT Companion diagnostic");
+    Top(0, "DSWT diagnostic");
     Top(1, "%s mode", isDSiMode() ? "DSi" : "DS");
 
     CpNdsEntropy_Start();
@@ -394,7 +394,7 @@ int CpDiagnostic_Run(CompanionScreens *screens)
     fat = CpNdsCard_Mount();
     CpNdsEntropy_Jitter();
     if (fat) snprintf(sBase, sizeof(sBase), "%sdswt-companion/", fatGetDefaultDrive());
-    Log("\n=== DSWT Companion diagnostic, %s mode, drive %s\n", isDSiMode() ? "DSi" : "DS", fat ? fatGetDefaultDrive() : "none");
+    Log("\n=== DSWT diagnostic, %s mode, drive %s\n", isDSiMode() ? "DSi" : "DS", fat ? fatGetDefaultDrive() : "none");
     Log("server %s (%s)\n", WONDER_TRADE_AUTHORITY, inet_ntoa((struct in_addr){ htonl((uint32_t)WONDER_TRADE_IPV4) }));
     Top(2, "Drive: %s", fat ? fatGetDefaultDrive() : "none");
     if (fat) LoadConfig();
