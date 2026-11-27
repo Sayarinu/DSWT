@@ -26,18 +26,22 @@ typedef struct CpCardRom {
     uint32_t id, capacity, twlStart, dataFlags;
     uint32_t pageOffset, generation;
     uint8_t page[CP_CARD_PAGE];
-    int active;
+    int active, inherited;
 } CpCardRom;
 
 /* Allocate the header and secure-area caches off the DS stack. Keep this
  * object and the bus alive until Close. Reopening the bus or a failed card
  * check invalidates the previous session. */
 int CpCardRom_Open(CpCardRom *, CpCardBus *, CpReader *);
+int CpCardRom_OpenHandoff(CpCardRom *, CpCardBus *, uint32_t control, CpReader *);
 int CpCardRom_Check(CpCardRom *);
 void CpCardRom_Close(CpCardRom *);
 
 /* The physical slot on DSi and 3DS in DSi mode. */
 int CpNdsSlot_Present(void);
+/* On retry, use a full cold start and return the raw ROM chip ID. */
+int CpNdsSlot_Header(uint8_t header[CP_CARD_PAGE], uint32_t *retryChipId);
+int CpNdsSlot_Handoff(CpCardRom *, CpReader *);
 int CpNdsSlot_Open(CpCardRom *, CpReader *);
 
 #endif

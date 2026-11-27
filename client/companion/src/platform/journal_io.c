@@ -202,7 +202,7 @@ static int Stage(CpJournalStore *store, uint32_t offset, const unsigned char *by
     return 0;
 }
 
-int CpJournal_WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
+static int WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE], int cartridge)
 {
     static const unsigned char uncommitted[4] = { 0, 0, 0, 0 };
     enum { TAG = WT_JOURNAL_RECORD_SIZE - 4 };
@@ -217,7 +217,11 @@ int CpJournal_WriteBank(void *arg, int bank, const unsigned char record[WT_JOURN
     if (!SizeMatches(file)) return Fail(store, CP_JOURNAL_ERROR_SIZE);
     address = Area(store)->bank[bank];
     if (store->hold) store->hold(1);
-    if (Stage(store, address + TAG, uncommitted, sizeof(uncommitted)) != 0
+    /* The cartridge store persists the entire after-image before programming
+     * flash. All supported banks fit in one independently recovered sector. */
+    if (cartridge && address / 65536u == (address + TAG + 3) / 65536u) {
+        if (Stage(store, address, record, WT_JOURNAL_RECORD_SIZE) != 0) goto done;
+    } else if (Stage(store, address + TAG, uncommitted, sizeof(uncommitted)) != 0
         || Stage(store, address, record, TAG) != 0
         || Stage(store, address + TAG, record + TAG, 4) != 0) goto done;
     if (file->readDurable(file->arg, address, check, sizeof(check)) != 0) { Fail(store, CP_JOURNAL_ERROR_READ); goto done; }
@@ -228,6 +232,16 @@ done:
     if (store->hold) store->hold(0);
     memset(check, 0, sizeof(check));
     return result;
+}
+
+int CpJournal_WriteBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    return WriteBank(arg, bank, record, 0);
+}
+
+int CpJournal_WriteCardBank(void *arg, int bank, const unsigned char record[WT_JOURNAL_RECORD_SIZE])
+{
+    return WriteBank(arg, bank, record, 1);
 }
 
 WtJournalIO CpJournal_IO(CpJournalStore *store, WtJournalHash hash)

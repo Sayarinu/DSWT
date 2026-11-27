@@ -1,7 +1,10 @@
+import base64
 import importlib.util
+import io
 import ipaddress
 import json
 from pathlib import Path
+import re
 import struct
 import tempfile
 import unittest
@@ -47,15 +50,34 @@ class PackageCompanionTests(unittest.TestCase):
         self.assertEqual(target.name, "dswt-companion-0.4.1.zip")
         with zipfile.ZipFile(target) as archive:
             prefix = "dswt-companion-0.4.1/"
-            expected = {"dswt.nds", "NOTICE", "LICENSE", "INSTALL.txt", "font-manifest.json",
+            expected = {"Install-DSWT.html", "dswt.nds", "NOTICE", "LICENSE", "INSTALL.txt", "font-manifest.json",
                         *package.LICENSES}
             self.assertEqual(set(archive.namelist()), {prefix + name for name in expected})
             self.assertEqual(archive.read(prefix + "dswt.nds"), self.rom)
+            self.assertEqual((target.parent / "dswt.nds").read_bytes(), self.rom)
+            self.assertEqual(archive.read(prefix + "Install-DSWT.html"), target.with_suffix(".html").read_bytes())
             for name in ("NOTICE", "LICENSE", *package.LICENSES):
                 self.assertEqual(archive.read(prefix + name), (ROOT / name).read_bytes())
             self.assertIn(b"https://github.com/Sayarinu/DSWT/wiki/DS-Companion",
                           archive.read(prefix + "INSTALL.txt"))
             self.assertIn(b"/sys/crts", archive.read(prefix + "NOTICE"))
+
+    def test_public_installer_contains_an_unseeded_sd_layout(self):
+        installer = self.pack().with_suffix(".html").read_text()
+        encoded = re.search(r"const template = '([^']+)';", installer)[1]
+        kit = base64.b64decode(encoded, validate=True)
+        with zipfile.ZipFile(io.BytesIO(kit)) as archive:
+            self.assertIsNone(archive.testzip())
+            self.assertEqual(archive.read("roms/nds/dswt.nds"), self.rom)
+            record = archive.getinfo("_nds/dswt/seeds.bin")
+            self.assertEqual(archive.read(record), bytes(32 * 64))
+            self.assertEqual(record.compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(record.header_offset, 0)
+            offset = int(re.search(r"const seedOffset = (\d+);", installer)[1])
+            central_crc = int(re.search(r"const centralCrcOffset = (\d+);", installer)[1])
+            self.assertEqual(offset, 30 + len(record.filename) + len(record.extra))
+            self.assertEqual(central_crc, archive.start_dir + 16)
+            self.assertEqual(struct.unpack_from("<I", kit, central_crc)[0], record.CRC)
 
     def test_rejects_ds_only_and_missing_or_truncated_dsi_payloads(self):
         original = bytes(self.rom)

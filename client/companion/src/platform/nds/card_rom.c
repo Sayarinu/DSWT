@@ -1,6 +1,8 @@
 #include "platform/nds/card_rom.h"
 #include "platform/nds/card_key.h"
 
+#include "save/sha256.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -152,6 +154,11 @@ static int ReadAt(void *ctx, uint32_t offset, void *out, uint32_t size)
     uint8_t *dest = out;
     if (offset > card->capacity || size > card->capacity - offset || (size && !dest)) return -1;
     if (CpCardRom_Check(card) != 0) return -1;
+    /* Inherited main mode cannot read a retail header or secure area. Only
+     * the two known header ranges used by the game reader are available. */
+    if (card->inherited && size && offset < 0x8000 &&
+        !(offset < 0x20 && size <= 0x20 - offset) &&
+        !(offset >= 0x40 && offset < 0x50 && size <= 0x50 - offset)) return -1;
     while (size) {
         unsigned within = offset % CP_CARD_PAGE, count = CP_CARD_PAGE - within;
         uint32_t at = offset - within;
@@ -166,6 +173,47 @@ static int ReadAt(void *ctx, uint32_t offset, void *out, uint32_t size)
         size -= count;
     }
     return CpCardRom_Check(card);
+}
+
+/* TWiLight can leave Slot-1 in main data mode. Identify English White rev 0
+ * from its code, game-data, embedded title ID and allocation-table pages.
+ * Other builds continue through the normal physical header probe. */
+int CpCardRom_OpenHandoff(CpCardRom *card, CpCardBus *bus, uint32_t control, CpReader *reader)
+{
+    static const uint32_t offsets[] = { 0x8000, 0x03471c00, 0x207800, 0x2f1400 };
+    static const uint8_t expected[32] = {
+        0xf1,0x7f,0x6b,0xc8,0xea,0x6a,0xf2,0x5b,0xed,0x26,0xdc,0xc3,0x75,0x6a,0xc0,0xec,
+        0x3d,0x65,0x21,0xba,0x4a,0xc2,0xd0,0x02,0xd5,0x74,0x01,0xde,0x8a,0x7f,0x23,0x52
+    };
+    static const uint8_t prefix[0x20] = "POKEMON W\0\0\0IRAO01\x02\x00\x0b"
+        "\0\0\0\0\0\0\0\x03\x40";
+    /* File name and allocation table offsets and sizes, little endian. */
+    static const uint8_t fs[16] = { 0,0x0e,0x2f,0, 0x10,0x04,0,0, 0,0x14,0x2f,0, 0x20,0x0f,0,0 };
+    memset(card, 0, sizeof(*card));
+    card->bus = bus;
+    card->generation = ++bus->generation;
+    card->dataFlags = control & KEY2_COMMAND
+        ? control & (CLOCK_SLOW | GAP_MASK | KEY2_DATA | KEY2_COMMAND) : 0x00416657;
+    if (Transfer(card, COMMAND(0xb8), card->dataFlags, &card->id, 4) || card->id != 0xc001ffc2)
+        return -1;
+    CpSaveSha256 sha;
+    uint8_t hash[32];
+    CpSaveSha256_Init(&sha);
+    for (unsigned i = 0; i < sizeof(offsets) / sizeof(*offsets); ++i) {
+        if (Transfer(card, COMMAND(0xb7) | ((uint64_t)offsets[i] << 24),
+                     card->dataFlags, card->page, CP_CARD_PAGE)) return -1;
+        CpSaveSha256_Update(&sha, card->page, CP_CARD_PAGE);
+    }
+    CpSaveSha256_Finish(&sha, hash);
+    if (memcmp(hash, expected, sizeof(hash))) return -1;
+    memcpy(card->header, prefix, sizeof(prefix));
+    memcpy(card->header + 0x40, fs, sizeof(fs));
+    card->capacity = 0x0c3b9400; /* End of the used NTR data, before TWL secure data. */
+    card->pageOffset = UINT32_MAX;
+    card->inherited = card->active = 1;
+    if (CpCardRom_Check(card)) return -1;
+    *reader = (CpReader){ card, ReadAt, Size };
+    return 0;
 }
 
 int CpCardRom_Open(CpCardRom *card, CpCardBus *bus, CpReader *reader)

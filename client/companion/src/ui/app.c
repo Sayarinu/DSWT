@@ -83,6 +83,15 @@ static void InitEngine(Engine *engine, int sub)
 
 static void Present(const Engine *engine, const CpScreen *screen)
 {
+    uint16_t *palette = engine == &sMain ? BG_PALETTE : BG_PALETTE_SUB;
+    for (unsigned i = 0; i < CP_UI_PARTY_MAX; ++i) {
+        if (!screen->portraits[i]) continue;
+        const uint16_t *colors = screen->portraits[i]->palette;
+        for (unsigned color = 0; color < 16; ++color)
+            palette[CpRender_PortraitPalette(i) * 16 + color] = colors[color];
+    }
+    DC_FlushRange(screen->textMap, sizeof(screen->textMap));
+    dmaCopy(screen->textMap, bgGetMapPtr(engine->text), sizeof(screen->textMap));
     DC_FlushRange(screen->text.tiles, CP_CANVAS_BYTES);
     DC_FlushRange(screen->map, sizeof(screen->map));
     dmaCopy(screen->text.tiles, bgGetGfxPtr(engine->text), CP_CANVAS_BYTES);

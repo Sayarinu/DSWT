@@ -155,7 +155,9 @@ static WtJournalIO JournalIO(CpApp *app)
     app->store.hold = app->platform->hold;
     app->store.error = 0;
     app->store.area = JournalArea(app);
-    return CpJournal_IO(&app->store, CpSaveJournal_Hash);
+    WtJournalIO io = CpJournal_IO(&app->store, CpSaveJournal_Hash);
+    if (app->saveOpen && app->model.saves[app->index].gameCard) io.write = CpJournal_WriteCardBank;
+    return io;
 }
 
 /* ---- Scan ------------------------------------------------------------------- */
@@ -264,6 +266,16 @@ static int ScanJob(void *arg)
     memset(scan, 0, sizeof(*scan));
     scan->app = app;
     app->result.saveCount = 0;
+    if (app->platform->gameCard) {
+        CpAppSave *card = &app->saves[0];
+        memset(card, 0, sizeof(*card));
+        int status = app->platform->gameCard(app->platform->arg, &card->info, NULL);
+        if (status == CP_OK || status == CP_ERR_IO) {
+            app->result.saves[0] = (CpUiSave){ .status = CP_UI_SAVE_READY, .gameCard = 1,
+                .version = card->info.version, .language = card->info.language };
+            app->result.saveCount = 1;
+        }
+    }
     if (!Join(roms, app->platform->root, "roms/nds/", "")) return -1;
     struct stat info;
     if (Join(path, app->platform->root, "_nds/TWiLightMenu", "") && stat(path, &info) == 0 && S_ISDIR(info.st_mode)) {
@@ -358,7 +370,7 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
     const unsigned char *list;
     /* A Generation V party Pokémon is 220 bytes; the fields read here are the
      * same in PK4 and PK5, and so is the start of the battle stats. */
-    unsigned count, slot, stride = gen5 ? 220 : CP_SAVE_PARTY_STRIDE;
+    unsigned count, slot, portraits = 0, stride = gen5 ? 220 : CP_SAVE_PARTY_STRIDE;
     memset(party, 0, CP_UI_PARTY_MAX * sizeof(*party));
     if (!general) return 0;
     list = gen5 ? general : general + gCpAppImage.layout->partyOffset;
@@ -382,6 +394,16 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
         mon->gender = (canonical[PK_FLAGS] & 4) ? CP_UI_GENDERLESS : (canonical[PK_FLAGS] & 2) ? CP_UI_FEMALE : CP_UI_MALE;
         mon->shiny = ((ot & 0xFFFF) ^ (ot >> 16) ^ (pid & 0xFFFF) ^ (pid >> 16)) < 8;
         CopyName(mon->nickname, canonical + PK_NICKNAME);
+        mon->form = canonical[PK_FLAGS] >> 3;
+        const CpUiPokemon *old = &app->model.party[slot];
+        if (app->loaded && old->portrait.ready && mon->species == old->species && mon->form == old->form &&
+            mon->gender == old->gender && mon->shiny == old->shiny && mon->isEgg == old->isEgg)
+            mon->portrait = old->portrait;
+        else if (app->game.table)
+            CpPortrait_Load(&app->game, mon->species, mon->form, mon->gender == CP_UI_FEMALE,
+                            mon->shiny, mon->isEgg, &mon->portrait);
+        if (mon->portrait.ready) ++portraits;
+        if (app->model.saves[app->index].gameCard && !app->saveOpen) continue;
         if (mon->isEgg || CpGame_SpeciesName(&app->game, mon->species, mon->speciesName, CP_UI_NAME_MAX, NULL) != CP_OK)
             memcpy(mon->speciesName, mon->nickname, sizeof(mon->speciesName));
         ItemName(app, mon->heldItem, mon->itemName);
@@ -390,6 +412,7 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
         else mon->ineligible = CpAdapter_Unique(&gCpAppImage, slot) ? CP_UI_ELIGIBLE : CP_UI_INELIGIBLE_DUPLICATE;
         memset(canonical, 0, sizeof(canonical));
     }
+    Log(app, "party: %u of %u sprites ready\n", portraits, count);
     return count;
 }
 
@@ -513,23 +536,61 @@ static int LoadJob(void *arg)
     int boot;
     app->result.loadMessage = Companion_Text_SaveError;
     app->result.recovery = 0;
-    if (platform->openRom(platform->arg, CP_APP_ROM_GAME, save->rom, &app->romReader) != 0) {
-        Log(app, "load: cannot open %s\n", save->rom);
-        app->result.loadMessage = Companion_Text_MatchingRomMissing;
-        return -1;
+    if (app->model.saves[app->index].gameCard) {
+        CpRomInfo current = {0};
+        app->result.loadMessage = Companion_Text_GameCardError;
+        if (platform->gameCard(platform->arg, &current, &app->platformFile) != CP_OK ||
+            (save->info.buildCode && current.buildCode != save->info.buildCode)) return -1;
+        save->info = current;
+        app->game.rom = current;
+        int opened = platform->openCardTrade
+            ? platform->openCardTrade(platform->arg, &current, &app->romReader, &app->platformFile)
+            : CP_ERR_UNSUPPORTED;
+        if (opened == CP_ERR_UNSUPPORTED) {
+            app->game.table = NULL;
+            if (platform->previewCardRom && platform->previewCardRom(&app->romReader) == CP_OK &&
+                CpGame_Open(&app->romReader, &app->game) != CP_OK) {
+                app->game.table = NULL;
+                app->game.rom = current;
+            }
+            loaded = Reload(app);
+            Log(app, "slot-1: preview save image %d\n", loaded);
+            if (loaded != CP_SAVE_OK) {
+                if (loaded == CP_SAVE_NEEDS_GAME_SAVE || loaded == CP_SAVE_INVALID)
+                    app->result.loadMessage = Companion_Text_SaveInGameFirst;
+                return -1;
+            }
+            app->result.phase = WT_JOURNAL_EMPTY;
+            app->result.partyCount = FillParty(app, app->result.party);
+            return 0;
+        }
+        if (opened != CP_OK) {
+            app->result.loadMessage = Companion_Text_CardRecovery;
+            return -1;
+        }
+        app->saveOpen = 1;
+        snprintf(save->path, sizeof(save->path), "%.4s.sav", current.gameCode);
+    } else {
+        if (platform->openRom(platform->arg, CP_APP_ROM_GAME, save->rom, &app->romReader) != 0) {
+            Log(app, "load: cannot open %s\n", save->rom);
+            app->result.loadMessage = Companion_Text_MatchingRomMissing;
+            return -1;
+        }
+        app->romOpen = 1;
     }
-    app->romOpen = 1;
     if (CpGame_Open(&app->romReader, &app->game) != CP_OK) {
         Log(app, "load: %s is not a game the companion reads\n", save->rom);
         app->result.loadMessage = Companion_Text_SaveUnsupported;
         return -1;
     }
+    if (app->game.rom.buildCode != save->info.buildCode) return -1;
     app->hasFont = CpGame_Font(&app->game, CP_FONT_SYSTEM, &app->font) == CP_OK;
-    if (platform->openSave(platform->arg, save->path, &app->platformFile) != 0) {
+    if (!app->saveOpen && platform->openSave(platform->arg, save->path, &app->platformFile) != 0) {
         Log(app, "load: cannot open %s\n", save->path);
         return -1;
     }
     app->saveOpen = 1;
+    app->result.loadMessage = Companion_Text_SaveError;
     loaded = Reload(app);
     Log(app, "load: %s image %d\n", save->path, (int)loaded);
     /* A file the game never saved to, or one it would not load either. */
@@ -555,6 +616,17 @@ static int LoadJob(void *arg)
         : detection == CP_SAVE_JOURNAL_UNUSED ? "unused" : "refused");
     if (detection == CP_SAVE_JOURNAL_REFUSE) return -1;
     app->needsProvision = detection == CP_SAVE_JOURNAL_UNUSED;
+    if (app->model.saves[app->index].gameCard && app->needsProvision) {
+        unsigned char hash[CP_SAVE_HASH_SIZE];
+        char initial[48];
+        if (CpSaveImage_Hash(&gCpAppImage, hash) != CP_SAVE_OK) return -1;
+        snprintf(initial, sizeof(initial), "%.4s-original-%02x%02x%02x%02x.sav", save->info.gameCode,
+            hash[0], hash[1], hash[2], hash[3]);
+        if (CpBackup_Create(&platform->backup, &app->file, initial, gCpAppImage.globalCounter) != CP_BACKUP_OK) {
+            app->result.loadMessage = Companion_Text_BackupFailed;
+            return -1;
+        }
+    }
     if (detection == CP_SAVE_JOURNAL_HAS_JOURNAL) {
         if (ReadPhase(app, &phase, saveID) != 0) { Log(app, "load: journal read failed\n"); return -1; }
         /* The boot check may finish a trade's local step in the save: back it up first. */
@@ -591,6 +663,8 @@ static void FillReceived(CpApp *app)
     to->species = from->species;
     to->gender = from->gender > CP_UI_GENDERLESS ? CP_UI_GENDERLESS : from->gender;
     to->shiny = from->shiny;
+    CpPortrait_Load(&app->game, to->species, from->form, to->gender == CP_UI_FEMALE,
+                    to->shiny, 0, &to->portrait);
     to->hasNickname = from->hasNickname != 0;
     to->originalTrainerGender = from->originalTrainerGender;
     for (i = 0; i + 1 < CP_UI_NAME_MAX && i < WT_GAME_NAME_LENGTH + 1; ++i) to->nickname[i] = from->nickname[i];
@@ -638,6 +712,7 @@ static int VisitJob(void *arg)
     WtJournalIO journal = JournalIO(app);
     uint32_t build = app->saves[app->index].info.buildCode;
     int result, resumed = 0;
+    if (app->model.saves[app->index].gameCard) Log(app, "visit: cartridge save/check started\n");
     memset(&app->visit, 0, sizeof(app->visit));
     app->result.hasReceived = 0;
     app->visitOpened = 0;
@@ -1058,6 +1133,11 @@ static void Visit(CpApp *app, int slot, unsigned action)
 {
     CpUiModel *model = &app->model;
     ClearOutcome(model);
+    if (!app->loaded || !app->platformFile.writeAt || !app->saveOpen) {
+        model->net = CP_UI_NET_ERROR;
+        model->error = CP_APP_ERROR_SAVE;
+        return;
+    }
     app->needsEntropy = 0;
     app->slot = slot;
     app->action = action;
@@ -1108,6 +1188,7 @@ static void Finish(CpApp *app, int job, int result)
     case JOB_LOAD:
         model->busy = 0;
         model->loadMessage = result == 0 ? -1 : app->result.loadMessage;
+        model->saves[app->index].writableCard = model->saves[app->index].gameCard && result == 0 && app->saveOpen;
         if (result != 0) { CloseFiles(app); break; }
         app->loaded = 1;
         model->gameVersion = app->saves[app->index].info.version;
@@ -1123,6 +1204,11 @@ static void Finish(CpApp *app, int job, int result)
         model->net = CP_UI_NET_CLOSED;
         break;
     case JOB_VISIT:
+        if (model->saves[app->index].writableCard && app->platformFile.sync(app->platformFile.arg) != 0) {
+            app->visitCanLeave = 0;
+            result = CP_APP_ERROR_SAVE;
+            app->visit.completed = app->visit.returned = app->result.hasReceived = 0;
+        }
         model->partyCount = app->result.partyCount;
         memcpy(model->party, app->result.party, sizeof(model->party));
         if (app->visitOpened) model->tradePhase = app->visit.phase;

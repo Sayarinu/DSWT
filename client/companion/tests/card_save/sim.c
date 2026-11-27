@@ -25,7 +25,7 @@ void SimInsert(enum SimPart part, bool ir)
     static const uint8_t ids[][9] = {
         {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},
         {0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0xC2,0x22,0x08},
-        {0x62,0x11,0x00}, {0x20,0x40,0x13}, {0x20,0x80,0x13}, {0x20,0x20,0x13}
+        {0x62,0x11,0x00}, {0x20,0x40,0x13}, {0x20,0x80,0x13}, {0x20,0x20,0x13}, {0xc2,0x20,0x13}
     };
     memset(&sim, 0, sizeof(sim));
     sim.part = part;
@@ -78,7 +78,7 @@ void CpSaveSpi_PollDelay(void)
 {
     ++sim.elapsed;
     if (!sim.powered || !sim.busy) return;
-    if (sim.cut && sim.latency - sim.busy + 1 == sim.cutTick) {
+    if (sim.cut && (!sim.cutModify || sim.cutModify == sim.modifies) && sim.latency - sim.busy + 1 == sim.cutTick) {
         Cut(pending.address, sim.sector);
     } else if (!sim.stuck && --sim.busy == 0) {
         Complete();
@@ -131,7 +131,7 @@ CpChipResult CpSaveSpi_Transfer(const uint8_t *h, size_t n,
         return CP_CHIP_OK;
     }
     ++sim.modifies;
-    assert(opcode == 0x02 || opcode == 0xDB || opcode == 0xD8);
+    assert(opcode == 0x02 || opcode == 0xDB || opcode == 0x20 || opcode == 0xD8);
     if (!sim.wel || sim.protected) return CP_CHIP_OK;
 
     if (sim.part == SIM_FRAM) {
@@ -156,7 +156,8 @@ CpChipResult CpSaveSpi_Transfer(const uint8_t *h, size_t n,
     if (pending.erase) {
         assert(sim.part != SIM_EEPROM && !size && !tx);
         assert(opcode != 0xDB || sim.part != SIM_M25P40);
-        pending.length = opcode == 0xDB ? sim.page : sim.sector;
+        assert(opcode != 0x20 || sim.part == SIM_MX25L4005);
+        pending.length = opcode == 0xDB ? sim.page : opcode == 0x20 ? 4096 : sim.sector;
         pending.address = address - address % pending.length;
     } else {
         assert(size && size <= sim.page && tx);
@@ -165,6 +166,6 @@ CpChipResult CpSaveSpi_Transfer(const uint8_t *h, size_t n,
         memcpy(pending.data, tx, size);
     }
     sim.busy = sim.latency;
-    if (sim.cut && sim.cutTick == 0) Cut(address, sim.sector);
+    if (sim.cut && (!sim.cutModify || sim.cutModify == sim.modifies) && sim.cutTick == 0) Cut(address, sim.sector);
     return CP_CHIP_OK;
 }

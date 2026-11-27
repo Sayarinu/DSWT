@@ -25,7 +25,7 @@ enum CpSdError {
  * FAT cannot be parsed (exFAT), it falls back to closing and reopening the
  * file and reading it again; both were proven on hardware (LUNE-860). */
 typedef struct CpSdFile {
-    int fd, writable, raw;
+    int fd, writable, raw, bulkVerify;
     char path[CP_SD_PATH_MAX];
     uint32_t chain[CP_SD_CHAIN_MAX], chainLength, firstCluster;
 } CpSdFile;

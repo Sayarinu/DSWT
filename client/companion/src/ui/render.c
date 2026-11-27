@@ -113,6 +113,8 @@ static void Header(CpScreen *screen)
 static void Clear(CpScreen *screen)
 {
     CpCanvas_Clear(&screen->text);
+    for (unsigned i = 0; i < CP_CANVAS_TILES; ++i) screen->textMap[i] = (uint16_t)i;
+    memset(screen->portraits, 0, sizeof(screen->portraits));
     memset(screen->map, 0, sizeof(screen->map));
     Header(screen);
 }
@@ -253,6 +255,31 @@ static void GenderIcon(CpScreen *screen, int x, int y, unsigned gender)
     else if (gender == CP_UI_FEMALE) Icon(screen, x, y, CP_ICON_FEMALE);
 }
 
+unsigned CpRender_PortraitPalette(unsigned slot)
+{
+    static const unsigned banks[CP_UI_PARTY_MAX] = { 2, 4, 6, 7, 8, 11 };
+    return banks[slot];
+}
+
+/* Put the portrait in the text background's own tiles. Transparent pixels
+ * reveal the existing party button or preview behind them. */
+static void Portrait(CpScreen *screen, const CpPortrait *picture, unsigned slot, int tx, int ty, unsigned side)
+{
+    if (!picture->ready) return;
+    screen->portraits[slot] = picture;
+    unsigned bank = CpRender_PortraitPalette(slot);
+    for (unsigned y = 0; y < side; ++y) {
+        for (unsigned x = 0; x < side; ++x) {
+            unsigned cell = (ty + y / 8) * 32 + tx + x / 8;
+            screen->textMap[cell] = ENTRY(cell, bank);
+            unsigned sx = x * CP_PORTRAIT_SIDE / side, sy = y * CP_PORTRAIT_SIDE / side;
+            unsigned at = ((sy / 8) * 10 + sx / 8) * 32 + sy % 8 * 4 + sx % 8 / 2;
+            unsigned ink = (picture->tiles[at] >> ((sx & 1) * 4)) & 15;
+            CpCanvas_Pixel(&screen->text, tx * 8 + x, ty * 8 + y, ink);
+        }
+    }
+}
+
 /* The details card (application.c 381-412). */
 static void DrawPokemonCard(const CpUi *ui, const CpUiModel *model, CpScreen *top, enum CpUiCard card)
 {
@@ -264,6 +291,7 @@ static void DrawPokemonCard(const CpUi *ui, const CpUiModel *model, CpScreen *to
         int slot = ui->state == CP_UI_CONFIRM ? ui->selectedSlot : ui->partyCursor;
         const CpUiPokemon *mon = &model->party[slot];
         int width = CpCanvas_GameText(text, ox, oy + 16, mon->speciesName, CP_UI_NAME_MAX, model->font, kLight);
+        Portrait(top, &mon->portrait, 0, PREVIEW_X, PREVIEW_Y, CP_PORTRAIT_SIDE);
         GenderIcon(top, (ox + width) / 8 + 1, DETAILS_Y + 2, mon->isEgg ? CP_UI_GENDERLESS : mon->gender);
         if (mon->shiny) Icon(top, PREVIEW_X, PREVIEW_Y, CP_ICON_SHINY);
         CpCanvas_GameText(text, ox, oy + 32, mon->nickname, CP_UI_NAME_MAX, model->font, kLight);
@@ -278,6 +306,7 @@ static void DrawPokemonCard(const CpUi *ui, const CpUiModel *model, CpScreen *to
         const CpUiReceived *received = &model->received;
         int width;
         CpCanvas_Text(text, ox, oy, T(WonderTrade_Text_Received), kLight);
+        Portrait(top, &received->portrait, 0, PREVIEW_X, PREVIEW_Y, CP_PORTRAIT_SIDE);
         width = CpCanvas_GameText(text, ox, oy + 16, received->speciesName, CP_UI_NAME_MAX, model->font, kLight);
         GenderIcon(top, (ox + width) / 8 + 1, DETAILS_Y + 2, received->gender);
         if (received->shiny) Icon(top, PREVIEW_X, PREVIEW_Y, CP_ICON_SHINY);
@@ -310,9 +339,10 @@ static void DrawSaves(const CpUi *ui, const CpUiModel *model, CpScreen *top)
             int language = LanguageName(save->language);
             snprintf(label, sizeof(label), "%s %s", T(detail), language >= 0 ? T(language) : "");
         }
+        if (save->gameCard && !save->version) label[0] = 0;
         width = CpText_Width(label);
         CpCanvas_Text(&top->text, right - width, oy + row * 16, label, ink);
-        Fit(name, sizeof(name), save->name, right - width - (ox + 8) - 8);
+        Fit(name, sizeof(name), save->gameCard ? T(Companion_Text_GameCard) : save->name, right - width - (ox + 8) - 8);
         CpCanvas_Text(&top->text, ox + 8, oy + row * 16, name, ink);
     }
     CpCanvas_Unclip(&top->text);
@@ -432,6 +462,24 @@ static void DrawTop(const CpUi *ui, const CpUiModel *model, CpScreen *top)
         DrawPokemonCard(ui, model, top, card);
         DrawMessage(top, message, MESSAGE_Y);
         break;
+    case CP_UI_CARD_GAME_CARD:
+        Window(top, LIST_X, LIST_Y, LIST_W, 12);
+        for (unsigned i = 0; i < model->partyCount; ++i) {
+            const CpUiPokemon *mon = &model->party[i];
+            int x = LIST_X * 8 + 4, y = LIST_Y * 8 + i * 16;
+            char details[40];
+            if (mon->portrait.ready) {
+                Portrait(top, &mon->portrait, i, LIST_X, LIST_Y + i * 2, 16);
+                x += 16;
+            }
+            if (model->gameVersion >= CP_VERSION_WHITE && model->gameVersion <= CP_VERSION_BLACK2)
+                CpCanvas_UnicodeText(&top->text, x, y, mon->nickname, CP_UI_NAME_MAX, kDark);
+            else CpCanvas_GameText(&top->text, x, y, mon->nickname, CP_UI_NAME_MAX, NULL, kDark);
+            snprintf(details, sizeof(details), "#%u  %s %u", mon->species, T(WonderTrade_Text_Level), mon->level);
+            CpCanvas_Text(&top->text, (LIST_X + LIST_W) * 8 - 4 - CpText_Width(details), y, details, kDark);
+        }
+        DrawMessage(top, message, MESSAGE_Y);
+        break;
     case CP_UI_CARD_SAVES:
         DrawSaves(ui, model, top);
         DrawMessage(top, message, MESSAGE_Y);
@@ -474,7 +522,14 @@ static void DrawParty(const CpUi *ui, const CpUiModel *model, CpScreen *bottom)
         palette = slot == ui->partyCursor ? CP_PAL_SELECTED : mon->ineligible ? CP_PAL_DISABLED : CP_PAL_BUTTON;
         ink = mon->ineligible ? kGrey : kDark;
         Box(bottom, CP_TILE_BUTTON, tx, ty, CP_UI_PANEL_WIDTH / 8, CP_UI_PANEL_HEIGHT / 8, palette);
-        CpCanvas_GameText(&bottom->text, x + 8, y + 3, mon->nickname, CP_UI_NAME_MAX, model->font, ink);
+        int nameX = x + 8;
+        if (mon->portrait.ready) {
+            Portrait(bottom, &mon->portrait, (unsigned)slot, tx + 1, ty, 16);
+            nameX += 16;
+        }
+        CpCanvas_Clip(&bottom->text, nameX, y, x + 104 - nameX, 20);
+        CpCanvas_GameText(&bottom->text, nameX, y + 3, mon->nickname, CP_UI_NAME_MAX, model->font, ink);
+        CpCanvas_Unclip(&bottom->text);
         if (!mon->isEgg) GenderIcon(bottom, tx + 13, ty + 1, mon->gender);
         if (mon->heldItem) Icon(bottom, tx + 12, ty + 3, CP_ICON_ITEM);
         if (mon->shiny) Icon(bottom, tx + 13, ty + 3, CP_ICON_SHINY);

@@ -16,3 +16,11 @@ foreach(mode readonly writable)
         add_test(NAME ${target} COMMAND ${target})
     endforeach()
 endforeach()
+
+add_executable(card_store_test store_test.c sim.c "${COMPANION_SRC}/platform/nds/card_store.c"
+    "${COMPANION_SRC}/platform/nds/card_save.c" "${COMPANION_SRC}/save/sha256.c")
+target_include_directories(card_store_test PRIVATE "${COMPANION_SRC}")
+target_compile_definitions(card_store_test PRIVATE CP_CARD_SAVE_WRITES=1)
+target_compile_options(card_store_test PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
+target_link_options(card_store_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME card_store_test COMMAND card_store_test)

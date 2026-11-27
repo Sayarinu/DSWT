@@ -20,6 +20,7 @@ static struct {
     int type;
 } sFs;
 static uint8_t sSector[512] __attribute__((aligned(32)));
+static uint8_t sReadBurst[4096] __attribute__((aligned(32)));
 static uint8_t sFat[1024] __attribute__((aligned(32)));
 
 static uint16_t Le16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -232,9 +233,21 @@ static int ReadDurable(void *arg, uint32_t offset, void *bytes, size_t size)
     while (size) {
         uint32_t index = offset / clusterBytes, within = offset % 512;
         size_t count = 512 - within < size ? 512 - within : size;
-        if (index >= file->chainLength
-            || RawRead(ClusterSector(file->chain[index]) + (offset % clusterBytes) / 512, sSector) != 0) return -1;
-        memcpy(p, sSector + within, count);
+        if (index >= file->chainLength) return -1;
+        uint32_t sector = ClusterSector(file->chain[index]) + (offset % clusterBytes) / 512;
+        if (file->bulkVerify && !within && size >= 1024) {
+            size_t run = clusterBytes - offset % clusterBytes;
+            if (run > size) run = size;
+            if (run > sizeof(sReadBurst)) run = sizeof(sReadBurst);
+            count = run - run % 512;
+            DC_FlushRange(sReadBurst, count);
+            if (!sFs.io->readSectors(sector, count / 512, sReadBurst)) return -1;
+            DC_InvalidateRange(sReadBurst, count);
+            memcpy(p, sReadBurst, count);
+        } else {
+            if (RawRead(sector, sSector) != 0) return -1;
+            memcpy(p, sSector + within, count);
+        }
         p += count; offset += (uint32_t)count; size -= count;
     }
     return 0;
