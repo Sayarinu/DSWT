@@ -113,7 +113,8 @@ public:
     // A short archive delay can finish within this response. Only wait after
     // the write transaction committed and released the identity lock.
     constexpr auto interval = std::chrono::milliseconds(150);
-    for (int i = 0; !covered && after_commit && i < 3; ++i) {
+    constexpr int kMaxArchiveRechecks = 3;
+    for (int i = 0; !covered && after_commit && i < kMaxArchiveRechecks; ++i) {
       if (after_commit->IsCancelled() || std::chrono::system_clock::now() + interval >= after_commit->deadline()) break;
       std::this_thread::sleep_for(interval);
       covered = Covered(event);
