@@ -31,29 +31,17 @@ static void ShowMessage(CpUi *ui, int message, CpUiState back)
 
 static int MenuMessage(const CpUiModel *model)
 {
+    if (model->serverTradeState == WT_TRADE_MATCHED) return Companion_Text_MatchReady;
+    if (model->serverTradeState == WT_TRADE_QUEUED) return Companion_Text_AwaitingMatch;
     return Pending(model) ? WonderTrade_Text_Queued : WonderTrade_Text_Choose;
-}
-
-/* Keep the highlighted save a real one and on a visible row, whatever the
- * list's length; returns nonzero when that moved it. */
-static int ClampSaves(CpUi *ui, const CpUiModel *model)
-{
-    int count = (int)model->saveCount, cursor = ui->listCursor, top = ui->listTop;
-    if (cursor >= count) cursor = count - 1;
-    if (cursor < 0) cursor = 0;
-    if (top > cursor) top = cursor;
-    if (cursor >= top + CP_UI_SAVE_ROWS) top = cursor - CP_UI_SAVE_ROWS + 1;
-    if (top < 0) top = 0;
-    if (cursor == ui->listCursor && top == ui->listTop) return 0;
-    ui->listCursor = cursor;
-    ui->listTop = top;
-    return 1;
 }
 
 static void ShowSaves(CpUi *ui, CpUiModel *model)
 {
-    ClampSaves(ui, model);
-    Show(ui, CP_UI_SAVE_PICKER, model->saveCount ? Companion_Text_SavePickerHint : Companion_Text_NoSaves);
+    if (ui->listCursor < 0 || ui->listCursor >= (int)model->saveCount) ui->listCursor = 0;
+    ui->sourceFocus = 0;
+    ui->listTop = ui->listCursor >= CP_SOURCE_ROWS ? ui->listCursor - CP_SOURCE_ROWS + 1 : 0;
+    Show(ui, CP_UI_SAVE_PICKER, model->saveCount ? Companion_Text_SourceMenuHint : Companion_Text_NoSaves);
 }
 
 void CpUi_Start(CpUi *ui, CpUiModel *model)
@@ -64,20 +52,6 @@ void CpUi_Start(CpUi *ui, CpUiModel *model)
     model->ops->scan(model->context);
 }
 
-CompanionLanguage CpUi_GameLanguage(unsigned language, CompanionLanguage fallback)
-{
-    switch (language) {
-    case CP_LANGUAGE_JAPANESE: return Companion_Language_ja_JP;
-    case CP_LANGUAGE_ENGLISH: return Companion_Language_en_US;
-    case CP_LANGUAGE_FRENCH: return Companion_Language_fr_FR;
-    case CP_LANGUAGE_ITALIAN: return Companion_Language_it_IT;
-    case CP_LANGUAGE_GERMAN: return Companion_Language_de_DE;
-    case CP_LANGUAGE_SPANISH: return Companion_Language_es_ES;
-    case CP_LANGUAGE_KOREAN: return Companion_Language_ko_KR;
-    default: return fallback;
-    }
-}
-
 static int IsWifi(CpUiState state)
 {
     return state >= CP_UI_WIFI_LIST && state <= CP_UI_WIFI_FORGET_FAILED;
@@ -85,18 +59,13 @@ static int IsWifi(CpUiState state)
 
 CompanionLanguage CpUi_Language(const CpUi *ui, const CpUiModel *model)
 {
-    int chosen = ui->state != CP_UI_SAVE_PICKER && ui->state != CP_UI_EXIT
-        && !(ui->state == CP_UI_BOOT && !ui->loading)
-        && !(ui->state == CP_UI_MESSAGE && ui->messageReturn == CP_UI_SAVE_PICKER);
-    /* Wi-Fi settings speak the language of the screen they were opened from. */
-    if (IsWifi(ui->state) || (ui->state == CP_UI_MESSAGE && ui->messageReturn == CP_UI_WIFI_LIST))
-        chosen = ui->wifiReturn != CP_UI_SAVE_PICKER;
-    return chosen ? CpUi_GameLanguage(model->gameLanguage, model->systemLanguage) : model->systemLanguage;
+    (void)ui;
+    return model->uiLanguage < Companion_Language_Count ? model->uiLanguage : Companion_Language_en_US;
 }
 
 int CpUi_HasWifi(const CpUiModel *model)
 {
-    return model->ops->wifiScan && model->ops->wifiJoin && model->ops->wifiForget && model->ops->wifiLeave;
+    return model->ops && model->ops->wifiScan && model->ops->wifiJoin && model->ops->wifiForget && model->ops->wifiLeave;
 }
 
 int CpUi_WifiReasonText(unsigned unsupported)
@@ -122,15 +91,6 @@ int CpUi_WifiFailureText(unsigned failure)
 int CpUi_Actions(const CpUi *ui, const CpUiModel *model, int labels[CP_UI_MAX_ACTIONS])
 {
     switch (ui->state) {
-    case CP_UI_SAVE_PICKER:
-        labels[0] = model->saveCount ? WonderTrade_Text_ConfirmAction : WonderTrade_Text_Retry;
-        if (!CpUi_HasWifi(model)) {
-            labels[1] = WonderTrade_Text_Exit;
-            return 2;
-        }
-        labels[1] = Companion_Text_WifiSettings;
-        labels[2] = WonderTrade_Text_Exit;
-        return 3;
     case CP_UI_WIFI_LIST: {
         int count = 0;
         if (model->wifi.count) labels[count++] = WonderTrade_Text_ConfirmAction;
@@ -154,11 +114,16 @@ int CpUi_Actions(const CpUi *ui, const CpUiModel *model, int labels[CP_UI_MAX_AC
         labels[1] = WonderTrade_Text_Back;
         return 2;
     case CP_UI_MENU:
+        if (model->serverTradeState == WT_TRADE_MATCHED) {
+            labels[0] = Companion_Text_ReceivePokemon;
+            labels[1] = Companion_Text_ChangeGame;
+            return 2;
+        }
         labels[0] = Pending(model) ? WonderTrade_Text_Collect : WonderTrade_Text_Trade;
+        if (model->serverTradeState == WT_TRADE_QUEUED) labels[0] = Companion_Text_CheckStatus;
         labels[1] = Pending(model) ? WonderTrade_Text_CancelOffer : WonderTrade_Text_Info;
-        labels[2] = WonderTrade_Text_Exit;
+        labels[2] = Companion_Text_ChangeGame;
         return 3;
-    case CP_UI_GAME_CONFIRM:
     case CP_UI_CONFIRM:
     case CP_UI_COLLECT_CONFIRM:
     case CP_UI_CANCEL_CONFIRM:
@@ -169,11 +134,17 @@ int CpUi_Actions(const CpUi *ui, const CpUiModel *model, int labels[CP_UI_MAX_AC
         int count = 0;
         labels[count++] = WonderTrade_Text_Retry;
         if (model->wifiError && CpUi_HasWifi(model)) labels[count++] = Companion_Text_WifiSettings;
-        if (model->canLeave) labels[count++] = WonderTrade_Text_Exit;
+        if (model->canLeave) labels[count++] = Companion_Text_ChangeGame;
         return count;
     }
-    case CP_UI_MESSAGE:
     case CP_UI_RECEIVED:
+        if (model->received.summary.ready) {
+            labels[0] = Companion_Text_Summary;
+            labels[1] = WonderTrade_Text_Back;
+            return 2;
+        }
+        /* fall through */
+    case CP_UI_MESSAGE:
         labels[0] = WonderTrade_Text_Back;
         return 1;
     case CP_UI_RECOVERY:
@@ -194,6 +165,7 @@ enum CpUiCard CpUi_Card(const CpUi *ui, const CpUiModel *model)
 {
     switch (ui->state) {
     case CP_UI_SAVE_PICKER:
+    case CP_UI_GAME_LIST:
         return model->saveCount ? CP_UI_CARD_SAVES : CP_UI_CARD_NONE;
     case CP_UI_PICKER:
         return ui->partyCursor < (int)model->partyCount ? CP_UI_CARD_PARTY : CP_UI_CARD_NONE;
@@ -211,7 +183,6 @@ enum CpUiCard CpUi_Card(const CpUi *ui, const CpUiModel *model)
     case CP_UI_WIFI_KEYBOARD:
         return CP_UI_CARD_PASSWORD;
     case CP_UI_MESSAGE:
-        if (ui->message == Companion_Text_GameCardParty) return CP_UI_CARD_GAME_CARD;
         return ui->message == WonderTrade_Text_Explanation ? CP_UI_CARD_FULL_TEXT : CP_UI_CARD_NONE;
     default:
         return CP_UI_CARD_NONE;
@@ -482,6 +453,19 @@ static void KeyboardInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     ui->dirty = 1;
 }
 
+static int Preview(const CpUi *ui, const CpUiModel *model)
+{
+    const CpUiSave *source = &model->saves[ui->listCursor];
+    return source->gameCard && !source->writableCard;
+}
+
+static void PartySummary(CpUi *ui)
+{
+    ui->summaryReturn = CP_UI_PICKER;
+    ui->summaryMoves = 0;
+    Show(ui, CP_UI_SUMMARY, Companion_Text_Summary);
+}
+
 static void Back(CpUi *ui, CpUiModel *model)
 {
     switch (ui->state) {
@@ -504,17 +488,19 @@ static void Back(CpUi *ui, CpUiModel *model)
         ContinueAfterJoin(ui, model);
         break;
     case CP_UI_SAVE_PICKER:
-        Show(ui, CP_UI_EXIT, WonderTrade_Text_Disconnecting);
         break;
-    case CP_UI_GAME_CONFIRM:
-        model->ops->unload(model->context);
-        ShowSaves(ui, model);
+    case CP_UI_SUMMARY:
+        if (ui->summaryReturn == CP_UI_RECEIVED) Show(ui, CP_UI_RECEIVED, WonderTrade_Text_Completed);
+        else Show(ui, CP_UI_PICKER, Preview(ui, model) ? Companion_Text_GameCardParty : WonderTrade_Text_Choose);
         break;
     case CP_UI_RECOVERY:
         /* The game offers only "Connect and retry" here. */
         break;
     case CP_UI_PICKER:
-        Show(ui, CP_UI_MENU, WonderTrade_Text_Choose);
+        if (Preview(ui, model)) {
+            model->ops->unload(model->context);
+            ShowSaves(ui, model);
+        } else Show(ui, CP_UI_MENU, WonderTrade_Text_Choose);
         break;
     case CP_UI_CONFIRM:
         ui->selectedSlot = -1;
@@ -522,7 +508,7 @@ static void Back(CpUi *ui, CpUiModel *model)
         break;
     case CP_UI_COLLECT_CONFIRM:
     case CP_UI_CANCEL_CONFIRM:
-        Show(ui, CP_UI_MENU, WonderTrade_Text_Queued);
+        Show(ui, CP_UI_MENU, MenuMessage(model));
         break;
     case CP_UI_MESSAGE:
     case CP_UI_RECEIVED:
@@ -554,6 +540,10 @@ static void Pick(CpUi *ui, CpUiModel *model, int slot)
     }
     if (slot < 0 || slot >= (int)model->partyCount) return;
     mon = &model->party[slot];
+    if (Preview(ui, model)) {
+        if (mon->summary.ready) PartySummary(ui);
+        return;
+    }
     if (mon->ineligible == CP_UI_INELIGIBLE_DUPLICATE) {
         ShowMessage(ui, WonderTrade_Text_Duplicate, CP_UI_PICKER);
     } else if (mon->ineligible != CP_UI_ELIGIBLE) {
@@ -573,26 +563,6 @@ static void Activate(CpUi *ui, CpUiModel *model, int choice)
         return;
     }
     switch (ui->state) {
-    case CP_UI_SAVE_PICKER:
-        if (label == WonderTrade_Text_Exit) {
-            Back(ui, model);
-        } else if (label == Companion_Text_WifiSettings) {
-            EnterWifi(ui, model, CP_UI_SAVE_PICKER, 0);
-        } else if (!model->saveCount) {
-            Show(ui, CP_UI_BOOT, WonderTrade_Text_CheckingSave);
-            ui->loading = 0;
-            model->ops->scan(model->context);
-        } else {
-            ui->loading = 1;
-            model->ops->load(model->context, (unsigned)ui->listCursor);
-            Show(ui, CP_UI_BOOT, WonderTrade_Text_CheckingSave);
-        }
-        break;
-    case CP_UI_GAME_CONFIRM:
-        if (choice == 1) Back(ui, model);
-        else if (model->recovery) Show(ui, CP_UI_RECOVERY, WonderTrade_Text_RecoveryRequired);
-        else Connect(ui, model);
-        break;
     case CP_UI_RECOVERY:
         Connect(ui, model);
         break;
@@ -611,8 +581,15 @@ static void Activate(CpUi *ui, CpUiModel *model, int choice)
             Show(ui, CP_UI_PINGING, WonderTrade_Text_Pinging);
         }
         break;
-    case CP_UI_MESSAGE:
     case CP_UI_RECEIVED:
+        if (label == Companion_Text_Summary) {
+            ui->summaryReturn = CP_UI_RECEIVED;
+            ui->summaryMoves = 0;
+            Show(ui, CP_UI_SUMMARY, Companion_Text_Summary);
+            break;
+        }
+        /* fall through */
+    case CP_UI_MESSAGE:
         Back(ui, model);
         break;
     case CP_UI_ERROR:
@@ -626,18 +603,23 @@ static void Activate(CpUi *ui, CpUiModel *model, int choice)
         }
         break;
     case CP_UI_MENU:
-        if (choice == 0) {
+        if (label == Companion_Text_CheckStatus || label == Companion_Text_ReceivePokemon) {
+            if (label == Companion_Text_CheckStatus) model->ops->trade(model->context, -1);
+            else model->ops->collect(model->context, 0);
+            Show(ui, CP_UI_PINGING, WonderTrade_Text_Pinging);
+        } else if (label == Companion_Text_ChangeGame) {
+            Close(ui, model);
+        } else if (choice == 0) {
             if (!Pending(model)) {
                 ui->partyCursor = 0;
                 Show(ui, CP_UI_PICKER, WonderTrade_Text_Choose);
             } else {
                 Show(ui, CP_UI_COLLECT_CONFIRM, WonderTrade_Text_ConfirmCollect);
             }
-        } else if (choice == 1) {
-            if (!Pending(model)) ShowMessage(ui, WonderTrade_Text_Explanation, CP_UI_MENU);
-            else Show(ui, CP_UI_CANCEL_CONFIRM, WonderTrade_Text_ConfirmCancel);
-        } else {
-            Close(ui, model);
+        } else if (label == WonderTrade_Text_Info) {
+            ShowMessage(ui, WonderTrade_Text_Explanation, CP_UI_MENU);
+        } else if (label == WonderTrade_Text_CancelOffer) {
+            Show(ui, CP_UI_CANCEL_CONFIRM, WonderTrade_Text_ConfirmCancel);
         }
         break;
     default:
@@ -666,14 +648,144 @@ static void Respond(CpUi *ui, CpUiModel *model)
     else Show(ui, CP_UI_MENU, MenuMessage(model));
 }
 
-static void MoveList(CpUi *ui, int count, int step)
+int CpUi_SourceRows(const CpUiModel *model)
 {
-    if (count <= 0) return;
-    ui->listCursor = (ui->listCursor + step + count) % count;
-    if (ui->listCursor < ui->listTop) ui->listTop = ui->listCursor;
-    if (ui->listCursor >= ui->listTop + CP_UI_SAVE_ROWS) ui->listTop = ui->listCursor - CP_UI_SAVE_ROWS + 1;
-    ui->sounds++;
+    return 3 + CpUi_HasWifi(model);
+}
+
+int CpUi_SourceLabel(const CpUiModel *model, int index)
+{
+    if (!index) return model->saveCount ? Companion_Text_SavePickerTitle : WonderTrade_Text_Retry;
+    if (index == 1) return Companion_Text_Language;
+    if (index + 1 == CpUi_SourceRows(model)) return WonderTrade_Text_Exit;
+    return Companion_Text_WifiSettings;
+}
+
+static int GridColumn(int x)
+{
+    if (x < CP_GRID_LEFT) return -1;
+    int offset = x - CP_GRID_LEFT;
+    return offset < 2 * CP_GRID_STEP && offset % CP_GRID_STEP < CP_GRID_WIDTH ? offset / CP_GRID_STEP : -1;
+}
+
+static void SourceInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
+{
+    int choosing = ui->state == CP_UI_LANGUAGE;
+    int count = choosing ? Companion_Language_Count : CpUi_SourceRows(model);
+    int *focus = choosing ? &ui->languageCursor : &ui->sourceFocus;
+    int activate = input->pressed & CP_UI_KEY_A;
+    if (!input->touchHeld) ui->touchBlocked = 0;
+    if (input->pressed & (CP_UI_KEY_B | CP_UI_KEY_X)) {
+        if (choosing && !model->needsLanguage) ShowSaves(ui, model);
+        return;
+    }
+    if (!ui->touchBlocked && input->touchPressed) {
+        int dy = input->touchY - CP_SOURCE_TOP;
+        if (dy < 0 || dy >= CP_SOURCE_ROWS * CP_SOURCE_STEP || dy % CP_SOURCE_STEP >= CP_SOURCE_HEIGHT) return;
+        int row = dy / CP_SOURCE_STEP;
+        if (choosing) {
+            int col = GridColumn(input->touchX);
+            if (col < 0 || 2 * row + col >= count) return;
+            *focus = 2 * row + col;
+            activate = 1;
+        } else if (input->touchX >= CP_SOURCE_LEFT && input->touchX < CP_SOURCE_LEFT + CP_SOURCE_WIDTH) {
+            if (row >= count) return;
+            *focus = row;
+            activate = 1;
+        } else return;
+    } else if (choosing && (input->pressed & (CP_UI_KEY_LEFT | CP_UI_KEY_RIGHT))) {
+        if ((*focus ^ 1) < count) *focus ^= 1;
+    } else if (input->pressed & (CP_UI_KEY_UP | CP_UI_KEY_DOWN)) {
+        int direction = input->pressed & CP_UI_KEY_UP ? -1 : 1;
+        if (choosing) {
+            int col = *focus % 2, rows = (count + 1 - col) / 2;
+            *focus = 2 * ((*focus / 2 + rows + direction) % rows) + col;
+        } else *focus = (*focus + count + direction) % count;
+    } else if (!activate) return;
     ui->dirty = 1;
+    ui->sounds++;
+    if (!activate) return;
+    if (choosing) {
+        model->uiLanguage = (CompanionLanguage)*focus;
+        model->needsLanguage = 0;
+        ShowSaves(ui, model);
+        if (model->storeLanguage && model->storeLanguage(model->context, model->uiLanguage))
+            ShowMessage(ui, Companion_Text_PreferenceFailed, CP_UI_SAVE_PICKER);
+        return;
+    }
+    int label = CpUi_SourceLabel(model, *focus);
+    if (label == Companion_Text_Language) {
+        ui->languageCursor = model->uiLanguage;
+        Show(ui, CP_UI_LANGUAGE, Companion_Text_Language);
+    } else if (label == WonderTrade_Text_Exit) Show(ui, CP_UI_EXIT, WonderTrade_Text_Disconnecting);
+    else if (label == Companion_Text_WifiSettings) EnterWifi(ui, model, CP_UI_SAVE_PICKER, 0);
+    else if (model->saveCount) Show(ui, CP_UI_GAME_LIST, Companion_Text_SavePickerHint);
+    else {
+        ui->loading = 0;
+        model->ops->scan(model->context);
+        Show(ui, CP_UI_BOOT, WonderTrade_Text_CheckingSave);
+    }
+}
+
+static void GameListInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
+{
+    int count = (int)model->saveCount;
+    unsigned keys = input->pressed;
+    if (!input->touchHeld) ui->touchBlocked = 0;
+    if (input->touchPressed && !ui->touchBlocked) {
+        int col = GridColumn(input->touchX);
+        if (col < 0) return;
+        if (input->touchY >= CP_GAME_NAV_Y && input->touchY < CP_GAME_NAV_Y + CP_SOURCE_HEIGHT)
+            keys = col ? CP_UI_KEY_DOWN : CP_UI_KEY_UP;
+        else if (input->touchY >= CP_GAME_ACTION_Y && input->touchY < CP_GAME_ACTION_Y + CP_SOURCE_HEIGHT)
+            keys = col ? CP_UI_KEY_B : CP_UI_KEY_A;
+    }
+    if (!count || (keys & (CP_UI_KEY_B | CP_UI_KEY_X))) {
+        ShowSaves(ui, model);
+        return;
+    }
+    if (ui->listCursor >= count) {
+        ui->listCursor = count - 1;
+        ui->listTop = count > CP_SOURCE_ROWS ? count - CP_SOURCE_ROWS : 0;
+        ui->dirty = 1;
+    }
+    if (keys & CP_UI_KEY_A) {
+        ui->sounds++;
+        ui->loading = 1;
+        model->ops->load(model->context, (unsigned)ui->listCursor);
+        Show(ui, CP_UI_BOOT, WonderTrade_Text_CheckingSave);
+    } else if (keys & (CP_UI_KEY_UP | CP_UI_KEY_DOWN)) {
+        int step = (keys & CP_UI_KEY_UP) ? -1 : 1;
+        ui->listCursor = (ui->listCursor + count + step) % count;
+        if (ui->listCursor < ui->listTop) ui->listTop = ui->listCursor;
+        if (ui->listCursor >= ui->listTop + CP_SOURCE_ROWS) ui->listTop = ui->listCursor - CP_SOURCE_ROWS + 1;
+        ui->sounds++;
+        ui->dirty = 1;
+    }
+}
+
+int CpUi_SummaryHasMoves(const CpUi *ui, const CpUiModel *model)
+{
+    return !(ui->summaryReturn == CP_UI_RECEIVED ? model->received.summary.statsOnly :
+        model->party[ui->partyCursor].summary.statsOnly);
+}
+
+static void SummaryInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
+{
+    if (!input->touchHeld) ui->touchBlocked = 0;
+    if ((input->pressed & (CP_UI_KEY_B | CP_UI_KEY_X)) ||
+        (input->touchPressed && !ui->touchBlocked &&
+         input->touchY >= CP_SUMMARY_NAV_Y && input->touchY < CP_SUMMARY_NAV_Y + 32 &&
+         input->touchX >= CP_UI_PICKER_BACK_LEFT && input->touchX < CP_UI_PICKER_BACK_LEFT + CP_UI_PICKER_BACK_WIDTH)) {
+        Back(ui, model);
+    } else if (CpUi_SummaryHasMoves(ui, model) && (input->pressed & (CP_UI_KEY_L | CP_UI_KEY_R))) {
+        int moves = !!(input->pressed & CP_UI_KEY_R);
+        if (moves != ui->summaryMoves) {
+            ui->summaryMoves = moves;
+            ui->dirty = 1;
+            ui->sounds++;
+        }
+    }
 }
 
 static void PickerInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
@@ -681,6 +793,17 @@ static void PickerInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     int count = (int)model->partyCount, touched = -1, step = 0;
     if (!input->touchHeld) ui->touchBlocked = 0;
     else if (!ui->touchBlocked && input->touchPressed) touched = CpUi_PickerTouch(input->touchX, input->touchY, model->partyCount);
+    if (ui->partyCursor < count && model->party[ui->partyCursor].summary.ready &&
+        ((input->pressed & CP_UI_KEY_Y) || (!ui->touchBlocked && input->touchPressed &&
+          input->touchY >= 160 && input->touchY < 184 && input->touchX >= 8 && input->touchX < 144))) {
+        PartySummary(ui);
+        return;
+    }
+    if (touched >= 0 && touched != CP_UI_PICKER_BACK && touched != ui->partyCursor) {
+        ui->partyCursor = touched;
+        ui->dirty = 1;
+        return;
+    }
     if (touched >= 0) {
         ui->sounds++;
         ui->partyCursor = touched;
@@ -714,12 +837,28 @@ static void HandleInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
 {
     int labels[CP_UI_MAX_ACTIONS];
     int count, touched;
+    if (ui->state == CP_UI_GAME_LIST) {
+        GameListInput(ui, model, input);
+        return;
+    }
+    if (ui->state == CP_UI_SUMMARY) {
+        SummaryInput(ui, model, input);
+        return;
+    }
+    if (ui->state == CP_UI_SAVE_PICKER || ui->state == CP_UI_LANGUAGE) {
+        SourceInput(ui, model, input);
+        return;
+    }
     if (ui->state == CP_UI_PICKER) {
         PickerInput(ui, model, input);
         return;
     }
     if (ui->state == CP_UI_WIFI_KEYBOARD) {
         KeyboardInput(ui, model, input);
+        return;
+    }
+    if (ui->state == CP_UI_RECEIVED && model->received.summary.ready && (input->pressed & CP_UI_KEY_Y)) {
+        Activate(ui, model, 0);
         return;
     }
     count = CpUi_Actions(ui, model, labels);
@@ -735,9 +874,6 @@ static void HandleInput(CpUi *ui, CpUiModel *model, const CpUiInput *input)
         ui->sounds++;
         ui->cursor = touched;
         Activate(ui, model, touched);
-    } else if (ui->state == CP_UI_SAVE_PICKER && model->saveCount && (input->pressed & (CP_UI_KEY_UP | CP_UI_KEY_DOWN))) {
-        /* Up and Down choose a save; A confirms it, B leaves. */
-        MoveList(ui, (int)model->saveCount, (input->pressed & CP_UI_KEY_UP) ? -1 : 1);
     } else if (ui->state == CP_UI_WIFI_LIST && model->wifi.count && (input->pressed & (CP_UI_KEY_UP | CP_UI_KEY_DOWN))) {
         /* Up and Down choose a network, Left and Right a button. */
         int networks = (int)model->wifi.count;
@@ -775,18 +911,23 @@ void CpUi_Frame(CpUi *ui, CpUiModel *model, const CpUiInput *input)
     case CP_UI_BOOT:
         if (model->busy) return;
         if (!ui->loading) {
-            ShowSaves(ui, model);
+            if (model->needsLanguage) Show(ui, CP_UI_LANGUAGE, Companion_Text_Language);
+            else ShowSaves(ui, model);
         } else {
             ui->loading = 0;
             if (model->loadMessage >= 0) ShowMessage(ui, model->loadMessage, CP_UI_SAVE_PICKER);
-            else if (model->saves[ui->listCursor].gameCard && !model->saves[ui->listCursor].writableCard) ShowMessage(ui, Companion_Text_GameCardParty, CP_UI_SAVE_PICKER);
-            else Show(ui, CP_UI_GAME_CONFIRM, Companion_Text_GameConfirm);
+            else if (Preview(ui, model)) {
+                ui->partyCursor = 0;
+                Show(ui, CP_UI_PICKER, Companion_Text_GameCardParty);
+            }
+            else if (model->recovery) Show(ui, CP_UI_RECOVERY, WonderTrade_Text_RecoveryRequired);
+            else Connect(ui, model);
         }
         return;
     case CP_UI_EXIT:
         return;
     case CP_UI_SAVE_PICKER:
-        if (ClampSaves(ui, model)) ui->dirty = 1;
+        if (ui->sourceFocus >= CpUi_SourceRows(model)) ShowSaves(ui, model);
         break;
     case CP_UI_WIFI_LIST: {
         /* The list grows and its signals change as the search goes on. */

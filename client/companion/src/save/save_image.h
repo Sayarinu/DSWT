@@ -146,6 +146,8 @@ CpSaveResult CpSaveImage_LoadAny(CpSaveImage *image, const CpFile *file);
 unsigned char *CpSaveImage_Block(CpSaveImage *image, unsigned block);
 /* The size of a block's body. */
 uint32_t CpSaveImage_BlockSize(const CpSaveImage *image, unsigned block);
+uint16_t CpSave_Crc16(uint16_t crc, const unsigned char *data, size_t size);
+
 /* SHA-256 of both block bodies as the game's adapter digests them (the
  * layout's mask read as zero). */
 CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_SAVE_HASH_SIZE]);
@@ -154,6 +156,10 @@ CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_
  * With a shared counter both blocks of a half must carry the same one. */
 CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
                               const unsigned char expected[CP_SAVE_HASH_SIZE]);
+/* When the caller has just hashed the in-memory image to expected, a
+ * differing general-block byte can reject the preflight early. */
+CpSaveResult CpSaveImage_VerifyCurrent(const CpSaveImage *image, const CpFile *file,
+                                      const unsigned char expected[CP_SAVE_HASH_SIZE]);
 /* Always performs two alternating full saves, incrementing global and each
  * block counter per pass. Bodies become identical; footers have adjacent
  * counters. A fallback block is published first, then general-first saves resume.

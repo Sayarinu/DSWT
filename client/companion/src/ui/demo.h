@@ -40,7 +40,7 @@ typedef struct CpUiDemo {
     unsigned step, stepFrame;
 } CpUiDemo;
 
-void CpUiDemo_Init(CpUiDemo *, CompanionLanguage systemLanguage);
+void CpUiDemo_Init(CpUiDemo *, CompanionLanguage uiLanguage);
 void CpUiDemo_SetOutcome(CpUiDemo *, enum CpUiDemoOutcome);
 
 /* The input of one frame of a fixed walk through every screen, holding each

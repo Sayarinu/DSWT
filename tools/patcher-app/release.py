@@ -36,8 +36,6 @@ def archive_name(version):
     return f"dswt-{version}.zip"
 
 
-WIKI = "https://github.com/Sayarinu/DSWT/wiki"
-UPSTREAM = re.compile(r"upstream(?:-[a-z0-9]+)?\.json")
 MERGED = re.compile(r"(?:[A-Z][A-Z0-9]*-[0-9]+ - )?(?P<title>.+ \(#[0-9]+\))")
 
 
@@ -67,56 +65,15 @@ def changes(version, commit, repository):
     return previous, titles
 
 
-def upstreams(commit, repository):
-    """(name, revision) of every decompilation the commit pins, from its client/games/upstream*.json."""
-    directory = f"repos/{repository}/contents/client"
-    listing = json.loads(gh("api", f"{directory}?ref={commit}"))
-    if any(item["name"] == "games" for item in listing):
-        directory += "/games"
-        listing = json.loads(gh("api", f"{directory}?ref={commit}"))
-    names = [item["name"] for item in listing if UPSTREAM.fullmatch(item["name"])]
-    pinned = []
-    for name in names:
-        record = json.loads(gh("api", f"{directory}/{name}?ref={commit}",
-                               "-H", "Accept: application/vnd.github.raw"))
-        pinned.append((record["repository"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1], record["revision"]))
-    if not pinned:
-        raise build.BuildError(f"{commit} pins no upstream")
-    return sorted(pinned)
-
-
-def notes(manifest, previous=None, titles=(), pinned=()):
-    version = manifest["version"]
-    if previous is None:
-        changelog = "First release."
-    elif titles:
-        changelog = "\n".join(f"- {title}" for title in titles)
-    else:
-        changelog = "No changes to the game patches."
-    heading = "## Changes" if previous is None else f"## Changes since {previous}"
-    upstream_line = ", ".join(f"{name} {revision[:7]}" for name, revision in pinned)
-    return f"""Wonder Trade for your own copy of a supported Pokémon game.
-
-Download one file, DSWT Patcher for your computer: `dswt-patcher-{version}-windows.zip`,
-`dswt-patcher-{version}-macos.zip` or `dswt-patcher-{version}-linux.zip`. It carries every
-patch. Open it, choose a clean dump of your cartridge and save the patched ROM. Trimmed
-dumps work; the original file is never changed. Patches apply only through DSWT Patcher;
-generic BPS patchers are not supported.
-
-Tested on melonDS with the US versions of Platinum, Diamond, Pearl, HeartGold and
-SoulSilver, and the USA/Europe versions of Black, White, Black 2 and White 2. Black, White,
-Black 2 and White 2 run in DS mode only. Other languages are ports: see
-[Language support]({WIKI}/Language-support). DS hardware is not tested yet.
-
-{heading}
-
-{changelog}
-
-The apps are not code-signed: Windows SmartScreen and macOS Gatekeeper ask you to confirm
-the first launch. `SHA256SUMS` lists every file in this release.
-
-Source: {manifest['source']['commit']}. Upstreams: {upstream_line}.
-"""
+def notes(repository, previous, titles):
+    bullets = []
+    for title in titles:
+        summary, number = title.rsplit(" (#", 1)
+        number = number.removesuffix(")")
+        bullets.append(f"- {summary}. [#{number}](https://github.com/{repository}/pull/{number})")
+    if not bullets:
+        bullets.append("- First release." if previous is None else "- No merged pull requests since the last release.")
+    return "<details>\n<summary>Core changes</summary>\n\n" + "\n".join(bullets) + "\n\n</details>\n"
 
 
 def draft(version, archive, repository):
@@ -127,19 +84,17 @@ def draft(version, archive, repository):
     gh("api", f"repos/{repository}/commits/{commit}", "--silent")
     gh("release", "create", f"v{version}", str(archive), "--repo", repository, "--draft", "--target", commit,
        "--title", f"DSWT {version}", "--notes",
-       notes(manifest, *changes(version, commit, repository), upstreams(commit, repository)))
+       notes(repository, *changes(version, commit, repository)))
     return {"release": f"v{version}", "commit": commit, "draft": True}
 
 
 def rewrite(version, repository):
     """Replace a published release's notes, keeping the source commit it was released with."""
-    body = json.loads(gh("release", "view", f"v{version}", "--repo", repository, "--json", "body"))["body"]
-    # Earlier notes read "Source: COMMIT, upstream REVISION."; current ones list every upstream.
-    source = re.search(r"^Source: ([0-9a-f]{40})(?:, upstream [0-9a-f]{40}\.|\. Upstreams: .+\.)$", body, re.MULTILINE)
-    if source is None:
-        raise build.BuildError(f"v{version}'s notes have no source line")
-    manifest = {"version": version, "source": {"commit": source[1]}}
-    text = notes(manifest, *changes(version, source[1], repository), upstreams(source[1], repository))
+    tag = f"v{version}"
+    commit = gh("api", f"repos/{repository}/commits/{tag}", "--jq", ".sha").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise build.BuildError(f"Cannot resolve the release tag {tag}")
+    text = notes(repository, *changes(version, commit, repository))
     gh("release", "edit", f"v{version}", "--repo", repository, "--notes", text)
     return {"release": f"v{version}", "notes": text}
 
@@ -164,7 +119,7 @@ def publish(version, repository, directory, companion=False):
     directory = Path(directory)
     names = {f"dswt-patcher-{version}-{name}.zip" for name in PLATFORMS}
     if companion:
-        names.update({"dswt.nds", f"dswt-companion-{version}.zip", f"dswt-companion-{version}.html"})
+        names.update({"dswt.nds", "THIRD-PARTY-NOTICES.txt"})
     found = {path.name for path in directory.iterdir() if path.is_file()}
     if found != names | {archive_name(version)}:
         raise build.BuildError(f"Release files differ from the expected set: {sorted(found ^ (names | {archive_name(version)}))}")

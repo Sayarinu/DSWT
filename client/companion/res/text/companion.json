@@ -4,13 +4,13 @@
   "messages": [
     {
       "id": "Companion_Text_SavePickerTitle",
-      "en_US": "Choose a game",
-      "fr_FR": "Choisissez un jeu",
-      "de_DE": "Wähle ein Spiel",
-      "it_IT": "Scegli un gioco",
-      "es_ES": "Elige un juego",
-      "ja_JP": "ゲームを　えらんでください",
-      "ko_KR": "게임을 선택해 주십시오"
+      "en_US": "Select Game",
+      "fr_FR": "Choisir un jeu",
+      "de_DE": "Spiel auswählen",
+      "it_IT": "Seleziona gioco",
+      "es_ES": "Elegir juego",
+      "ja_JP": "ゲームをえらぶ",
+      "ko_KR": "게임 선택"
     },
     {
       "id": "Companion_Text_NoSaves",
@@ -31,16 +31,6 @@
       "es_ES": "Elige con la cruz de control.\nPulsa A para confirmar.",
       "ja_JP": "じゅうじボタンで　えらんで\nAボタンで　きめてください",
       "ko_KR": "십자버튼으로 선택하고\nA버튼으로 결정해 주십시오"
-    },
-    {
-      "id": "Companion_Text_GameConfirm",
-      "en_US": "{game}, {language}. Correct?",
-      "fr_FR": "{game}, {language}. C’est bien ça ?",
-      "de_DE": "{game}, {language}. Stimmt das?",
-      "it_IT": "{game}, {language}. Va bene?",
-      "es_ES": "{game}, {language}. ¿Es correcto?",
-      "ja_JP": "{game}　{language}\nこれで　よろしいですか？",
-      "ko_KR": "{game}, {language}\n맞습니까?"
     },
     {
       "id": "Companion_Text_WifiScanning",
@@ -691,6 +681,226 @@
       "es_ES": "Dibuja círculos grandes durante unos 15 segundos. Vuelve y abre la partida de nuevo.",
       "ja_JP": "タッチペンで　15びょうほど　おおきなまるを　かいてください。もどって　レポートを　えらびなおしてください。",
       "ko_KR": "터치 화면에 약 15초 동안 큰 원을 그리세요. 돌아가서 저장 데이터를 다시 여세요."
+    },
+    {
+      "id": "Companion_Text_Language",
+      "en_US": "Language",
+      "fr_FR": "Langue",
+      "de_DE": "Sprache",
+      "it_IT": "Lingua",
+      "es_ES": "Idioma",
+      "ja_JP": "ことば",
+      "ko_KR": "언어"
+    },
+    {
+      "id": "Companion_Text_ChangeGame",
+      "en_US": "Change game",
+      "fr_FR": "Changer de jeu",
+      "de_DE": "Spiel wechseln",
+      "it_IT": "Cambia gioco",
+      "es_ES": "Cambiar juego",
+      "ja_JP": "ゲームを　かえる",
+      "ko_KR": "게임 변경"
+    },
+    {
+      "id": "Companion_Text_PreferenceFailed",
+      "en_US": "Language set for this session. Could not save it to the SD card.",
+      "fr_FR": "Langue choisie pour cette session. Écriture sur carte SD impossible.",
+      "de_DE": "Sprache für diese Sitzung gewählt. Speichern auf SD-Karte fehlgeschlagen.",
+      "it_IT": "Lingua scelta per questa sessione. Salvataggio su scheda SD fallito.",
+      "es_ES": "Idioma elegido para esta sesión. No se pudo guardar en la tarjeta SD.",
+      "ja_JP": "ことばを　えらびました。SDカードには　きろくできませんでした。",
+      "ko_KR": "이번 실행에 언어를 적용했습니다. SD 카드에 저장할 수 없습니다."
+    },
+    {
+      "id": "Companion_Text_Summary",
+      "en_US": "Summary",
+      "fr_FR": "Résumé",
+      "de_DE": "Bericht",
+      "it_IT": "Info",
+      "es_ES": "Datos",
+      "ja_JP": "つよさをみる",
+      "ko_KR": "능력치"
+    },
+    {
+      "id": "Companion_Text_Moves",
+      "en_US": "Moves",
+      "fr_FR": "Capacités",
+      "de_DE": "Attacken",
+      "it_IT": "Mosse",
+      "es_ES": "Movimientos",
+      "ja_JP": "わざ",
+      "ko_KR": "기술"
+    },
+    {
+      "id": "Companion_Text_Stats",
+      "en_US": "Stats",
+      "fr_FR": "Stats",
+      "de_DE": "Werte",
+      "it_IT": "Statistiche",
+      "es_ES": "Estadísticas",
+      "ja_JP": "のうりょく",
+      "ko_KR": "능력치"
+    },
+    {
+      "id": "Companion_Text_HP",
+      "en_US": "HP",
+      "fr_FR": "PV",
+      "de_DE": "KP",
+      "it_IT": "PS",
+      "es_ES": "PS",
+      "ja_JP": "HP",
+      "ko_KR": "HP"
+    },
+    {
+      "id": "Companion_Text_Attack",
+      "en_US": "Attack",
+      "fr_FR": "Attaque",
+      "de_DE": "Angriff",
+      "it_IT": "Attacco",
+      "es_ES": "Ataque",
+      "ja_JP": "こうげき",
+      "ko_KR": "공격"
+    },
+    {
+      "id": "Companion_Text_Defense",
+      "en_US": "Defense",
+      "fr_FR": "Défense",
+      "de_DE": "Vert.",
+      "it_IT": "Difesa",
+      "es_ES": "Defensa",
+      "ja_JP": "ぼうぎょ",
+      "ko_KR": "방어"
+    },
+    {
+      "id": "Companion_Text_Speed",
+      "en_US": "Speed",
+      "fr_FR": "Vitesse",
+      "de_DE": "Initiative",
+      "it_IT": "Velocità",
+      "es_ES": "Velocidad",
+      "ja_JP": "すばやさ",
+      "ko_KR": "스피드"
+    },
+    {
+      "id": "Companion_Text_SpAtk",
+      "en_US": "Sp. Atk",
+      "fr_FR": "Atq. Spé.",
+      "de_DE": "Sp.-Ang.",
+      "it_IT": "Att. Sp.",
+      "es_ES": "At. Esp.",
+      "ja_JP": "とくこう",
+      "ko_KR": "특수공격"
+    },
+    {
+      "id": "Companion_Text_SpDef",
+      "en_US": "Sp. Def",
+      "fr_FR": "Déf. Spé.",
+      "de_DE": "Sp.-Vert.",
+      "it_IT": "Dif. Sp.",
+      "es_ES": "Def. Esp.",
+      "ja_JP": "とくぼう",
+      "ko_KR": "특수방어"
+    },
+    {
+      "id": "Companion_Text_Nature",
+      "en_US": "Nature",
+      "fr_FR": "Nature",
+      "de_DE": "Wesen",
+      "it_IT": "Natura",
+      "es_ES": "Naturaleza",
+      "ja_JP": "せいかく",
+      "ko_KR": "성격"
+    },
+    {
+      "id": "Companion_Text_Ability",
+      "en_US": "Ability",
+      "fr_FR": "Talent",
+      "de_DE": "Fähigkeit",
+      "it_IT": "Abilità",
+      "es_ES": "Habilidad",
+      "ja_JP": "とくせい",
+      "ko_KR": "특성"
+    },
+    {
+      "id": "Companion_Text_HeldItem",
+      "en_US": "Held item",
+      "fr_FR": "Objet",
+      "de_DE": "Item",
+      "it_IT": "Strumento",
+      "es_ES": "Objeto",
+      "ja_JP": "もちもの",
+      "ko_KR": "지닌물건"
+    },
+    {
+      "id": "Companion_Text_SourceMenuHint",
+      "en_US": "Choose Select Game to use the upper list.",
+      "fr_FR": "Choisissez « Choisir un jeu » pour utiliser la liste du haut.",
+      "de_DE": "Mit „Spiel auswählen“ öffnest du die obere Liste.",
+      "it_IT": "Scegli «Seleziona gioco» per usare la lista in alto.",
+      "es_ES": "Selecciona «Elegir juego» para usar la lista de arriba.",
+      "ja_JP": "「ゲームをえらぶ」で　うえのリストから　えらべます。",
+      "ko_KR": "「게임 선택」을 눌러 위 목록에서 고르세요."
+    },
+    {
+      "id": "Companion_Text_PreviousGame",
+      "en_US": "↑  Previous",
+      "fr_FR": "↑  Précédent",
+      "de_DE": "↑  Zurück",
+      "it_IT": "↑  Precedente",
+      "es_ES": "↑  Anterior",
+      "ja_JP": "↑  まえ",
+      "ko_KR": "↑  이전"
+    },
+    {
+      "id": "Companion_Text_NextGame",
+      "en_US": "↓  Next",
+      "fr_FR": "↓  Suivant",
+      "de_DE": "↓  Weiter",
+      "it_IT": "↓  Successivo",
+      "es_ES": "↓  Siguiente",
+      "ja_JP": "↓  つぎ",
+      "ko_KR": "↓  다음"
+    },
+    {
+      "id": "Companion_Text_AwaitingMatch",
+      "en_US": "Waiting for a trade partner.",
+      "fr_FR": "En attente d’un partenaire.",
+      "de_DE": "Du wartest auf einen Tauschpartner.",
+      "it_IT": "In attesa di un altro giocatore.",
+      "es_ES": "Esperando a otro jugador.",
+      "ja_JP": "こうかんあいてを　まっています。",
+      "ko_KR": "교환 상대를 기다리고 있습니다."
+    },
+    {
+      "id": "Companion_Text_CheckStatus",
+      "en_US": "Check status",
+      "fr_FR": "Vérifier",
+      "de_DE": "Status prüfen",
+      "it_IT": "Controlla",
+      "es_ES": "Comprobar",
+      "ja_JP": "かくにん",
+      "ko_KR": "상태 확인"
+    },
+    {
+      "id": "Companion_Text_MatchReady",
+      "en_US": "Match found! Choose Receive Pokémon to collect yours.",
+      "fr_FR": "Partenaire trouvé ! Choisissez Recevoir pour récupérer votre Pokémon.",
+      "de_DE": "Partner gefunden! Wähle Abholen, um dein Pokémon zu erhalten.",
+      "it_IT": "Scambio pronto! Scegli Ritira per ricevere il tuo Pokémon.",
+      "es_ES": "¡Intercambio listo! Elige Recibir para recoger tu Pokémon.",
+      "ja_JP": "こうかんあいてが　みつかりました！　「うけとる」を　えらんでください。",
+      "ko_KR": "교환이 성사됐습니다! 받기를 선택해 포켓몬을 받으세요."
+    },
+    {
+      "id": "Companion_Text_ReceivePokemon",
+      "en_US": "Receive Pokémon",
+      "fr_FR": "Recevoir",
+      "de_DE": "Abholen",
+      "it_IT": "Ritira",
+      "es_ES": "Recibir",
+      "ja_JP": "うけとる",
+      "ko_KR": "받기"
     }
   ]
 }

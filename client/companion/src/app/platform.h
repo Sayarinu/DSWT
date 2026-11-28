@@ -91,6 +91,8 @@ typedef struct CpAppPlatform {
     int (*wifiFailure)(void *arg);
     /* Nonzero when WPA2 networks can be joined (DSi mode). */
     int wifiWpa2;
+    void (*loadMusic)(const CpReader *, CpFamily); /* worker, after the save loads */
+    void (*stopMusic)(void); /* before closing the active game */
     int (*previewCardRom)(CpReader *); /* existing read-only Slot-1 session */
 } CpAppPlatform;
 

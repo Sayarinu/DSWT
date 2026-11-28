@@ -17,6 +17,7 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
     size_t requestSize, replySize;
     unsigned count, processing = 0, wireResult;
     int result = CP_VISIT_ERROR_JOURNAL, operation;
+    int deposited = 0;
     if (!visit) return CP_VISIT_ERROR_JOURNAL;
     memset(visit, 0, sizeof(*visit));
     if (!engine || !game || !transport || !transport->post) return visit->result = CP_VISIT_ERROR_JOURNAL;
@@ -33,6 +34,7 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
             result = WtGame_Checkpoint(game);
             if (result != 0) { result = CP_VISIT_ERROR_CHECKPOINT + (result < -99 ? -99 : result); break; }
             if (WtEngine_Deposit(engine, (unsigned)slot) != 0) { result = CP_VISIT_ERROR_DEPOSIT; break; }
+            deposited = 1;
             slot = -1;
         }
         operation = WtSession_Next(engine, action);
@@ -43,6 +45,7 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
             /* The ACK retires this journal entry, so read what was saved first. */
             visit->hasReceived = WtGame_Received(&engine->entry, &visit->received) == 0;
             if (visit->hasReceived) {
+                visit->receivedLength = engine->entry.destination.length;
                 memcpy(visit->received.sent, engine->entry.original, sizeof(visit->received.sent));
                 memcpy(visit->received.image, engine->entry.destinationAfter, sizeof(visit->received.image));
             }
@@ -74,6 +77,14 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
         if (operation == WT_OP_SUBMIT && wireResult == WT_RESULT_COUNTER_MISMATCH && !engine->blocked) {
             visit->superseded = 1; continue;
         }
+        /* Submit records the queued state. If the server already knows of
+         * a later event (such as a match), reconcile to show that result. */
+        if (deposited && operation == WT_OP_SUBMIT && wireResult == WT_RESULT_OK &&
+            decoded.highwater == decoded.body.mutation.event && engine->entry.phase == WT_JOURNAL_QUEUED) {
+            visit->serverTradeState = decoded.body.mutation.snapshot.state;
+            result = 0;
+            break;
+        }
         if (operation == WT_OP_ACKNOWLEDGE && wireResult == WT_RESULT_OK) {
             visit->completed = 1;
             if (slot < 0 && engine->entry.phase == WT_JOURNAL_IDLE) { result = 0; break; }
@@ -84,7 +95,11 @@ int CpVisit_Run(WtEngine *engine, WtGame *game, uint32_t build, int slot, unsign
             && !(operation == WT_OP_CANCEL && (wireResult == WT_RESULT_CONFLICT || wireResult == WT_RESULT_NOT_FOUND))) {
             result = -100 - (int)wireResult; break;
         }
-        if (operation == WT_OP_STATUS) { result = 0; break; }
+        if (operation == WT_OP_STATUS) {
+            visit->serverTradeState = decoded.body.status.state;
+            result = 0;
+            break;
+        }
     }
     if (count == MAX_EXCHANGES) result = CP_VISIT_ERROR_LOOP;
     if (Cancelled(transport)) result = CP_VISIT_ERROR_CANCELLED;

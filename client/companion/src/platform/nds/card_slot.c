@@ -149,6 +149,7 @@ int CpNdsSlot_Header(uint8_t header[CP_CARD_PAGE], uint32_t *retryChipId)
 int CpNdsSlot_Handoff(CpCardRom *card, CpReader *reader)
 {
     card->active = 0;
+    card->id = 0;
     if (!CpNdsSlot_Present() || !Powered()) return -1;
     sysSetCardOwner(true);
     uint32_t control = REG_ROMCTRL;

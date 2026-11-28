@@ -48,4 +48,7 @@ typedef struct CpNetExchange {
  * is polled while waiting. Zero on success, otherwise enum CpNetError. */
 int CpNet_Post(CpNetExchange *, const unsigned char *request, size_t size, const volatile int *cancel);
 
+/* Release any connection before the worker tears down its TLS arena. */
+void CpNet_EndVisit(void);
+
 #endif

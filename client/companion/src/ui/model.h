@@ -6,6 +6,7 @@
 #include "companion_text.h"
 #include "game/text.h"
 #include "game/portrait.h"
+#include "game/party_icon.h"
 #include "platform/wifi_status.h"
 
 /* What the screens show and what they can ask for. The UI never touches the
@@ -55,6 +56,14 @@ enum CpUiIneligible {
 
 enum CpUiGender { CP_UI_MALE, CP_UI_FEMALE, CP_UI_GENDERLESS };
 
+enum { CP_SUMMARY_NAME = 24 };
+typedef struct CpUiSummary {
+    uint16_t hp, stats[6];
+    uint8_t iv[6], ev[6], pp[4], maxPp[4], level, ready, statsOnly;
+    uint16_t nature[CP_SUMMARY_NAME], ability[CP_SUMMARY_NAME], item[CP_UI_ITEM_NAME_MAX];
+    uint16_t moves[4][CP_SUMMARY_NAME];
+} CpUiSummary;
+
 typedef struct CpUiPokemon {
     uint16_t species; /* national dex number; 0 for an empty slot */
     uint8_t level, gender, shiny, isEgg, form;
@@ -67,6 +76,8 @@ typedef struct CpUiPokemon {
     /* The held item's name from the ROM, or empty (CP_CHAR_EOS first) to show
      * only the held-item mark. */
     uint16_t itemName[CP_UI_ITEM_NAME_MAX];
+    CpUiSummary summary;
+    CpPartyIcon icon;
     CpPortrait portrait;
 } CpUiPokemon;
 
@@ -77,6 +88,7 @@ typedef struct CpUiReceived {
     uint16_t speciesName[CP_UI_NAME_MAX];
     uint16_t nickname[CP_UI_NAME_MAX];
     uint16_t originalTrainer[CP_UI_TRAINER_MAX];
+    CpUiSummary summary;
     CpPortrait portrait;
 } CpUiReceived;
 
@@ -138,8 +150,9 @@ typedef struct CpUiModel {
     const CpUiOps *ops;
     void *context;
 
-    /* The console's language, for the screens before a save is chosen. */
-    CompanionLanguage systemLanguage;
+    CompanionLanguage uiLanguage; /* player-selected interface language */
+    int needsLanguage;
+    int (*storeLanguage)(void *, CompanionLanguage);
     /* A scan or load is running. */
     int busy;
 
@@ -163,6 +176,7 @@ typedef struct CpUiModel {
     int error;           /* the support code shown with an error */
     unsigned tradePhase; /* enum WtJournalPhase of the save's journal */
     int completed, returned, rejected, waiting, superseded, needsEntropy, refused;
+    unsigned char serverTradeState; /* WtWireTradeState from the last status check. */
     unsigned char refusal; /* enum WtWireRefusal */
     int hasReceived;
     CpUiReceived received;

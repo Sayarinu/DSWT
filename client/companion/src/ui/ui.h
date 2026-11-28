@@ -6,14 +6,13 @@
 
 /* The companion's screens as a state machine, after the patched game's
  * platinum/application.c: the same states, actions, messages and flow, plus
- * the companion's own save picker, game check and party list. It has no
+ * the companion's own source picker, language setting and party list. It has no
  * platform code: the DS front end (ui/app.c) feeds it input once per frame
  * and draws whatever it describes, and host tests drive it with a fake model. */
 
 typedef enum CpUiState {
     CP_UI_BOOT,          /* looking for saves, or checking the chosen one */
     CP_UI_SAVE_PICKER,   /* the .sav files and the games they belong to */
-    CP_UI_GAME_CONFIRM,  /* "Platinum, English. Correct?" */
     CP_UI_RECOVERY,
     CP_UI_CONNECTING,
     CP_UI_MENU,
@@ -36,6 +35,7 @@ typedef enum CpUiState {
     CP_UI_WIFI_FAILED,   /* why the network could not be joined, with a support code */
     CP_UI_WIFI_FORGET,   /* "Forget ...?" */
     CP_UI_WIFI_FORGET_FAILED, /* wifi.cfg could not be deleted: Retry, with a support code */
+    CP_UI_LANGUAGE, CP_UI_SUMMARY, CP_UI_GAME_LIST,
     CP_UI_STATE_COUNT
 } CpUiState;
 
@@ -43,7 +43,8 @@ typedef enum CpUiState {
 enum {
     CP_UI_KEY_A = 1 << 0, CP_UI_KEY_B = 1 << 1, CP_UI_KEY_X = 1 << 2,
     CP_UI_KEY_UP = 1 << 3, CP_UI_KEY_DOWN = 1 << 4,
-    CP_UI_KEY_LEFT = 1 << 5, CP_UI_KEY_RIGHT = 1 << 6, CP_UI_KEY_SELECT = 1 << 7
+    CP_UI_KEY_LEFT = 1 << 5, CP_UI_KEY_RIGHT = 1 << 6, CP_UI_KEY_SELECT = 1 << 7, CP_UI_KEY_Y = 1 << 8,
+    CP_UI_KEY_L = 1 << 9, CP_UI_KEY_R = 1 << 10
 };
 
 typedef struct CpUiInput {
@@ -66,11 +67,25 @@ typedef struct CpUiInput {
 /* The PICKER cursor value of the Back button. */
 #define CP_UI_PICKER_BACK CP_UI_PARTY_MAX
 
+/* Root actions and language buttons on the touch screen. */
+#define CP_SOURCE_TOP 32
+#define CP_SOURCE_LEFT 32
+#define CP_SOURCE_WIDTH 192
+#define CP_SOURCE_HEIGHT 32
+#define CP_SOURCE_STEP 40
+#define CP_SOURCE_ROWS 4
+#define CP_GRID_LEFT 8
+#define CP_GRID_STEP 128
+#define CP_GRID_WIDTH 112
+#define CP_GAME_NAV_Y 64
+#define CP_GAME_ACTION_Y 120
+#define CP_SUMMARY_NAV_Y 160
+int CpUi_SourceRows(const CpUiModel *);
+int CpUi_SourceLabel(const CpUiModel *, int index);
+
 /* At most this many bottom-screen buttons (WT_MENU_MAX_ACTIONS). */
 #define CP_UI_MAX_ACTIONS 3
 
-/* Rows of the save list that fit its window. */
-#define CP_UI_SAVE_ROWS 5
 /* Rows of the Wi-Fi network list, in the same window. */
 #define CP_UI_NETWORK_ROWS 5
 
@@ -82,6 +97,9 @@ typedef struct CpUi {
     int cursor;
     /* The highlighted save and the first save row shown (SAVE_PICKER). */
     int listCursor, listTop;
+    int sourceFocus, languageCursor;
+    CpUiState summaryReturn;
+    int summaryMoves;
     /* The highlighted party slot, or CP_UI_PICKER_BACK (PICKER). */
     int partyCursor;
     /* The party slot being offered (CONFIRM), or -1. */
@@ -113,6 +131,8 @@ typedef struct CpUi {
     CpKeyboard keyboard;
 } CpUi;
 
+int CpUi_SummaryHasMoves(const CpUi *, const CpUiModel *);
+
 /* Start at BOOT and ask the model for its saves. */
 void CpUi_Start(CpUi *, CpUiModel *);
 
@@ -123,10 +143,8 @@ void CpUi_Frame(CpUi *, CpUiModel *, const CpUiInput *);
  * how many (0..CP_UI_MAX_ACTIONS). */
 int CpUi_Actions(const CpUi *, const CpUiModel *, int labels[CP_UI_MAX_ACTIONS]);
 
-/* The language the screens use: the loaded game's once a save is chosen,
- * otherwise the console's. */
+/* The player's chosen interface language, shared by every screen. */
 CompanionLanguage CpUi_Language(const CpUi *, const CpUiModel *);
-CompanionLanguage CpUi_GameLanguage(unsigned cpLanguage, CompanionLanguage fallback);
 
 /* What the top screen shows besides its message. */
 enum CpUiCard {
@@ -135,7 +153,6 @@ enum CpUiCard {
     CP_UI_CARD_RECEIVED, /* the received Pokémon's card */
     CP_UI_CARD_SAVES,    /* the save list */
     CP_UI_CARD_FULL_TEXT, /* one framed body of text (errors, recovery, Info) */
-    CP_UI_CARD_GAME_CARD, /* read-only cartridge party */
     CP_UI_CARD_NETWORKS,  /* the Wi-Fi network list */
     CP_UI_CARD_PASSWORD   /* the network's name, the typed password and where it is kept */
 };

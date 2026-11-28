@@ -11,7 +11,8 @@
 static void RunDemo(int tour)
 {
     static CpUiDemo demo;
-    CpUiDemo_Init(&demo, CpUiApp_SystemLanguage());
+    soundEnable();
+    CpUiDemo_Init(&demo, Companion_Language_en_US);
     CpUiApp_Run(&demo.model, tour ? &demo : NULL);
 }
 

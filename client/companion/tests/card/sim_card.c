@@ -97,8 +97,10 @@ static int Transfer(void *ctx, uint64_t command, uint32_t flags, void *out, unsi
             return 0;
         }
         assert(op == 0xb7 && offset >= 0x8000 && offset % CP_CARD_PAGE == 0 && bytes == CP_CARD_PAGE);
-        assert(sim->twl || !sim->twlStart || offset < sim->twlStart - 0x3000);
-        return sim->failPage ? -1 : ImageRead(sim, offset, out, bytes);
+        if (!sim->twl && sim->twlStart && offset >= sim->twlStart - 0x3000) return -1;
+        if (sim->failPage || ImageRead(sim, offset, out, bytes) != 0) return -1;
+        if (offset == sim->corruptPage) ((uint8_t *)out)[0] ^= 1;
+        return 0;
     }
     if (op == 0x9f) return bytes == 8192 && !out ? 0 : -1;
     if (op == 0x90 && bytes == 4) {

@@ -74,11 +74,11 @@ static void OfferStatusCancel(void)
     Fresh(4);
     Party(before);
     memcpy(original, before + 8 + 1 * FX_MON, FX_MON);
-    /* Enroll, reconcile, offer slot 1, then the status of the queued offer. */
+    /* Enroll, reconcile, offer slot 1, use the durable submit snapshot. */
     Open(&engine);
     assert(CpVisit_Run(&engine, &game, 7, 1, 0, &transport, &visit) == 0);
     assert(visit.phase == WT_JOURNAL_QUEUED && visit.canLeave && !visit.completed);
-    assert(server.requests[WT_OP_ENROLL] == 1 && server.requests[WT_OP_SUBMIT] == 1 && server.requests[WT_OP_STATUS] == 1);
+    assert(server.requests[WT_OP_ENROLL] == 1 && server.requests[WT_OP_SUBMIT] == 1 && server.requests[WT_OP_STATUS] == 0 && visit.serverTradeState == WT_TRADE_QUEUED);
     assert(engine.entry.source.kind == 1 && engine.entry.source.slot == 1 && engine.entry.source.length == 236);
     assert(memcmp(engine.entry.original, original, FX_MON) == 0);
     assert(FxImageCount(&image) == 3);
@@ -103,6 +103,35 @@ static void OfferStatusCancel(void)
     assert(CpVisit_Run(&engine, &game, 7, -1, 0, &transport, &visit) == 0 && visit.phase == WT_JOURNAL_IDLE);
     WtEngine_Close(&engine);
     puts("PASS visit: cancel collects the return and acknowledges it");
+}
+
+static int MatchBeforeSubmitReply(void *arg, const unsigned char *request, size_t size,
+    unsigned char reply[WT_WIRE_REPLY_MAX], size_t *replySize)
+{
+    int result = FsPost(arg, request, size, reply, replySize);
+    if (!result && request[WT_WIRE_REQUEST_OPERATION] == WT_OP_SUBMIT) {
+        FxSpec partner = FxDefault(5);
+        unsigned char canonical[136];
+        FxCanonical(&partner, canonical);
+        FsMatch(canonical);
+        FsPut(reply + WT_WIRE_REPLY_HIGHWATER, server.eventCount, 8);
+    }
+    return result;
+}
+
+static void AlreadyMatchedOfferChecksStatus(void)
+{
+    CpTransport immediate = transport;
+    WtEngine engine;
+    CpVisit visit;
+    immediate.post = MatchBeforeSubmitReply;
+    Fresh(4);
+    Open(&engine);
+    assert(CpVisit_Run(&engine, &game, 7, 1, 0, &immediate, &visit) == 0);
+    assert(visit.canLeave && visit.serverTradeState == WT_TRADE_MATCHED);
+    assert(server.requests[WT_OP_SUBMIT] == 1 && server.requests[WT_OP_STATUS] == 1);
+    WtEngine_Close(&engine);
+    puts("PASS a newer event on the submit reply still shows the match immediately");
 }
 
 static void RejectedOfferRestoresInPlace(void)
@@ -140,6 +169,7 @@ static void Failures(void)
 int main(void)
 {
     OfferStatusCancel();
+    AlreadyMatchedOfferChecksStatus();
     RejectedOfferRestoresInPlace();
     Failures();
     puts("PASS visit driver");

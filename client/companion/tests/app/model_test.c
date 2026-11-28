@@ -903,17 +903,32 @@ static void MatchedDeliveries(void)
     Visit(-1, 0, 0);
     Visit(0, 0, 0);
     assert(model->tradePhase == WT_JOURNAL_QUEUED && model->partyCount == 3);
+    assert(model->serverTradeState == WT_TRADE_QUEUED);
     spec.species = 25;
     FxCanonical(&spec, canonical);
     FsMatch(canonical);
     acknowledged = server.requests[WT_OP_ACKNOWLEDGE];
+    unsigned collects = server.requests[WT_OP_COLLECT];
+    Visit(-1, 0, 0);
+    assert(model->net == CP_UI_NET_RESPONSE && model->serverTradeState == WT_TRADE_MATCHED);
+    assert(model->partyCount == 3 && !model->hasReceived && !model->completed);
+    assert(server.requests[WT_OP_COLLECT] == collects && server.requests[WT_OP_ACKNOWLEDGE] == acknowledged);
     Visit(-1, 1, 0);
+    assert(model->serverTradeState == WT_TRADE_NONE);
     assert(model->net == CP_UI_NET_RESPONSE && model->completed && !model->returned && !model->refused);
     assert(model->tradePhase == WT_JOURNAL_IDLE && model->canLeave);
     assert(server.requests[WT_OP_ACKNOWLEDGE] == acknowledged + 1);
     assert(model->partyCount == 4 && model->party[3].species == 25);
     assert(model->hasReceived && model->received.species == 25 && NameIs(model->received.speciesName, kWesternName));
     assert(model->received.originalTrainer[CP_UI_TRAINER_MAX - 1] == CP_CHAR_EOS);
+    const CpUiSummary *summary = &model->received.summary;
+    assert(summary->ready && summary->hp > 0 && summary->hp == summary->stats[0]);
+    assert(summary->level == model->party[3].level);
+    assert(!memcmp(summary, &model->party[3].summary, sizeof(*summary)));
+    for (unsigned i = 0; i < 6; ++i) {
+        assert(summary->iv[i] == ((Fx32(canonical + 0x38) >> (5*i)) & 31));
+        assert(summary->ev[i] == canonical[0x18+i]);
+    }
     CloseSession();
     /* Reopened: the save loads and holds the received Pokémon. */
     LoadByName("Platinum.sav");
@@ -1028,11 +1043,13 @@ static void ScreensDriveTheModel(void)
     for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
     assert(ui.state == CP_UI_SAVE_PICKER && model->saveCount == 8);
     target = FindSave("Second.sav");
-    ui.listCursor = target;
+    input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_GAME_LIST);
+    input.pressed = CP_UI_KEY_DOWN;
+    for (int step = 0; step < target; ++step) CpUi_Frame(&ui, model, &input);
+    assert(ui.listCursor == target);
     input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;
     for (frame = 0; frame < 4; ++frame) CpUi_Frame(&ui, model, &input);
-    assert(ui.state == CP_UI_GAME_CONFIRM);
-    input.pressed = CP_UI_KEY_A; CpUi_Frame(&ui, model, &input); input.pressed = 0;
     for (frame = 0; frame < 8; ++frame) CpUi_Frame(&ui, model, &input);
     assert(ui.state == CP_UI_MENU && model->tradePhase == WT_JOURNAL_IDLE);
     puts("PASS model: the screens pick a save, confirm it, connect and reach the menu");
@@ -1759,9 +1776,20 @@ static void GameCardPreview(void)
     assert(ui.state == CP_UI_SAVE_PICKER && model->saves[0].gameCard);
     input.pressed = CP_UI_KEY_A;
     CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_GAME_LIST);
+    CpUi_Frame(&ui, model, &input);
     input.pressed = 0;
     CpUi_Frame(&ui, model, &input);
-    assert(ui.state == CP_UI_MESSAGE && ui.message == Companion_Text_GameCardParty);
+    assert(ui.state == CP_UI_PICKER && ui.message == Companion_Text_GameCardParty);
+    input.pressed = CP_UI_KEY_A;
+    CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_SUMMARY && model->party[0].summary.statsOnly);
+    input.pressed = CP_UI_KEY_R; CpUi_Frame(&ui, model, &input);
+    assert(!ui.summaryMoves);
+    assert(model->party[0].summary.hp == 20 && model->party[0].summary.stats[0] == 40);
+    input.pressed = CP_UI_KEY_B;
+    CpUi_Frame(&ui, model, &input);
+    assert(ui.state == CP_UI_PICKER);
     assert(model->gameVersion == CP_VERSION_BLACK && model->partyCount == 3 && model->party[0].species);
     assert(!fake.romOpen[CP_APP_ROM_GAME] && fake.saveFd < 0);
     model->ops->trade(model->context, 0);
@@ -1849,6 +1877,15 @@ static void WhiteMovesBetweenConsoles(void)
 int main(void)
 {
     Setup();
+    CpApp_Init(&app, &platform, Companion_Language_Count);
+    assert(app.model.needsLanguage);
+    assert(!app.model.storeLanguage(&app, Companion_Language_ja_JP));
+    CpApp_Init(&app, &platform, Companion_Language_Count);
+    assert(!app.model.needsLanguage && app.model.uiLanguage == Companion_Language_ja_JP);
+    assert(!app.model.storeLanguage(&app, Companion_Language_fr_FR));
+    CpApp_Init(&app, &platform, Companion_Language_Count);
+    assert(!app.model.needsLanguage && app.model.uiLanguage == Companion_Language_fr_FR);
+    puts("PASS first run, remembered Japanese and changed French preference on next boot");
     ScanFindsSavesAndTheirRoms();
     LoadRefusals();
     OfferStatusCancelCollect();

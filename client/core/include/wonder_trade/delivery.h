@@ -237,10 +237,15 @@ static int WtDelivery_Prepare(const WtDeliveryOps *ops, WtJournalEntry *entry)
     void *copy;
     int result;
     if (entry->deliveryKind == WT_DELIVERY_MATCH) {
-        if (WtDelivery_Absent(ops, ops->live, entry->outgoing) != 0) return -1;
+        if (WtDelivery_Absent(ops, ops->live, entry->outgoing) != 0 ||
+            WtDelivery_Scan(ops, ops->live, entry->incoming, &scan) != 0 || scan.unreadable) return -1;
+        /* A resident with this identity would be indistinguishable after an
+         * interrupted write and stock-game play. Keep the delivery pending. */
+        if (scan.identities) return 1;
     } else if (entry->deliveryKind == WT_DELIVERY_RETURN) {
         if (memcmp(entry->incoming, entry->outgoing, WT_POKEMON_SIZE) != 0
             || WtDelivery_Scan(ops, ops->live, entry->outgoing, &scan) != 0) return -1;
+        if (scan.unreadable || scan.identities > 1) return -1;
         if (scan.identities) {
             WtDelivery_Counters(ops, counters);
             if (WtDelivery_Behind(counters, entry) || WtDelivery_Found(ops, ops->live, entry, &scan) != 0
@@ -275,6 +280,7 @@ static int WtDelivery_Recover(const WtDeliveryOps *ops, WtJournalEntry *entry)
         || WtDelivery_Scan(ops, ops->live, entry->outgoing, &scan) != 0) return -1;
     if (entry->deliveryKind == WT_DELIVERY_MATCH
         && (scan.exact || WtDelivery_Scan(ops, ops->live, entry->incoming, &scan) != 0)) return -1;
+    if (scan.unreadable || scan.identities > 1) return -1;
     if (scan.identities == 1 && WtDelivery_Found(ops, ops->live, entry, &scan) != 0) return -1;
     if (ops->checkpoint(ops->arg) != 0) return -1;
     /* Without one such Pokémon the record stays as prepared; its inventoryAfter

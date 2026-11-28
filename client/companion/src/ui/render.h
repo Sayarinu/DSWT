@@ -46,7 +46,8 @@ extern const uint16_t CpRender_Palettes[16][16];
 /* Colours of the text layer (CP_PAL_TEXT). */
 enum {
     CP_INK_DARK = 1, CP_INK_SHADOW = 2, CP_INK_WHITE = 3, CP_INK_BLUE = 4,
-    CP_INK_GREY = 5, CP_INK_GREY_SHADOW = 6, CP_INK_CURSOR = 7, CP_INK_FILL = 15
+    CP_INK_GREY = 5, CP_INK_GREY_SHADOW = 6, CP_INK_CURSOR = 7, CP_INK_FEMALE = 8, CP_INK_MALE = 9, CP_INK_STRIPE = 10,
+    CP_INK_BAG_EDGE = 11, CP_INK_BAG_FILL = 12, CP_INK_TITLE = 13, CP_INK_GOLD = 14, CP_INK_FILL = 15
 };
 
 #define CP_MAP_SIZE (32 * 32)
@@ -54,7 +55,7 @@ enum {
 typedef struct CpScreen {
     CpCanvas text;
     uint16_t textMap[CP_CANVAS_TILES];
-    const CpPortrait *portraits[CP_UI_PARTY_MAX];
+    const uint16_t *spritePalettes[CP_UI_PARTY_MAX];
     uint16_t map[CP_MAP_SIZE]; /* layer 1: tile | flip bits | palette << 12 */
 } CpScreen;
 

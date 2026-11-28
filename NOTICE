@@ -132,3 +132,8 @@ Pokémon and Nintendo names are used to identify compatibility. This project
 is independent and is not endorsed by Nintendo, Game Freak, or The Pokémon
 Company. Public source and releases must exclude game ROMs, BIOS files, saves
 and original game assets.
+
+The DS companion's ARM7 sequence player adapts FeOS Sound System,
+copyright 2012 fincs, under the WTFPL version 2 (LICENSES/WTFPL.txt).
+Source revision c0f69d6105e8877ca8ff3b929d230e49e05726c7 at
+https://github.com/fincs/FSS. The companion reads music from the player's game.

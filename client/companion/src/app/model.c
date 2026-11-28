@@ -3,10 +3,12 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <string.h>
 
 #include "adapter/gen5.h"
+#include "adapter/gen5_receive.h"
 #include "game/twilight.h"
 #include "adapter/holdable.h"
 #include "core/journal_family.h"
@@ -362,6 +364,47 @@ static unsigned Gen5Reason(unsigned slot)
     }
 }
 
+/* Bank numbers in the selected game's own message archive (international, Japanese, Korean). */
+static void Summary(const CpGame *game, const unsigned char *box, const unsigned char *ext, CpUiSummary *out)
+{
+    static const struct { CpMessageBank nature, ability, move; } banks[] = {
+        [CP_FAMILY_DP] = {{190,189,189},{552,544,546},{588,575,577}},
+        [CP_FAMILY_PLATINUM] = {{202,201,201},{610,604,605},{647,636,637}},
+        [CP_FAMILY_HGSS] = {{34,33,33},{720,711,715},{750,739,743}},
+        [CP_FAMILY_BW] = {{24,24,24},{182,182,182},{203,203,203}},
+        [CP_FAMILY_B2W2] = {{27,27,27},{374,374,374},{403,403,403}}
+    };
+    if (Read32(box + PK_IVS) & (1u << 30)) return;
+    out->hp = Read16(ext + EXT_HP);
+    out->level = ext[EXT_LEVEL];
+    uint32_t ivs = Read32(box + PK_IVS);
+    for (unsigned i = 0; i < 6; ++i) {
+        out->stats[i] = Read16(ext + 8 + 2 * i);
+        out->iv[i] = (ivs >> (5 * i)) & 31;
+        out->ev[i] = box[0x18 + i];
+    }
+    out->ready = 1;
+    if (!game->table) { out->statsOnly = 1; return; }
+    unsigned family = game->rom.family;
+    unsigned nature = game->table->gen5PersonalSize ? box[0x41] : Read32(box) % 25;
+    out->nature[0] = out->ability[0] = out->item[0] = CP_CHAR_EOS;
+    CpGame_Message(game, CpGame_Bank(game, &banks[family].nature), nature, out->nature, CP_SUMMARY_NAME, NULL);
+    CpGame_Message(game, CpGame_Bank(game, &banks[family].ability), box[0x15], out->ability, CP_SUMMARY_NAME, NULL);
+    if (Read16(box + PK_ITEM)) CpGame_ItemName(game, Read16(box + PK_ITEM), out->item, CP_UI_ITEM_NAME_MAX, NULL);
+    for (unsigned i = 0; i < 4; ++i) {
+        unsigned move = Read16(box + 0x28 + i * 2);
+        out->moves[i][0] = CP_CHAR_EOS;
+        if (!move) continue;
+        CpGame_Message(game, CpGame_Bank(game, &banks[family].move), move, out->moves[i], CP_SUMMARY_NAME, NULL);
+        uint8_t base;
+        if (CpGame_MovePp(game, move, &base) == CP_OK) {
+            unsigned ups = box[0x34 + i];
+            out->maxPp[i] = base + base * (ups > 3 ? 3 : ups) / 5;
+        }
+        out->pp[i] = box[0x30 + i];
+    }
+}
+
 static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
 {
     int gen5 = CpGen5_Is(&gCpAppImage);
@@ -376,6 +419,7 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
     list = gen5 ? general : general + gCpAppImage.layout->partyOffset;
     count = Read32(list + 4);
     if (Read32(list) != CP_SAVE_PARTY_CAPACITY || count > CP_SAVE_PARTY_CAPACITY) return 0;
+    if (count && !app->loaded) CpPartyIcons_Open(&app->icons, &app->game);
     for (slot = 0; slot < count; ++slot) {
         const unsigned char *image = list + 8 + slot * stride;
         unsigned char canonical[WT_POKEMON_SIZE], extension[PK_EXTENSION_SIZE];
@@ -397,16 +441,20 @@ static unsigned FillParty(CpApp *app, CpUiPokemon party[CP_UI_PARTY_MAX])
         mon->form = canonical[PK_FLAGS] >> 3;
         const CpUiPokemon *old = &app->model.party[slot];
         if (app->loaded && old->portrait.ready && mon->species == old->species && mon->form == old->form &&
-            mon->gender == old->gender && mon->shiny == old->shiny && mon->isEgg == old->isEgg)
+            mon->gender == old->gender && mon->shiny == old->shiny && mon->isEgg == old->isEgg) {
             mon->portrait = old->portrait;
-        else if (app->game.table)
+            mon->icon = old->icon;
+        } else if (app->game.table) {
+            CpPartyIcon_Load(&app->icons, &app->game, mon->species, mon->form, mon->gender == CP_UI_FEMALE, mon->isEgg, &mon->icon);
             CpPortrait_Load(&app->game, mon->species, mon->form, mon->gender == CP_UI_FEMALE,
                             mon->shiny, mon->isEgg, &mon->portrait);
+        }
         if (mon->portrait.ready) ++portraits;
-        if (app->model.saves[app->index].gameCard && !app->saveOpen) continue;
-        if (mon->isEgg || CpGame_SpeciesName(&app->game, mon->species, mon->speciesName, CP_UI_NAME_MAX, NULL) != CP_OK)
+        Summary(&app->game, canonical, extension, &mon->summary);
+        if (!app->game.table || mon->isEgg || CpGame_SpeciesName(&app->game, mon->species, mon->speciesName, CP_UI_NAME_MAX, NULL) != CP_OK)
             memcpy(mon->speciesName, mon->nickname, sizeof(mon->speciesName));
-        ItemName(app, mon->heldItem, mon->itemName);
+        if (app->game.table) ItemName(app, mon->heldItem, mon->itemName);
+        if (app->model.saves[app->index].gameCard && !app->saveOpen) continue;
         if (!CpAdapter_Eligible(&gCpAppImage, slot))
             mon->ineligible = (uint8_t)(gen5 ? Gen5Reason(slot) : Reason(list, count, slot, canonical, extension));
         else mon->ineligible = CpAdapter_Unique(&gCpAppImage, slot) ? CP_UI_ELIGIBLE : CP_UI_INELIGIBLE_DUPLICATE;
@@ -549,7 +597,7 @@ static int LoadJob(void *arg)
         if (opened == CP_ERR_UNSUPPORTED) {
             app->game.table = NULL;
             if (platform->previewCardRom && platform->previewCardRom(&app->romReader) == CP_OK &&
-                CpGame_Open(&app->romReader, &app->game) != CP_OK) {
+                (CpGame_Open(&app->romReader, &app->game) != CP_OK || app->game.rom.buildCode != current.buildCode)) {
                 app->game.table = NULL;
                 app->game.rom = current;
             }
@@ -559,6 +607,10 @@ static int LoadJob(void *arg)
                 if (loaded == CP_SAVE_NEEDS_GAME_SAVE || loaded == CP_SAVE_INVALID)
                     app->result.loadMessage = Companion_Text_SaveInGameFirst;
                 return -1;
+            }
+            if (app->game.table) {
+                app->hasFont = CpGame_Font(&app->game, CP_FONT_SYSTEM, &app->font) == CP_OK;
+                if (platform->loadMusic) platform->loadMusic(&app->romReader, current.family);
             }
             app->result.phase = WT_JOURNAL_EMPTY;
             app->result.partyCount = FillParty(app, app->result.party);
@@ -639,6 +691,7 @@ static int LoadJob(void *arg)
     }
     app->result.phase = phase;
     app->result.partyCount = FillParty(app, app->result.party);
+    if (platform->loadMusic) platform->loadMusic(&app->romReader, app->game.rom.family);
     app->result.loadMessage = -1;
     return 0;
 }
@@ -660,6 +713,22 @@ static void FillReceived(CpApp *app)
     memset(to, 0, sizeof(*to));
     app->result.hasReceived = app->visit.hasReceived;
     if (!app->visit.hasReceived) return;
+    const unsigned char *image = (const unsigned char *)from->image;
+    unsigned char box[WT_POKEMON_SIZE], ext[PK_EXTENSION_SIZE] = {0};
+    if (WtPokemon_Decode(image, box) == 0) {
+        unsigned length = app->visit.receivedLength;
+        int valid = 0;
+        if (length == sizeof(box)) {
+            valid = app->game.table && (app->game.table->gen5PersonalSize
+                ? CpReceive5_BoxStats(&app->romData, box, ext)
+                : CpReceive_LevelAndStats(&app->romData, box, ext)) == 0;
+        } else if (length == 220 || length == 236) {
+            memcpy(ext, image + sizeof(box), length - sizeof(box));
+            Crypt(ext, length - sizeof(box), Read32(image));
+            valid = 1;
+        }
+        if (valid) Summary(&app->game, box, ext, &to->summary);
+    }
     to->species = from->species;
     to->gender = from->gender > CP_UI_GENDERLESS ? CP_UI_GENDERLESS : from->gender;
     to->shiny = from->shiny;
@@ -787,6 +856,7 @@ static int Start(CpApp *app, int job, CpAppJob function, WtSeed *journal)
 
 static void ClearOutcome(CpUiModel *model)
 {
+    model->serverTradeState = WT_TRADE_NONE;
     model->completed = model->returned = model->rejected = model->waiting = 0;
     model->superseded = model->needsEntropy = model->refused = model->hasReceived = 0;
     model->refusal = 0;
@@ -805,6 +875,7 @@ static void Scan(void *context)
 
 static void CloseFiles(CpApp *app)
 {
+    if (app->platform->stopMusic) app->platform->stopMusic();
     if (app->saveOpen) app->platform->closeSave(app->platform->arg);
     if (app->romOpen) app->platform->closeRom(app->platform->arg, CP_APP_ROM_GAME);
     app->saveOpen = app->romOpen = app->hasFont = 0;
@@ -1216,6 +1287,7 @@ static void Finish(CpApp *app, int job, int result)
         model->returned = app->visit.returned;
         model->rejected = app->visit.rejected;
         model->waiting = app->visit.waiting;
+        model->serverTradeState = app->visit.serverTradeState;
         model->superseded = app->visit.superseded;
         model->refused = app->visit.refused;
         model->refusal = app->visit.refusal;
@@ -1257,7 +1329,47 @@ static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close
 static const CpUiOps kOpsWithoutSettings = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
     NULL, NULL, NULL, NULL };
 
-void CpApp_Init(CpApp *app, const CpAppPlatform *platform, CompanionLanguage systemLanguage)
+static const char *const localeCodes[Companion_Language_Count] = {
+    "en_US", "fr_FR", "de_DE", "it_IT", "es_ES", "ja_JP", "ko_KR"
+};
+
+static int LanguagePath(const CpApp *app, char path[CP_PATH_MAX], const char *suffix)
+{
+    const char *root = app->platform->root;
+    return root && *root && Join(path, root, "_nds/dswt/language.cfg", suffix);
+}
+
+static CompanionLanguage ReadLanguage(const CpApp *app)
+{
+    char path[CP_PATH_MAX], code[8];
+    if (!LanguagePath(app, path, "")) return Companion_Language_Count;
+    FILE *file = fopen(path, "rb");
+    if (!file && LanguagePath(app, path, ".tmp")) file = fopen(path, "rb");
+    if (!file) return Companion_Language_Count;
+    size_t size = fread(code, 1, sizeof(code), file);
+    fclose(file);
+    for (int i = 0; i < Companion_Language_Count; ++i)
+        if (size == 6 && code[5] == '\n' && !memcmp(code, localeCodes[i], 5)) return (CompanionLanguage)i;
+    return Companion_Language_Count;
+}
+
+static int StoreLanguage(void *context, CompanionLanguage language)
+{
+    char path[CP_PATH_MAX], temp[CP_PATH_MAX];
+    if ((unsigned)language >= Companion_Language_Count || !LanguagePath(context, path, "") ||
+        !LanguagePath(context, temp, ".tmp")) return -1;
+    FILE *file = fopen(temp, "wb");
+    if (!file) return -1;
+    int ok = fprintf(file, "%s\n", localeCodes[language]) == 6 && fflush(file) == 0 && fsync(fileno(file)) == 0;
+    if (fclose(file) != 0 || !ok) return -1;
+    if (!rename(temp, path)) return 0;
+    /* FatFs cannot rename over a file. A cut after removal leaves the synced
+     * temporary preference, which ReadLanguage also recognizes. */
+    if (remove(path) != 0) return -1;
+    return rename(temp, path);
+}
+
+void CpApp_Init(CpApp *app, const CpAppPlatform *platform, CompanionLanguage uiLanguage)
 {
     memset(app, 0, sizeof(*app));
     sApp = app;
@@ -1269,7 +1381,10 @@ void CpApp_Init(CpApp *app, const CpAppPlatform *platform, CompanionLanguage sys
     app->file.size = FileSize;
     app->model.ops = HasSetup(platform) ? &kOps : &kOpsWithoutSettings;
     app->model.context = app;
-    app->model.systemLanguage = systemLanguage;
+    if (uiLanguage == Companion_Language_Count) uiLanguage = ReadLanguage(app);
+    app->model.needsLanguage = uiLanguage == Companion_Language_Count;
+    app->model.uiLanguage = app->model.needsLanguage ? Companion_Language_en_US : uiLanguage;
+    app->model.storeLanguage = StoreLanguage;
     app->model.loadMessage = -1;
     app->model.canLeave = 1;
     app->model.tradePhase = WT_JOURNAL_IDLE;

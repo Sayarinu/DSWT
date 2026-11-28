@@ -77,7 +77,7 @@ static CpUiModel *Reset(void)
     sFake.model.loadMessage = -1;
     sFake.model.canLeave = 1;
     sFake.model.tradePhase = WT_JOURNAL_IDLE;
-    sFake.model.systemLanguage = Companion_Language_de_DE;
+    sFake.model.uiLanguage = Companion_Language_de_DE;
     sFake.model.wifi.wpa2 = 1;
     return &sFake.model;
 }
@@ -102,10 +102,11 @@ static void Tap(int x, int y)
     CpUi_Frame(&sUi, &sFake.model, &input);
 }
 
-static void Expect(CpUiState state, int message)
+#define Expect(state, message) ExpectAt(state, message, __LINE__)
+static void ExpectAt(CpUiState state, int message, int line)
 {
     if (sUi.state != state || sUi.message != message) {
-        fprintf(stderr, "expected state %d message %d, got state %d message %d\n", state, message, sUi.state, sUi.message);
+        fprintf(stderr, "line %d: expected state %d message %d, got state %d message %d\n", line, state, message, sUi.state, sUi.message);
         assert(0);
     }
 }
@@ -141,8 +142,16 @@ static void AddParty(void)
     }
 }
 
-/* Boot, pick save 0, confirm the game and connect: the UI stops in PINGING
+/* Boot, pick save 0 and connect: the UI stops in PINGING
  * after the resume request. */
+static void EnterGameList(void)
+{
+    int loads = sFake.loads;
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_GAME_LIST, Companion_Text_SavePickerHint);
+    assert(sFake.loads == loads);
+}
+
 static void ReachPinging(void)
 {
     CpUiModel *model = Reset();
@@ -150,12 +159,11 @@ static void ReachPinging(void)
     AddSaves(2);
     AddParty();
     Frame();
+    EnterGameList();
     Press(CP_UI_KEY_A);
     sFake.model.gameVersion = CP_VERSION_PLATINUM;
     sFake.model.gameLanguage = CP_LANGUAGE_FRENCH;
     Frame();
-    Expect(CP_UI_GAME_CONFIRM, Companion_Text_GameConfirm);
-    Press(CP_UI_KEY_A);
     Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
     sFake.model.net = CP_UI_NET_READY;
     Frame();
@@ -192,7 +200,7 @@ static void TestBootAndSaves(void)
     model->busy = 0;
     Frame();
     Expect(CP_UI_SAVE_PICKER, Companion_Text_NoSaves);
-    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Exit, 0);
+    assert(CpUi_SourceLabel(model, 0) == WonderTrade_Text_Retry);
     assert(CpUi_Card(&sUi, model) == CP_UI_CARD_NONE);
     /* Retry looks again. */
     Press(CP_UI_KEY_A);
@@ -200,15 +208,16 @@ static void TestBootAndSaves(void)
     Expect(CP_UI_BOOT, WonderTrade_Text_CheckingSave);
     AddSaves(7);
     Frame();
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
-    ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Exit, 0);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
+    assert(CpUi_SourceRows(model) == 3);
     assert(CpUi_Card(&sUi, model) == CP_UI_CARD_SAVES);
     assert(CpUi_Language(&sUi, model) == Companion_Language_de_DE);
     /* Up and Down move through the list, wrapping and scrolling. */
     Press(CP_UI_KEY_UP);
-    assert(sUi.listCursor == 6 && sUi.listTop == 6 - CP_UI_SAVE_ROWS + 1 && sUi.cursor == 0);
+    assert(CpUi_SourceLabel(model, sUi.sourceFocus) == WonderTrade_Text_Exit);
     Press(CP_UI_KEY_DOWN);
     assert(sUi.listCursor == 0 && sUi.listTop == 0);
+    EnterGameList();
     Press(CP_UI_KEY_DOWN);
     Press(CP_UI_KEY_DOWN);
     /* A save that cannot be used says why and goes back to the list. */
@@ -226,23 +235,80 @@ static void TestBootAndSaves(void)
     ExpectActions(1, WonderTrade_Text_Back, 0, 0);
     Press(CP_UI_KEY_B);
     assert(sFake.unloads == 1);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     assert(sUi.listCursor == 2);
-    /* A usable one asks to confirm the game, in the game's language. */
+    /* A usable save connects directly and keeps the chosen interface language. */
     model->loadMessage = -1;
     model->gameVersion = CP_VERSION_PLATINUM;
     model->gameLanguage = CP_LANGUAGE_JAPANESE;
+    EnterGameList();
     Press(CP_UI_KEY_A);
     Frame();
-    Expect(CP_UI_GAME_CONFIRM, Companion_Text_GameConfirm);
-    ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
-    assert(CpUi_Language(&sUi, model) == Companion_Language_ja_JP);
+    Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
+    assert(CpUi_Language(&sUi, model) == Companion_Language_de_DE);
     Press(CP_UI_KEY_B);
-    assert(sFake.unloads == 2);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
-    /* B leaves the companion from the list. */
+    model->net = CP_UI_NET_CLOSED;
+    Frame();
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     Press(CP_UI_KEY_B);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
+    Tap(CP_SOURCE_LEFT + 4, CP_SOURCE_TOP + 4);
+    Expect(CP_UI_GAME_LIST, Companion_Text_SavePickerHint);
+    Tap(CP_GRID_LEFT + 4, CP_GAME_ACTION_Y + 4);
+    Frame();
+    Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
+    Press(CP_UI_KEY_B);
+    model->net = CP_UI_NET_CLOSED;
+    Frame();
+    Press(CP_UI_KEY_UP);
+    Press(CP_UI_KEY_A);
     Expect(CP_UI_EXIT, WonderTrade_Text_Disconnecting);
+}
+
+static void TestUpperGameList(void)
+{
+    CpUiModel *model = Reset();
+    CpUi_Start(&sUi, model);
+    AddSaves(7);
+    Frame();
+    EnterGameList();
+    Tap(CP_GRID_LEFT + 4, CP_GAME_NAV_Y + 4);
+    assert(sUi.listCursor == 6 && sUi.listTop == 3 && sFake.loads == 0);
+    Tap(CP_GRID_LEFT + CP_GRID_STEP + 4, CP_GAME_NAV_Y + 4);
+    assert(sUi.listCursor == 0 && sUi.listTop == 0);
+    Press(CP_UI_KEY_DOWN);
+    Tap(CP_GRID_LEFT + CP_GRID_STEP + 4, CP_GAME_ACTION_Y + 4);
+    assert(sUi.state == CP_UI_SAVE_PICKER && sFake.loads == 0);
+    EnterGameList();
+    assert(sUi.listCursor == 1);
+    model->saveCount = 1;
+    Frame();
+    assert(sUi.listCursor == 0);
+    model->saveCount = 0;
+    Frame();
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_NoSaves);
+    assert(sFake.loads == 0);
+}
+
+static void TestLanguageGrid(void)
+{
+    CpUiModel *model = Reset();
+    model->needsLanguage = 1;
+    CpUi_Start(&sUi, model);
+    Frame();
+    Expect(CP_UI_LANGUAGE, Companion_Text_Language);
+    Press(CP_UI_KEY_RIGHT);
+    assert(sUi.languageCursor == 1);
+    Press(CP_UI_KEY_UP);
+    assert(sUi.languageCursor == 5);
+    Press(CP_UI_KEY_DOWN);
+    assert(sUi.languageCursor == 1);
+    Tap(128, CP_SOURCE_TOP + 4);
+    Tap(192, CP_SOURCE_TOP + 3 * CP_SOURCE_STEP + 4);
+    Tap(192, CP_SOURCE_TOP + CP_SOURCE_HEIGHT + 2);
+    assert(sUi.state == CP_UI_LANGUAGE && model->needsLanguage);
+    Tap(192, CP_SOURCE_TOP + CP_SOURCE_STEP + 4);
+    assert(sUi.state == CP_UI_SAVE_PICKER && model->uiLanguage == Companion_Language_it_IT);
 }
 
 static void TestTouchExitFromList(void)
@@ -256,11 +322,11 @@ static void TestTouchExitFromList(void)
         CpUiInput input = kNone;
         input.touchPressed = input.touchHeld = 1;
         input.touchX = WT_MENU_LEFT + 4;
-        input.touchY = WT_MENU_TOP + WT_MENU_SPACING + 4;
+        input.touchY = CP_SOURCE_TOP + 2 * CP_SOURCE_STEP + 4;
         CpUi_Frame(&sUi, model, &input);
-        Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+        Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     }
-    Tap(WT_MENU_LEFT + 4, WT_MENU_TOP + WT_MENU_SPACING + 4);
+    Tap(WT_MENU_LEFT + 4, CP_SOURCE_TOP + 2 * CP_SOURCE_STEP + 4);
     Expect(CP_UI_EXIT, WonderTrade_Text_Disconnecting);
     assert(sUi.sounds == 1);
 }
@@ -271,10 +337,10 @@ static void TestRecovery(void)
     CpUi_Start(&sUi, model);
     AddSaves(1);
     Frame();
+    EnterGameList();
     Press(CP_UI_KEY_A);
     model->recovery = 1;
     Frame();
-    Press(CP_UI_KEY_A);
     Expect(CP_UI_RECOVERY, WonderTrade_Text_RecoveryRequired);
     ExpectActions(1, WonderTrade_Text_RecoveryAction, 0, 0);
     assert(CpUi_Card(&sUi, model) == CP_UI_CARD_FULL_TEXT);
@@ -308,7 +374,7 @@ static void TestConnecting(void)
     sFake.model.net = CP_UI_NET_CLOSED;
     Frame();
     assert(sFake.unloads == 1);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
 
     /* A failed connection says so, with Retry and (when allowed) Exit. */
     ReachPinging();
@@ -317,7 +383,7 @@ static void TestConnecting(void)
     sFake.model.error = -12;
     Frame();
     Expect(CP_UI_ERROR, WonderTrade_Text_ConnectionError);
-    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Exit, 0);
+    ExpectActions(2, WonderTrade_Text_Retry, Companion_Text_ChangeGame, 0);
     assert(CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_FULL_TEXT);
     sFake.model.canLeave = 0;
     ExpectActions(1, WonderTrade_Text_Retry, 0, 0);
@@ -409,7 +475,7 @@ static void TestMenu(void)
 {
     /* Nothing pending: Wonder Trade, Info, Exit. */
     ReachMenu(WT_JOURNAL_IDLE);
-    ExpectActions(3, WonderTrade_Text_Trade, WonderTrade_Text_Info, WonderTrade_Text_Exit);
+    ExpectActions(3, WonderTrade_Text_Trade, WonderTrade_Text_Info, Companion_Text_ChangeGame);
     assert(!CpUi_Busy(&sUi));
     Press(CP_UI_KEY_DOWN);
     assert(sUi.cursor == 1);
@@ -426,9 +492,26 @@ static void TestMenu(void)
     Press(CP_UI_KEY_A);
     Expect(CP_UI_CLOSING, WonderTrade_Text_Disconnecting);
 
-    /* Pending: Collect result, Cancel offer, Exit. */
+    ReachPinging();
+    sFake.model.tradePhase = WT_JOURNAL_QUEUED;
+    sFake.model.serverTradeState = WT_TRADE_QUEUED;
+    Respond();
+    Expect(CP_UI_MENU, Companion_Text_AwaitingMatch);
+    ExpectActions(3, Companion_Text_CheckStatus, WonderTrade_Text_CancelOffer, Companion_Text_ChangeGame);
+    Press(CP_UI_KEY_A);
+    Expect(CP_UI_PINGING, WonderTrade_Text_Pinging);
+    assert(sFake.trades == 2 && sFake.lastTrade == -1 && !sFake.collects);
+    sFake.model.serverTradeState = WT_TRADE_MATCHED;
+    Respond();
+    Expect(CP_UI_MENU, Companion_Text_MatchReady);
+    ExpectActions(2, Companion_Text_ReceivePokemon, Companion_Text_ChangeGame, 0);
+    Tap(WT_MENU_LEFT + 10, WT_MENU_TOP + 10);
+    Expect(CP_UI_PINGING, WonderTrade_Text_Pinging);
+    assert(sFake.collects == 1 && !sFake.lastCancel);
+
+    /* Recovery can still collect when the last visit had no status snapshot. */
     ReachMenu(WT_JOURNAL_QUEUED);
-    ExpectActions(3, WonderTrade_Text_Collect, WonderTrade_Text_CancelOffer, WonderTrade_Text_Exit);
+    ExpectActions(3, WonderTrade_Text_Collect, WonderTrade_Text_CancelOffer, Companion_Text_ChangeGame);
     Press(CP_UI_KEY_A);
     Expect(CP_UI_COLLECT_CONFIRM, WonderTrade_Text_ConfirmCollect);
     ExpectActions(2, WonderTrade_Text_ConfirmAction, WonderTrade_Text_Back, 0);
@@ -471,7 +554,8 @@ static void TestBackupWarningOnInfo(void)
     for (language = 0; language < Companion_Language_Count; ++language) {
         char wrapped[CP_RENDER_MESSAGE_MAX];
         ReachMenu(WT_JOURNAL_IDLE);
-        sFake.model.gameLanguage = languages[language];
+        sFake.model.gameLanguage = languages[(language + 1) % Companion_Language_Count];
+        sFake.model.uiLanguage = (CompanionLanguage)language;
         Press(CP_UI_KEY_DOWN);
         Press(CP_UI_KEY_A);
         Expect(CP_UI_MESSAGE, WonderTrade_Text_Explanation);
@@ -499,6 +583,23 @@ static void TestPicker(void)
     Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
     ExpectActions(0, 0, 0, 0);
     assert(sUi.partyCursor == 0 && CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_PARTY);
+    sFake.model.party[0].summary.ready = 1;
+    Press(CP_UI_KEY_Y);
+    Expect(CP_UI_SUMMARY, Companion_Text_Summary);
+    Press(CP_UI_KEY_A);
+    assert(!sUi.summaryMoves);
+    Press(CP_UI_KEY_R);
+    assert(sUi.summaryMoves);
+    Press(CP_UI_KEY_L);
+    assert(!sUi.summaryMoves);
+    Press(CP_UI_KEY_B);
+    Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
+    Tap(70, 172);
+    assert(sUi.state == CP_UI_SUMMARY && !sUi.summaryMoves);
+    Tap(32, CP_SUMMARY_NAV_Y + 4);
+    assert(!sUi.summaryMoves && sUi.state == CP_UI_SUMMARY);
+    Tap(192, CP_SUMMARY_NAV_Y + 4);
+    assert(sUi.state == CP_UI_PICKER);
     Press(CP_UI_KEY_RIGHT);
     assert(sUi.partyCursor == 1);
     Press(CP_UI_KEY_DOWN);
@@ -527,6 +628,8 @@ static void TestPicker(void)
     Press(CP_UI_KEY_A);
     Expect(CP_UI_PICKER, WonderTrade_Text_Choose);
     /* Touch a panel: slot 1 is the right-hand top one. */
+    Tap(CP_UI_PANEL_LEFT + CP_UI_PANEL_STEP_X + 5, CP_UI_PANEL_TOP + 5);
+    assert(sUi.partyCursor == 1 && sUi.state == CP_UI_PICKER);
     Tap(CP_UI_PANEL_LEFT + CP_UI_PANEL_STEP_X + 5, CP_UI_PANEL_TOP + 5);
     Expect(CP_UI_CONFIRM, WonderTrade_Text_Confirm);
     assert(sUi.selectedSlot == 1 && CpUi_Card(&sUi, &sFake.model) == CP_UI_CARD_PARTY);
@@ -575,15 +678,13 @@ static void TestTextIds(void)
         assert(id >= 0 && id < Companion_Text_Count);
         for (language = 0; language < Companion_Language_Count; language++) assert(Companion_Text[id][language][0]);
     }
-    assert(CpUi_GameLanguage(CP_LANGUAGE_KOREAN, Companion_Language_en_US) == Companion_Language_ko_KR);
-    assert(CpUi_GameLanguage(6, Companion_Language_fr_FR) == Companion_Language_fr_FR);
 }
 
 /* The highlighted save is always one of the visible rows and a real save. */
 static void ExpectVisibleSave(void)
 {
     assert(sUi.listCursor >= 0 && sUi.listCursor < (int)sFake.model.saveCount);
-    assert(sUi.listTop >= 0 && sUi.listTop <= sUi.listCursor && sUi.listCursor < sUi.listTop + CP_UI_SAVE_ROWS);
+    assert(sUi.listTop >= 0 && sUi.listTop <= sUi.listCursor && sUi.listCursor < sUi.listTop + CP_SOURCE_ROWS);
 }
 
 static void TestSaveCursorSurvivesThePicker(void)
@@ -593,9 +694,9 @@ static void TestSaveCursorSurvivesThePicker(void)
     AddSaves(7);
     AddParty();
     Frame();
+    EnterGameList();
     Press(CP_UI_KEY_A);
     Frame();
-    Press(CP_UI_KEY_A);
     model->net = CP_UI_NET_READY;
     Frame();
     model->net = CP_UI_NET_RESPONSE;
@@ -612,9 +713,10 @@ static void TestSaveCursorSurvivesThePicker(void)
     Expect(CP_UI_CLOSING, WonderTrade_Text_Disconnecting);
     model->net = CP_UI_NET_CLOSED;
     Frame();
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     ExpectVisibleSave();
     assert(sUi.listCursor == 0);
+    EnterGameList();
     Press(CP_UI_KEY_A);
     assert(sFake.lastLoad == 0);
 
@@ -623,15 +725,15 @@ static void TestSaveCursorSurvivesThePicker(void)
     model->loadMessage = Companion_Text_SaveInGameFirst;
     Frame();
     Press(CP_UI_KEY_B);
-    Press(CP_UI_KEY_UP);
-    Press(CP_UI_KEY_UP);
-    assert(sUi.listCursor == 5 && sUi.listTop == 2);
+    EnterGameList();
+    for (int i = 0; i < 5; ++i) Press(CP_UI_KEY_DOWN);
+    assert(sUi.listCursor == 5 && sUi.listTop == 6 - CP_SOURCE_ROWS);
     Press(CP_UI_KEY_A);
     Frame();
     Expect(CP_UI_MESSAGE, Companion_Text_SaveInGameFirst);
     model->saveCount = 4;
     Press(CP_UI_KEY_B);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     ExpectVisibleSave();
 }
 
@@ -701,13 +803,13 @@ static void TestWifiFromTheSaveList(void)
     Frame();
     /* Both save lists offer the settings between their two buttons. */
     Expect(CP_UI_SAVE_PICKER, Companion_Text_NoSaves);
-    ExpectActions(3, WonderTrade_Text_Retry, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    assert(CpUi_SourceRows(model) == 4);
     Press(CP_UI_KEY_A);
     AddSaves(2);
     Frame();
-    ExpectActions(3, WonderTrade_Text_ConfirmAction, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    assert(CpUi_SourceRows(model) == 4);
     /* Exit is still Exit, now the third button. */
-    TapButton(2);
+    Tap(CP_SOURCE_LEFT + 4, CP_SOURCE_TOP + 3 * CP_SOURCE_STEP + 4);
     Expect(CP_UI_EXIT, WonderTrade_Text_Disconnecting);
 
     model = Reset();
@@ -715,7 +817,7 @@ static void TestWifiFromTheSaveList(void)
     CpUi_Start(&sUi, model);
     AddSaves(2);
     Frame();
-    TapButton(1);
+    Tap(CP_SOURCE_LEFT + 4, CP_SOURCE_TOP + 2 * CP_SOURCE_STEP + 4);
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
     assert(sFake.wifiScans == 1 && CpUi_Busy(&sUi) && CpUi_Card(&sUi, model) == CP_UI_CARD_NETWORKS);
     assert(CpUi_Language(&sUi, model) == Companion_Language_de_DE);
@@ -774,11 +876,11 @@ static void TestWifiFromTheSaveList(void)
     Expect(CP_UI_WIFI_JOINED, Companion_Text_WifiJoinedOpen);
     ExpectActions(1, WonderTrade_Text_ConfirmAction, 0, 0);
     Press(CP_UI_KEY_A);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     assert(sFake.leaves == 1);
 
     /* A WPA2 network: the password keyboard. */
-    TapButton(1);
+    Tap(CP_SOURCE_LEFT + 4, CP_SOURCE_TOP + 2 * CP_SOURCE_STEP + 4);
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiScanning);
     assert(sFake.wifiScans == 2 && sUi.wifiCursor == 0);
     AddNetworks();
@@ -877,7 +979,7 @@ static void TestWifiFromTheSaveList(void)
 
     /* Back leaves for the save list and joins automatically again. */
     Press(CP_UI_KEY_B);
-    Expect(CP_UI_SAVE_PICKER, Companion_Text_SavePickerHint);
+    Expect(CP_UI_SAVE_PICKER, Companion_Text_SourceMenuHint);
     assert(sFake.leaves == 2);
 
     /* Failures each have their own words. */
@@ -899,18 +1001,18 @@ static void TestWifiAfterAFailedConnection(void)
     CpUi_Start(&sUi, model);
     AddSaves(2);
     Frame();
+    EnterGameList();
     Press(CP_UI_KEY_A);
     model->gameVersion = CP_VERSION_PLATINUM;
     model->gameLanguage = CP_LANGUAGE_JAPANESE;
     Frame();
-    Press(CP_UI_KEY_A);
     Expect(CP_UI_CONNECTING, WonderTrade_Text_Connecting);
     model->net = CP_UI_NET_ERROR;
     model->error = -20;
     model->wifiError = 1;
     Frame();
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiSavedFailed);
-    assert(sFake.wifiScans == 1 && CpUi_Language(&sUi, model) == Companion_Language_ja_JP);
+    assert(sFake.wifiScans == 1 && CpUi_Language(&sUi, model) == Companion_Language_de_DE);
     AddNetworks();
     Frame();
     Expect(CP_UI_WIFI_LIST, Companion_Text_WifiSavedFailed);
@@ -919,7 +1021,7 @@ static void TestWifiAfterAFailedConnection(void)
     Press(CP_UI_KEY_B);
     Expect(CP_UI_ERROR, WonderTrade_Text_ConnectionError);
     assert(sFake.leaves == 1);
-    ExpectActions(3, WonderTrade_Text_Retry, Companion_Text_WifiSettings, WonderTrade_Text_Exit);
+    ExpectActions(3, WonderTrade_Text_Retry, Companion_Text_WifiSettings, Companion_Text_ChangeGame);
     model->canLeave = 0;
     ExpectActions(2, WonderTrade_Text_Retry, Companion_Text_WifiSettings, 0);
     TapButton(1);
@@ -958,14 +1060,14 @@ static void TestWifiAfterAFailedConnection(void)
     CpUi_Start(&sUi, model);
     AddSaves(1);
     Frame();
+    EnterGameList();
     Press(CP_UI_KEY_A);
     Frame();
-    Press(CP_UI_KEY_A);
     model->net = CP_UI_NET_ERROR;
     model->error = -21;
     Frame();
     Expect(CP_UI_ERROR, WonderTrade_Text_ConnectionError);
-    ExpectActions(2, WonderTrade_Text_Retry, WonderTrade_Text_Exit, 0);
+    ExpectActions(2, WonderTrade_Text_Retry, Companion_Text_ChangeGame, 0);
     sWithWifi = 0;
 }
 
@@ -973,6 +1075,8 @@ int main(void)
 {
     TestSaveCursorSurvivesThePicker();
     TestBootAndSaves();
+    TestLanguageGrid();
+    TestUpperGameList();
     TestTouchExitFromList();
     TestRecovery();
     TestConnecting();

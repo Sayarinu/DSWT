@@ -23,7 +23,7 @@ TLS_DIR			?= ../game/mbedtls-4.1.1
 CONNECTION_HEADER	?= $(BUILDDIR)/dswt-connection.h
 
 # The DSWiFi core also serves the microphone and Slot-1 power requests.
-ARM7_SOURCE := src/platform/nds/arm7/main.c
+ARM7_SOURCE := src/platform/nds/arm7/main.c $(wildcard src/platform/nds/arm7/music/*.c)
 ARM7ELF := $(BUILDDIR)/arm7.elf
 
 # The game-independent client core, compiled in place. The Nitro-only
@@ -102,12 +102,12 @@ check-inputs:
 	@test -f $(TLS_DIR)/include/mbedtls/ssl.h || { echo "TLS_DIR must name the Mbed TLS source from scripts/prepare/prepare-tls.py" >&2; exit 2; }
 	@test -f $(CONNECTION_HEADER) || { echo "CONNECTION_HEADER must name a header from scripts/build/configure-connection.py" >&2; exit 2; }
 
-$(ARM7ELF): $(ARM7_SOURCE)
+$(ARM7ELF): $(ARM7_SOURCE) $(wildcard src/platform/nds/arm7/music/*.h) src/game/gts_music.h src/platform/nds/menu_audio.h
 	@mkdir -p $(@D)
 	$(V)$(CC) -mthumb -mcpu=arm7tdmi -std=gnu11 -Os -Wall -Wextra -Werror \
 		-specs=$(BLOCKSDS)/sys/crts/ds_arm7.specs -I$(BLOCKSDS)/libs/libnds/include \
 		-I$(BLOCKSDS)/libs/dswifi/include -L$(BLOCKSDS)/libs/dswifi/lib \
-		-L$(BLOCKSDS)/libs/libnds/lib -o $@ $< -Wl,--start-group -ldswifi7 -lnds7 -lc -Wl,--end-group
+		-L$(BLOCKSDS)/libs/libnds/lib -Isrc -I$(CLIENT)/include -o $@ $(ARM7_SOURCE) -Wl,--start-group -ldswifi7 -lnds7 -lc -Wl,--end-group
 
 # unitcode 2 runs on DS and DSi; the DSi header asks for DSi mode, which the
 # companion needs for the SD card and WPA2.
@@ -244,3 +244,13 @@ $(GFX_DIR)/%.o: $(GFX_DIR)/%.s
 ifdef CP_UI_DEMO
 BASE_CFLAGS             += -DCP_UI_DEMO=$(CP_UI_DEMO)
 endif
+
+# Original score and one-shot interface sound, rendered into shared ARM9 RAM.
+MENU_AUDIO := $(BUILDDIR)/audio/menu.o
+APP_OBJS += $(MENU_AUDIO)
+$(ELF) $(LINK_CHECK): $(MENU_AUDIO)
+$(BUILDDIR)/audio/menu.s: res/audio/menu.py
+	@mkdir -p $(@D)
+	$(V)python3 $< $@
+$(MENU_AUDIO): $(BUILDDIR)/audio/menu.s
+	$(V)$(CC) $(ARCH) -c -o $@ $<

@@ -319,8 +319,17 @@ class GatewayScenario:
                 b'Content-Length: ' + str(len(valid)).encode()]
         for fields in (base + [base[-1]], base + [b'Transfer-Encoding: chunked'], base + [b'Content-Encoding: gzip'],
                        base + [b'Expect: 100-continue'], base + [b'Host: duplicate'],
-                       [base[0], b'Connection: keep-alive', *base[2:]], base + [b'X-Fill: ' + b'x' * 2100]):
+                       [base[0], b'Connection: upgrade', *base[2:]], base + [b'X-Fill: ' + b'x' * 2100]):
             self.reject_http(self.http(valid, headers=fields))
+        with self.raw() as connection:
+            for option in ('keep-alive', 'keep-alive', 'close'):
+                connection.sendall(self.http(valid, headers=[base[0], b'Connection: ' + option.encode(), *base[2:]]))
+                response = http.client.HTTPResponse(connection)
+                response.begin()
+                self.test.assertEqual(response.status, 200)
+                self.test.assertEqual(response.getheader('X-DSWT-Visit'), '1')
+                self.test.assertEqual(response.getheader('Connection'), option)
+                self.test.assertEqual(RESPONSE.unpack_from(response.read())[5], 1)
         self.reject_http(self.http(valid, version=b'1.0'))
         self.reject_http(self.http(bytes(4097)))
         self.reject_http(self.http(valid) + b'GET /v1/ping HTTP/1.1\r\nHost: localhost\r\n\r\n')

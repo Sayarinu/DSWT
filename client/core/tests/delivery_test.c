@@ -544,6 +544,41 @@ static void Seed(void)
     events = cutAt = cutMode = 0; saveWrites = journalWrites = 0;
 }
 
+/* Two independent gifts may share their PID and trainer despite differences
+ * in friendship or training. Neither is evidence of an interrupted delivery. */
+static void FixedIdentityGifts(void)
+{
+    static const struct { unsigned species; uint32_t pid, ot; } gifts[] = {
+        { 25, 0x246E13AF, 0x516E1FAB }, /* Diamond/Pearl event Pikachu */
+        { 570, 0xFF00001F, 2 },         /* N's Zorua */
+    };
+    unsigned i;
+    for (i = 0; i < sizeof(gifts) / sizeof(gifts[0]); ++i) {
+        WtEngine engine;
+        WtJournalEntry entry;
+        unsigned char resident[BOX];
+        unsigned writes;
+        Seed();
+        Start(MATCHED);
+        Open(&engine, 1);
+        entry = engine.entry;
+        WtEngine_Close(&engine);
+        Mon(entry.incoming, gifts[i].pid, gifts[i].ot, gifts[i].species, 0);
+        Mon(resident, gifts[i].pid, gifts[i].ot, gifts[i].species, 100);
+        CHECK(WtPokemon_Encode(resident, live.boxes[0][1]) == 0);
+        writes = saveWrites;
+        CHECK(WtDelivery_Prepare(&sOps, &entry) == 1 && saveWrites == writes);
+        CHECK(WtPokemon_Encode(entry.incoming, live.boxes[0][3]) == 0);
+        ++live.counter;
+        CHECK(WtDelivery_Recover(&sOps, &entry) == -1 && saveWrites == writes);
+        entry.deliveryKind = WT_DELIVERY_RETURN;
+        memcpy(entry.outgoing, entry.incoming, BOX);
+        CHECK(WtDelivery_Prepare(&sOps, &entry) == -1 && saveWrites == writes);
+        CHECK(Copies(&live, entry.incoming) == 2);
+    }
+    puts("fixed-identity gifts: matched delivery deferred and ambiguous recovery refused without saving");
+}
+
 /* ---- Scan, uniqueness and the journal's Battle Box ---- */
 
 static void ScanCases(void)
@@ -970,6 +1005,7 @@ static void CompanionEscrows(void)
 
 int main(void)
 {
+    FixedIdentityGifts();
     ScanCases();
     ChangedByPlay();
     MovedToDaycare();

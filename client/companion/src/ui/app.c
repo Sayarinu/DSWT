@@ -7,7 +7,7 @@
 #include "ui/render.h"
 #include "ui_button.h"
 #include "ui_frame.h"
-#include "ui_icons.h"
+#include "platform/nds/menu_audio.h"
 #include "ui_spinner.h"
 
 /* Both engines: background 0 the text layer (its own tile for every cell,
@@ -71,7 +71,6 @@ static void InitEngine(Engine *engine, int sub)
     /* Tiles of the project-original art (res/gfx), at their CP_TILE_* numbers. */
     dmaCopy(ui_frameTiles, (uint8_t *)bgGetGfxPtr(engine->ui) + CP_TILE_BLANK * 32, ui_frameTilesLen);
     dmaCopy(ui_buttonTiles, (uint8_t *)bgGetGfxPtr(engine->ui) + CP_TILE_BUTTON * 32, ui_buttonTilesLen);
-    dmaCopy(ui_iconsTiles, (uint8_t *)bgGetGfxPtr(engine->ui) + CP_TILE_ICON * 32, ui_iconsTilesLen);
     dmaCopy(ui_spinnerTiles, (uint8_t *)bgGetGfxPtr(engine->ui) + CP_TILE_SPINNER * 32, ui_spinnerTilesLen);
     map = bgGetMapPtr(engine->text);
     for (i = 0; i < 32 * 32; i++) map[i] = i < CP_CANVAS_TILES ? (uint16_t)i : 0;
@@ -85,8 +84,8 @@ static void Present(const Engine *engine, const CpScreen *screen)
 {
     uint16_t *palette = engine == &sMain ? BG_PALETTE : BG_PALETTE_SUB;
     for (unsigned i = 0; i < CP_UI_PARTY_MAX; ++i) {
-        if (!screen->portraits[i]) continue;
-        const uint16_t *colors = screen->portraits[i]->palette;
+        if (!screen->spritePalettes[i]) continue;
+        const uint16_t *colors = screen->spritePalettes[i];
         for (unsigned color = 0; color < 16; ++color)
             palette[CpRender_PortraitPalette(i) * 16 + color] = colors[color];
     }
@@ -101,9 +100,9 @@ static void Present(const Engine *engine, const CpScreen *screen)
 static void ReadInput(CpUiInput *input)
 {
     static const struct { unsigned key, ui; } keys[] = {
-        { KEY_A, CP_UI_KEY_A }, { KEY_B, CP_UI_KEY_B }, { KEY_X, CP_UI_KEY_X },
+        { KEY_Y, CP_UI_KEY_Y }, { KEY_A, CP_UI_KEY_A }, { KEY_B, CP_UI_KEY_B }, { KEY_X, CP_UI_KEY_X },
         { KEY_UP, CP_UI_KEY_UP }, { KEY_DOWN, CP_UI_KEY_DOWN }, { KEY_LEFT, CP_UI_KEY_LEFT },
-        { KEY_RIGHT, CP_UI_KEY_RIGHT }, { KEY_SELECT, CP_UI_KEY_SELECT }
+        { KEY_RIGHT, CP_UI_KEY_RIGHT }, { KEY_L, CP_UI_KEY_L }, { KEY_R, CP_UI_KEY_R }, { KEY_SELECT, CP_UI_KEY_SELECT }
     };
     unsigned down, held, i;
     touchPosition touch;
@@ -122,24 +121,11 @@ static void ReadInput(CpUiInput *input)
     }
 }
 
-CompanionLanguage CpUiApp_SystemLanguage(void)
-{
-    switch (PersonalData->language) {
-    case 0: return Companion_Language_ja_JP;
-    case 2: return Companion_Language_fr_FR;
-    case 3: return Companion_Language_de_DE;
-    case 4: return Companion_Language_it_IT;
-    case 5: return Companion_Language_es_ES;
-    case 7: return Companion_Language_ko_KR;
-    default: return Companion_Language_en_US;
-    }
-}
-
 void CpUiApp_Run(CpUiModel *model, CpUiDemo *tour)
 {
     CpUi ui;
     CpUiInput input;
-    unsigned sounds = 0, soundFrames = 0;
+    unsigned sounds = 0;
     int channel = -1;
 
     videoSetMode(MODE_0_2D);
@@ -150,7 +136,7 @@ void CpUiApp_Run(CpUiModel *model, CpUiDemo *tour)
     InitEngine(&sSub, 1);
     dmaCopy(CpRender_Palettes, BG_PALETTE, sizeof(CpRender_Palettes));
     dmaCopy(CpRender_Palettes, BG_PALETTE_SUB, sizeof(CpRender_Palettes));
-    soundEnable();
+    DC_FlushRange(CpMenuTap, CpMenuTapBytes);
     irqSet(IRQ_VBLANK, VBlank);
     irqEnable(IRQ_VBLANK);
 
@@ -161,14 +147,9 @@ void CpUiApp_Run(CpUiModel *model, CpUiDemo *tour)
         CpUi_Frame(&ui, model, &input);
         if (ui.state == CP_UI_EXIT) break;
         if (ui.sounds != sounds) {
-            /* The game plays a confirm effect on every action: a short blip. */
             sounds = ui.sounds;
-            if (channel >= 0) soundKill(channel);
-            channel = soundPlayPSG(DutyCycle_25, 1760, 40, 64);
-            soundFrames = 4;
-        } else if (soundFrames && !--soundFrames && channel >= 0) {
-            soundKill(channel);
-            channel = -1;
+            channel = soundPlaySampleChannel(13, CpMenuTap, SoundFormat_8Bit, CpMenuTapBytes,
+                CP_MENU_SAMPLE_RATE, 19, 64, false, 0);
         }
         if (ui.dirty) {
             ui.dirty = 0;

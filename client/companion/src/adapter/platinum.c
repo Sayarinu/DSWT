@@ -387,7 +387,7 @@ static int SaveBoth(WtGame *game, const unsigned char expected[32])
 {
     unsigned char actual[32];
     if (Hash(game->image, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
-    if (CpSaveImage_Verify(game->image, game->file, expected) == CP_SAVE_OK) return 0;
+    if (CpSaveImage_VerifyCurrent(game->image, game->file, expected) == CP_SAVE_OK) return 0;
     return CpSaveImage_CommitBoth(game->image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
 }
 
@@ -395,7 +395,13 @@ int WtGame_Checkpoint(WtGame *game)
 {
     unsigned char digest[32];
     if (!game || !game->image || Hash(game->image, digest) != 0) return -1;
-    return CpSaveImage_Verify(game->image, game->file, digest) == CP_SAVE_OK ? 0 : SaveBoth(game, digest);
+    CpSaveResult result = CpSaveImage_VerifyCurrent(game->image, game->file, digest);
+    if (result == CP_SAVE_OK) return 0;
+    /* A confirmed mismatch already requires a commit. Keep the retry for
+     * failed reads. CommitBoth verifies the target hash and both writes. */
+    if (result == CP_SAVE_VERIFY_FAILED)
+        return CpSaveImage_CommitBoth(game->image, game->file, digest) == CP_SAVE_OK ? 0 : -1;
+    return SaveBoth(game, digest);
 }
 
 /* What a step may change, kept to put the image back when it fails or only
@@ -492,6 +498,11 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
          * delivery needs its offer gone: a copy still here would make two. The
          * game refuses both too (client wonder_trade/delivery.h). */
         if (Absent(image, entry->outgoing) != 0) return -1;
+        if (entry->deliveryKind == WT_DELIVERY_MATCH) {
+            Found resident;
+            int present = Locate(image, entry->incoming, NULL, 0, &resident);
+            if (present != 0) return present;
+        }
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (count < CP_SAVE_PARTY_CAPACITY) {
             entry->destination.kind = 1; entry->destination.slot = (unsigned char)count;
@@ -695,7 +706,7 @@ static int SaveRemoval(WtGame *game, const WtJournalEntry *entry, const unsigned
     uint32_t recorded = entry->globalCounter;
     int result;
     if (Hash(image, actual) != 0 || memcmp(actual, expected, 32) != 0) return -1;
-    if (CpSaveImage_Verify(image, game->file, expected) == CP_SAVE_OK) return 0;
+    if (CpSaveImage_VerifyCurrent(image, game->file, expected) == CP_SAVE_OK) return 0;
     if (recorded <= WT_ABANDON_LIMIT && (uint32_t)(image->globalCounter - recorded) < WT_ABANDON_STEP)
         image->globalCounter = recorded + WT_ABANDON_STEP - 1;
     image->counterFirst = 1;
@@ -778,6 +789,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
     unsigned i;
     if (!party || !(backup = Keep(image))) return -1;
     if (step == WT_INVENTORY_PREPARE_REMOVE) {
+        Found resident;
         if (!Eligible(RulesOf(image), party, slot) || WtPokemon_Decode(Slot(party, slot), canonical) != 0) goto done;
         entry->source.kind = 1; entry->source.box = 0;
         entry->source.slot = (unsigned char)slot; entry->source.length = MON_SIZE;
@@ -786,7 +798,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
         Remove(RulesOf(image), party, slot);
-        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
+        if (Locate(image, entry->outgoing, NULL, 0, &resident) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= CP_SAVE_PARTY_CAPACITY
@@ -906,6 +918,7 @@ int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
 {
     unsigned char *party, canonical[BOX_MON_SIZE];
     Backup *backup;
+    Found resident;
     int count, unique;
     if (CpGen5_Is(image)) return CpGen5_Unique(image, slot);
     party = Party(image);
@@ -914,7 +927,7 @@ int CpAdapter_Unique(CpSaveImage *image, unsigned slot)
     /* Anything uncertain falls through to the deposit's own fail-closed check. */
     if (!(backup = Keep(image))) return 1;
     Remove(RulesOf(image), party, slot);
-    unique = Absent(image, canonical) == 0;
+    unique = Locate(image, canonical, NULL, 0, &resident) == 0;
     Release(backup, 1);
     return unique;
 }

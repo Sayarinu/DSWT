@@ -13,10 +13,10 @@ static uint8_t sTopText[CP_CANVAS_BYTES], sBottomText[CP_CANVAS_BYTES];
 static CpScreen sTop = { .text = { .tiles = sTopText } }, sBottom = { .text = { .tiles = sBottomText } };
 
 static const char *kNames[CP_UI_STATE_COUNT] = {
-    "BOOT", "SAVE_PICKER", "GAME_CONFIRM", "RECOVERY", "CONNECTING", "MENU", "PICKER", "CONFIRM",
+    "BOOT", "SAVE_PICKER", "RECOVERY", "CONNECTING", "MENU", "PICKER", "CONFIRM",
     "COLLECT_CONFIRM", "CANCEL_CONFIRM", "PINGING", "RECEIVED", "MESSAGE", "ERROR", "RESTART", "CLOSING", "EXIT",
     "WIFI_LIST", "WIFI_KEYBOARD", "WIFI_JOINING", "WIFI_JOINED", "WIFI_FAILED", "WIFI_FORGET",
-    "WIFI_FORGET_FAILED"
+    "WIFI_FORGET_FAILED", "LANGUAGE", "SUMMARY", "GAME_LIST"
 };
 
 static void Dump(const char *directory, unsigned index, const CpUi *ui)
@@ -61,8 +61,10 @@ int main(int argc, char **argv)
             ui.dirty = 0;
             drawn++;
             /* Every screen has its title and some message text. */
-            assert(Inked(&sTop.text, 16, 8, 224, 16, CP_INK_WHITE));
-            assert(Inked(&sBottom.text, 16, 8, 224, 16, CP_INK_WHITE));
+            assert(Inked(&sTop.text, 16, 8, 224, 16, CP_INK_TITLE));
+            assert(!memcmp(sTop.map, sBottom.map, 3 * 32 * sizeof(sTop.map[0])));
+            assert(!memcmp(sTop.textMap, sBottom.textMap, 3 * 32 * sizeof(sTop.textMap[0])));
+            assert(!memcmp(sTopText, sBottomText, 3 * 32 * 32));
             assert(Inked(&sTop.text, 0, 24, 256, 168, CP_INK_DARK));
             if (ui.state == CP_UI_MENU) assert(Inked(&sBottom.text, 56, 40, 144, 112, CP_INK_DARK));
         }

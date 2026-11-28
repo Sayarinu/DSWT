@@ -7,7 +7,7 @@
 typedef struct SimCard {
     CpCardBus bus;
     const CpReader *image;
-    uint32_t id, gameCode, twlStart, key[CP_CARD_KEY_WORDS];
+    uint32_t id, gameCode, twlStart, corruptPage, key[CP_CARD_KEY_WORDS];
     uint8_t secure[CP_CARD_SECURE];
     unsigned mode, counter, repeats, resets;
     int present, twl, seeded, delayed, changeHeader, failPage;

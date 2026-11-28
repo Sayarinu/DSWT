@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <thread>
 #include <stdexcept>
 #include <utility>
 
@@ -101,13 +102,24 @@ public:
   }
 
   template <typename Reply>
-  void Publish(Reply &reply, v1::ResultCode code) {
+  void Publish(Reply &reply, v1::ResultCode code, grpc::ServerContext *after_commit = nullptr) {
     // After a write commit these reads also cover any newer committed progress.
     // For reads they remain in the same repeatable-read snapshot.
     auto row = database.Parameters("SELECT next_counter::text,event_highwater::text "
         "FROM dswt.save_identities WHERE save_id=$1::uuid", {HexBytes(auth.save_id())});
     if (PQntuples(row.get()) != 1) throw std::runtime_error("identity disappeared");
-    if (!Covered(Unsigned(PQgetvalue(row.get(), 0, 1)))) {
+    const auto event = Unsigned(PQgetvalue(row.get(), 0, 1));
+    bool covered = Covered(event);
+    // A short archive delay can finish within this response. Only wait after
+    // the write transaction committed and released the identity lock.
+    constexpr auto interval = std::chrono::milliseconds(150);
+    constexpr int kMaxArchiveRechecks = 3;
+    for (int i = 0; !covered && after_commit && i < kMaxArchiveRechecks; ++i) {
+      if (after_commit->IsCancelled() || std::chrono::system_clock::now() + interval >= after_commit->deadline()) break;
+      std::this_thread::sleep_for(interval);
+      covered = Covered(event);
+    }
+    if (!covered) {
       Result(reply, v1::RESULT_PROCESSING);
       return;
     }
@@ -362,7 +374,7 @@ grpc::Status TradeService::Submit(grpc::ServerContext *context, const v1::Submit
       trace.Trade(trade);
       reply->set_operation_event(session.highwater + 1);
       *reply->mutable_outcome() = snapshot;
-      session.Publish(*reply, v1::RESULT_OK);
+      session.Publish(*reply, v1::RESULT_OK, context);
     });
   });
 }
@@ -489,7 +501,7 @@ grpc::Status TradeService::Acknowledge(grpc::ServerContext *context, const v1::A
     session.Record(request->context(), wire::kAcknowledge, hash, v1::RESULT_OK, v1::EVENT_ACKNOWLEDGED, snapshot);
     reply->set_operation_event(session.highwater + 1);
     *reply->mutable_outcome() = snapshot;
-    session.Publish(*reply, v1::RESULT_OK);
+    session.Publish(*reply, v1::RESULT_OK, context);
   });
 }
 

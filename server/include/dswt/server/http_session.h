@@ -7,6 +7,7 @@
 #include <boost/beast/ssl.hpp>
 #include <grpcpp/grpcpp.h>
 #include <memory>
+#include <optional>
 #include <variant>
 
 namespace dswt::server {
@@ -39,11 +40,13 @@ private:
   boost::asio::any_io_executor executor_;
   boost::asio::steady_timer deadline_;
   boost::beast::flat_buffer buffer_{kHeaderLimitBytes + wire::kMaxPacket};
-  boost::beast::http::request_parser<boost::beast::http::string_body> parser_;
+  std::optional<boost::beast::http::request_parser<boost::beast::http::string_body>> parser_;
   boost::beast::http::response<boost::beast::http::string_body> response_;
   std::shared_ptr<grpc::ClientContext> context_ = std::make_shared<grpc::ClientContext>();
   Phase phase_ = Phase::Reading;
   char probe_[1]{};
+  unsigned exchanges_ = 0;
+  bool idle_ = false;
   unsigned version_ = kHttp11;
 };
 

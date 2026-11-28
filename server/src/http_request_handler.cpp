@@ -39,6 +39,7 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
   response.set(http::field::cache_control, "no-store");
 
   if (request.target() == "/wt/v1") {
+    const bool keep_alive = boost::beast::iequals(request[http::field::connection], "keep-alive");
     const auto length = request[http::field::content_length];
     std::size_t size = 0;
     bool valid_length = false;
@@ -56,7 +57,7 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
         request.count(http::field::content_encoding) != 0 || request.count(http::field::expect) != 0 ||
         request.count(http::field::upgrade) != 0 || request.count(http::field::content_type) != 1 ||
         request[http::field::content_type] != "application/octet-stream" || request.count(http::field::connection) != 1 ||
-        !boost::beast::iequals(request[http::field::connection], "close")) response.result(http::status::bad_request);
+        (!keep_alive && !boost::beast::iequals(request[http::field::connection], "close"))) response.result(http::status::bad_request);
     else if (!trades_) response.result(http::status::service_unavailable);
     else {
       exchanged = true;
@@ -65,6 +66,8 @@ HttpRequestHandler::Handle(const http::request<http::string_body> &request,
           reply.status == GatewayReply::Status::Invalid ? http::status::bad_request : http::status::service_unavailable);
       if (reply.status == GatewayReply::Status::Ok) {
         response.set(http::field::content_type, "application/octet-stream");
+        response.set("X-DSWT-Visit", "1");
+        if (keep_alive) response.set(http::field::connection, "keep-alive");
         response.body() = std::move(reply.packet);
       }
     }

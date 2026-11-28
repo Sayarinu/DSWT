@@ -70,6 +70,7 @@ typedef struct CpApp {
     CpJournalStore store;
     CpGame game;
     CpFont font;
+    CpPartyIcons icons;
     WtGame adapter;
     CpAdapterData romData;
     int needsProvision, backedUp;
@@ -115,7 +116,7 @@ typedef struct CpApp {
 /* Kept in static storage: the image alone is 512 KiB. */
 extern CpSaveImage gCpAppImage;
 
-void CpApp_Init(CpApp *, const CpAppPlatform *, CompanionLanguage systemLanguage);
+void CpApp_Init(CpApp *, const CpAppPlatform *, CompanionLanguage uiLanguage);
 
 /* Start joining Wi-Fi in the background, as the companion starts: the network
  * stored by the Wi-Fi settings first, then the console's saved connections.

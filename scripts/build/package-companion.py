@@ -26,6 +26,7 @@ LICENSES = (
     "LICENSES/GPL-2.0-or-later.txt",
     "LICENSES/GPL-3.0-or-later.txt",
     "LICENSES/OFL-1.1.txt",
+    "LICENSES/WTFPL.txt",
     "licensing/ds-companion-blocksds.txt",
     "licensing/ds-companion-dswifi.txt",
     "licensing/ds-companion-fatfs.txt",
@@ -40,12 +41,18 @@ INSTALL = """DSWT
 Open Install-DSWT.html in your browser and download your own SD card kit.
 Copy its roms and _nds folders to the root of your SD card. The browser creates
 private seeds for first-time setup. Share the public installer with other players.
-The Game Card entry shows the party on an inserted supported DS cartridge.
+Pick your language on first launch. Highlight a Game Card or SD save and press A
+to open it. Press Y on a party member to see its stats, IVs, EVs and moves.
+Choose Exit from the game list to leave DSWT.
 
 For a manual installation, back up your save first. Copy dswt.nds to your SD card
 and launch it in DSi mode through TWiLight Menu++ on your DSi or 3DS.
-Keep your own game ROM and its save on the SD card. The app reads game data
-from your ROM and opens the active TWiLight save slot for that game.
+For a supported retail Game Card, insert it before launching DSWT. The app can
+use the cartridge session opened by TWiLight Menu++ without any BIOS files.
+For an SD save, keep your game ROM and its save on the SD card. The app opens
+the active TWiLight save slot for that game.
+If first-time setup asks you to draw loops, follow the prompt to generate a
+private seed for that save. Future trades reuse the initialized save.
 
 Setup, supported games and recovery:
 https://github.com/Sayarinu/DSWT/wiki/DS-Companion
@@ -94,6 +101,9 @@ def package(version, build, output):
     members.update({name: (ROOT / name).read_bytes() for name in LICENSES})
     output.mkdir(parents=True, exist_ok=True)
     (output / "dswt.nds").write_bytes(data)
+    notices = b"\n\n".join(name.encode() + b"\n\n" + members[name]
+                           for name in ("NOTICE", "LICENSE", *LICENSES, "font-manifest.json"))
+    (output / "THIRD-PARTY-NOTICES.txt").write_bytes(notices)
     installer = download_installer(members).encode("utf-8")
     (output / f"dswt-companion-{version}.html").write_bytes(installer)
     members["Install-DSWT.html"] = installer
