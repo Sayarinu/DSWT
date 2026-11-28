@@ -58,6 +58,7 @@ class PackageCompanionTests(unittest.TestCase):
             self.assertEqual(archive.read(prefix + "Install-DSWT.html"), target.with_suffix(".html").read_bytes())
             for name in ("NOTICE", "LICENSE", *package.LICENSES):
                 self.assertEqual(archive.read(prefix + name), (ROOT / name).read_bytes())
+                self.assertIn((ROOT / name).read_bytes(), (target.parent / "THIRD-PARTY-NOTICES.txt").read_bytes())
             self.assertIn(b"https://github.com/Sayarinu/DSWT/wiki/DS-Companion",
                           archive.read(prefix + "INSTALL.txt"))
             self.assertIn(b"/sys/crts", archive.read(prefix + "NOTICE"))

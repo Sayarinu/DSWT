@@ -8,8 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "client/companion/src/platform/nds/card_profiles.inc"
 PAGE = 512
+MAIN_DATA_START = 0x8000
 # Main-program and data pages which distinguish regional builds and revisions.
-COMMON = (0x8000, 0xa400, 0x107000, 0x432e00, 0xd0fc00)
+COMMON = (MAIN_DATA_START, 0xa400, 0x107000, 0x432e00, 0xd0fc00)
 
 
 def page(file, offset):
@@ -21,7 +22,7 @@ def page(file, offset):
 
 
 def literal(data):
-    return '"' + ''.join(chr(b) if 32 <= b < 127 and b not in (34, 92)
+    return '"' + ''.join(chr(b) if b in range(ord(" "), ord("~") + 1) and b not in (34, 92)
                          else f'\\{b:03o}' for b in data) + '"'
 
 
@@ -34,8 +35,8 @@ def separation_page(paths, limit):
     with ExitStack() as stack:
         files = [stack.enter_context(p.open("rb")) for p in paths]
         for f in files:
-            f.seek(0x8000)
-        for start in range(0x8000, limit, 65536):
+            f.seek(MAIN_DATA_START)
+        for start in range(MAIN_DATA_START, limit, 65536):
             blocks = [f.read(min(65536, limit - start)) for f in files]
             if len(set(blocks)) == 1:
                 continue
@@ -77,7 +78,7 @@ def main():
             digest = base.copy()
             with path.open("rb") as f:
                 for at in (probe, fnt // PAGE * PAGE, fat // PAGE * PAGE):
-                    if not 0x8000 <= at <= capacity - PAGE:
+                    if not MAIN_DATA_START <= at <= capacity - PAGE:
                         raise ValueError(f"Page outside NTR data in {name}")
                     digest.update(page(f, at))
             out.extend([f"    /* {name} */",

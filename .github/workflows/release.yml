@@ -115,8 +115,7 @@ jobs:
           name: app-companion
           path: |
             game/apps/dswt.nds
-            game/apps/dswt-companion-*.zip
-            game/apps/dswt-companion-*.html
+            game/apps/THIRD-PARTY-NOTICES.txt
           if-no-files-found: error
           retention-days: 7
 

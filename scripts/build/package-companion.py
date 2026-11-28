@@ -101,6 +101,9 @@ def package(version, build, output):
     members.update({name: (ROOT / name).read_bytes() for name in LICENSES})
     output.mkdir(parents=True, exist_ok=True)
     (output / "dswt.nds").write_bytes(data)
+    notices = b"\n\n".join(name.encode() + b"\n\n" + members[name]
+                           for name in ("NOTICE", "LICENSE", *LICENSES, "font-manifest.json"))
+    (output / "THIRD-PARTY-NOTICES.txt").write_bytes(notices)
     installer = download_installer(members).encode("utf-8")
     (output / f"dswt-companion-{version}.html").write_bytes(installer)
     members["Install-DSWT.html"] = installer
