@@ -50,14 +50,13 @@ static void Write32(unsigned char *p, uint32_t value)
     for (i = 0; i < 4; ++i) p[i] = (unsigned char)(value >> (i * 8));
 }
 
-static uint16_t Crc(uint16_t crc, const unsigned char *data, size_t size)
+uint16_t CpSave_Crc16(uint16_t crc, const unsigned char *data, size_t size)
 {
-    size_t i;
-    unsigned bit;
-    for (i = 0; i < size; ++i) {
-        crc ^= (uint16_t)((unsigned)data[i] << 8);
-        for (bit = 0; bit < 8; ++bit)
-            crc = (uint16_t)((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0));
+    /* Bytewise form of the retail CRC-16/CCITT recurrence (polynomial 0x1021). */
+    for (size_t i = 0; i < size; ++i) {
+        unsigned x = (crc >> 8) ^ data[i];
+        x ^= x >> 4;
+        crc = (uint16_t)((crc << 8) ^ (x << 12) ^ (x << 5) ^ x);
     }
     return crc;
 }
@@ -107,19 +106,22 @@ static const unsigned char *Block(const CpSaveImage *image, unsigned block)
 static void HashBody(CpSaveSha256 *hash, const CpSaveLayout *layout, unsigned block, uint32_t offset,
                      const unsigned char *bytes, size_t size)
 {
-    static const unsigned char zero = 0;
-    uint32_t end = offset + (uint32_t)size, at;
-    if (block != 1 || layout->maskSize == 0 || end <= layout->maskOffset
-        || offset >= layout->maskOffset + layout->maskSize) {
+    static const unsigned char zeros[4] = {0};
+    uint32_t end = offset + (uint32_t)size, maskEnd = layout->maskOffset + layout->maskSize;
+    if (block != 1 || !layout->maskSize || end <= layout->maskOffset || offset >= maskEnd) {
         CpSaveSha256_Update(hash, bytes, size);
         return;
     }
-    for (at = offset; at < end; ++at) {
-        if (at >= layout->maskOffset && at < layout->maskOffset + layout->maskSize)
-            CpSaveSha256_Update(hash, &zero, 1);
-        else
-            CpSaveSha256_Update(hash, bytes + (at - offset), 1);
+    uint32_t start = offset > layout->maskOffset ? offset : layout->maskOffset;
+    uint32_t stop = end < maskEnd ? end : maskEnd;
+    CpSaveSha256_Update(hash, bytes, start - offset);
+    for (uint32_t at = start; at < stop;) {
+        uint32_t n = stop - at;
+        if (n > sizeof(zeros)) n = sizeof(zeros);
+        CpSaveSha256_Update(hash, zeros, n);
+        at += n;
     }
+    CpSaveSha256_Update(hash, bytes + (stop - offset), end - stop);
 }
 
 static int FileSize(const CpFile *file)
@@ -180,7 +182,7 @@ CpSaveResult CpSaveImage_LoadLayout(CpSaveImage *image, const CpFile *file, cons
             const unsigned char *footer = body + BodySize(layout, block);
             globals[block][half] = GlobalOf(layout, footer);
             counters[block][half] = CounterOf(layout, footer);
-            if (FooterValid(layout, footer, block, magic, Crc(0xffff, body, BodySize(layout, block))))
+            if (FooterValid(layout, footer, block, magic, CpSave_Crc16(0xffff, body, BodySize(layout, block))))
                 valid[block] |= 1u << half;
         }
         if (valid[block] == 0) return CP_SAVE_INVALID;
@@ -273,8 +275,8 @@ CpSaveResult CpSaveImage_Hash(const CpSaveImage *image, unsigned char digest[CP_
     return CP_SAVE_OK;
 }
 
-CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
-                              const unsigned char expected[CP_SAVE_HASH_SIZE])
+static CpSaveResult Verify(const CpSaveImage *image, const CpFile *file,
+                           const unsigned char expected[CP_SAVE_HASH_SIZE], int matchCurrent)
 {
     unsigned half, block;
     unsigned char page[256], footer[CP_SAVE_FOOTER_SIZE], digest[CP_SAVE_HASH_SIZE];
@@ -290,13 +292,17 @@ CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
         for (block = 0; block < 2; ++block) {
             uint32_t offset = 0, bodySize = BodySize(layout, block);
             uint32_t address = half * CP_SAVE_HALF_SIZE + layout->offsets[block];
+            const unsigned char *current = matchCurrent && block == 0 ? Block(image, block) : NULL;
             uint16_t crc = 0xffff;
             while (offset < bodySize) {
                 size_t count = bodySize - offset;
                 if (count > sizeof(page)) count = sizeof(page);
                 if (file->readAt(file->context, address + offset, page, count) != 0)
                     return CP_SAVE_IO_ERROR;
-                crc = Crc(crc, page, count);
+                /* The party is in the unmasked general block. A changed byte
+                 * proves a mismatch immediately when the target is the current image. */
+                if (current && memcmp(page, current + offset, count) != 0) return CP_SAVE_VERIFY_FAILED;
+                crc = CpSave_Crc16(crc, page, count);
                 HashBody(&hash, layout, block, offset, page, count);
                 offset += (uint32_t)count;
             }
@@ -316,6 +322,18 @@ CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
         if (memcmp(digest, expected, sizeof(digest)) != 0) return CP_SAVE_VERIFY_FAILED;
     }
     return CP_SAVE_OK;
+}
+
+CpSaveResult CpSaveImage_Verify(const CpSaveImage *image, const CpFile *file,
+                               const unsigned char expected[CP_SAVE_HASH_SIZE])
+{
+    return Verify(image, file, expected, 0);
+}
+
+CpSaveResult CpSaveImage_VerifyCurrent(const CpSaveImage *image, const CpFile *file,
+                                      const unsigned char expected[CP_SAVE_HASH_SIZE])
+{
+    return Verify(image, file, expected, 1);
 }
 
 static int WriteSync(const CpFile *file, uint32_t address, const unsigned char *bytes, size_t size)
@@ -384,7 +402,7 @@ CpSaveResult CpSaveImage_CommitBoth(CpSaveImage *image, const CpFile *file,
             uint16_t crc;
             /* Save_SetAllPCBoxesModified before each save: hashed as zero. */
             if (block == 1 && layout->maskSize == 4) Write32(body + layout->maskOffset, layout->maskCommit);
-            crc = Crc(0xffff, body, bodySize);
+            crc = CpSave_Crc16(0xffff, body, bodySize);
             /* Retain the ignored padding byte just as retail does. */
             memcpy(footer, body + bodySize, layout->footerSize);
             if (layout->footer == CP_SAVE_FOOTER_SHARED_COUNTER) {

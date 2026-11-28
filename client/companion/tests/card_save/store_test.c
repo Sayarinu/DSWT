@@ -38,6 +38,14 @@ int main(void)
             unsigned prior = sim.modifies;
             assert(!OpenTestStore(&copy, &record, &f) && sim.modifies == prior);
             sim.memory[0x300] ^= 1;
+            sim.memory[AT - 4096] ^= 1;
+            assert(!OpenTestStore(&copy, &record, &f) && sim.modifies == prior);
+            sim.memory[AT - 4096] ^= 1;
+            /* Compact recovery relies on the unchanged part of the mirror.
+             * A corrupt mirror must never supply bytes for a flash repair. */
+            copy.bytes[AT - 4096] ^= 1;
+            assert(!OpenTestStore(&copy, &record, &f) && sim.modifies == prior);
+            copy.bytes[AT - 4096] ^= 1;
             store = OpenTestStore(&copy, &record, &f);
             assert(store && !memcmp(sim.memory, target, sizeof(target)) && !memcmp(copy.bytes, target, sizeof(target)));
             CpCardStore_Close(store);

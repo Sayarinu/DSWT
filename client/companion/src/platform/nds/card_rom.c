@@ -175,40 +175,60 @@ static int ReadAt(void *ctx, uint32_t offset, void *out, uint32_t size)
     return CpCardRom_Check(card);
 }
 
-/* TWiLight can leave Slot-1 in main data mode. Identify English White rev 0
- * from its code, game-data, embedded title ID and allocation-table pages.
- * Other builds continue through the normal physical header probe. */
+typedef struct {
+    uint32_t selector, extraPage, ntrEnd;
+    uint8_t prefix[32], fs[16], digest[32];
+} CpCardProfile;
+
+#include "card_profiles.inc"
+
+static int HashPage(CpCardRom *card, uint32_t at, CpSaveSha256 *sha)
+{
+    if (Transfer(card, COMMAND(0xb7) | ((uint64_t)at << 24),
+                 card->dataFlags, card->page, CP_CARD_PAGE) != 0) return -1;
+    CpSaveSha256_Update(sha, card->page, CP_CARD_PAGE);
+    return 0;
+}
+
+/* TWiLight can leave the card in main data mode. Match its accessible data
+ * before supplying the two header slices that cannot be read in that mode. */
 int CpCardRom_OpenHandoff(CpCardRom *card, CpCardBus *bus, uint32_t control, CpReader *reader)
 {
-    static const uint32_t offsets[] = { 0x8000, 0x03471c00, 0x207800, 0x2f1400 };
-    static const uint8_t expected[32] = {
-        0xf1,0x7f,0x6b,0xc8,0xea,0x6a,0xf2,0x5b,0xed,0x26,0xdc,0xc3,0x75,0x6a,0xc0,0xec,
-        0x3d,0x65,0x21,0xba,0x4a,0xc2,0xd0,0x02,0xd5,0x74,0x01,0xde,0x8a,0x7f,0x23,0x52
-    };
-    static const uint8_t prefix[0x20] = "POKEMON W\0\0\0IRAO01\x02\x00\x0b"
-        "\0\0\0\0\0\0\0\x03\x40";
-    /* File name and allocation table offsets and sizes, little endian. */
-    static const uint8_t fs[16] = { 0,0x0e,0x2f,0, 0x10,0x04,0,0, 0,0x14,0x2f,0, 0x20,0x0f,0,0 };
     memset(card, 0, sizeof(*card));
     card->bus = bus;
     card->generation = ++bus->generation;
     card->dataFlags = control & KEY2_COMMAND
         ? control & (CLOCK_SLOW | GAP_MASK | KEY2_DATA | KEY2_COMMAND) : 0x00416657;
-    if (Transfer(card, COMMAND(0xb8), card->dataFlags, &card->id, 4) || card->id != 0xc001ffc2)
-        return -1;
-    CpSaveSha256 sha;
+    if (Transfer(card, COMMAND(0xb8), card->dataFlags, &card->id, 4) ||
+        card->id == 0 || card->id == UINT32_MAX) return -1;
+
+    CpSaveSha256 common;
     uint8_t hash[32];
-    CpSaveSha256_Init(&sha);
-    for (unsigned i = 0; i < sizeof(offsets) / sizeof(*offsets); ++i) {
-        if (Transfer(card, COMMAND(0xb7) | ((uint64_t)offsets[i] << 24),
-                     card->dataFlags, card->page, CP_CARD_PAGE)) return -1;
-        CpSaveSha256_Update(&sha, card->page, CP_CARD_PAGE);
-    }
+    CpSaveSha256_Init(&common);
+    for (unsigned i = 0; i < sizeof(commonPages) / sizeof(*commonPages); ++i)
+        if (HashPage(card, commonPages[i], &common) != 0) return -1;
+    CpSaveSha256 sha = common;
     CpSaveSha256_Finish(&sha, hash);
-    if (memcmp(hash, expected, sizeof(hash))) return -1;
-    memcpy(card->header, prefix, sizeof(prefix));
-    memcpy(card->header + 0x40, fs, sizeof(fs));
-    card->capacity = 0x0c3b9400; /* End of the used NTR data, before TWL secure data. */
+    uint32_t selector = CpLe32(hash);
+    const CpCardProfile *match = NULL;
+    for (unsigned i = 0; i < sizeof(profiles) / sizeof(*profiles); ++i) {
+        const CpCardProfile *profile = &profiles[i];
+        if (profile->selector != selector) continue;
+        sha = common;
+        uint32_t mask = ~(uint32_t)(CP_CARD_PAGE - 1);
+        if (HashPage(card, profile->extraPage, &sha) ||
+            HashPage(card, CpLe32(profile->fs) & mask, &sha) ||
+            HashPage(card, CpLe32(profile->fs + 8) & mask, &sha)) return -1;
+        CpSaveSha256_Finish(&sha, hash);
+        if (memcmp(hash, profile->digest, sizeof(hash)) == 0) {
+            match = profile;
+            break;
+        }
+    }
+    if (!match) return -1;
+    memcpy(card->header, match->prefix, sizeof(match->prefix));
+    memcpy(card->header + 0x40, match->fs, sizeof(match->fs));
+    card->capacity = match->ntrEnd;
     card->pageOffset = UINT32_MAX;
     card->inherited = card->active = 1;
     if (CpCardRom_Check(card)) return -1;

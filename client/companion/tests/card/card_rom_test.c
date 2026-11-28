@@ -1,4 +1,5 @@
 #include "sim_card.h"
+#include "game/portrait.h"
 #include "../posix_reader.h"
 #include "../synthetic_rom.h"
 
@@ -26,22 +27,23 @@ static void CompareArchive(const CpNarc *file, const CpNarc *card)
 
 /* An already initialized card, with neither the cold-boot keys nor a reset
  * available. Compare the exact header slices and every archive the app uses. */
-static void CheckHandoff(const CpReader *image, int whiteReference)
+static void CheckHandoff(const CpReader *image, int catalogReference)
 {
     CpCardRom card;
     CpReader reader = {0};
     SimCard sim;
     SimCard_Init(&sim, image, 0xc001ffc2);
     sim.mode = 2;
-    sim.twl = 1;
     sim.bus.loadKey = NULL;
     sim.bus.reset = NULL;
-    if (!whiteReference) {
+    if (!catalogReference) {
         assert(CpCardRom_OpenHandoff(&card, &sim.bus, 0, &reader) < 0 && !card.active);
         return;
     }
     uint8_t byte;
     for (unsigned pass = 0; pass < 2; ++pass) {
+        sim.twl = pass && sim.twlStart;
+        sim.id = pass ? 0x80007fc2 : 0xc001ffc2;
         uint32_t control = pass ? 0x20416657 : 0x20000000;
         assert(CpCardRom_OpenHandoff(&card, &sim.bus, control, &reader) == 0);
         assert(card.active && card.inherited && sim.resets == 0);
@@ -63,14 +65,23 @@ static void CheckHandoff(const CpReader *image, int whiteReference)
         CompareArchive(&a.moves, &b.moves);
         CompareArchive(&a.messages, &b.messages);
         CompareArchive(&a.font, &b.font);
+        CpPortrait expected = {0}, actualPortrait = {0};
+        assert(CpPortrait_Load(&a, 25, 0, 0, 0, 0, &expected) == CP_OK && expected.ready);
+        assert(CpPortrait_Load(&b, 25, 0, 0, 0, 0, &actualPortrait) == CP_OK && actualPortrait.ready);
+        assert(!memcmp(&expected, &actualPortrait, sizeof(expected)));
     }
     sim.present = 0;
     assert(CpCardRom_Check(&card) < 0 && !card.active);
     sim.present = 1;
     assert(reader.readAt(&card, 0, &byte, 1) < 0);
-    sim.id ^= 1;
+    uint8_t fatOffset[4];
+    assert(image->readAt(image->context, 0x48, fatOffset, sizeof(fatOffset)) == 0);
+    sim.corruptPage = CpLe32(fatOffset) & ~(uint32_t)(CP_CARD_PAGE - 1);
+    assert(CpCardRom_OpenHandoff(&card, &sim.bus, 0, &reader) < 0 && !card.active);
+    sim.corruptPage = 0;
+    sim.id = UINT32_MAX;
     assert(CpCardRom_OpenHandoff(&card, &sim.bus, 0, &reader) < 0);
-    puts("White handoff: all 7 archives and header slices matched without keys or resets; removal invalidated the reader");
+    puts("Handoff: portrait, seven archives and identity matched without keys or resets; removal invalidated reader");
 }
 
 static void CheckImage(const char *path, uint32_t id, int faults)
@@ -82,9 +93,7 @@ static void CheckImage(const char *path, uint32_t id, int faults)
     CpRomFile left, right;
     CpGame a, b;
     assert(PosixReader_Open(&file, path) == 0);
-    uint8_t prefix[32];
-    assert(file.reader.readAt(file.reader.context, 0, prefix, sizeof(prefix)) == 0);
-    CheckHandoff(&file.reader, !faults && !memcmp(prefix + 12, "IRAO", 4) && prefix[30] == 0);
+    CheckHandoff(&file.reader, !faults);
     SimCard_Init(&sim, &file.reader, id);
     assert(CpCardRom_Open(&card, &sim.bus, &reader) == 0);
     assert(card.id == id && sim.resets == (card.twlStart ? 2u : 1u));

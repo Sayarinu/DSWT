@@ -197,7 +197,7 @@ static void TestMasking(void)
     int x, y;
     memset(&model, 0, sizeof(model));
     memset(&ui, 0, sizeof(ui));
-    model.systemLanguage = Companion_Language_en_US;
+    model.uiLanguage = Companion_Language_en_US;
     ui.state = CP_UI_WIFI_KEYBOARD;
     ui.message = Companion_Text_WifiPassword;
     ui.wifiReturn = CP_UI_SAVE_PICKER;

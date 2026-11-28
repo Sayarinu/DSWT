@@ -360,13 +360,6 @@ static int SaveBoth(WtGame *game, const unsigned char expected[32])
     return CpSaveImage_CommitBoth(game->image, game->file, expected) == CP_SAVE_OK ? 0 : -1;
 }
 
-static int Checkpoint(WtGame *game)
-{
-    unsigned char digest[32];
-    if (Hash(game->image, digest) != 0) return -1;
-    return CpSaveImage_Verify(game->image, game->file, digest) == CP_SAVE_OK ? 0 : SaveBoth(game, digest);
-}
-
 /* What a step may change, kept to put the image back when it fails or only
  * prepares: the party, the Pokédex and the one PC slot a delivery may fill. */
 typedef struct Backup {
@@ -418,7 +411,7 @@ static int Removed(WtGame *game, const WtJournalEntry *entry)
 {
     if (!Bound(entry)) return -1;
     if (Behind(game->image, entry) || Absent(game->image, entry->outgoing) != 0) return -1;
-    return Checkpoint(game);
+    return WtGame_Checkpoint(game);
 }
 
 static unsigned char *Destination(const CpSaveImage *image, WtJournalLocator where)
@@ -448,6 +441,11 @@ static int BuildReceived(WtGame *game, WtJournalEntry *entry, Backup *backup, in
          * delivery needs its offer gone: a copy still here would make two. The
          * game refuses both too (client wonder_trade/delivery.h). */
         if (Absent(image, entry->outgoing) != 0) return -1;
+        if (entry->deliveryKind == WT_DELIVERY_MATCH) {
+            Found resident;
+            int present = Locate(image, entry->incoming, NULL, 0, &resident);
+            if (present != 0) return present;
+        }
         memset(&entry->destination, 0, sizeof(entry->destination));
         if (count < PARTY_CAPACITY) {
             entry->destination.kind = 1; entry->destination.slot = (unsigned char)count;
@@ -508,7 +506,7 @@ static int Applied(WtGame *game, const WtJournalEntry *entry)
     if (Hash(game->image, digest) != 0) return -1;
     if (memcmp(digest, entry->inventoryAfter, 32) == 0) return VerifyReceived(game, entry);
     if (Behind(game->image, entry)) return -1;
-    return Checkpoint(game);
+    return WtGame_Checkpoint(game);
 }
 
 /* adapter/platinum.c Record: the Pokémon Locate found, recorded as the
@@ -561,7 +559,7 @@ static int ReceiveMoved(WtGame *game, WtJournalEntry *entry)
         || memcmp(entry->incoming, entry->outgoing, BOX_MON_SIZE) != 0) return -1;
     if ((where = Locate(game->image, entry->incoming, NULL, 0, &found)) < 0) return -1;
     if (where == 1 && Record(entry, game->image, &found) != 0) return -1;
-    if (Checkpoint(game) != 0) return -1;
+    if (WtGame_Checkpoint(game) != 0) return -1;
     if (where == 1 && Hash(game->image, entry->inventoryAfter) != 0) return -1;
     Counters(game->image, entry);
     return 0;
@@ -679,7 +677,7 @@ static int RemoveMoved(WtGame *game, WtJournalEntry *entry, unsigned char *party
         if (SaveRemoval(game, entry, entry->inventoryAfter) != 0) return -1;
     } else {
         *restore = 0;
-        if (Checkpoint(game) != 0) return -1;
+        if (WtGame_Checkpoint(game) != 0) return -1;
     }
     Counters(image, entry);
     return 0;
@@ -694,6 +692,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
     unsigned i;
     if (!(backup = Keep(image))) return -1;
     if (step == WT_INVENTORY_PREPARE_REMOVE) {
+        Found resident;
         if (slot >= PARTY_CAPACITY || !Eligible(RulesOf(image), party, slot)
             || WtPokemon_Decode(Slot(party, slot), canonical) != 0) goto done;
         entry->source.kind = 1; entry->source.box = 0;
@@ -704,7 +703,7 @@ static int PartyStep(WtGame *game, enum WtInventoryStep step, WtJournalEntry *en
         Sha(entry->original, MON_SIZE, entry->originalDigest);
         if (Hash(image, entry->inventoryBefore) != 0) goto done;
         Remove(party, slot);
-        if (Absent(image, entry->outgoing) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
+        if (Locate(image, entry->outgoing, NULL, 0, &resident) != 0 || Hash(image, entry->inventoryAfter) != 0) goto done;
         Counters(image, entry); result = 0; goto done;
     }
     if (entry->source.kind != 1 || entry->source.length != MON_SIZE || slot >= PARTY_CAPACITY
@@ -792,6 +791,7 @@ int CpGen5_Unique(CpSaveImage *image, unsigned slot)
 {
     unsigned char *party, canonical[BOX_MON_SIZE];
     Backup *backup;
+    Found resident;
     int count, unique;
     if (!CpGen5_Is(image) || !image->loaded) return 1;
     party = Party(image);
@@ -799,7 +799,7 @@ int CpGen5_Unique(CpSaveImage *image, unsigned slot)
         return 1;
     if (!(backup = Keep(image))) return 1;
     Remove(party, slot);
-    unique = Absent(image, canonical) == 0;
+    unique = Locate(image, canonical, NULL, 0, &resident) == 0;
     Release(backup, 1);
     return unique;
 }
@@ -849,6 +849,6 @@ int CpGen5_ReleaseMusical(WtGame *game)
     if (state == CP_MUSICAL_JOURNAL) return 0;
     /* Writes nothing when both copies hold the loaded save; otherwise the
      * cleared marker and program flag reach both before any bank is erased. */
-    if (Checkpoint(game) != 0) return -1;
+    if (WtGame_Checkpoint(game) != 0) return -1;
     return state == CP_MUSICAL_LEFTOVER ? CpMusicalArea_Erase(game->file, area) : 0;
 }

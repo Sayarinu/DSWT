@@ -327,6 +327,27 @@ static void Offered(WtJournalEntry *entry, unsigned partySize, unsigned partnerS
     assert(Step(WT_INVENTORY_PREPARE_REMOVE, entry, 0) == 0 && Step(WT_INVENTORY_REMOVE, entry, 0) == 0);
 }
 
+static void FixedIdentityGift(void)
+{
+    WtJournalEntry entry;
+    Spec gift = Basic(570);
+    unsigned char resident[136];
+    unsigned writes, i;
+    gift.pid = 0xFF00001F;
+    gift.ot = 2;
+    for (i = 0; i < 6; ++i) gift.ivs[i] = 30;
+    Offered(&entry, 3, 25, 0);
+    Match(&entry, &gift);
+    gift.exp += 1000;
+    Canonical(&gift, resident);
+    assert(WtPokemon_Encode(resident, Fx5ImageBox(&image, 23, 29)) == 0);
+    writes = file.writes;
+    assert(Step(WT_INVENTORY_PREPARE_RECEIVE, &entry, 0) == 1 && file.writes == writes);
+    Fx5Empty(Fx5ImageBox(&image, 23, 29), FX5_BOX_MON);
+    Deliver(&entry);
+    puts("N's Zorua: collection waits while its trained twin is present and succeeds after it leaves");
+}
+
 static void Decoded(const unsigned char *image220, unsigned char box[136], unsigned char ext[84])
 {
     assert(WtPokemon_Decode(image220, box) == 0);
@@ -867,6 +888,7 @@ static void Musical(void)
 
 int main(void)
 {
+    if (B2W2) FixedIdentityGift();
     Eligibility();
     RemoveAndRestore();
     PartyDelivery();

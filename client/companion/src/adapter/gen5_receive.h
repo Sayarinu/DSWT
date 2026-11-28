@@ -47,6 +47,8 @@ int CpReceive5_Apply(CpReceive5Game, const CpAdapterData *, unsigned char *poked
                      const unsigned char incoming[136], const unsigned char partner[220], int destination,
                      unsigned char image[220]);
 
+int CpReceive5_BoxStats(const CpAdapterData *, const unsigned char box[136], unsigned char ext[84]);
+
 /* The forms the game's Pokédex keeps for a species (ZUKAN_SAVE_GetFormCount,
  * getNumberOfForms): 1 for any species it lists none for. */
 unsigned CpReceive5_Forms(CpReceive5Game, unsigned species);

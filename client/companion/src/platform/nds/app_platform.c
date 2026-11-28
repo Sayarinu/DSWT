@@ -16,6 +16,8 @@
 
 #include "app/model.h"
 #include "game/twilight.h"
+#include "game/gts_music.h"
+#include "platform/nds/menu_audio.h"
 #include "platform/nds/card_rom.h"
 #include "platform/nds/card_save.h"
 #include "platform/nds/card_store.h"
@@ -217,9 +219,11 @@ static int ChipSize(void *arg, uint32_t *size)
 static int IdentifyCard(CpRomInfo *info)
 {
     if (CpNdsSlot_Handoff(&sCardRom, &sHandoffReader) == 0) {
-        Logf("slot-1: verified White IRAO rev 0 launcher handoff\n");
+        Logf("slot-1: verified %.4s rev %u launcher handoff\n",
+            (const char *)sCardRom.header + 12, sCardRom.header[0x1e]);
         return CpRom_FromCode((const char *)sCardRom.header + 12, sCardRom.header[0x1e], info);
     }
+    Logf("slot-1: no verified launcher handoff (ROM ID %08lx)\n", (unsigned long)sCardRom.id);
     uint8_t header[CP_CARD_PAGE] __attribute__((aligned(4)));
     for (unsigned attempt = 1; attempt <= 2; ++attempt) {
         uint32_t chipId = 0;
@@ -248,9 +252,15 @@ static int IdentifyCard(CpRomInfo *info)
 
 static int PreviewCardRom(CpReader *reader)
 {
-    if (!sCardRom.inherited || CpCardRom_Check(&sCardRom)) return CP_ERR_UNSUPPORTED;
-    *reader = sHandoffReader;
-    return CP_OK;
+    if (sCardRom.active && !CpCardRom_Check(&sCardRom)) {
+        *reader = sHandoffReader;
+        return CP_OK;
+    }
+#if !CP_CARD_SAVE_WRITES
+    /* A cold boot can read retail artwork even with flash writes disabled. */
+    if (!CpNdsSlot_Open(&sCardRom, reader)) return CP_OK;
+#endif
+    return CP_ERR_UNSUPPORTED;
 }
 
 static int GameCard(void *arg, CpRomInfo *info, CpPlatformFile *file)
@@ -321,7 +331,7 @@ static int OpenCardTrade(void *arg, const CpRomInfo *info, CpReader *reader, CpP
     Logf("slot-1: save chip %02x%02x%02x erase %lu\n", chip.jedec[0], chip.jedec[1],
         chip.jedec[2], (unsigned long)chip.eraseSize);
     if (chip.eraseSize != 256 && chip.eraseSize != 4096) {
-        CpCardRom_Close(&sCardRom);
+        sHandoffReader = *reader;
         return CP_ERR_UNSUPPORTED;
     }
     const char *folder = "sd:/_nds/dswt/cards";
@@ -496,6 +506,42 @@ static void Frame(void *arg)
 
 /* ---- The companion ----------------------------------------------------------- */
 
+static CpGtsMusic music __attribute__((aligned(32)));
+
+/* ARM7 acknowledges only after it has stopped using the previous buffers. */
+static int MusicCommand(const CpGtsMusic *command)
+{
+    DC_FlushRange(command, sizeof(*command));
+    while (!fifoSendAddress(FIFO_USER_03, (void *)command)) cothread_yield_irq(IRQ_VBLANK);
+    while (!fifoCheckValue32(FIFO_USER_03)) cothread_yield_irq(IRQ_VBLANK);
+    return fifoGetValue32(FIFO_USER_03);
+}
+
+static void MenuMusic(void)
+{
+    static CpGtsMusic menu __attribute__((aligned(32))) = { .menuPcm = CpMenuTheme };
+    menu.bytes = CpMenuThemeBytes;
+    MusicCommand(&menu);
+}
+
+static void LoadMusic(const CpReader *rom, CpFamily family)
+{
+    int result = CpGtsMusic_Load(rom, family, &music);
+    if (result == CP_OK) {
+        DC_FlushRange(music.sequence, music.bytes);
+        int playing = MusicCommand(&music);
+        Logf("GTS music: %lu bytes, playing %d\n", (unsigned long)music.bytes, playing);
+    } else Logf("GTS archive unavailable (%d), using menu theme\n", result);
+}
+
+static void StopMusic(void)
+{
+    if (music.sequence) {
+        MenuMusic();
+        CpGtsMusic_Free(&music);
+    }
+}
+
 void CpNdsApp_Run(void)
 {
     static char backups[64];
@@ -513,6 +559,10 @@ void CpNdsApp_Run(void)
     }
     Logf("=== DSWT, %s mode, drive %s, server %s\n", isDSiMode() ? "DSi" : "DS", root[0] ? root : "none",
         WONDER_TRADE_AUTHORITY);
+    soundEnable();
+    DC_FlushRange(CpMenuTheme, CpMenuThemeBytes);
+    MenuMusic();
+    Logf("music: built-in menu theme started\n");
     CpNdsEntropy_Jitter();
     if (CpWifi_Init() != 0) Logf("wifi: driver failed to start\n");
     CpWifi_SetTimeout(WIFI_TIMEOUT_MS);
@@ -549,6 +599,7 @@ void CpNdsApp_Run(void)
     sPlatform.backup.root = backups[0] ? backups : NULL;
     sPlatform.backup.freeSpace = FreeSpace;
     sPlatform.backup.readDurable = BackupDurable;
+    sPlatform.loadMusic = LoadMusic; sPlatform.stopMusic = StopMusic;
     sPlatform.frame = Frame;
     sPlatform.log = Log;
     sPlatform.wifiScan = WifiScan;
@@ -557,12 +608,14 @@ void CpNdsApp_Run(void)
     sPlatform.wifiFailure = WifiFailure;
     sPlatform.wifiWpa2 = CpWifi_DsiMode();
 
-    CpApp_Init(&sApp, &sPlatform, CpUiApp_SystemLanguage());
+    CpApp_Init(&sApp, &sPlatform, Companion_Language_Count);
     /* Join Wi-Fi while the player chooses a save (DSWiFi can take a while):
      * the network stored by the Wi-Fi settings, then the console's saved
      * connections. Connect then finds it ready or waits for it. */
     CpApp_StartWifi(&sApp);
     CpUiApp_Run(&sApp.model, NULL);
+    static CpGtsMusic silence __attribute__((aligned(32)));
+    MusicCommand(&silence);
     Logf("exit\n");
     CpNdsApp_ReturnToMenu();
     CpWifi_Disconnect();

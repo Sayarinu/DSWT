@@ -431,6 +431,9 @@ static void VerifyFailures(void)
             *p ^= 0x40;
         }
         Body(half, block)[55] ^= 1;
+        memory.reads = 0;
+        assert(CpSaveImage_VerifyCurrent(&image, &file, digest) == CP_SAVE_VERIFY_FAILED);
+        if (half == 0 && block == 0) assert(memory.reads == 1);
         assert(CpSaveImage_Verify(&image, &file, digest) == CP_SAVE_VERIFY_FAILED);
         /* A changed body with a repaired CRC still fails the SHA-256 check. */
         Seal(half, block, Read32(Footer(half, block)), Read32(Footer(half, block) + 4), CP_SAVE_MAGIC_INTERNATIONAL);
@@ -447,6 +450,7 @@ static void VerifyFailures(void)
     assert(CpSaveImage_Verify(&image, &file, digest) == CP_SAVE_IO_ERROR);
     memory.size++;
     assert(CpSaveImage_Verify(&image, &file, digest) == CP_SAVE_OK);
+    assert(CpSaveImage_VerifyCurrent(&image, &file, digest) == CP_SAVE_OK);
     puts("PASS verify: both halves, all footer fields, body/CRC/hash changes and read failures");
 }
 

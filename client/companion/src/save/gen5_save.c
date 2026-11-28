@@ -75,13 +75,7 @@ static void Write32(unsigned char *p, uint32_t value)
 
 uint16_t CpGen5Save_Crc(uint16_t crc, const unsigned char *data, size_t size)
 {
-    size_t i;
-    unsigned bit;
-    for (i = 0; i < size; ++i) {
-        crc ^= (uint16_t)((unsigned)data[i] << 8);
-        for (bit = 0; bit < 8; ++bit) crc = (uint16_t)((crc << 1) ^ ((crc & WT_SAVE_CRC_HIGH_BIT) ? WT_SAVE_CRC_POLYNOMIAL : 0));
-    }
-    return crc;
+    return CpSave_Crc16(crc, data, size);
 }
 
 static uint32_t CrcTableSize(const CpSaveGen5 *g) { return g->blockCount * 2u + (g->blockCount & 1u) * 2u; }

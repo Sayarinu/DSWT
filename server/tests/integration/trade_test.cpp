@@ -824,6 +824,45 @@ TEST_F(TradeTest, LaggingWalWatermarkCanFinishWithoutChasingRetryLocks) {
   }
 }
 
+TEST_F(TradeTest, SubmitOverGrpcWaitsForCoverageAndKeepsAnUncoveredOfferRecoverable) {
+  for (const bool archive_catches_up : {true, false}) {
+    std::uint64_t covered_position = 0;
+    unsigned committed_checks = 0;
+    TradeService lagged("", [](const auto &, auto) {
+      return LegalityDecision{LegalityVerdict::Legal, {}, kGenIVDestinations};
+    }, [&](auto required) {
+      if (!covered_position) covered_position = required;
+      if (required <= covered_position) return true;
+      ++committed_checks;
+      return archive_catches_up && committed_checks >= 2;
+    });
+    grpc::ServerBuilder builder;
+    int port = 0;
+    builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(), &port);
+    builder.RegisterService(&lagged);
+    auto server = builder.BuildAndStart();
+    ASSERT_TRUE(server);
+    auto stub = v1::WonderTrade::NewStub(grpc::CreateChannel(
+        "127.0.0.1:" + std::to_string(port), grpc::InsecureChannelCredentials()));
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    const auto request = Submission(Enroll());
+    v1::MutationReply reply;
+    const auto status = stub->Submit(&context, request, &reply);
+    server->Shutdown();
+    server->Wait();
+    ASSERT_TRUE(status.ok());
+    EXPECT_GE(committed_checks, 2U);
+    EXPECT_EQ(reply.context().result(), archive_catches_up ? v1::RESULT_OK : v1::RESULT_PROCESSING);
+    EXPECT_EQ(reply.has_outcome(), archive_catches_up);
+    const auto replay = Submit(request);
+    EXPECT_EQ(replay.context().result(), v1::RESULT_OK);
+    EXPECT_EQ(replay.outcome().state(), v1::TRADE_QUEUED);
+    EXPECT_EQ(replay.context().next_counter(), 2U);
+    EXPECT_EQ(validations.load(), 0);
+  }
+}
+
 TEST_F(TradeTest, CommitFailureRollsBackPayloadOwnershipOperationAndAudit) {
   const auto before = Scalar("SELECT count(*) FROM dswt.audit_journal");
   database.Execute("CREATE FUNCTION dswt.fail_lifecycle_test() RETURNS trigger LANGUAGE plpgsql AS $$ "

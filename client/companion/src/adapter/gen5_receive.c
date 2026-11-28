@@ -150,6 +150,15 @@ static int Recalc(Mon *mon)
     return 0;
 }
 
+int CpReceive5_BoxStats(const CpAdapterData *data, const unsigned char box[136], unsigned char ext[84])
+{
+    Mon mon = { .data = data };
+    memcpy(mon.box, box, sizeof(mon.box));
+    if (Recalc(&mon)) return -1;
+    memcpy(ext, mon.ext, sizeof(mon.ext));
+    return 0;
+}
+
 /* POKE_TOOL_HealFull / PokeParty_Recover: HP, status, then any move's PP below its maximum. */
 static int Heal(Mon *mon)
 {

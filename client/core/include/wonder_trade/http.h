@@ -12,6 +12,9 @@ typedef struct WtHttpResponse {
     size_t headerSize;
     size_t bodySize;
     size_t contentLength;
+    int allowKeepAlive;
+    int keepAlive;
+    int visitSupported;
     int headersComplete;
     int complete;
 } WtHttpResponse;
@@ -46,5 +49,11 @@ typedef struct WtHttpExchange {
  * Failure clears all exchange storage. This function never retries a request. */
 int WtHttp_Exchange(WtHttpExchange *, WtHttpIO, const char *authority,
     const unsigned char *request, size_t requestSize);
+
+
+/* Companion visit. With keepAlive set, a peer may explicitly keep the
+ * connection open after delivering its complete, fixed-length body. */
+int WtHttp_ExchangeVisit(WtHttpExchange *, WtHttpIO, const char *authority,
+    const unsigned char *request, size_t requestSize, int keepAlive);
 
 #endif

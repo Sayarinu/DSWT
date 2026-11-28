@@ -1,6 +1,7 @@
 #include "platform/nds/card_store.h"
 #if CP_CARD_SAVE_WRITES
 #include "save/sha256.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,6 +15,8 @@ typedef struct {
     uint8_t hashes[COUNT][DIGEST], before[SECTOR], after[SECTOR];
 } Intent;
 
+enum { HEADER = offsetof(Intent, before), COMPACT = HEADER + 2 * CHUNK };
+
 struct CpCardStore {
     CpCardSave chip;
     uint32_t build, romID;
@@ -22,6 +25,7 @@ struct CpCardStore {
     CpPlatformFile copy, log;
     uint8_t image[CP_SAVE_SIZE], hashes[COUNT][DIGEST], scratch[32768];
     Intent intent;
+    uint8_t compact[COMPACT];
     int failed;
 };
 
@@ -81,7 +85,7 @@ static int Apply(CpCardStore *s, int committed)
     Intent *r = &s->intent;
     static const uint8_t clear[DIGEST] = {0};
     unsigned sector = r->sector;
-    if (r->version != 1 || r->romID != s->romID || r->build != s->build ||
+    if ((r->version != 1 && r->version != 2) || (r->version == 2 && r->reserved >= SECTOR / CHUNK) || r->romID != s->romID || r->build != s->build ||
         r->geometry != s->chip.eraseSize || memcmp(r->chipID, s->chip.jedec, 3) || sector >= COUNT)
         return -1;
     for (unsigned i = 0; i < COUNT; ++i)
@@ -104,10 +108,36 @@ static int Apply(CpCardStore *s, int committed)
                 (live[i] & r->after[i]) != r->after[i])) return -1;
         }
     }
-    if (Store(s, &s->copy, at, r->after, SECTOR) || Program(s, at, live, r->after) ||
+    unsigned window = r->version == 2 ? r->reserved * CHUNK : 0;
+    size_t length = r->version == 2 ? CHUNK : SECTOR;
+    if (Store(s, &s->copy, at + window, r->after + window, length) || Program(s, at, live, r->after) ||
         Store(s, &s->log, 0, clear, DIGEST)) return -1;
     Digest(live, SECTOR, s->hashes[sector]);
     return 0;
+}
+
+/* A single changed 4 KiB window contains whole erase units on both
+ * supported chips. Keep the full-sector format for larger edits. */
+static int StoreIntent(CpCardStore *s, unsigned first, unsigned last)
+{
+    Intent *r = &s->intent;
+    const void *data = r;
+    size_t size = sizeof(*r);
+    uint8_t tag[DIGEST];
+    while (first < last && r->before[first] == r->after[first]) ++first;
+    while (last > first && r->before[last - 1] == r->after[last - 1]) --last;
+    if (first < last && first / CHUNK == (last - 1) / CHUNK) {
+        unsigned at = first / CHUNK * CHUNK;
+        r->version = 2;
+        r->reserved = first / CHUNK;
+        memcpy(s->compact, r, HEADER);
+        memcpy(s->compact + HEADER, r->before + at, CHUNK);
+        memcpy(s->compact + HEADER + CHUNK, r->after + at, CHUNK);
+        data = s->compact;
+        size = COMPACT;
+    }
+    Digest(data, size, tag);
+    return Store(s, &s->log, DIGEST, data, size) || Store(s, &s->log, 0, tag, DIGEST);
 }
 
 static int Recover(CpCardStore *s)
@@ -116,8 +146,27 @@ static int Recover(CpCardStore *s)
     static const uint8_t clear[DIGEST] = {0};
     if (s->log.readDurable(s->log.arg, 0, tag, sizeof(tag))) return -1;
     if (!memcmp(tag, clear, sizeof(tag))) return 0;
-    if (s->log.readDurable(s->log.arg, DIGEST, &s->intent, sizeof(Intent))) return -1;
-    Digest(&s->intent, sizeof(Intent), digest);
+    Intent *r = &s->intent;
+    if (s->log.readDurable(s->log.arg, DIGEST, r, HEADER)) return -1;
+    if (r->version == 1) {
+        if (s->log.readDurable(s->log.arg, DIGEST + HEADER, (uint8_t *)r + HEADER,
+                               sizeof(*r) - HEADER)) return -1;
+        Digest(r, sizeof(*r), digest);
+    } else if (r->version == 2 && r->sector < COUNT && r->reserved < SECTOR / CHUNK) {
+        uint8_t original[DIGEST];
+        unsigned at = r->reserved * CHUNK;
+        memcpy(s->compact, r, HEADER);
+        if (s->log.readDurable(s->log.arg, DIGEST + HEADER, s->compact + HEADER, 2 * CHUNK)) return -1;
+        Digest(s->compact, COMPACT, digest);
+        /* A power cut can disturb all 64 KiB of flash. Outside the
+         * window the SD mirror is untouched by this transaction. */
+        if (s->copy.readDurable(s->copy.arg, r->sector * SECTOR, r->before, SECTOR)) return -1;
+        memcpy(r->before + at, s->compact + HEADER, CHUNK);
+        Digest(r->before, SECTOR, original);
+        if (memcmp(original, r->hashes[r->sector], DIGEST)) return -1;
+        memcpy(r->after, r->before, SECTOR);
+        memcpy(r->after + at, s->compact + HEADER + CHUNK, CHUNK);
+    } else return -1;
     if (!memcmp(tag, digest, sizeof(tag))) return Apply(s, 1);
     /* A partial sector write of the tag can leave a mix of digest and zero
      * bytes. Other corrupt records stay blocked even on an exact live save. */
@@ -137,10 +186,10 @@ static int Write(void *arg, uint32_t offset, const void *bytes, size_t size)
         uint8_t *live = s->image + sector * SECTOR;
         if (memcmp(live + within, p, n)) {
             Intent *r = &s->intent;
-            uint8_t tag[DIGEST];
             s->failed = 1; /* After any I/O failure, require a new copy-in. */
             if (ReadChip(s, sector * SECTOR, r->before, SECTOR) || memcmp(r->before, live, SECTOR)) return -1;
             r->version = 1;
+            r->reserved = 0;
             r->build = s->build;
             r->romID = s->romID;
             r->geometry = s->chip.eraseSize;
@@ -149,8 +198,7 @@ static int Write(void *arg, uint32_t offset, const void *bytes, size_t size)
             memcpy(r->hashes, s->hashes, sizeof(r->hashes));
             memcpy(r->after, live, SECTOR);
             memcpy(r->after + within, p, n);
-            Digest(r, sizeof(*r), tag);
-            if (Store(s, &s->log, DIGEST, r, sizeof(*r)) || Store(s, &s->log, 0, tag, DIGEST) || Apply(s, 1)) return -1;
+            if (StoreIntent(s, within, within + (unsigned)n) || Apply(s, 1)) return -1;
             s->failed = 0;
         }
         p += n;

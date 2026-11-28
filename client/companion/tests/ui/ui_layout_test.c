@@ -119,7 +119,7 @@ static void TestWifiMessages(void)
         for (n = 0; n < sizeof(names) / sizeof(*names); n++) {
             memset(&model, 0, sizeof(model));
             memset(&ui, 0, sizeof(ui));
-            model.systemLanguage = CpUi_GameLanguage(kLanguages[l], Companion_Language_en_US);
+            model.uiLanguage = (CompanionLanguage)l;
             model.loadMessage = -1;
             model.wifi.saved = 1;
             snprintf(model.wifi.savedSsid, sizeof(model.wifi.savedSsid), "%s", names[n]);
@@ -139,7 +139,7 @@ static void TestWifiMessages(void)
             }
             /* The plain-text notice: two lines under the password field. */
             assert(CpText_Wrap(wrapped, sizeof(wrapped), Companion_Text[Companion_Text_WifiPasswordWarning]
-                [model.systemLanguage], 216) <= 2);
+                [model.uiLanguage], 216) <= 2);
             for (i = 0; i < sizeof(alone) / sizeof(*alone); i++) {
                 ui.state = alone[i] == Companion_Text_WifiForgetConfirm ? CP_UI_WIFI_FORGET
                     : alone[i] == Companion_Text_WifiConnecting ? CP_UI_WIFI_JOINING : CP_UI_WIFI_JOINED;
@@ -173,29 +173,18 @@ int main(void)
             if (!SupportedVersion(v)) continue;
             memset(&model, 0, sizeof(model));
             memset(&ui, 0, sizeof(ui));
-            model.gameVersion = v;
-            model.gameLanguage = kLanguages[l];
-            model.loadMessage = -1;
-            ui.state = CP_UI_GAME_CONFIRM;
-            ui.message = Companion_Text_GameConfirm;
+            model.uiLanguage = (CompanionLanguage)l;
+            model.saveCount = 1;
+            model.saves[0].version = v;
+            model.saves[0].language = kLanguages[l];
+            ui.state = CP_UI_SAVE_PICKER;
+            ui.message = Companion_Text_SavePickerHint;
             CpRender_Draw(&ui, &model, &sTop, &sBottom);
-            ExpectInside(&ui, &model, "game check", kLanguages[l]);
-            /* The game check keeps its box: three lines at most. */
-            {
-                char message[CP_RENDER_MESSAGE_MAX];
-                CpRender_Message(&ui, &model, message, sizeof(message));
-                /* Every supported version must resolve to a catalogue name. */
-                if (!message[0] || message[0] == '?' || message[0] == ',') {
-                    fprintf(stderr, "missing game name: version %u, language %u: %s\n", v, kLanguages[l], message);
-                    assert(0);
-                }
-                assert(CpRender_MessageLines(message, NULL) <= WINDOW_H / 16);
-            }
         }
         for (n = 0; n < sizeof(kSaveNames) / sizeof(*kSaveNames); n++) {
             memset(&model, 0, sizeof(model));
             memset(&ui, 0, sizeof(ui));
-            model.systemLanguage = CpUi_GameLanguage(kLanguages[l], Companion_Language_en_US);
+            model.uiLanguage = (CompanionLanguage)l;
             model.saveCount = 1;
             snprintf(model.saves[0].name, CP_UI_SAVE_NAME_MAX, "%s", kSaveNames[n]);
             ui.state = CP_UI_MESSAGE;

@@ -16,6 +16,8 @@ namespace {
 constexpr auto kHandshakeTimeout = std::chrono::seconds(30);
 constexpr auto kRequestTimeout = std::chrono::seconds(15);
 constexpr auto kIoTimeout = std::chrono::seconds(5);
+constexpr auto kVisitIdleTimeout = std::chrono::seconds(45);
+constexpr unsigned kMaxExchanges = 16;
 constexpr auto kShutdownTimeout = std::chrono::seconds(2);
 } // namespace
 
@@ -24,11 +26,7 @@ HttpSession::HttpSession(tcp::socket socket, std::shared_ptr<HttpServices> servi
     : services_(std::move(services)), connection_(std::move(connection)),
       stream_(services_->Tls() ? Stream(std::in_place_index<1>, std::move(socket), *services_->Tls()) :
                                 Stream(std::in_place_index<0>, std::move(socket))),
-      executor_(Lowest().get_executor()), deadline_(executor_) {
-  parser_.header_limit(kHeaderLimitBytes);
-  parser_.body_limit(wire::kMaxPacket);
-  parser_.eager(true);
-}
+      executor_(Lowest().get_executor()), deadline_(executor_) {}
 
 HttpSession::~HttpSession() = default;
 
@@ -46,18 +44,31 @@ void HttpSession::Run() {
 }
 
 void HttpSession::BeginRead() {
-  deadline_.expires_after(kRequestTimeout);
+  phase_ = Phase::Reading;
+  parser_.emplace();
+  parser_->header_limit(kHeaderLimitBytes);
+  parser_->body_limit(wire::kMaxPacket);
+  parser_->eager(true);
+  idle_ = exchanges_ != 0;
+  deadline_.expires_after(idle_ ? kVisitIdleTimeout : kRequestTimeout);
   deadline_.async_wait([self = shared_from_this()](beast::error_code error) { if (!error) self->Close(); });
   Read();
 }
 
 void HttpSession::Read() {
-  Lowest().expires_after(kIoTimeout);
+  Lowest().expires_after(idle_ ? kVisitIdleTimeout : kIoTimeout);
   std::visit([self = shared_from_this()](auto &stream) {
-    http::async_read_some(stream, self->buffer_, self->parser_, [self](beast::error_code error, std::size_t) {
+    http::async_read_some(stream, self->buffer_, *self->parser_, [self](beast::error_code error, std::size_t) {
       if (self->phase_ != Phase::Reading) return;
       if (error) self->Close();
-      else if (!self->parser_.is_done()) self->Read();
+      else if (!self->parser_->is_done()) {
+        if (self->idle_) {
+          self->idle_ = false;
+          self->deadline_.expires_after(kRequestTimeout);
+          self->deadline_.async_wait([self](beast::error_code expired) { if (!expired) self->Close(); });
+        }
+        self->Read();
+      }
       else if (self->buffer_.size() != 0) self->Close();
       else self->Dispatch();
     });
@@ -66,7 +77,7 @@ void HttpSession::Read() {
 
 void HttpSession::Dispatch() {
   phase_ = Phase::Waiting;
-  version_ = parser_.get().version();
+  version_ = parser_->get().version();
   context_->set_deadline(std::chrono::system_clock::now() + kBackendTimeout);
   Lowest().expires_after(kIoTimeout);
   // Watch EOF or extra pipelined bytes while gRPC runs on a bounded worker.
@@ -77,7 +88,7 @@ void HttpSession::Dispatch() {
       else self->Close();
     });
   }, stream_);
-  const bool started = services_->Dispatch(parser_.release(), context_, services_->Tls() != nullptr, connection_->network,
+  const bool started = services_->Dispatch(parser_->release(), context_, services_->Tls() != nullptr, connection_->network,
       [self = shared_from_this()](HttpServices::Response response) {
         asio::post(self->executor_, [self, response = std::move(response)]() mutable { self->Ready(std::move(response)); });
       });
@@ -92,6 +103,7 @@ void HttpSession::Dispatch() {
 
 void HttpSession::Ready(http::response<http::string_body> response) {
   if (phase_ != Phase::Waiting) return;
+  if (++exchanges_ >= kMaxExchanges) response.keep_alive(false);
   response_ = std::move(response);
   phase_ = Phase::ReadyToWrite;
   // Finish the read cancellation before starting a write or TLS shutdown.
@@ -105,7 +117,12 @@ void HttpSession::Write() {
   Lowest().expires_after(kIoTimeout);
   std::visit([self = shared_from_this()](auto &stream) {
     http::async_write(stream, self->response_, [self](beast::error_code error, std::size_t) {
-      if (error) self->Close(); else self->Shutdown();
+      if (error) self->Close();
+      else if (!self->response_.keep_alive()) self->Shutdown();
+      else {
+        self->context_ = std::make_shared<grpc::ClientContext>();
+        self->BeginRead();
+      }
     });
   }, stream_);
 }

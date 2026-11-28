@@ -184,7 +184,7 @@ foreach(test ui_state_test ui_render_test ui_layout_test)
 endforeach()
 
 # --- Platinum offer adapter and visit driver (LUNE-871) ---------------------
-add_library(companion_adapter STATIC "${COMPANION_SRC}/game/portrait.c" "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
+add_library(companion_adapter STATIC "${COMPANION_SRC}/game/party_icon.c" "${COMPANION_SRC}/game/gts_music.c" "${COMPANION_SRC}/game/portrait.c" "${COMPANION_SRC}/adapter/platinum.c" "${COMPANION_SRC}/adapter/holdable.c"
     "${COMPANION_SRC}/adapter/gen5.c" "${COMPANION_SRC}/adapter/gen5_receive.c"
     "${COMPANION_SRC}/adapter/platinum_receive.c" "${COMPANION_SRC}/adapter/rom_data.c"
     "${COMPANION_SRC}/game/rom.c" "${COMPANION_SRC}/game/nitrofs.c" "${COMPANION_SRC}/game/gamedata.c"

@@ -12,7 +12,4 @@
  * input instead of the buttons, for the demo model's walk through every screen. */
 void CpUiApp_Run(CpUiModel *model, CpUiDemo *tour);
 
-/* The console's language setting, for the screens before a save is chosen. */
-CompanionLanguage CpUiApp_SystemLanguage(void);
-
 #endif

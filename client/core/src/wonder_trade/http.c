@@ -28,7 +28,7 @@ static int WtHttp_Headers(WtHttpResponse *response, size_t capacity)
     char *end = strstr(line, "\r\n");
     int lengthFound = 0;
     int typeFound = 0;
-    int closeFound = 0;
+    int connectionFound = 0;
 
     if (end == NULL || end - line < 13 || memcmp(line, "HTTP/1.1 200 ", 13) != 0) {
         return -1;
@@ -85,11 +85,15 @@ static int WtHttp_Headers(WtHttpResponse *response, size_t capacity)
                 return -1;
             }
         } else if (WtHttp_Equal(line, colon - line, "connection")) {
-            if (closeFound++ || !WtHttp_Equal(value, valueEnd - value, "close")) return -1;
+            if (connectionFound++) return -1;
+            if (response->allowKeepAlive && WtHttp_Equal(value, valueEnd - value, "keep-alive")) response->keepAlive = 1;
+            else if (!WtHttp_Equal(value, valueEnd - value, "close")) return -1;
+        } else if (WtHttp_Equal(line, colon - line, "x-dswt-visit")) {
+            response->visitSupported = WtHttp_Equal(value, valueEnd - value, "1");
         }
         line = end + 2;
     }
-    return lengthFound == 1 && typeFound == 1 && closeFound == 1 ? 0 : -1;
+    return lengthFound == 1 && typeFound == 1 && connectionFound == 1 ? 0 : -1;
 }
 
 void WtHttp_Init(WtHttpResponse *response)
@@ -174,8 +178,8 @@ static int WtHttp_Write(WtHttpIO io, const unsigned char *bytes, size_t size)
     return 0;
 }
 
-int WtHttp_Exchange(WtHttpExchange *exchange, WtHttpIO io, const char *authority,
-    const unsigned char *request, size_t requestSize)
+int WtHttp_ExchangeVisit(WtHttpExchange *exchange, WtHttpIO io, const char *authority,
+    const unsigned char *request, size_t requestSize, int keepAlive)
 {
     int length, result;
     if (!exchange) return -1;
@@ -184,8 +188,8 @@ int WtHttp_Exchange(WtHttpExchange *exchange, WtHttpIO io, const char *authority
         || ((request == NULL) != (requestSize == 0)) || requestSize > WT_HTTP_BODY_MAX) return -1;
     if (requestSize) {
         length = snprintf((char *)exchange->headers, sizeof(exchange->headers),
-            "POST /wt/v1 HTTP/1.1\r\nHost: %s\r\nContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
-            authority, (unsigned)requestSize);
+            "POST /wt/v1 HTTP/1.1\r\nHost: %s\r\nContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: %s\r\n\r\n",
+            authority, (unsigned)requestSize, keepAlive ? "keep-alive" : "close");
     } else {
         length = snprintf((char *)exchange->headers, sizeof(exchange->headers),
             "GET /v1/ping HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", authority);
@@ -194,12 +198,17 @@ int WtHttp_Exchange(WtHttpExchange *exchange, WtHttpIO io, const char *authority
         || WtHttp_Write(io, exchange->headers, (size_t)length) != 0
         || WtHttp_Write(io, request, requestSize) != 0) goto failed;
     WtHttp_Init(&exchange->response);
+    exchange->response.allowKeepAlive = requestSize && keepAlive;
     for (;;) {
         result = io.read(io.arg, exchange->input, sizeof(exchange->input));
         if (result > 0) {
             if ((size_t)result > sizeof(exchange->input) || exchange->response.complete
                 || WtHttp_Feed(&exchange->response, exchange->input, (size_t)result,
                     exchange->body, sizeof(exchange->body)) < 0) goto failed;
+            if (exchange->response.complete && exchange->response.keepAlive) {
+                exchange->bodySize = exchange->response.bodySize;
+                return 0;
+            }
         } else if (result == 0 || result == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
             if (!exchange->response.complete) goto failed;
             exchange->bodySize = exchange->response.bodySize;
@@ -210,4 +219,11 @@ int WtHttp_Exchange(WtHttpExchange *exchange, WtHttpIO io, const char *authority
 failed:
     WtHttp_Clear(exchange, sizeof(*exchange));
     return -1;
+}
+
+
+int WtHttp_Exchange(WtHttpExchange *exchange, WtHttpIO io, const char *authority,
+    const unsigned char *request, size_t requestSize)
+{
+    return WtHttp_ExchangeVisit(exchange, io, authority, request, requestSize, 0);
 }

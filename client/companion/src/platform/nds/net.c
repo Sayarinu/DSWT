@@ -27,7 +27,8 @@ typedef struct Connection {
 } Connection;
 
 /* Kept off the worker stack, like the game's transport. One exchange at a time. */
-static Connection sConnection;
+static Connection sConnection = { .fd = -1 };
+static int sVisitSupported;
 
 static uint64_t Now(void) { return systemCounterGetTicks(); }
 static uint32_t Since(uint64_t start) { return systemCounterTicksToMsec((u32)(Now() - start)); }
@@ -134,62 +135,84 @@ static int Close(Connection *connection, int complete)
     return set;
 }
 
-int CpNet_Post(CpNetExchange *result, const unsigned char *request, size_t size, const volatile int *cancel)
+void CpNet_EndVisit(void)
+{
+    if (sConnection.fd < 0) return;
+    WtTls_Close(&sConnection.tls);
+    Close(&sConnection, 1);
+}
+
+static int OpenTls(Connection *connection, CpNetExchange *result)
 {
     static const unsigned char pins[2][32] = WONDER_TRADE_PINS;
-    Connection *connection = &sConnection;
-    WtHttpIO io = { connection, WriteHttp, ReadHttp, Wait };
-    uint64_t start;
-    int status, opened = 0, complete = 0;
-    if (!result || !request || !size) return CP_NET_ERROR_ARGUMENT;
-    memset(result, 0, sizeof(*result));
-    memset(connection, 0, sizeof(*connection));
-    connection->fd = -1;
-    connection->cancel = cancel;
-    /* Associated alone may mean IPv6 only; these sockets need IPv4. */
-    if (!CpWifi_Address()) { result->stage = "wifi"; return CP_NET_ERROR_NOT_CONNECTED; }
-
+    uint64_t start = Now();
+    int status;
     result->stage = "connect";
-    start = Now();
     connection->lastProgress = start;
     connection->deadline = After(CP_NET_CONNECT_MS);
     status = Connect(connection);
     result->connectMs = Since(start);
-    if (status != 0) goto done;
+    if (status != 0) {
+        Close(connection, 0);
+        return status;
+    }
 
     result->stage = "tls";
     start = Now();
     connection->lastProgress = start;
     connection->deadline = After(CP_NET_TLS_MS);
     status = WtTls_Open(&connection->tls, WONDER_TRADE_HOSTNAME, pins, connection, Send, Receive);
-    opened = 1;
     if (status == 0) {
         do { status = WtTls_Handshake(&connection->tls); } while (Wait(connection, status));
     }
     result->handshakeMs = Since(start);
-    if (status != 0) {
-        connection->detail = status;
-        status = cancel && *cancel ? CP_NET_ERROR_CANCELLED : CP_NET_ERROR_TLS;
-        goto done;
-    }
+    if (status == 0) return 0;
+    connection->detail = status;
+    WtTls_Close(&connection->tls);
+    Close(connection, 0);
+    return connection->cancel && *connection->cancel ? CP_NET_ERROR_CANCELLED : CP_NET_ERROR_TLS;
+}
 
-    result->stage = "http";
-    start = Now();
-    connection->lastProgress = start;
-    connection->deadline = After(CP_NET_HTTP_MS);
-    status = WtHttp_Exchange(&result->exchange, io, WONDER_TRADE_AUTHORITY, request, size);
-    result->httpMs = Since(start);
-    if (status != 0) {
-        connection->detail = status;
-        status = cancel && *cancel ? CP_NET_ERROR_CANCELLED : CP_NET_ERROR_HTTP;
-        goto done;
+int CpNet_Post(CpNetExchange *result, const unsigned char *request, size_t size, const volatile int *cancel)
+{
+    Connection *connection = &sConnection;
+    WtHttpIO io = { connection, WriteHttp, ReadHttp, Wait };
+    if (!result || !request || !size) return CP_NET_ERROR_ARGUMENT;
+    memset(result, 0, sizeof(*result));
+    connection->cancel = cancel;
+    if (!CpWifi_Address()) { result->stage = "wifi"; return CP_NET_ERROR_NOT_CONNECTED; }
+
+    for (;;) {
+        int reused = connection->fd >= 0;
+        int requestedVisit = sVisitSupported;
+        connection->detail = 0;
+        if (!reused) {
+            int status = OpenTls(connection, result);
+            if (status != 0) { result->detail = connection->detail; return status; }
+        }
+        result->stage = "http";
+        uint64_t start = Now();
+        connection->lastProgress = start;
+        connection->deadline = After(CP_NET_HTTP_MS);
+        int status = WtHttp_ExchangeVisit(&result->exchange, io, WONDER_TRADE_AUTHORITY,
+            request, size, requestedVisit);
+        result->httpMs += Since(start);
+        if (!status) {
+            sVisitSupported = result->exchange.response.visitSupported;
+            if (!result->exchange.response.keepAlive) {
+                WtTls_Close(&connection->tls);
+                result->lingerSet = Close(connection, 1);
+            }
+            result->stage = "done";
+            result->detail = 0;
+            return 0;
+        }
+        result->detail = status;
+        CpNet_EndVisit();
+        sVisitSupported = 0;
+        if (cancel && *cancel) return CP_NET_ERROR_CANCELLED;
+        /* A save can outlast an idle connection, or a gateway can revert
+         * to close-only. Replay the journalled bytes once using close. */
+        if (!reused && !requestedVisit) return CP_NET_ERROR_HTTP;
     }
-    result->stage = "done";
-    complete = 1;
-done:
-    result->detail = connection->detail;
-    if (opened) WtTls_Close(&connection->tls);
-    result->lingerSet = Close(connection, complete);
-    memset(connection, 0, sizeof(*connection));
-    return status;
 }

@@ -179,6 +179,7 @@ static void WifiUpdate(CpUiDemo *demo)
 
 static void ClearOutcome(CpUiModel *model)
 {
+    model->serverTradeState = WT_TRADE_NONE;
     model->completed = model->returned = model->rejected = model->waiting = 0;
     model->superseded = model->needsEntropy = model->refused = model->hasReceived = 0;
     model->refusal = WT_REFUSAL_NONE;
@@ -226,6 +227,7 @@ static void LoadSave(CpUiDemo *demo)
         CpUiPokemon *mon = &model->party[i];
         memset(mon, 0, sizeof(*mon));
         mon->species = kParty[i].species;
+        mon->summary.ready = 1;
         mon->level = kParty[i].level;
         mon->gender = kParty[i].gender;
         mon->shiny = kParty[i].shiny;
@@ -248,7 +250,8 @@ static void Answer(CpUiDemo *demo, int job)
     model->canLeave = 1;
     switch (outcome) {
     case CP_UI_DEMO_WAITING:
-        model->waiting = 1;
+        model->serverTradeState = WT_TRADE_QUEUED;
+        model->waiting = job == JOB_COLLECT;
         model->tradePhase = WT_JOURNAL_QUEUED;
         break;
     case CP_UI_DEMO_COMPLETED:
@@ -337,6 +340,7 @@ static void Update(void *context)
         break;
     case JOB_RESUME:
         ClearOutcome(model);
+        if (model->tradePhase == WT_JOURNAL_QUEUED) model->serverTradeState = WT_TRADE_MATCHED;
         model->net = CP_UI_NET_RESPONSE;
         break;
     case JOB_CLOSE:
@@ -352,12 +356,12 @@ static void Update(void *context)
 static const CpUiOps kOps = { Scan, Load, Unload, Connect, Trade, Collect, Close, Update,
     WifiScan, WifiJoin, WifiForget, WifiLeave };
 
-void CpUiDemo_Init(CpUiDemo *demo, CompanionLanguage systemLanguage)
+void CpUiDemo_Init(CpUiDemo *demo, CompanionLanguage uiLanguage)
 {
     memset(demo, 0, sizeof(*demo));
     demo->model.ops = &kOps;
     demo->model.context = demo;
-    demo->model.systemLanguage = systemLanguage;
+    demo->model.uiLanguage = uiLanguage;
     demo->model.loadMessage = -1;
     demo->model.canLeave = 1;
     demo->model.tradePhase = WT_JOURNAL_IDLE;
@@ -383,7 +387,10 @@ static const struct {
     unsigned hold;
 } kTour[] = {
     { 0, NONE, 240 },                   /* BOOT, then the empty save list */
-    /* Wi-Fi settings (LUNE-875). */
+    { CP_UI_KEY_DOWN, NONE, 30 },
+    { CP_UI_KEY_A, NONE, 60 }, /* language list */
+    { CP_UI_KEY_A, NONE, 30 },
+    { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_DOWN, NONE, 60 },       /* the Wi-Fi settings button */
     { CP_UI_KEY_A, NONE, 150 },         /* searching, then the networks */
     { CP_UI_KEY_DOWN, NONE, 60 },       /* an open network */
@@ -413,6 +420,7 @@ static const struct {
     { TAP(CP_KEY_INDEX_JOIN), NONE, 240 }, /* JOINING, then JOINED */
     { CP_UI_KEY_A, NONE, 60 },          /* back to the save list */
     { CP_UI_KEY_DOWN, NONE, 30 },
+    { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_A, NONE, 150 },         /* the list, with the saved network */
     { CP_UI_KEY_RIGHT, NONE, 60 },      /* Forget network */
     { CP_UI_KEY_A, NONE, 150 },         /* "Forget Lune Home?" */
@@ -420,16 +428,19 @@ static const struct {
     { CP_UI_KEY_A, NONE, 60 },          /* Retry: forgotten, back to the list */
     { CP_UI_KEY_B, NONE, 60 },          /* back to the save list */
     { CP_UI_KEY_A, NONE, 240 },         /* Retry: BOOT, then three saves */
+    { CP_UI_KEY_A, NONE, 30 },          /* Select Game */
     { CP_UI_KEY_DOWN, NONE, 120 },      /* a save without its ROM */
     { CP_UI_KEY_A, NONE, 240 },         /* "Matching ROM not found" */
     { CP_UI_KEY_B, NONE, 60 },
+    { CP_UI_KEY_A, NONE, 30 },          /* Select Game */
     { CP_UI_KEY_UP, NONE, 60 },
-    { CP_UI_KEY_A, NONE, 210 },         /* checking, then "Platinum, English. Correct?" */
     { CP_UI_KEY_A, NONE, 330 },         /* CONNECTING, PINGING, then MENU */
     { CP_UI_KEY_DOWN, NONE, 60 },
     { CP_UI_KEY_A, NONE, 180 },         /* Info */
     { CP_UI_KEY_B, NONE, 60 },
     { CP_UI_KEY_A, NONE, 150 },         /* the party */
+    { CP_UI_KEY_Y, NONE, 60 },
+    { CP_UI_KEY_B, NONE, 30 },
     { CP_UI_KEY_RIGHT, NONE, 30 },
     { CP_UI_KEY_RIGHT, NONE, 150 },     /* an Egg, greyed out */
     { CP_UI_KEY_A, NONE, 150 },         /* "Cannot offer this Pokémon." */
@@ -440,9 +451,8 @@ static const struct {
     { CP_UI_KEY_UP, NONE, 30 },
     { CP_UI_KEY_LEFT, NONE, 60 },
     { CP_UI_KEY_A, NONE, 150 },         /* CONFIRM */
-    { CP_UI_KEY_A, CP_UI_DEMO_WAITING, 240 },   /* PINGING, then "No trade partner yet" */
-    { CP_UI_KEY_B, NONE, 150 },         /* MENU with a pending offer */
-    { CP_UI_KEY_A, NONE, 150 },         /* COLLECT_CONFIRM */
+    { CP_UI_KEY_A, CP_UI_DEMO_WAITING, 240 },   /* waiting for a match */
+    { CP_UI_KEY_A, NONE, 240 },         /* check status, then show the ready notice */
     { CP_UI_KEY_A, CP_UI_DEMO_COMPLETED, 240 }, /* the received Pokémon's card */
     { CP_UI_KEY_B, NONE, 60 },
     { CP_UI_KEY_A, NONE, 30 },
@@ -452,7 +462,6 @@ static const struct {
     { CP_UI_KEY_A, NONE, 30 },
     { CP_UI_KEY_A, NONE, 30 },
     { CP_UI_KEY_A, CP_UI_DEMO_WAITING, 150 },
-    { CP_UI_KEY_B, NONE, 30 },
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_A, NONE, 150 },         /* CANCEL_CONFIRM */
     { CP_UI_KEY_A, CP_UI_DEMO_RETURNED, 240 },  /* "Offer cancelled." */
@@ -470,8 +479,9 @@ static const struct {
     { CP_UI_KEY_A, NONE, 30 },
     { CP_UI_KEY_A, CP_UI_DEMO_KEEP_PLAYING, 240 }, /* "A little more play is needed" */
     { CP_UI_KEY_B, NONE, 180 },         /* closing, back to the saves */
+    { CP_UI_KEY_A, NONE, 30 },          /* Select Game */
     { CP_UI_KEY_A, FAIL_CONNECT, 90 },
-    { CP_UI_KEY_A, NONE, 240 },         /* ERROR with Retry and Exit */
+    { 0, NONE, 240 },
     { CP_UI_KEY_A, NONE, 330 },         /* Retry: RESTART, CONNECTING, PINGING, MENU */
     { CP_UI_KEY_A, NONE, 30 },
     { CP_UI_KEY_A, NONE, 30 },
@@ -480,10 +490,11 @@ static const struct {
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_A, NONE, 150 },         /* Exit: back to the saves */
+    { CP_UI_KEY_A, NONE, 30 },          /* Select Game */
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_DOWN, NONE, 30 },
     { CP_UI_KEY_A, NONE, 210 },         /* a Japanese HeartGold save */
-    { CP_UI_KEY_A, NONE, 240 },         /* RECOVERY, in Japanese */
+    { 0, NONE, 240 },
     { CP_UI_KEY_A, FAIL_WIFI, 330 },    /* no saved network: the Wi-Fi settings, in Japanese */
     { CP_UI_KEY_B, NONE, 240 },         /* ERROR with Retry and Wi-Fi settings */
 };

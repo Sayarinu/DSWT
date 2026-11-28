@@ -9,6 +9,7 @@
 #include <psa/crypto.h>
 
 #include "platform/entropy_pool.h"
+#include "platform/nds/net.h"
 #include "wonder_trade/tls.h"
 
 /* Twice the game's network worker: besides a visit (the game's whole
@@ -61,6 +62,7 @@ static int Run(void *arg)
     mbedtls_memory_buffer_alloc_init(sArena, sizeof(sArena));
     mbedtls_platform_set_nv_seed(ReadSeed, WriteSeed);
     sWorker.result = sWorker.job(sWorker.arg);
+    CpNet_EndVisit();
     mbedtls_psa_crypto_free();
     mbedtls_memory_buffer_alloc_max_get(&sWorker.peak, &blocks);
     mbedtls_memory_buffer_alloc_cur_get(&sWorker.leaked, &blocks);

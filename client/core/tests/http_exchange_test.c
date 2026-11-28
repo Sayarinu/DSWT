@@ -138,6 +138,21 @@ int main(void)
     io.arg = &peer; io.read = Read; io.write = Write; io.wait = NULL;
     assert(WtHttp_Exchange(&exchange, io, "localhost", NULL, 0) != 0); Cleared();
     assert(WtHttp_Exchange(NULL, io, "localhost", NULL, 0) != 0);
+    const char *persistent = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        "Content-Length: 3\r\nX-DSWT-Visit: 1\r\nConnection: keep-alive\r\n\r\nabc";
+    peer = Setup(persistent);
+    peer.stall = 1;
+    io = (WtHttpIO){ &peer, Write, Read, Wait };
+    assert(WtHttp_ExchangeVisit(&exchange, io, "localhost", body, sizeof(body), 1) == 0);
+    assert(exchange.response.keepAlive && exchange.response.visitSupported && exchange.bodySize == 3);
+    assert(!memcmp(exchange.body, "abc", 3) && !peer.waits);
+    assert(strstr((const char *)peer.output, "Connection: keep-alive\r\n"));
+    peer = Setup(persistent);
+    assert(Run(&peer, "localhost", body, sizeof(body)) != 0);
+    peer = Setup(response);
+    assert(WtHttp_ExchangeVisit(&exchange, io, "localhost", body, sizeof(body), 1) == 0);
+    assert(!exchange.response.keepAlive && !exchange.response.visitSupported);
+    puts("Companion visit supports bounded keep-alive and legacy close responses");
     puts("Shared HTTP fragmentation, partial writes, closure, cancellation and bounds passed");
     return 0;
 }
